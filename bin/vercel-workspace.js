@@ -17,4 +17,4 @@ const { cli } = await import("../src/index.ts")
     }),
   );
 
-cli();
+await cli();
