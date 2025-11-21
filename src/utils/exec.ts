@@ -14,7 +14,7 @@ export function runCommand(
       cwd,
       stdio: capture
         ? ["ignore", "pipe", "pipe"]
-        : ["ignore", "inherit", "inherit"],
+        : ["inherit", "inherit", "inherit"],
     });
 
     let stdout = "";
