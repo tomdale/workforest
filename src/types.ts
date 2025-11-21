@@ -8,4 +8,3 @@ export type RunCommandOptions = {
   cwd?: string;
   capture?: boolean;
 };
-

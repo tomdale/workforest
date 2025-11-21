@@ -2,7 +2,7 @@ import type { RepoConfig } from "../types.ts";
 import { log } from "../logger.ts";
 import { pathExists } from "../utils/fs.ts";
 import { withRetry } from "../utils/retry.ts";
-import { runGit } from "../services/git.ts";
+import { runGit, cloneRepository } from "../services/git.ts";
 
 export async function ensureMirrorRepo(
   repo: RepoConfig,
@@ -13,7 +13,7 @@ export async function ensureMirrorRepo(
   if (!mirrorExists) {
     log.info(`Seeding mirror for ${repo.name}`);
     await withRetry(
-      () => runGit(["clone", "--mirror", repo.remote, mirrorDir], {}),
+      () => cloneRepository(repo.remote, mirrorDir, ["--mirror"], {}),
       { attempts: 3, label: `clone-mirror:${repo.name}` },
     );
     return;
