@@ -15,7 +15,7 @@ export async function cli(): Promise<void> {
   );
 
   if (args["--help"]) {
-    printHelp();
+    console.log(help());
     return;
   }
 
@@ -23,7 +23,7 @@ export async function cli(): Promise<void> {
 
   if (!featureName?.trim()) {
     log.error("Missing <feature-name> argument.");
-    printHelp();
+    console.log(help());
     process.exitCode = 1;
     return;
   }
