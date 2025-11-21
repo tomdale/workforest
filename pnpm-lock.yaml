@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@unblessed/blessed':
+        specifier: 1.0.0-alpha.18
+        version: 1.0.0-alpha.18(omggif@1.0.10)(pngjs@7.0.0)
       arg:
         specifier: ^5.0.2
         version: 5.0.2
@@ -479,6 +482,18 @@ packages:
   '@types/node@24.10.1':
     resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
 
+  '@unblessed/blessed@1.0.0-alpha.18':
+    resolution: {integrity: sha512-hXLyCMXzLrGelzAKktItEL5WOO7UaJbRbacHFo3oBfU2w84tWNfpBGxuYLwKxQunkl1gEaQ2VJZNwjKlggctjg==}
+    engines: {node: '>= 22.0.0'}
+    hasBin: true
+    peerDependencies:
+      omggif: ^1.0.10
+      pngjs: ^7.0.0
+
+  '@unblessed/core@1.0.0-alpha.18':
+    resolution: {integrity: sha512-+QlvjCLWSKjEZ8uOkn7nELLZnToPUf+s7d3LvYH7ZtPZjrZBPieOYuv0SMREb65sZx3xD0WvYFqxkVeoueGqWg==}
+    engines: {node: '>= 22.0.0'}
+
   ansis@4.2.0:
     resolution: {integrity: sha512-HqZ5rWlFjGiV0tDm3UxxgNRqsOTniqoKZu0pIAfh7TZQMGuZK+hH0drySty0si0QXj1ieop4+SkSfPZBPPkHig==}
     engines: {node: '>=14'}
@@ -558,12 +573,19 @@ packages:
   obug@2.1.0:
     resolution: {integrity: sha512-uu/tgLPoa75CFA7UDkmqspKbefvZh1WMPwkU3bNr0PY746a/+xwXVgbw5co5C3GvJj3h5u8g/pbxXzI0gd1QFg==}
 
+  omggif@1.0.10:
+    resolution: {integrity: sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw==}
+
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
   picomatch@4.0.3:
     resolution: {integrity: sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==}
     engines: {node: '>=12'}
+
+  pngjs@7.0.0:
+    resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
+    engines: {node: '>=14.19.0'}
 
   quansync@0.2.11:
     resolution: {integrity: sha512-AifT7QEbW9Nri4tAwR5M/uzpBuqfZf+zwaEM/QkzEjj7NBuFD2rBuy0K3dE+8wltbezDV7JMA0WfnCPYRSYbXA==}
@@ -959,6 +981,14 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
+  '@unblessed/blessed@1.0.0-alpha.18(omggif@1.0.10)(pngjs@7.0.0)':
+    dependencies:
+      '@unblessed/core': 1.0.0-alpha.18
+      omggif: 1.0.10
+      pngjs: 7.0.0
+
+  '@unblessed/core@1.0.0-alpha.18': {}
+
   ansis@4.2.0: {}
 
   arg@5.0.2: {}
@@ -1034,9 +1064,13 @@ snapshots:
 
   obug@2.1.0: {}
 
+  omggif@1.0.10: {}
+
   pathe@2.0.3: {}
 
   picomatch@4.0.3: {}
+
+  pngjs@7.0.0: {}
 
   quansync@0.2.11: {}
 

@@ -1,6 +1,6 @@
+import { log } from "../logger.ts";
 import type { RunCommandOptions } from "../types.ts";
 import { runCommand } from "../utils/exec.ts";
-import { log } from "../logger.ts";
 
 export function runGit(
   args: string[],
@@ -30,7 +30,7 @@ export async function cloneRepository(
         args.push("--", ...gitArgs);
       }
       return await runCommand("gh", args, options);
-    } catch (error_) {
+    } catch {
       log.info(
         `GitHub CLI not available or failed. Falling back to git clone for ${githubSlug}`,
       );
@@ -51,12 +51,12 @@ export function getGitHubSlug(remote: string): string | null {
   }
 
   const sshMatch = trimmed.match(/^git@github\.com:(.+)$/i);
-  if (sshMatch) {
+  if (sshMatch?.[1]) {
     return sshMatch[1].replace(/\.git$/, "");
   }
 
   const httpsMatch = trimmed.match(/^https?:\/\/github\.com\/(.+)$/i);
-  if (httpsMatch) {
+  if (httpsMatch?.[1]) {
     return httpsMatch[1].replace(/\.git$/, "");
   }
 
