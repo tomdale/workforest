@@ -1,3 +1,4 @@
+import path from "node:path";
 import { log } from "../logger.ts";
 import { cloneRepository, runGit } from "../services/git.ts";
 import type { RepoConfig } from "../types.ts";
@@ -65,6 +66,50 @@ export async function ensureWorkingCopy(
       ),
     { attempts: 3, label: `worktree:${repo.name}` },
   );
+}
+
+export async function cleanupWorkspaceWorktrees(
+  mirrorDir: string,
+  workspaceDir: string,
+): Promise<void> {
+  const normalizedWorkspaceDir = path.resolve(workspaceDir);
+  const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
+    cwd: mirrorDir,
+    capture: true,
+  });
+
+  const worktreePaths = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.substring("worktree ".length).trim())
+    .filter(Boolean);
+
+  const targets = worktreePaths.filter((worktreePath) => {
+    const normalizedWorktree = path.resolve(worktreePath);
+    return (
+      normalizedWorktree === normalizedWorkspaceDir ||
+      normalizedWorktree.startsWith(`${normalizedWorkspaceDir}${path.sep}`)
+    );
+  });
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  log.info(
+    `Cleaning up ${targets.length} existing worktree(s) under ${workspaceDir}`,
+  );
+
+  for (const worktreePath of targets) {
+    await withRetry(
+      () =>
+        runGit(["worktree", "remove", "--force", worktreePath], {
+          cwd: mirrorDir,
+        }),
+      { attempts: 3, label: `worktree-remove:${path.basename(worktreePath)}` },
+    );
+  }
 }
 
 async function updatePristineRepo(

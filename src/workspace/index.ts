@@ -9,7 +9,11 @@ import {
 } from "../services/pnpm.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
-import { ensureMirrorRepo, ensureWorkingCopy } from "./repository.ts";
+import {
+  cleanupWorkspaceWorktrees,
+  ensureMirrorRepo,
+  ensureWorkingCopy,
+} from "./repository.ts";
 
 type StampWorkspaceOptions = {
   featureName: string;
@@ -52,6 +56,7 @@ async function stampRepository(
   await ensureMirrorRepo(repo, mirrorDir);
 
   const targetDir = path.join(workspaceDir, repo.name);
+  await cleanupWorkspaceWorktrees(mirrorDir, workspaceDir);
   await ensureWorkingCopy(repo, mirrorDir, targetDir, featureName);
 
   await installDependenciesIfNeeded(repo, targetDir);
