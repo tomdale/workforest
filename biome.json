@@ -20,6 +20,9 @@
       "complexity": {
         "useLiteralKeys": "off"
       }
+    },
+    "domains": {
+      "project": "recommended"
     }
   },
   "javascript": {
