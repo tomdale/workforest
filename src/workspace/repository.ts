@@ -1,8 +1,8 @@
-import type { RepoConfig } from "../types.ts";
 import { log } from "../logger.ts";
+import { cloneRepository, runGit } from "../services/git.ts";
+import type { RepoConfig } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import { withRetry } from "../utils/retry.ts";
-import { runGit, cloneRepository } from "../services/git.ts";
 
 export async function ensureMirrorRepo(
   repo: RepoConfig,
@@ -11,24 +11,24 @@ export async function ensureMirrorRepo(
   const mirrorExists = await pathExists(mirrorDir);
 
   if (!mirrorExists) {
-    log.info(`Seeding mirror for ${repo.name}`);
+    log.info(`Seeding pristine repo for ${repo.name}`);
     await withRetry(
-      () => cloneRepository(repo.remote, mirrorDir, ["--mirror"], {}),
-      { attempts: 3, label: `clone-mirror:${repo.name}` },
+      () =>
+        cloneRepository(
+          repo.remote,
+          mirrorDir,
+          [
+            "--bare",
+            "--filter=blob:none",
+            "--config",
+            "remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*",
+          ],
+          {},
+        ),
+      { attempts: 3, label: `clone-pristine:${repo.name}` },
     );
-    return;
-  }
-
-  try {
-    await withRetry(
-      () => runGit(["fetch", "--all", "--prune"], { cwd: mirrorDir }),
-      { attempts: 3, label: `update-mirror:${repo.name}` },
-    );
-  } catch (error_) {
-    log.warn(
-      `Unable to update mirror for ${repo.name}. Using the last cached snapshot.`,
-    );
-    log.warn(String(error_));
+  } else {
+    await updatePristineRepo(repo, mirrorDir);
   }
 }
 
@@ -36,54 +36,50 @@ export async function ensureWorkingCopy(
   repo: RepoConfig,
   mirrorDir: string,
   targetDir: string,
+  branchName: string,
 ): Promise<void> {
   const workingCopyExists = await pathExists(targetDir);
 
-  if (!workingCopyExists) {
-    log.info(`Cloning ${repo.name} into workspace`);
-    await withRetry(
-      () =>
-        runGit(
-          ["clone", "--reference-if-able", mirrorDir, repo.remote, targetDir],
-          {},
-        ),
-      { attempts: 3, label: `clone:${repo.name}` },
-    );
-  } else {
+  if (workingCopyExists) {
     log.info(`Reusing existing checkout for ${repo.name}`);
-  }
-
-  const clean = await isWorkingTreeClean(targetDir);
-  if (!clean) {
-    log.warn(
-      `${repo.name} has local changes. Skipping automatic reset to origin/${repo.defaultBranch}.`,
-    );
     return;
   }
 
+  log.info(
+    `Creating worktree for ${repo.name} on branch "${branchName}" from origin/${repo.defaultBranch}`,
+  );
+
+  await withRetry(
+    () =>
+      runGit(
+        [
+          "worktree",
+          "add",
+          "--track",
+          "-B",
+          branchName,
+          targetDir,
+          `origin/${repo.defaultBranch}`,
+        ],
+        { cwd: mirrorDir },
+      ),
+    { attempts: 3, label: `worktree:${repo.name}` },
+  );
+}
+
+async function updatePristineRepo(
+  repo: RepoConfig,
+  mirrorDir: string,
+): Promise<void> {
   try {
     await withRetry(
-      () => runGit(["fetch", "origin", "--prune"], { cwd: targetDir }),
-      { attempts: 3, label: `fetch:${repo.name}` },
+      () => runGit(["fetch", "origin", "--prune"], { cwd: mirrorDir }),
+      { attempts: 3, label: `update-pristine:${repo.name}` },
     );
   } catch (error_) {
     log.warn(
-      `Unable to fetch latest changes for ${repo.name}. Using cached refs.`,
+      `Unable to update pristine repo for ${repo.name}. Using the last cached snapshot.`,
     );
     log.warn(String(error_));
   }
-
-  await runGit(["checkout", repo.defaultBranch], { cwd: targetDir });
-  await runGit(["reset", "--hard", `origin/${repo.defaultBranch}`], {
-    cwd: targetDir,
-  });
 }
-
-async function isWorkingTreeClean(repoDir: string): Promise<boolean> {
-  const { stdout } = await runGit(["status", "--porcelain"], {
-    cwd: repoDir,
-    capture: true,
-  });
-  return stdout.trim().length === 0;
-}
-

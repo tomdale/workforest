@@ -35,9 +35,9 @@ export async function stampWorkspace({
 
   await warnAboutLargeRepositories(repos);
 
-  await Promise.all(
-    repos.map((repo) => stampRepository(repo, cacheDir, workspaceDir)),
-  );
+  for (const repo of repos) {
+    await stampRepository(repo, cacheDir, workspaceDir, featureName);
+  }
 
   log.success("Workspace ready.");
 }
@@ -46,12 +46,13 @@ async function stampRepository(
   repo: RepoConfig,
   cacheDir: string,
   workspaceDir: string,
+  featureName: string,
 ): Promise<void> {
   const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
   await ensureMirrorRepo(repo, mirrorDir);
 
   const targetDir = path.join(workspaceDir, repo.name);
-  await ensureWorkingCopy(repo, mirrorDir, targetDir);
+  await ensureWorkingCopy(repo, mirrorDir, targetDir, featureName);
 
   await installDependenciesIfNeeded(repo, targetDir);
   await turboLinkIfNeeded(repo, targetDir);
