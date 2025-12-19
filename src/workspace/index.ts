@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { log } from "../logger.ts";
@@ -43,6 +44,7 @@ export async function stampWorkspace({
     await stampRepository(repo, cacheDir, workspaceDir, featureName);
   }
 
+  await writeVSCodeWorkspaceFile(workspaceDir, repos);
   log.success("Workspace ready.");
 }
 
@@ -69,6 +71,26 @@ async function ensureCacheDir(): Promise<string> {
   const cacheRoot = path.join(cacheHome, "vercel-workspace");
   await ensureDir(cacheRoot);
   return cacheRoot;
+}
+
+async function writeVSCodeWorkspaceFile(
+  workspaceDir: string,
+  repos: readonly RepoConfig[],
+): Promise<void> {
+  const workspaceName = path.basename(workspaceDir) || "vercel-workspace";
+  const workspaceFile = path.join(
+    workspaceDir,
+    `${workspaceName}.code-workspace`,
+  );
+
+  const contents = JSON.stringify(
+    { folders: repos.map((repo) => ({ path: repo.name })) },
+    null,
+    2,
+  );
+
+  await fs.writeFile(workspaceFile, `${contents}\n`, "utf8");
+  log.info(`VS Code workspace saved to ${workspaceFile}`);
 }
 
 const LARGE_REPO_THRESHOLD_MB = 500;
