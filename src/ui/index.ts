@@ -1,6 +1,6 @@
 export {
-  TerminalUI,
   type Subtask,
+  TerminalUI,
   type TerminalUIOptions,
   type TerminalUIState,
 } from "./terminal.ts";

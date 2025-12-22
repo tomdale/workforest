@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { TerminalUI, type Subtask } from "./terminal.ts";
+import { type Subtask, TerminalUI } from "./terminal.ts";
 
 /**
  * Demo of the TerminalUI
@@ -87,7 +87,7 @@ async function main() {
     } else {
       ui.updatePrimaryTask("✓ All tasks completed successfully!");
     }
-    
+
     // Keep UI alive for a few seconds to see results
     setTimeout(() => {
       ui.cleanup();

@@ -27,7 +27,6 @@ export class TerminalUI {
   private panes: Widgets.Box[] = [];
   private processes: Map<string, ChildProcess> = new Map();
   private state: TerminalUIState;
-  private options: Required<Pick<TerminalUIOptions, "maxConcurrent">>;
   private subtaskStatuses: Map<string, SubtaskStatus> = new Map();
   private subtaskToPane: Map<string, number> = new Map();
   private queuedSubtasks: Subtask[] = [];
@@ -52,110 +51,6 @@ export class TerminalUI {
     });
 
     this.setupLayout();
-  }
-
-  private setupLayout(): void {
-    const primaryHeight = 32;
-
-    // Primary task box - top section
-    this.primaryBox = blessed.box({
-      top: 0,
-      left: 0,
-      width: "100%",
-      height: `${primaryHeight}%`,
-      content: "",
-      border: {
-        type: "line",
-      },
-      style: {
-        border: {
-          fg: "cyan",
-        },
-      },
-      padding: {
-        left: 1,
-        right: 1,
-        top: 1,
-        bottom: 1,
-      },
-      tags: true,
-    });
-
-    // Determine pane grid based on maxConcurrent and subtask count
-    const paneCount = Math.min(
-      this.options.maxConcurrent,
-      Math.max(1, this.state.subtasks.length),
-    );
-    const cols = Math.ceil(Math.sqrt(paneCount));
-    const rows = Math.ceil(paneCount / cols);
-    const paneAreaHeight = 100 - primaryHeight;
-    const paneHeight = paneAreaHeight / rows;
-    const paneWidth = 100 / cols;
-
-    for (let index = 0; index < paneCount; index++) {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      const top = primaryHeight + row * paneHeight;
-      const left = col * paneWidth;
-
-      const box = blessed.box({
-        top: `${top}%`,
-        left: `${left}%`,
-        width: `${paneWidth}%`,
-        height: `${paneHeight}%`,
-        border: {
-          type: "line",
-        },
-        style: {
-          border: {
-            fg: "green",
-          },
-        },
-        scrollable: true,
-        alwaysScroll: true,
-        scrollbar: {
-          ch: " ",
-          track: {
-            bg: "black",
-          },
-          style: {
-            inverse: true,
-          },
-        },
-        tags: true,
-        keys: true,
-        vi: true,
-        mouse: true,
-        label: " {white-fg}waiting...{/} ",
-      });
-
-      // Enable scrolling with arrow keys
-      box.key(["up", "down", "pageup", "pagedown"], (ch, key) => {
-        if (key.name === "up") {
-          box.scroll(-1);
-        } else if (key.name === "down") {
-          box.scroll(1);
-        } else if (key.name === "pageup") {
-          box.scroll(-(box.height as number));
-        } else if (key.name === "pagedown") {
-          box.scroll(box.height as number);
-        }
-        this.screen.render();
-      });
-
-      this.panes.push(box);
-      this.screen.append(box);
-    }
-
-    this.screen.append(this.primaryBox);
-
-    // Initialize all subtask statuses as pending
-    this.state.subtasks.forEach((subtask) => {
-      this.subtaskStatuses.set(subtask.id, "pending");
-    });
-
-    this.updatePrimaryTask(this.state.primaryTask);
-    this.render();
   }
 
   private renderTaskTree(): string {
@@ -294,7 +189,7 @@ export class TerminalUI {
     box.setContent("");
 
     // Show command being executed
-    const commandLine = `$ ${subtask.command} ${subtask.args.join(" ")}` + "\n\n";
+    const commandLine = `$ ${subtask.command} ${subtask.args.join(" ")}\n\n`;
     this.appendToSubtask(subtask.id, commandLine);
 
     this.updateSubtaskStatus(subtask.id, "running");
@@ -403,7 +298,9 @@ export class TerminalUI {
     this.primaryBox.setContent(this.renderTaskTree());
     this.render();
 
-    const runners = this.panes.map((_, paneIndex) => this.runNextInPane(paneIndex));
+    const runners = this.panes.map((_, paneIndex) =>
+      this.runNextInPane(paneIndex),
+    );
     await Promise.all(runners);
   }
 

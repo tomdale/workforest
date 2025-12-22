@@ -15,4 +15,3 @@ export async function pathExists(target: string): Promise<boolean> {
     throw error_;
   }
 }
-

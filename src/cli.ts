@@ -4,6 +4,7 @@ import { resolveRepositories } from "./config.ts";
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import type { RepoConfig } from "./types.ts";
+import { stampWorkspaceWithUI } from "./ui/workspace-ui.ts";
 import { stampWorkspace } from "./workspace/index.ts";
 
 export { log };
@@ -12,6 +13,7 @@ export async function cli(): Promise<void> {
   const args = arg(
     {
       "--help": Boolean,
+      "--no-tui": Boolean,
       "-h": "--help",
     },
     { argv: process.argv.slice(2) },
@@ -52,11 +54,19 @@ export async function cli(): Promise<void> {
     `vercel-${normalizedFeature}`,
   );
 
-  await stampWorkspace({
+  const options = {
     featureName: normalizedFeature,
     workspaceDir,
     repos,
-  });
+  };
 
-  log.info("Happy shipping!");
+  // Use TUI by default, unless --no-tui is specified or stdout is not a TTY
+  const useTui = !args["--no-tui"] && process.stdout.isTTY;
+
+  if (useTui) {
+    await stampWorkspaceWithUI(options);
+  } else {
+    await stampWorkspace(options);
+    log.info("Happy shipping!");
+  }
 }

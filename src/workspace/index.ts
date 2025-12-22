@@ -4,68 +4,197 @@ import path from "node:path";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
 import { fetchRepoDiskUsage } from "../services/github.ts";
-import {
-  installDependenciesIfNeeded,
-  turboLinkIfNeeded,
-} from "../services/pnpm.ts";
+import { hasAny, installDependencies, linkTurbo } from "../services/pnpm.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
+import type { TaskState } from "../utils/task-generator.ts";
+import { runParallel } from "../utils/task-generator.ts";
 import {
   cleanupWorkspaceWorktrees,
   ensureMirrorRepo,
   ensureWorkingCopy,
 } from "./repository.ts";
 
-type StampWorkspaceOptions = {
+// ============================================================================
+// Types
+// ============================================================================
+
+export type StampWorkspaceOptions = {
   featureName: string;
   workspaceDir: string;
   repos: readonly RepoConfig[];
 };
 
-export async function stampWorkspace({
+export type PreparedRepo = {
+  repo: RepoConfig;
+  targetDir: string;
+  hasLockfile: boolean;
+};
+
+/**
+ * State emitted by the workspace stamping generator.
+ */
+export type WorkspaceState =
+  | { phase: "init"; message: string }
+  | { phase: "git"; repo: string; step: "mirror" | "cleanup" | "worktree" }
+  | { phase: "git-complete"; repo: string }
+  | { phase: "install-start"; repos: PreparedRepo[] }
+  | { phase: "install"; repo: string; state: TaskState }
+  | { phase: "turbo"; repo: string }
+  | { phase: "turbo-complete"; repo: string }
+  | { phase: "finalize"; message: string }
+  | { phase: "complete" };
+
+// ============================================================================
+// Generator-based workspace stamping
+// ============================================================================
+
+/**
+ * Generator-based workspace stamping that yields state updates.
+ * This allows the UI to have full visibility into the progress of each step.
+ */
+export async function* stampWorkspaceGenerator({
   featureName,
   workspaceDir,
   repos,
-}: StampWorkspaceOptions): Promise<void> {
+}: StampWorkspaceOptions): AsyncGenerator<WorkspaceState> {
   if (repos.length === 0) {
-    throw new Error("stampWorkspace requires at least one repository.");
+    throw new Error(
+      "stampWorkspaceGenerator requires at least one repository.",
+    );
   }
 
+  yield { phase: "init", message: "Setting up cache directory" };
   const cacheDir = await ensureCacheDir();
   await ensureDir(workspaceDir);
-  log.info(`Stamping workspace for "${featureName}" at ${workspaceDir}`);
-  log.info(
-    `Preparing repositories: ${repos.map((repo) => repo.name).join(", ")}`,
-  );
 
-  await warnAboutLargeRepositories(repos);
+  yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
+
+  // Phase A: Sequential git operations
+  const preparedRepos: PreparedRepo[] = [];
 
   for (const repo of repos) {
-    await stampRepository(repo, cacheDir, workspaceDir, featureName);
+    const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
+
+    yield { phase: "git", repo: repo.name, step: "mirror" };
+    await ensureMirrorRepo(repo, mirrorDir);
+
+    yield { phase: "git", repo: repo.name, step: "cleanup" };
+    const targetDir = path.join(workspaceDir, repo.name);
+    await cleanupWorkspaceWorktrees(mirrorDir, workspaceDir);
+
+    yield { phase: "git", repo: repo.name, step: "worktree" };
+    await ensureWorkingCopy(repo, mirrorDir, targetDir, featureName);
+
+    yield { phase: "git-complete", repo: repo.name };
+
+    // Check if repo has lockfile for install phase
+    const hasLockfile = await hasAny(targetDir, [
+      "pnpm-lock.yaml",
+      "pnpm-lock.yml",
+    ]);
+    preparedRepos.push({ repo, targetDir, hasLockfile });
   }
 
+  // Phase B: Parallel pnpm installs
+  const reposWithLockfiles = preparedRepos.filter((r) => r.hasLockfile);
+
+  if (reposWithLockfiles.length > 0) {
+    yield { phase: "install-start", repos: reposWithLockfiles };
+
+    const installTasks = new Map(
+      reposWithLockfiles.map(({ repo, targetDir }) => [
+        repo.name,
+        installDependencies(repo, targetDir),
+      ]),
+    );
+
+    for await (const { id, state } of runParallel(installTasks)) {
+      yield { phase: "install", repo: id, state };
+    }
+  }
+
+  // Phase C: Turbo link (sequential, fast)
+  for (const { repo, targetDir, hasLockfile } of preparedRepos) {
+    if (!hasLockfile) continue;
+
+    yield { phase: "turbo", repo: repo.name };
+
+    // Consume the turbo generator
+    for await (const _state of linkTurbo(repo, targetDir)) {
+      // We could yield these states too, but turbo link is fast
+      // Just wait for it to complete
+    }
+
+    yield { phase: "turbo-complete", repo: repo.name };
+  }
+
+  // Phase D: Finalize
+  yield { phase: "finalize", message: "Writing VS Code workspace file" };
   await writeVSCodeWorkspaceFile(workspaceDir, repos);
-  log.success("Workspace ready.");
+
+  yield { phase: "complete" };
 }
 
-async function stampRepository(
-  repo: RepoConfig,
-  cacheDir: string,
-  workspaceDir: string,
-  featureName: string,
+/**
+ * Run the workspace stamping with simple console logging.
+ * This is for non-TUI usage.
+ */
+export async function stampWorkspace(
+  options: StampWorkspaceOptions,
 ): Promise<void> {
-  const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
-  await ensureMirrorRepo(repo, mirrorDir);
-
-  const targetDir = path.join(workspaceDir, repo.name);
-  await cleanupWorkspaceWorktrees(mirrorDir, workspaceDir);
-  await ensureWorkingCopy(repo, mirrorDir, targetDir, featureName);
-
-  await installDependenciesIfNeeded(repo, targetDir);
-  await turboLinkIfNeeded(repo, targetDir);
+  for await (const state of stampWorkspaceGenerator(options)) {
+    switch (state.phase) {
+      case "init":
+        log.info(state.message);
+        break;
+      case "git":
+        log.info(`${state.repo}: ${state.step}`);
+        break;
+      case "git-complete":
+        log.success(`${state.repo}: git setup complete`);
+        break;
+      case "install-start":
+        log.info(
+          `Installing dependencies for: ${state.repos.map((r) => r.repo.name).join(", ")}`,
+        );
+        break;
+      case "install":
+        if (state.state.status === "running" && state.state.message) {
+          log.info(`${state.repo}: ${state.state.message}`);
+        } else if (state.state.status === "completed") {
+          log.success(`${state.repo}: dependencies installed`);
+        } else if (state.state.status === "failed") {
+          log.error(
+            `${state.repo}: install failed - ${state.state.error.message}`,
+          );
+        } else if (state.state.status === "skipped") {
+          log.info(`${state.repo}: ${state.state.reason}`);
+        } else if (state.state.status === "retrying") {
+          log.warn(`${state.repo}: ${state.state.reason}, retrying...`);
+        }
+        break;
+      case "turbo":
+        log.info(`${state.repo}: linking turbo cache`);
+        break;
+      case "turbo-complete":
+        log.success(`${state.repo}: turbo linked`);
+        break;
+      case "finalize":
+        log.info(state.message);
+        break;
+      case "complete":
+        log.success("Workspace ready.");
+        break;
+    }
+  }
 }
 
-async function ensureCacheDir(): Promise<string> {
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+export async function ensureCacheDir(): Promise<string> {
   const cacheHome =
     process.env["XDG_CACHE_HOME"] ?? path.join(os.homedir(), ".cache");
   const cacheRoot = path.join(cacheHome, "vercel-workspace");
@@ -95,7 +224,7 @@ async function writeVSCodeWorkspaceFile(
 
 const LARGE_REPO_THRESHOLD_MB = 500;
 
-async function warnAboutLargeRepositories(
+export async function warnAboutLargeRepositories(
   repos: readonly RepoConfig[],
 ): Promise<void> {
   await Promise.all(

@@ -1,4 +1,4 @@
-import { TerminalUI, type Subtask } from "./terminal.ts";
+import { type Subtask, TerminalUI } from "./terminal.ts";
 
 /**
  * Example usage of the TerminalUI
@@ -8,7 +8,7 @@ import { TerminalUI, type Subtask } from "./terminal.ts";
  * - Three subtasks running concurrently in virtual terminal windows (bottom 2/3)
  * - Each subtask streams stdout/stderr output in real-time
  */
-async function example() {
+async function _example() {
   const subtasks: Subtask[] = [
     {
       id: "subtask-1",
@@ -65,4 +65,3 @@ async function example() {
 
 // Uncomment to run example:
 // example().catch(console.error);
-

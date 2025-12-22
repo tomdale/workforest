@@ -1,8 +1,5 @@
 import chalk from "chalk";
-import {
-  getDefaultRepoTokens,
-  getRepoAliases,
-} from "./config.ts";
+import { getDefaultRepoTokens, getRepoAliases } from "./config.ts";
 
 export const help = () => {
   const aliases = getRepoAliases();
@@ -43,4 +40,3 @@ ${aliasText}
   )}
 `;
 };
-
