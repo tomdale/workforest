@@ -41,3 +41,7 @@ pnpm biome check --write .  # auto-fix
 - Uses Biome for linting/formatting (2-space indent, double quotes)
 - TypeScript with ES modules (`"type": "module"`)
 - Requires Node.js >= 25
+
+## TypeScript Guidelines
+- NEVER use `any`
+- NEVER use `!` for non-null assertions
