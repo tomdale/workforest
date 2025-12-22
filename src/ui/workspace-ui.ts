@@ -155,13 +155,16 @@ export class WorkspaceUI {
       });
 
       // Enable scrolling
-      box.key(["up", "down", "pageup", "pagedown"], (_, key) => {
-        if (key.name === "up") box.scroll(-1);
-        else if (key.name === "down") box.scroll(1);
-        else if (key.name === "pageup") box.scroll(-(box.height as number));
-        else if (key.name === "pagedown") box.scroll(box.height as number);
-        this.screen.render();
-      });
+      box.key(
+        ["up", "down", "pageup", "pagedown"],
+        (_ch: string, key: { name: string }) => {
+          if (key.name === "up") box.scroll?.(-1);
+          else if (key.name === "down") box.scroll?.(1);
+          else if (key.name === "pageup") box.scroll?.(-(box.height as number));
+          else if (key.name === "pagedown") box.scroll?.(box.height as number);
+          this.screen.render();
+        },
+      );
 
       this.panes.set(repo.name, {
         box,
@@ -235,12 +238,13 @@ export class WorkspaceUI {
         const current = pane.box.getContent();
         const next = this.limitBuffer(current + content);
         pane.box.setContent(next);
-        pane.box.setScrollPerc(100);
+        pane.box.setScrollPerc?.(100);
 
         // Extract last line for label snippet
         const lines = content.split(/\r?\n/).filter(Boolean);
-        if (lines.length > 0) {
-          pane.lastOutput = lines[lines.length - 1].trim();
+        const lastLine = lines[lines.length - 1];
+        if (lastLine) {
+          pane.lastOutput = lastLine.trim();
         }
       } else {
         pane.box.setContent(content);
