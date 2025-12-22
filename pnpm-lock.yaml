@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      '@unblessed/blessed':
+      '@unblessed/node':
         specifier: 1.0.0-alpha.18
         version: 1.0.0-alpha.18(omggif@1.0.10)(pngjs@7.0.0)
       arg:
@@ -472,17 +472,16 @@ packages:
   '@types/node@24.10.4':
     resolution: {integrity: sha512-vnDVpYPMzs4wunl27jHrfmwojOGKya0xyM3sH+UE5iv5uPS6vX7UIoh6m+vQc5LGBq52HBKPIn/zcSZVzeDEZg==}
 
-  '@unblessed/blessed@1.0.0-alpha.18':
-    resolution: {integrity: sha512-hXLyCMXzLrGelzAKktItEL5WOO7UaJbRbacHFo3oBfU2w84tWNfpBGxuYLwKxQunkl1gEaQ2VJZNwjKlggctjg==}
-    engines: {node: '>= 22.0.0'}
-    hasBin: true
-    peerDependencies:
-      omggif: ^1.0.10
-      pngjs: ^7.0.0
-
   '@unblessed/core@1.0.0-alpha.18':
     resolution: {integrity: sha512-+QlvjCLWSKjEZ8uOkn7nELLZnToPUf+s7d3LvYH7ZtPZjrZBPieOYuv0SMREb65sZx3xD0WvYFqxkVeoueGqWg==}
     engines: {node: '>= 22.0.0'}
+
+  '@unblessed/node@1.0.0-alpha.18':
+    resolution: {integrity: sha512-vg8W6UZjW4Ii8gNpf1eybzKYm9bSAHPFLbLWH1JYCFTQoF65xsRv1luOTV/HR2n7ou1w40CA8CE4MsZLhAAT5Q==}
+    engines: {node: '>= 22.0.0'}
+    peerDependencies:
+      omggif: ^1.0.10
+      pngjs: ^7.0.0
 
   ansis@4.2.0:
     resolution: {integrity: sha512-HqZ5rWlFjGiV0tDm3UxxgNRqsOTniqoKZu0pIAfh7TZQMGuZK+hH0drySty0si0QXj1ieop4+SkSfPZBPPkHig==}
@@ -966,13 +965,13 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
-  '@unblessed/blessed@1.0.0-alpha.18(omggif@1.0.10)(pngjs@7.0.0)':
+  '@unblessed/core@1.0.0-alpha.18': {}
+
+  '@unblessed/node@1.0.0-alpha.18(omggif@1.0.10)(pngjs@7.0.0)':
     dependencies:
       '@unblessed/core': 1.0.0-alpha.18
       omggif: 1.0.10
       pngjs: 7.0.0
-
-  '@unblessed/core@1.0.0-alpha.18': {}
 
   ansis@4.2.0: {}
 

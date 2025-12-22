@@ -1,5 +1,4 @@
-import type { Widgets } from "@unblessed/blessed";
-import blessed from "@unblessed/blessed";
+import { Box, Screen, ScrollableBox } from "@unblessed/node";
 import type { TaskState } from "../utils/task-generator.ts";
 import {
   type StampWorkspaceOptions,
@@ -16,7 +15,7 @@ type RepoStatus =
   | "error";
 
 interface RepoPane {
-  box: Widgets.Box;
+  box: ScrollableBox;
   status: RepoStatus;
   startTime?: number;
   lastOutput?: string;
@@ -27,10 +26,10 @@ interface RepoPane {
  * Consumes the stampWorkspaceGenerator and displays progress in a beautiful interface.
  */
 export class WorkspaceUI {
-  private screen: Widgets.Screen;
-  private headerBox: Widgets.Box;
-  private statusBox: Widgets.Box;
-  private paneContainer: Widgets.Box;
+  private screen: Screen;
+  private headerBox: Box;
+  private statusBox: Box;
+  private paneContainer: Box;
   private panes: Map<string, RepoPane> = new Map();
   private options: StampWorkspaceOptions;
   private hasErrors = false;
@@ -38,7 +37,7 @@ export class WorkspaceUI {
   constructor(options: StampWorkspaceOptions) {
     this.options = options;
 
-    this.screen = blessed.screen({
+    this.screen = new Screen({
       smartCSR: true,
       title: `Vercel Workspace: ${options.featureName}`,
       fullUnicode: true,
@@ -51,7 +50,7 @@ export class WorkspaceUI {
     });
 
     // Create UI components
-    this.headerBox = blessed.box({
+    this.headerBox = new Box({
       top: 0,
       left: 0,
       width: "100%",
@@ -68,7 +67,7 @@ export class WorkspaceUI {
       tags: true,
     });
 
-    this.statusBox = blessed.box({
+    this.statusBox = new Box({
       top: 3,
       left: 0,
       width: "100%",
@@ -89,7 +88,7 @@ export class WorkspaceUI {
       label: " {cyan-fg}Progress{/} ",
     });
 
-    this.paneContainer = blessed.box({
+    this.paneContainer = new Box({
       top: 8,
       left: 0,
       width: "100%",
@@ -124,7 +123,7 @@ export class WorkspaceUI {
       const row = Math.floor(index / cols);
       const col = index % cols;
 
-      const box = blessed.box({
+      const box = new ScrollableBox({
         parent: this.paneContainer,
         top: `${row * paneHeight}%`,
         left: `${col * paneWidth}%`,
@@ -138,7 +137,6 @@ export class WorkspaceUI {
             fg: "gray",
           },
         },
-        scrollable: true,
         alwaysScroll: true,
         scrollbar: {
           ch: " ",
