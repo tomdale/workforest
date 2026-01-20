@@ -1,6 +1,6 @@
-import { log } from "../logger.ts";
 import type { RunCommandOptions } from "../types.ts";
 import { runCommand } from "../utils/exec.ts";
+import type { TaskState } from "../utils/task-generator.ts";
 
 export function runGit(
   args: string[],
@@ -9,39 +9,69 @@ export function runGit(
   return runCommand("git", args, options);
 }
 
+type CloneResult = { stdout: string; stderr: string };
+
 /**
- * Try to clone a repository using GitHub CLI first, then fall back to git clone.
- * Supports git remotes like git@github.com:org/repo.git and https URLs.
- * Additional git arguments can be passed via the gitArgs parameter (e.g., ["--mirror"]).
+ * Generator version of cloneRepository that yields log messages.
+ * Tries GitHub CLI first, then falls back to git clone.
  */
-export async function cloneRepository(
+export async function* cloneRepositoryGenerator(
   remote: string,
   targetDir: string,
   gitArgs: string[] = [],
   options: RunCommandOptions = {},
-): Promise<{ stdout: string; stderr: string }> {
+): AsyncGenerator<TaskState, CloneResult, undefined> {
   const githubSlug = getGitHubSlug(remote);
 
   if (githubSlug) {
     try {
-      log.info(`Attempting to clone ${githubSlug} using GitHub CLI`);
+      yield {
+        status: "log",
+        level: "info",
+        message: `Attempting to clone ${githubSlug} using GitHub CLI`,
+      };
       const args = ["repo", "clone", githubSlug, targetDir];
       if (gitArgs.length > 0) {
         args.push("--", ...gitArgs);
       }
       return await runCommand("gh", args, options);
     } catch {
-      log.info(
-        `GitHub CLI not available or failed. Falling back to git clone for ${githubSlug}`,
-      );
+      yield {
+        status: "log",
+        level: "info",
+        message: `GitHub CLI not available or failed. Falling back to git clone for ${githubSlug}`,
+      };
     }
   } else {
-    log.info(
-      `Remote ${remote} is not a GitHub URL; cloning with git directly.`,
-    );
+    yield {
+      status: "log",
+      level: "info",
+      message: `Remote ${remote} is not a GitHub URL; cloning with git directly.`,
+    };
   }
 
-  return runGit(["clone", ...gitArgs, remote, targetDir], options);
+  return await runGit(["clone", ...gitArgs, remote, targetDir], options);
+}
+
+/**
+ * Try to clone a repository using GitHub CLI first, then fall back to git clone.
+ * Supports git remotes like git@github.com:org/repo.git and https URLs.
+ * Additional git arguments can be passed via the gitArgs parameter (e.g., ["--mirror"]).
+ * @deprecated Use cloneRepositoryGenerator for generator-based workflows.
+ */
+export async function cloneRepository(
+  remote: string,
+  targetDir: string,
+  gitArgs: string[] = [],
+  options: RunCommandOptions = {},
+): Promise<CloneResult> {
+  const gen = cloneRepositoryGenerator(remote, targetDir, gitArgs, options);
+  // Consume the generator, discarding log messages
+  let result = await gen.next();
+  while (!result.done) {
+    result = await gen.next();
+  }
+  return result.value;
 }
 
 export function getGitHubSlug(remote: string): string | null {

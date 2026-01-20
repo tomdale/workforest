@@ -7,6 +7,7 @@ export type TaskState =
   | { status: "pending" }
   | { status: "running"; message?: string }
   | { status: "output"; data: string }
+  | { status: "log"; level: "info" | "warn" | "error"; message: string }
   | { status: "retrying"; reason: string; attempt: number }
   | { status: "completed" }
   | { status: "failed"; error: Error }
