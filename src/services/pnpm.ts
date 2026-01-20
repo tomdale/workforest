@@ -3,6 +3,7 @@ import { log } from "../logger.ts";
 import type { RepoConfig, RunCommandOptions } from "../types.ts";
 import { runCommand } from "../utils/exec.ts";
 import { pathExists } from "../utils/fs.ts";
+import { getNodeVersionPrefix } from "../utils/node-version.ts";
 import { withRetry } from "../utils/retry.ts";
 import {
   runCommandGenerator,
@@ -32,6 +33,8 @@ export async function* installDependencies(
     return;
   }
 
+  const versionPrefix = await getNodeVersionPrefix(repoDir);
+
   yield { status: "running", message: "Installing (frozen-lockfile)" };
 
   // Collect output from the fast install to check for errors
@@ -40,11 +43,23 @@ export async function* installDependencies(
   let collectedOutput = "";
 
   // Try fast path first: frozen-lockfile + prefer-offline
-  const fastInstall = runCommandGenerator(
-    "pnpm",
-    ["install", "--frozen-lockfile", "--prefer-offline"],
-    { cwd: repoDir },
-  );
+  let command: string;
+  let args: string[];
+  if (versionPrefix) {
+    command = versionPrefix.command;
+    args = [
+      ...versionPrefix.args,
+      "pnpm",
+      "install",
+      "--frozen-lockfile",
+      "--prefer-offline",
+    ];
+  } else {
+    command = "pnpm";
+    args = ["install", "--frozen-lockfile", "--prefer-offline"];
+  }
+
+  const fastInstall = runCommandGenerator(command, args, { cwd: repoDir });
 
   for await (const state of fastInstall) {
     if (state.status === "failed") {
@@ -68,7 +83,15 @@ export async function* installDependencies(
     yield { status: "retrying", reason: "Lockfile out of sync", attempt: 1 };
 
     // Retry without --frozen-lockfile
-    const fallbackInstall = runCommandGenerator("pnpm", ["install"], {
+    if (versionPrefix) {
+      command = versionPrefix.command;
+      args = [...versionPrefix.args, "pnpm", "install"];
+    } else {
+      command = "pnpm";
+      args = ["install"];
+    }
+
+    const fallbackInstall = runCommandGenerator(command, args, {
       cwd: repoDir,
     });
 
@@ -98,13 +121,29 @@ export async function* linkTurbo(
     return;
   }
 
+  const versionPrefix = await getNodeVersionPrefix(repoDir);
+
   yield { status: "running", message: "Linking turbo cache" };
 
-  const linkGen = runCommandGenerator(
-    "pnpm",
-    ["turbo", "link", "--scope", "vercel", "--yes"],
-    { cwd: repoDir },
-  );
+  let command: string;
+  let args: string[];
+  if (versionPrefix) {
+    command = versionPrefix.command;
+    args = [
+      ...versionPrefix.args,
+      "pnpm",
+      "turbo",
+      "link",
+      "--scope",
+      "vercel",
+      "--yes",
+    ];
+  } else {
+    command = "pnpm";
+    args = ["turbo", "link", "--scope", "vercel", "--yes"];
+  }
+
+  const linkGen = runCommandGenerator(command, args, { cwd: repoDir });
 
   yield* linkGen;
 }
