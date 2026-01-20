@@ -16,8 +16,8 @@ function getCLIFromSource() {
 
 function getCLIFromDist(err) {
   return checkForActualError(err).then(() =>
-    import("../dist/cli.mjs").catch((distError) => {
-      error("Unable to load the CLI from either src/cli.ts or dist/cli.js.");
+    import("../dist/index.mjs").catch((distError) => {
+      error("Unable to load the CLI from either src/cli.ts or dist/index.mjs.");
       throw distError;
     }),
   );
@@ -34,6 +34,7 @@ function projectPath() {
 }
 
 function checkForActualError(err) {
-  if (err.code === "ENOENT") return;
+  if (err.code === "ENOENT" || err.code === "ERR_MODULE_NOT_FOUND")
+    return Promise.resolve();
   throw err;
 }
