@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { Box, Screen } from "@unblessed/node";
-import { GridLayout, type GridPane } from "./grid-layout.ts";
+import { Box, Screen, ScrollableBox } from "@unblessed/node";
 
 export interface Subtask {
   id: string;
@@ -24,7 +23,7 @@ type SubtaskStatus = "pending" | "queued" | "running" | "completed" | "error";
 export class TerminalUI {
   private screen: Screen;
   private primaryBox: Box;
-  private grid: GridLayout | null = null;
+  private panes: ScrollableBox[] = [];
   private processes: Map<string, ChildProcess> = new Map();
   private state: TerminalUIState;
   private options: Required<Pick<TerminalUIOptions, "maxConcurrent">>;
@@ -78,7 +77,7 @@ export class TerminalUI {
     this.setupLayout();
   }
 
-  protected primaryHeight = 22;
+  protected primaryHeight = 32;
 
   protected setupLayout(): void {
     // Determine pane grid based on maxConcurrent and subtask count
@@ -88,23 +87,62 @@ export class TerminalUI {
     );
     const cols = Math.ceil(Math.sqrt(paneCount));
     const rows = Math.ceil(paneCount / cols);
+    const paneAreaHeight = 100 - this.primaryHeight;
+    const paneHeight = paneAreaHeight / rows;
+    const paneWidth = 100 / cols;
 
-    // Create grid layout with collapsed borders
-    this.grid = new GridLayout({
-      screen: this.screen,
-      top: `${this.primaryHeight}%`,
-      left: 0,
-      width: "100%",
-      height: `${100 - this.primaryHeight}%`,
-      rows,
-      cols,
-      borderColor: "yellow",
-    });
+    for (let index = 0; index < paneCount; index++) {
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      const top = this.primaryHeight + row * paneHeight;
+      const left = col * paneWidth;
 
-    // Set initial labels
-    for (let i = 0; i < this.grid.getPaneCount(); i++) {
-      const pane = this.grid.getPane(i);
-      pane?.setLabel("{white-fg}waiting...{/}");
+      const box = new ScrollableBox({
+        top: `${top}%`,
+        left: `${left}%`,
+        width: `${paneWidth}%`,
+        height: `${paneHeight}%`,
+        border: {
+          type: "line",
+        },
+        style: {
+          border: {
+            fg: "green",
+          },
+        },
+        alwaysScroll: true,
+        scrollbar: {
+          ch: " ",
+          track: {
+            bg: "black",
+          },
+          style: {
+            inverse: true,
+          },
+        },
+        tags: true,
+        keys: true,
+        vi: true,
+        mouse: true,
+        label: " {white-fg}waiting...{/} ",
+      });
+
+      // Enable scrolling with arrow keys
+      box.key(["up", "down", "pageup", "pagedown"], (_, key) => {
+        if (key.name === "up") {
+          box.scroll(-1);
+        } else if (key.name === "down") {
+          box.scroll(1);
+        } else if (key.name === "pageup") {
+          box.scroll(-(box.height as number));
+        } else if (key.name === "pagedown") {
+          box.scroll(box.height as number);
+        }
+        this.screen.render();
+      });
+
+      this.panes.push(box);
+      this.screen.append(box);
     }
 
     this.screen.append(this.primaryBox);
@@ -123,22 +161,20 @@ export class TerminalUI {
 
     // Main task header
     const mainStatus = this.getOverallStatus();
-    const mainStatusIcon =
-      mainStatus === "completed"
-        ? "✓"
-        : mainStatus === "error"
-          ? "✗"
-          : mainStatus === "running"
-            ? "⟳"
-            : "○";
-    const mainStatusColor =
-      mainStatus === "completed"
-        ? "green"
-        : mainStatus === "error"
-          ? "red"
-          : mainStatus === "running"
-            ? "yellow"
-            : "white";
+    const mainStatusIcons: Record<typeof mainStatus, string> = {
+      completed: "✓",
+      error: "✗",
+      running: "⟳",
+      pending: "○",
+    };
+    const mainStatusColors: Record<typeof mainStatus, string> = {
+      completed: "green",
+      error: "red",
+      running: "yellow",
+      pending: "white",
+    };
+    const mainStatusIcon = mainStatusIcons[mainStatus];
+    const mainStatusColor = mainStatusColors[mainStatus];
 
     lines.push(
       `{bold}{${mainStatusColor}-fg}${mainStatusIcon}{/} ${this.state.primaryTask}{/bold}`,
@@ -146,31 +182,27 @@ export class TerminalUI {
     lines.push("");
 
     // Subtasks tree
+    const subtaskIcons: Record<SubtaskStatus, string> = {
+      pending: "○",
+      queued: "…",
+      running: "⟳",
+      completed: "✓",
+      error: "✗",
+    };
+    const subtaskColors: Record<SubtaskStatus, string> = {
+      pending: "white",
+      queued: "blue",
+      running: "yellow",
+      completed: "green",
+      error: "red",
+    };
+
     this.state.subtasks.forEach((subtask, index) => {
-      const status = this.subtaskStatuses.get(subtask.id) || "pending";
+      const status = this.subtaskStatuses.get(subtask.id) ?? "pending";
       const isLast = index === this.state.subtasks.length - 1;
       const connector = isLast ? "└──" : "├──";
-
-      const statusIcon =
-        status === "completed"
-          ? "✓"
-          : status === "error"
-            ? "✗"
-            : status === "running"
-              ? "⟳"
-              : status === "queued"
-                ? "…"
-                : "○";
-      const statusColor =
-        status === "completed"
-          ? "green"
-          : status === "error"
-            ? "red"
-            : status === "running"
-              ? "yellow"
-              : status === "queued"
-                ? "blue"
-                : "white";
+      const statusIcon = subtaskIcons[status];
+      const statusColor = subtaskColors[status];
 
       lines.push(
         ` ${connector} {${statusColor}-fg}${statusIcon}{/} ${subtask.name}`,
@@ -223,16 +255,14 @@ export class TerminalUI {
 
   private appendToSubtask(subtaskId: string, data: string): void {
     const index = this.subtaskToPane.get(subtaskId);
-    if (index === undefined || !this.grid) return;
+    if (index === undefined) return;
 
-    const pane = this.grid.getPane(index);
-    if (!pane) return;
-
-    const currentContent = pane.getContent();
+    const box = this.panes[index];
+    const currentContent = box.getContent();
     const nextContent = this.limitBuffer(currentContent + data);
-    pane.setContent(nextContent);
+    box.setContent(nextContent);
     // Auto-scroll to bottom
-    pane.box.setScrollPerc?.(100);
+    box.setScrollPerc(100);
     this.render();
   }
 
@@ -251,17 +281,12 @@ export class TerminalUI {
     subtask: Subtask,
     paneIndex: number,
   ): Promise<void> {
-    if (!this.grid) return;
     this.subtaskToPane.set(subtask.id, paneIndex);
-    const pane = this.grid.getPane(paneIndex);
-    if (!pane) return;
-    pane.setContent("");
+    const box = this.panes[paneIndex];
+    box.setContent("");
 
-    // Show command being executed (compact form)
-    const argsStr = subtask.args.join(" ");
-    const truncatedArgs =
-      argsStr.length > 50 ? `${argsStr.slice(0, 47)}...` : argsStr;
-    const commandLine = `{gray-fg}${subtask.command} ${truncatedArgs}{/}\n`;
+    // Show command being executed
+    const commandLine = `$ ${subtask.command} ${subtask.args.join(" ")}\n\n`;
     this.appendToSubtask(subtask.id, commandLine);
 
     this.updateSubtaskStatus(subtask.id, "running");
@@ -327,46 +352,39 @@ export class TerminalUI {
     latestChunk?: string,
   ): void {
     const paneIndex = this.subtaskToPane.get(subtask.id);
-    if (paneIndex === undefined || !this.grid) return;
-    const pane = this.grid.getPane(paneIndex);
-    if (!pane) return;
+    if (paneIndex === undefined) return;
+    const box = this.panes[paneIndex];
 
-    const statusColor =
-      status === "completed"
-        ? "green"
-        : status === "error"
-          ? "red"
-          : status === "queued"
-            ? "blue"
-            : "yellow";
+    const statusColors: Record<SubtaskStatus, string> = {
+      pending: "gray",
+      queued: "blue",
+      running: "yellow",
+      completed: "green",
+      error: "red",
+    };
+    const statusIcons: Record<SubtaskStatus, string> = {
+      pending: "○",
+      queued: "…",
+      running: "⟳",
+      completed: "✓",
+      error: "✗",
+    };
+    const statusColor = statusColors[status];
+    const statusText = statusIcons[status];
 
-    const statusText =
-      status === "completed"
-        ? "✓"
-        : status === "error"
-          ? "✗"
-          : status === "queued"
-            ? "…"
-            : "⟳";
+    const snippet = latestChunk
+      ? latestChunk.split(/\r?\n/).filter(Boolean).at(-1)
+      : undefined;
 
     const duration = this.formatDuration(startedAt);
+    const info = snippet ? ` • ${snippet.trim().slice(0, 40)}` : "";
 
-    // Extract last meaningful line from output for snippet
-    const snippet = latestChunk
-      ?.split(/\r?\n/)
-      .filter(Boolean)
-      .at(-1)
-      ?.trim()
-      .slice(0, 30);
-    const info = snippet ? ` • ${snippet}` : "";
-
-    pane.setLabel(
-      `{${statusColor}-fg}${statusText}{/} ${subtask.name} {gray-fg}(${duration})${info}{/}`,
+    box.setLabel(
+      ` {${statusColor}-fg}${statusText}{/} ${subtask.name} {gray-fg}(${duration})${info}{/} `,
     );
   }
 
   async startAllSubtasks(): Promise<void> {
-    if (!this.grid) return;
     this.queuedSubtasks = [...this.state.subtasks];
 
     // Mark everything as queued initially
@@ -376,8 +394,7 @@ export class TerminalUI {
     this.primaryBox.setContent(this.renderTaskTree());
     this.render();
 
-    const paneCount = this.grid.getPaneCount();
-    const runners = Array.from({ length: paneCount }, (_, paneIndex) =>
+    const runners = this.panes.map((_, paneIndex) =>
       this.runNextInPane(paneIndex),
     );
     await Promise.all(runners);
@@ -408,9 +425,6 @@ export class TerminalUI {
       }
     });
     this.processes.clear();
-    if (this.grid) {
-      this.grid.destroy();
-    }
     this.screen.destroy();
   }
 }
