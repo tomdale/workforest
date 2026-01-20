@@ -1,30 +1,42 @@
-import { log } from "../logger.ts";
-import type { RunCommandOptions } from "../types.ts";
 import { runCommand } from "../utils/exec.ts";
 
 type DiskUsageResult = {
   diskUsage?: number;
 };
 
+type LogMessage = { level: "warn"; message: string };
+
+type FetchRepoDiskUsageResult = {
+  sizeBytes: number | null;
+  messages: LogMessage[];
+};
+
 export async function fetchRepoDiskUsage(
   slug: string,
-  options: RunCommandOptions = { capture: true },
-): Promise<number | null> {
+): Promise<FetchRepoDiskUsageResult> {
+  const messages: LogMessage[] = [];
+
   try {
-    const { stdout } = await runCommand(
-      "gh",
-      ["repo", "view", slug, "--json", "diskUsage"],
-      { ...options, capture: true },
-    );
+    const { stdout } = await runCommand("gh", [
+      "repo",
+      "view",
+      slug,
+      "--json",
+      "diskUsage",
+    ]);
     const parsed: DiskUsageResult = JSON.parse(stdout);
     if (typeof parsed.diskUsage === "number") {
-      return parsed.diskUsage * 1024;
+      return { sizeBytes: parsed.diskUsage * 1024, messages };
     }
   } catch (error_) {
-    log.warn(
-      `Unable to fetch disk usage for ${slug} via GitHub CLI. Skipping size warning.`,
-    );
-    log.warn(String(error_));
+    messages.push({
+      level: "warn",
+      message: `Unable to fetch disk usage for ${slug} via GitHub CLI. Skipping size warning.`,
+    });
+    messages.push({
+      level: "warn",
+      message: String(error_),
+    });
   }
-  return null;
+  return { sizeBytes: null, messages };
 }

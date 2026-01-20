@@ -39,7 +39,7 @@ export class WorkspaceUI {
 
     this.screen = new Screen({
       smartCSR: true,
-      title: `Vercel Workspace: ${options.featureName}`,
+      title: `Workspace: ${options.featureName}`,
       fullUnicode: true,
     });
 
@@ -104,7 +104,7 @@ export class WorkspaceUI {
   }
 
   private renderHeader(): string {
-    const title = "{bold}⚡ Vercel Workspace{/bold}";
+    const title = "{bold}⚡ Workspace{/bold}";
     const feature = `Feature: {bold}${this.options.featureName}{/bold}`;
     return `${title}  │  ${feature}`;
   }
@@ -393,6 +393,19 @@ export class WorkspaceUI {
         this.updatePane(state.repo, "completed");
         break;
 
+      case "log": {
+        const colorMap = {
+          info: "cyan",
+          warn: "yellow",
+          error: "red",
+        };
+        this.appendOutput(
+          state.repo,
+          `{${colorMap[state.level]}-fg}[${state.level}] ${state.message}{/}\n`,
+        );
+        break;
+      }
+
       case "finalize":
         this.updateStatusBox();
         break;
@@ -414,6 +427,19 @@ export class WorkspaceUI {
       case "output":
         this.appendOutput(repo, state.data);
         break;
+
+      case "log": {
+        const colorMap = {
+          info: "cyan",
+          warn: "yellow",
+          error: "red",
+        };
+        this.appendOutput(
+          repo,
+          `{${colorMap[state.level]}-fg}[${state.level}] ${state.message}{/}\n`,
+        );
+        break;
+      }
 
       case "retrying":
         this.appendOutput(

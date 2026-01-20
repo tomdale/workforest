@@ -10,9 +10,9 @@ import { ensureDir } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
-  cleanupWorkspaceWorktrees,
-  ensureMirrorRepo,
-  ensureWorkingCopy,
+  cleanupWorkspaceWorktreesGenerator,
+  ensureMirrorRepoGenerator,
+  ensureWorkingCopyGenerator,
 } from "./repository.ts";
 
 // ============================================================================
@@ -42,6 +42,12 @@ export type WorkspaceState =
   | { phase: "install"; repo: string; state: TaskState }
   | { phase: "turbo"; repo: string }
   | { phase: "turbo-complete"; repo: string }
+  | {
+      phase: "log";
+      repo: string;
+      level: "info" | "warn" | "error";
+      message: string;
+    }
   | { phase: "finalize"; message: string }
   | { phase: "complete" };
 
@@ -77,14 +83,50 @@ export async function* stampWorkspaceGenerator({
     const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
 
     yield { phase: "git", repo: repo.name, step: "mirror" };
-    await ensureMirrorRepo(repo, mirrorDir);
+    // Consume generator and forward log states
+    for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
+      if (state.status === "log") {
+        yield {
+          phase: "log",
+          repo: repo.name,
+          level: state.level,
+          message: state.message,
+        };
+      }
+    }
 
     yield { phase: "git", repo: repo.name, step: "cleanup" };
     const targetDir = path.join(workspaceDir, repo.name);
-    await cleanupWorkspaceWorktrees(mirrorDir, workspaceDir);
+    for await (const state of cleanupWorkspaceWorktreesGenerator(
+      mirrorDir,
+      workspaceDir,
+    )) {
+      if (state.status === "log") {
+        yield {
+          phase: "log",
+          repo: repo.name,
+          level: state.level,
+          message: state.message,
+        };
+      }
+    }
 
     yield { phase: "git", repo: repo.name, step: "worktree" };
-    await ensureWorkingCopy(repo, mirrorDir, targetDir, featureName);
+    for await (const state of ensureWorkingCopyGenerator(
+      repo,
+      mirrorDir,
+      targetDir,
+      featureName,
+    )) {
+      if (state.status === "log") {
+        yield {
+          phase: "log",
+          repo: repo.name,
+          level: state.level,
+          message: state.message,
+        };
+      }
+    }
 
     yield { phase: "git-complete", repo: repo.name };
 
@@ -172,6 +214,8 @@ export async function stampWorkspace(
           log.info(`${state.repo}: ${state.state.reason}`);
         } else if (state.state.status === "retrying") {
           log.warn(`${state.repo}: ${state.state.reason}, retrying...`);
+        } else if (state.state.status === "log") {
+          log[state.state.level](`${state.repo}: ${state.state.message}`);
         }
         break;
       case "turbo":
@@ -179,6 +223,9 @@ export async function stampWorkspace(
         break;
       case "turbo-complete":
         log.success(`${state.repo}: turbo linked`);
+        break;
+      case "log":
+        log[state.level](`${state.repo}: ${state.message}`);
         break;
       case "finalize":
         log.info(state.message);
@@ -197,7 +244,7 @@ export async function stampWorkspace(
 export async function ensureCacheDir(): Promise<string> {
   const cacheHome =
     process.env["XDG_CACHE_HOME"] ?? path.join(os.homedir(), ".cache");
-  const cacheRoot = path.join(cacheHome, "vercel-workspace");
+  const cacheRoot = path.join(cacheHome, "workspace");
   await ensureDir(cacheRoot);
   return cacheRoot;
 }
@@ -206,7 +253,7 @@ async function writeVSCodeWorkspaceFile(
   workspaceDir: string,
   repos: readonly RepoConfig[],
 ): Promise<void> {
-  const workspaceName = path.basename(workspaceDir) || "vercel-workspace";
+  const workspaceName = path.basename(workspaceDir) || "workspace";
   const workspaceFile = path.join(
     workspaceDir,
     `${workspaceName}.code-workspace`,
@@ -224,9 +271,17 @@ async function writeVSCodeWorkspaceFile(
 
 const LARGE_REPO_THRESHOLD_MB = 500;
 
+type LargeRepoWarning = {
+  repo: string;
+  level: "warn";
+  message: string;
+};
+
 export async function warnAboutLargeRepositories(
   repos: readonly RepoConfig[],
-): Promise<void> {
+): Promise<LargeRepoWarning[]> {
+  const warnings: LargeRepoWarning[] = [];
+
   await Promise.all(
     repos.map(async (repo) => {
       const slug = getGitHubSlug(repo.remote);
@@ -234,7 +289,17 @@ export async function warnAboutLargeRepositories(
         return;
       }
 
-      const sizeBytes = await fetchRepoDiskUsage(slug);
+      const { sizeBytes, messages } = await fetchRepoDiskUsage(slug);
+
+      // Forward any warnings from fetchRepoDiskUsage
+      for (const msg of messages) {
+        warnings.push({
+          repo: repo.name,
+          level: msg.level,
+          message: msg.message,
+        });
+      }
+
       if (sizeBytes === null) {
         return;
       }
@@ -242,10 +307,19 @@ export async function warnAboutLargeRepositories(
       const sizeMB = sizeBytes / (1024 * 1024);
       if (sizeMB >= LARGE_REPO_THRESHOLD_MB) {
         const sizeString = sizeMB.toFixed(1);
-        log.warn(
-          `Repository ${repo.name} is approximately ${sizeString} MB and may take a while to mirror.`,
-        );
+        warnings.push({
+          repo: repo.name,
+          level: "warn",
+          message: `Repository ${repo.name} is approximately ${sizeString} MB and may take a while to mirror.`,
+        });
       }
     }),
   );
+
+  // Log warnings in non-TUI mode
+  for (const warning of warnings) {
+    log.warn(`${warning.repo}: ${warning.message}`);
+  }
+
+  return warnings;
 }
