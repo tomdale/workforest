@@ -1,42 +1,62 @@
 import chalk from "chalk";
-import { getDefaultRepoTokens, getRepoAliases } from "./config.ts";
+import { loadWorkspaceConfig } from "./config.ts";
+import type { WorkspaceConfig } from "./types.ts";
 
-export const help = () => {
-  const aliases = getRepoAliases();
-  const aliasEntries = Object.entries(aliases);
-  const aliasText =
-    aliasEntries.length === 0
+export async function help(): Promise<string> {
+  let config: WorkspaceConfig = {};
+  let configPath = "(unavailable)";
+  try {
+    const loaded = await loadWorkspaceConfig();
+    config = loaded.config;
+    configPath = loaded.path;
+  } catch {
+    config = { aliases: {}, defaultRepos: [] };
+  }
+  const templates = config.aliases ?? {};
+  const templateEntries = Object.entries(templates);
+  const templateText =
+    templateEntries.length === 0
       ? `    ${chalk.dim("(none)")}`
-      : aliasEntries
+      : templateEntries
           .map(
-            ([alias, repos]) =>
-              `    ${alias.padEnd(12)}${chalk.dim("->")} ${repos.join(", ")}`,
+            ([name, repos]) =>
+              `    ${name.padEnd(12)}${chalk.dim("->")} ${repos.join(", ")}`,
           )
           .join("\n");
 
-  const defaultTokens = getDefaultRepoTokens();
+  const defaultTokens = config.defaultRepos ?? [];
   const defaultSelection =
-    defaultTokens.length > 0 ? defaultTokens.join(" ") : chalk.dim("(none)");
+    defaultTokens.length > 0 ? defaultTokens.join("+") : chalk.dim("(none)");
 
   return `
-  ${chalk.bold("vercel-workspace")} <feature-name> [repo|alias ...]
+  ${chalk.bold("workforest")} <feature-name> [options]
+
+  ${chalk.dim("Options:")}
+
+    --with <template|org/repo[+...]>   Repositories to include
+    --no-tui                           Disable terminal UI
+    --help, -h                         Show this help
 
   ${chalk.dim("Examples:")}
 
   ${chalk.gray("–")} Create a workspace with specific repositories
 
-    ${chalk.cyan("$ vercel-workspace my-feature front api agents")}
+    ${chalk.cyan("$ wf my-feature --with vercel/front+vercel/agents")}
 
-  ${chalk.gray("–")} Create a workspace using an alias
+  ${chalk.gray("–")} Create a workspace using a template
 
-    ${chalk.cyan("$ vercel-workspace my-feature @dashboard agents")}
+    ${chalk.cyan("$ wf my-feature --with @dashboard")}
 
-  ${chalk.dim("Aliases:")}
+  ${chalk.gray("–")} Edit config (TUI)
 
-${aliasText}
+    ${chalk.cyan("$ wf")}
+
+  ${chalk.dim("Templates:")}
+
+${templateText}
 
   ${chalk.dim(
-    `If no repos or aliases are provided, the default selection "${defaultSelection}" is used. Each repo name maps to git@github.com:vercel/<name>.git and is cloned from cached bare mirrors under $XDG_CACHE_HOME/vercel-workspace.`,
+    `If no --with selection is provided, the default selection "${defaultSelection}" is used. Config is loaded from ${configPath}.`,
   )}
 `;
-};
+}

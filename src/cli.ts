@@ -1,9 +1,11 @@
+import os from "node:os";
 import path from "node:path";
 import arg from "arg";
-import { resolveRepositories } from "./config.ts";
+import { loadWorkspaceConfig, resolveRepositories } from "./config.ts";
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
-import type { RepoConfig } from "./types.ts";
+import type { RepoConfig, WorkspaceConfig } from "./types.ts";
+import { editConfigWithUI } from "./ui/config-ui.ts";
 import { stampWorkspaceWithUI } from "./ui/workspace-ui.ts";
 import { stampWorkspace } from "./workspace/index.ts";
 
@@ -13,6 +15,7 @@ export async function cli(): Promise<void> {
   const args = arg(
     {
       "--help": Boolean,
+      "--with": String,
       "--no-tui": Boolean,
       "-h": "--help",
     },
@@ -20,38 +23,56 @@ export async function cli(): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(help());
+    console.log(await help());
     return;
   }
 
   const featureName = args._[0];
 
   if (!featureName?.trim()) {
+    if (process.stdout.isTTY && !args["--no-tui"]) {
+      log.info("Launching config editor TUI (log: $WORKFOREST_TUI_LOG)");
+      await editConfigWithUI();
+      return;
+    }
     log.error("Missing <feature-name> argument.");
-    console.log(help());
+    console.log(await help());
     process.exitCode = 1;
     return;
   }
 
   const normalizedFeature = featureName.trim().replace(/\s+/g, "-");
-  const repoArgs = args._.slice(1)
+  const withArg = args["--with"] ?? "";
+  const repoArgs = withArg
+    .split("+")
     .map((argValue) => argValue.trim())
     .filter(Boolean);
   let repos: RepoConfig[];
-
+  let config: WorkspaceConfig;
   try {
-    repos = resolveRepositories(repoArgs);
-  } catch (error_) {
-    const message = error_ instanceof Error ? error_.message : String(error_);
-    log.error(message);
-    console.log(help());
+    ({ config } = await loadWorkspaceConfig());
+  } catch (error) {
+    log.error(getErrorMessage(error));
     process.exitCode = 1;
     return;
   }
 
+  try {
+    repos = resolveRepositories(repoArgs, config);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    console.log(await help());
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceRoot = config.defaultDir
+    ? path.resolve(expandHome(config.defaultDir))
+    : process.cwd();
+  const prefix = config.dirPrefix ?? "";
   const workspaceDir = path.resolve(
-    process.cwd(),
-    `vercel-${normalizedFeature}`,
+    workspaceRoot,
+    `${prefix}${normalizedFeature}`,
   );
 
   const options = {
@@ -69,4 +90,18 @@ export async function cli(): Promise<void> {
     await stampWorkspace(options);
     log.info("Happy shipping!");
   }
+}
+
+function expandHome(value: string): string {
+  if (value === "~") {
+    return os.homedir();
+  }
+  if (value.startsWith("~/")) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
