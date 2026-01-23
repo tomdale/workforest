@@ -16,20 +16,18 @@ export type ResolvedWorkspaceConfig = {
 };
 
 export type TemplateConfig = {
-  name: string;
-  description?: string;
   repos: string[];
-  defaultBranch?: string;
-  postInstallHooks?: PostInstallHook[];
+  description?: string;
+  hooks?: Hook[];
+  branchPrefix?: string;
 };
 
-export type PostInstallHook = {
+export type Hook = {
   name: string;
-  command: string;
-  args: string[];
-  condition?: {
-    fileExists?: string[];
-  };
+  run: string;
+  in?: string | string[];
+  if?: { fileExists?: string };
+  continueOnError?: boolean;
 };
 
 export type RunCommandOptions = {

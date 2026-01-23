@@ -4,7 +4,6 @@ import path from "node:path";
 import type { TemplateConfig } from "../types.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 
-const LEGACY_TEMPLATES_DIR = ".workforest/templates";
 const XDG_TEMPLATES_DIR = "workforest/templates";
 const TEMPLATE_FILENAME = "template.json";
 
@@ -14,14 +13,9 @@ export type Template = {
 };
 
 export function getTemplatesDir(): string {
-  const homeDir = os.homedir();
-  const xdgHome = process.env["XDG_CONFIG_HOME"];
-
-  if (xdgHome) {
-    return path.join(xdgHome, XDG_TEMPLATES_DIR);
-  }
-
-  return path.join(homeDir, LEGACY_TEMPLATES_DIR);
+  const xdgHome =
+    process.env["XDG_CONFIG_HOME"] ?? path.join(os.homedir(), ".config");
+  return path.join(xdgHome, XDG_TEMPLATES_DIR);
 }
 
 export async function listTemplates(): Promise<Template[]> {
@@ -118,14 +112,17 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
 
   const config = value as Record<string, unknown>;
 
-  if (typeof config["name"] !== "string" || !config["name"]) {
-    return false;
-  }
-
+  // repos is required and must be an array of strings
   if (!Array.isArray(config["repos"])) {
     return false;
   }
+  for (const repo of config["repos"]) {
+    if (typeof repo !== "string") {
+      return false;
+    }
+  }
 
+  // description is optional but must be a string if present
   if (
     config["description"] !== undefined &&
     typeof config["description"] !== "string"
@@ -133,63 +130,73 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
     return false;
   }
 
+  // branchPrefix is optional but must be a string if present
   if (
-    config["defaultBranch"] !== undefined &&
-    typeof config["defaultBranch"] !== "string"
+    config["branchPrefix"] !== undefined &&
+    typeof config["branchPrefix"] !== "string"
   ) {
     return false;
   }
 
-  if (config["postInstallHooks"] !== undefined) {
-    if (!Array.isArray(config["postInstallHooks"])) {
+  // hooks is optional but must be an array if present
+  if (config["hooks"] !== undefined) {
+    if (!Array.isArray(config["hooks"])) {
       return false;
     }
 
-    for (const hook of config["postInstallHooks"]) {
+    for (const hook of config["hooks"]) {
       if (hook === null || typeof hook !== "object") {
         return false;
       }
 
       const hookObj = hook as Record<string, unknown>;
 
+      // name is required
       if (typeof hookObj["name"] !== "string" || !hookObj["name"]) {
         return false;
       }
 
-      if (typeof hookObj["command"] !== "string" || !hookObj["command"]) {
+      // run is required (shell command string)
+      if (typeof hookObj["run"] !== "string" || !hookObj["run"]) {
         return false;
       }
 
-      if (!Array.isArray(hookObj["args"])) {
-        return false;
-      }
-
-      for (const arg of hookObj["args"]) {
-        if (typeof arg !== "string") {
-          return false;
-        }
-      }
-
-      if (hookObj["condition"] !== undefined) {
-        if (
-          hookObj["condition"] === null ||
-          typeof hookObj["condition"] !== "object"
-        ) {
-          return false;
-        }
-
-        const condition = hookObj["condition"] as Record<string, unknown>;
-
-        if (condition["fileExists"] !== undefined) {
-          if (!Array.isArray(condition["fileExists"])) {
-            return false;
-          }
-
-          for (const file of condition["fileExists"]) {
-            if (typeof file !== "string") {
+      // in is optional (repo name or array of repo names to run in)
+      if (hookObj["in"] !== undefined) {
+        if (typeof hookObj["in"] === "string") {
+          // valid
+        } else if (Array.isArray(hookObj["in"])) {
+          for (const item of hookObj["in"]) {
+            if (typeof item !== "string") {
               return false;
             }
           }
+        } else {
+          return false;
+        }
+      }
+
+      // continueOnError is optional boolean
+      if (
+        hookObj["continueOnError"] !== undefined &&
+        typeof hookObj["continueOnError"] !== "boolean"
+      ) {
+        return false;
+      }
+
+      // if is optional condition object
+      if (hookObj["if"] !== undefined) {
+        if (hookObj["if"] === null || typeof hookObj["if"] !== "object") {
+          return false;
+        }
+
+        const condition = hookObj["if"] as Record<string, unknown>;
+
+        if (
+          condition["fileExists"] !== undefined &&
+          typeof condition["fileExists"] !== "string"
+        ) {
+          return false;
         }
       }
     }
