@@ -1,6 +1,14 @@
 import { runCommand } from "./exec.ts";
 
 /**
+ * Check if a string is already a valid slug.
+ * A slug is: lowercase, no spaces, only alphanumeric + hyphens.
+ */
+export function isSlug(input: string): boolean {
+  return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(input);
+}
+
+/**
  * Sanitizes a string into a URL-safe slug.
  * - Lowercase
  * - Hyphens instead of spaces
