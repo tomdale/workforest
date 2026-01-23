@@ -12,6 +12,58 @@ import { stampWorkspace } from "./workspace/index.ts";
 export { log };
 
 export async function cli(): Promise<void> {
+  const argv = process.argv.slice(2);
+
+  // Check for help flag at top level
+  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+    console.log(await help());
+    return;
+  }
+
+  // Route to subcommands
+  const command = argv[0];
+  const commandArgv = argv.slice(1);
+
+  switch (command) {
+    case "new":
+      await runNewCommand(commandArgv);
+      break;
+    case "config":
+      await runConfigCommand(commandArgv);
+      break;
+    default:
+      log.error(`Unknown command: ${command}`);
+      console.log(await help());
+      process.exitCode = 1;
+  }
+}
+
+async function runConfigCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--no-tui": Boolean,
+      "-h": "--help",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  if (process.stdout.isTTY && !args["--no-tui"]) {
+    log.info("Launching config editor TUI (log: $WORKFOREST_TUI_LOG)");
+    await editConfigWithUI();
+    return;
+  }
+
+  log.error("Config editing requires a TTY. Use --no-tui to skip.");
+  process.exitCode = 1;
+}
+
+async function runNewCommand(argv: string[]): Promise<void> {
   const args = arg(
     {
       "--help": Boolean,
@@ -19,7 +71,7 @@ export async function cli(): Promise<void> {
       "--no-tui": Boolean,
       "-h": "--help",
     },
-    { argv: process.argv.slice(2) },
+    { argv },
   );
 
   if (args["--help"]) {
@@ -30,11 +82,6 @@ export async function cli(): Promise<void> {
   const featureName = args._[0];
 
   if (!featureName?.trim()) {
-    if (process.stdout.isTTY && !args["--no-tui"]) {
-      log.info("Launching config editor TUI (log: $WORKFOREST_TUI_LOG)");
-      await editConfigWithUI();
-      return;
-    }
     log.error("Missing <feature-name> argument.");
     console.log(await help());
     process.exitCode = 1;

@@ -29,9 +29,14 @@ export async function help(): Promise<string> {
     defaultTokens.length > 0 ? defaultTokens.join("+") : chalk.dim("(none)");
 
   return `
-  ${chalk.bold("workforest")} <feature-name> [options]
+  ${chalk.bold("workforest")} <command> [options]
 
-  ${chalk.dim("Options:")}
+  ${chalk.dim("Commands:")}
+
+    new <feature-name>   Create a new workspace
+    config               Edit configuration (TUI)
+
+  ${chalk.dim("Options (for new command):")}
 
     --with <template|org/repo[+...]>   Repositories to include
     --no-tui                           Disable terminal UI
@@ -41,15 +46,15 @@ export async function help(): Promise<string> {
 
   ${chalk.gray("–")} Create a workspace with specific repositories
 
-    ${chalk.cyan("$ wf my-feature --with vercel/front+vercel/agents")}
+    ${chalk.cyan("$ wf new my-feature --with vercel/front+vercel/agents")}
 
   ${chalk.gray("–")} Create a workspace using a template
 
-    ${chalk.cyan("$ wf my-feature --with @dashboard")}
+    ${chalk.cyan("$ wf new my-feature --with @dashboard")}
 
   ${chalk.gray("–")} Edit config (TUI)
 
-    ${chalk.cyan("$ wf")}
+    ${chalk.cyan("$ wf config")}
 
   ${chalk.dim("Templates:")}
 
