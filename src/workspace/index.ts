@@ -9,6 +9,7 @@ import type { RepoConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
+import { writeWorkspaceMetadata } from "./metadata.ts";
 import {
   cleanupWorkspaceWorktrees,
   ensureMirrorRepo,
@@ -21,9 +22,11 @@ import {
 
 export type StampWorkspaceOptions = {
   featureName: string;
+  description?: string;
   branchName?: string;
   workspaceDir: string;
   repos: readonly RepoConfig[];
+  templateId?: string;
 };
 
 export type PreparedRepo = {
@@ -54,9 +57,11 @@ export type WorkspaceState =
  */
 export async function* stampWorkspaceGenerator({
   featureName,
+  description,
   branchName,
   workspaceDir,
   repos,
+  templateId,
 }: StampWorkspaceOptions): AsyncGenerator<WorkspaceState> {
   if (repos.length === 0) {
     throw new Error(
@@ -116,6 +121,19 @@ export async function* stampWorkspaceGenerator({
   }
 
   // Phase C: Finalize
+  yield { phase: "finalize", message: "Writing workspace metadata" };
+  await writeWorkspaceMetadata(workspaceDir, {
+    featureName,
+    description,
+    templateId,
+    repos: preparedRepos.map((r) => ({
+      name: r.repo.name,
+      remote: r.repo.remote,
+      defaultBranch: r.repo.defaultBranch,
+      hasLockfile: r.hasLockfile,
+    })),
+  });
+
   yield { phase: "finalize", message: "Writing VS Code workspace file" };
   await writeVSCodeWorkspaceFile(workspaceDir, repos);
 

@@ -55,6 +55,7 @@ export type WorkspaceMetadata = {
     version: string;
     created_at: string;
     feature_name: string;
+    description?: string;
     template_id?: string;
   };
   repos: WorkspaceRepoMetadata[];

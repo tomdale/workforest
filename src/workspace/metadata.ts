@@ -9,6 +9,7 @@ const SCHEMA_VERSION = "1";
 
 export type WriteMetadataOptions = {
   featureName: string;
+  description?: string;
   templateId?: string;
   repos: readonly {
     name: string;
@@ -32,6 +33,7 @@ export async function writeWorkspaceMetadata(
       version: SCHEMA_VERSION,
       created_at: new Date().toISOString(),
       feature_name: options.featureName,
+      ...(options.description ? { description: options.description } : {}),
       ...(options.templateId ? { template_id: options.templateId } : {}),
     },
     repos: options.repos.map((repo) => ({

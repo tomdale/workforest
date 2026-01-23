@@ -133,7 +133,9 @@ async function runNewCommand(argv: string[]): Promise<void> {
       "--help": Boolean,
       "--with": String,
       "--template": String,
+      "--description": String,
       "-h": "--help",
+      "-d": "--description",
     },
     { argv },
   );
@@ -153,6 +155,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   }
 
   let featureName = args._[0];
+  let description: string | undefined = args["--description"];
   let repoArgs: string[];
 
   // Check if we need interactive mode
@@ -170,6 +173,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
       return;
     }
     featureName = interactiveResult.featureName;
+    description = interactiveResult.description;
     repoArgs = interactiveResult.repoArgs;
   } else {
     if (!featureName?.trim()) {
@@ -215,10 +219,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
 
   await stampWorkspace({
     featureName: normalizedFeature,
+    description,
     branchName,
     workspaceDir,
     repos,
-    ...(templateId ? { templateId } : {}),
+    templateId,
   });
 
   log.info("Happy shipping!");
@@ -226,6 +231,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
 
 type InteractiveResult = {
   featureName: string;
+  description?: string;
   repoArgs: string[];
 };
 
@@ -247,6 +253,9 @@ async function runInteractivePrompts(
     process.exitCode = 1;
     return null;
   }
+
+  // Prompt for description (optional)
+  const description = await promptText("Description (optional)");
 
   // Build selection options from aliases and defaults
   const aliases = config.aliases ?? {};
@@ -338,7 +347,11 @@ async function runInteractivePrompts(
   }
 
   console.log();
-  return { featureName, repoArgs };
+  return {
+    featureName,
+    description: description.trim() || undefined,
+    repoArgs,
+  };
 }
 
 function expandHome(value: string): string {
