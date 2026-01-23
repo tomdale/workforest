@@ -1,35 +1,76 @@
+import path from "node:path";
+import { runHook } from "../services/hooks.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import type { Template } from "./index.ts";
 
 export type ApplyTemplateOptions = {
   template: Template;
   workspaceDir: string;
+  repoDirs: string[];
 };
+
+export type HookState =
+  | { phase: "hook-start"; hookName: string }
+  | { phase: "hook"; hookName: string; state: TaskState }
+  | { phase: "hook-complete"; hookName: string };
 
 /**
  * Generator that applies a template to a workspace.
- * Yields TaskState updates as it processes the template.
+ * Runs hooks defined in the template.
  */
 export async function* applyTemplateGenerator({
   template,
   workspaceDir,
-}: ApplyTemplateOptions): AsyncGenerator<TaskState, void, undefined> {
-  yield {
-    status: "log",
-    level: "info",
-    message: `Applying template "${template.config.name}" to workspace at ${workspaceDir}`,
-  };
+  repoDirs,
+}: ApplyTemplateOptions): AsyncGenerator<HookState, void, undefined> {
+  const hooks = template.config.hooks ?? [];
 
-  // Template application logic will be implemented here
-  // For now, this is a placeholder that yields a completion state
+  if (hooks.length === 0) {
+    return;
+  }
 
-  yield {
-    status: "log",
-    level: "info",
-    message: `Template "${template.config.name}" applied successfully`,
-  };
+  for (const hook of hooks) {
+    yield { phase: "hook-start", hookName: hook.name };
 
-  yield { status: "completed" };
+    // Determine the working directories for the hook
+    // If no `in` specified, run in each repo directory
+    const dirs = hook.in
+      ? Array.isArray(hook.in)
+        ? hook.in
+        : [hook.in]
+      : repoDirs;
+
+    for (const dir of dirs) {
+      const hookCwd = dir ? path.join(workspaceDir, dir) : workspaceDir;
+
+      try {
+        for await (const state of runHook(hook, workspaceDir, hookCwd)) {
+          yield { phase: "hook", hookName: hook.name, state };
+
+          // Check if hook failed
+          if (state.status === "failed" && !hook.continueOnError) {
+            throw state.error;
+          }
+        }
+      } catch (error) {
+        if (!hook.continueOnError) {
+          throw error;
+        }
+        // Log but continue if continueOnError is true
+        yield {
+          phase: "hook",
+          hookName: hook.name,
+          state: {
+            status: "log",
+            level: "warn",
+            message: `Hook "${hook.name}" failed but continuing: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        };
+      }
+    }
+
+    yield { phase: "hook-complete", hookName: hook.name };
+  }
 }
 
 /**

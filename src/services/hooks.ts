@@ -1,34 +1,39 @@
-import type { PostInstallHook } from "../types.ts";
+import path from "node:path";
+import type { Hook } from "../types.ts";
+import { pathExists } from "../utils/fs.ts";
 import { getNodeVersionPrefix } from "../utils/node-version.ts";
 import {
   runCommandGenerator,
   type TaskGenerator,
 } from "../utils/task-generator.ts";
-import { hasAny } from "./pnpm.ts";
 
 /**
- * Generator-based post-install hook execution.
+ * Generator-based hook execution.
  * Checks conditions and executes hook command with proper node version handling.
  */
-export async function* runPostInstallHook(
-  hook: PostInstallHook,
-  repoDir: string,
+export async function* runHook(
+  hook: Hook,
+  workspaceDir: string,
+  repoDir?: string,
 ): TaskGenerator {
+  const cwd = repoDir ?? workspaceDir;
+
   yield { status: "running", message: `Checking conditions for ${hook.name}` };
 
-  // Check condition if present
-  if (hook.condition?.fileExists) {
-    const conditionMet = await hasAny(repoDir, hook.condition.fileExists);
+  // Check condition if present (relative to cwd)
+  if (hook.if?.fileExists) {
+    const filePath = path.join(cwd, hook.if.fileExists);
+    const conditionMet = await pathExists(filePath);
     if (!conditionMet) {
       yield {
         status: "skipped",
-        reason: `Condition not met: none of [${hook.condition.fileExists.join(", ")}] exist`,
+        reason: `Condition not met: ${hook.if.fileExists} does not exist`,
       };
       return;
     }
   }
 
-  const versionPrefix = await getNodeVersionPrefix(repoDir);
+  const versionPrefix = await getNodeVersionPrefix(cwd);
 
   yield { status: "running", message: `Running ${hook.name}` };
 
@@ -36,13 +41,13 @@ export async function* runPostInstallHook(
   let args: string[];
   if (versionPrefix) {
     command = versionPrefix.command;
-    args = [...versionPrefix.args, hook.command, ...hook.args];
+    args = [...versionPrefix.args, "sh", "-c", hook.run];
   } else {
-    command = hook.command;
-    args = hook.args;
+    command = "sh";
+    args = ["-c", hook.run];
   }
 
-  const hookGen = runCommandGenerator(command, args, { cwd: repoDir });
+  const hookGen = runCommandGenerator(command, args, { cwd });
 
   yield* hookGen;
 }

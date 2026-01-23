@@ -5,6 +5,8 @@ import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
 import { fetchRepoDiskUsage } from "../services/github.ts";
 import { hasAny, installDependencies } from "../services/pnpm.ts";
+import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
+import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
@@ -44,6 +46,9 @@ export type WorkspaceState =
   | { phase: "git-complete"; repo: string }
   | { phase: "install-start"; repos: PreparedRepo[] }
   | { phase: "install"; repo: string; state: TaskState }
+  | { phase: "hooks-start"; templateId: string }
+  | { phase: "hook"; hookState: HookState }
+  | { phase: "hooks-complete" }
   | { phase: "finalize"; message: string }
   | { phase: "complete" };
 
@@ -120,7 +125,25 @@ export async function* stampWorkspaceGenerator({
     }
   }
 
-  // Phase C: Finalize
+  // Phase C: Run template hooks
+  if (templateId) {
+    const template = await loadTemplate(templateId);
+    if (template?.config.hooks && template.config.hooks.length > 0) {
+      yield { phase: "hooks-start", templateId };
+
+      for await (const hookState of applyTemplateGenerator({
+        template,
+        workspaceDir,
+        repoDirs: preparedRepos.map((r) => r.repo.name),
+      })) {
+        yield { phase: "hook", hookState };
+      }
+
+      yield { phase: "hooks-complete" };
+    }
+  }
+
+  // Phase D: Finalize
   yield { phase: "finalize", message: "Writing workspace metadata" };
   await writeWorkspaceMetadata(workspaceDir, {
     featureName,
@@ -177,6 +200,28 @@ export async function stampWorkspace(
         } else if (state.state.status === "retrying") {
           log.warn(`${state.repo}: ${state.state.reason}, retrying...`);
         }
+        break;
+      case "hooks-start":
+        log.info(`Running hooks from template "${state.templateId}"...`);
+        break;
+      case "hook": {
+        const { hookState } = state;
+        if (hookState.phase === "hook-start") {
+          log.info(`Running hook: ${hookState.hookName}`);
+        } else if (hookState.phase === "hook-complete") {
+          log.success(`Hook complete: ${hookState.hookName}`);
+        } else if (hookState.phase === "hook") {
+          const { state: taskState } = hookState;
+          if (taskState.status === "failed") {
+            log.error(`Hook failed: ${taskState.error.message}`);
+          } else if (taskState.status === "skipped") {
+            log.info(`Hook skipped: ${taskState.reason}`);
+          }
+        }
+        break;
+      }
+      case "hooks-complete":
+        log.success("All hooks completed.");
         break;
       case "finalize":
         log.info(state.message);
