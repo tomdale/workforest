@@ -24,6 +24,7 @@ import {
 
 export type StampWorkspaceOptions = {
   featureName: string;
+  branchName?: string;
   workspaceDir: string;
   repos: readonly RepoConfig[];
   templateId?: string;
@@ -84,6 +85,7 @@ async function* gitSetupGenerator(
  */
 export async function* stampWorkspaceGenerator({
   featureName,
+  branchName,
   workspaceDir,
   repos,
   templateId,
@@ -101,6 +103,7 @@ export async function* stampWorkspaceGenerator({
   yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
 
   // Phase A: Parallel git operations
+  const effectiveBranchName = branchName ?? featureName;
   const gitTasks = new Map(
     repos.map((repo) => [
       repo.name,
@@ -108,7 +111,7 @@ export async function* stampWorkspaceGenerator({
         repo,
         cacheDir,
         path.join(workspaceDir, repo.name),
-        featureName,
+        effectiveBranchName,
       ),
     ]),
   );

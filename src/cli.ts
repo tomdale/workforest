@@ -75,8 +75,13 @@ export async function cli(): Promise<void> {
     `${prefix}${normalizedFeature}`,
   );
 
+  const branchName = config.branchPrefix
+    ? `${config.branchPrefix}${normalizedFeature}`
+    : normalizedFeature;
+
   const options = {
     featureName: normalizedFeature,
+    branchName,
     workspaceDir,
     repos,
   };
