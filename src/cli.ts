@@ -5,8 +5,6 @@ import { loadWorkspaceConfig, resolveRepositories } from "./config.ts";
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
-import { editConfigWithUI } from "./ui/config-ui.ts";
-import { stampWorkspaceWithUI } from "./ui/workspace-ui.ts";
 import { stampWorkspace } from "./workspace/index.ts";
 
 export { log };
@@ -16,7 +14,6 @@ export async function cli(): Promise<void> {
     {
       "--help": Boolean,
       "--with": String,
-      "--no-tui": Boolean,
       "-h": "--help",
     },
     { argv: process.argv.slice(2) },
@@ -30,11 +27,6 @@ export async function cli(): Promise<void> {
   const featureName = args._[0];
 
   if (!featureName?.trim()) {
-    if (process.stdout.isTTY && !args["--no-tui"]) {
-      log.info("Launching config editor TUI (log: $WORKFOREST_TUI_LOG)");
-      await editConfigWithUI();
-      return;
-    }
     log.error("Missing <feature-name> argument.");
     console.log(await help());
     process.exitCode = 1;
@@ -75,21 +67,13 @@ export async function cli(): Promise<void> {
     `${prefix}${normalizedFeature}`,
   );
 
-  const options = {
+  await stampWorkspace({
     featureName: normalizedFeature,
     workspaceDir,
     repos,
-  };
+  });
 
-  // Use TUI by default, unless --no-tui is specified or stdout is not a TTY
-  const useTui = !args["--no-tui"] && process.stdout.isTTY;
-
-  if (useTui) {
-    await stampWorkspaceWithUI(options);
-  } else {
-    await stampWorkspace(options);
-    log.info("Happy shipping!");
-  }
+  log.info("Happy shipping!");
 }
 
 function expandHome(value: string): string {

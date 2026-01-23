@@ -34,22 +34,17 @@ export async function help(): Promise<string> {
   ${chalk.dim("Options:")}
 
     --with <template|org/repo[+...]>   Repositories to include
-    --no-tui                           Disable terminal UI
     --help, -h                         Show this help
 
   ${chalk.dim("Examples:")}
 
-  ${chalk.gray("–")} Create a workspace with specific repositories
+  ${chalk.gray("-")} Create a workspace with specific repositories
 
     ${chalk.cyan("$ wf my-feature --with vercel/front+vercel/agents")}
 
-  ${chalk.gray("–")} Create a workspace using a template
+  ${chalk.gray("-")} Create a workspace using a template
 
     ${chalk.cyan("$ wf my-feature --with @dashboard")}
-
-  ${chalk.gray("–")} Edit config (TUI)
-
-    ${chalk.cyan("$ wf")}
 
   ${chalk.dim("Templates:")}
 
