@@ -1,59 +1,57 @@
 import chalk from "chalk";
 import { loadWorkspaceConfig } from "./config.ts";
-import type { WorkspaceConfig } from "./types.ts";
+import { listTemplates } from "./templates/index.ts";
 
 export async function help(): Promise<string> {
-  let config: WorkspaceConfig = {};
   let configPath = "(unavailable)";
   try {
     const loaded = await loadWorkspaceConfig();
-    config = loaded.config;
     configPath = loaded.path;
   } catch {
-    config = { aliases: {}, defaultRepos: [] };
+    // Ignore errors
   }
-  const templates = config.aliases ?? {};
-  const templateEntries = Object.entries(templates);
+
+  const templates = await listTemplates();
   const templateText =
-    templateEntries.length === 0
+    templates.length === 0
       ? `    ${chalk.dim("(none)")}`
-      : templateEntries
+      : templates
           .map(
-            ([name, repos]) =>
-              `    ${name.padEnd(12)}${chalk.dim("->")} ${repos.join(", ")}`,
+            (t) =>
+              `    ${t.id.padEnd(16)}${t.config.description ? chalk.dim(t.config.description) : chalk.dim(t.config.repos.join(", "))}`,
           )
           .join("\n");
-
-  const defaultTokens = config.defaultRepos ?? [];
-  const defaultSelection =
-    defaultTokens.length > 0 ? defaultTokens.join("+") : chalk.dim("(none)");
 
   return `
   ${chalk.bold("workforest")} <command> [options]
 
   ${chalk.dim("Commands:")}
 
-    new <feature-name>   Create a new workspace
-    clean [workspace]    Clean up a workspace
-    config               Show config file location
+    new [template|org/repo...]   Create a new workspace
+    clean [workspace]            Clean up a workspace
+    config                       Show config file location
+    template                     Manage templates
 
-  ${chalk.bold("workforest new")} <feature-name> [options]
+  ${chalk.bold("workforest new")} [template|org/repo...] [options]
 
   ${chalk.dim("Options:")}
 
-    --with <template|org/repo[+...]>   Repositories to include
-    --template <template-id>           Apply template after workspace creation
-    --help, -h                         Show this help
+    --description, -d <text>   Feature name or description (bypasses prompt)
+    --help, -h                 Show this help
 
   ${chalk.dim("Examples:")}
 
+  ${chalk.gray("–")} Create a workspace with a template
+
+    ${chalk.cyan("$ wf new dashboard")}
+
   ${chalk.gray("–")} Create a workspace with specific repositories
 
-    ${chalk.cyan("$ wf new my-feature --with vercel/front+vercel/agents")}
+    ${chalk.cyan("$ wf new vercel/front vercel/api")}
 
-  ${chalk.gray("–")} Create a workspace using a template
+  ${chalk.gray("–")} Create a workspace non-interactively
 
-    ${chalk.cyan("$ wf new my-feature --with @dashboard")}
+    ${chalk.cyan('$ wf new dashboard -d "Fix auth bug"')}
 
   ${chalk.bold("workforest clean")} [workspace-dir] [options]
 
@@ -84,8 +82,6 @@ export async function help(): Promise<string> {
 
 ${templateText}
 
-  ${chalk.dim(
-    `If no --with selection is provided, the default selection "${defaultSelection}" is used. Config is loaded from ${configPath}.`,
-  )}
+  ${chalk.dim(`Config: ${configPath}`)}
 `;
 }
