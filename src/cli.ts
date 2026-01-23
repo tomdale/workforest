@@ -5,6 +5,11 @@ import { loadWorkspaceConfig, resolveRepositories } from "./config.ts";
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
+import {
+  cleanupWorkspace,
+  previewCleanup,
+  validateWorkspace,
+} from "./workspace/cleanup.ts";
 import { stampWorkspace } from "./workspace/index.ts";
 
 export { log };
@@ -25,6 +30,9 @@ export async function cli(): Promise<void> {
   switch (command) {
     case "new":
       await runNewCommand(commandArgv);
+      break;
+    case "clean":
+      await runCleanCommand(commandArgv);
       break;
     case "config":
       await runConfigCommand(commandArgv);
@@ -55,11 +63,75 @@ async function runConfigCommand(argv: string[]): Promise<void> {
   log.info("Edit the config file directly with your preferred editor.");
 }
 
+async function runCleanCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--dry-run": Boolean,
+      "--force": Boolean,
+      "--keep-mirrors": Boolean,
+      "-h": "--help",
+      "-n": "--dry-run",
+      "-f": "--force",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  const workspaceDir = args._[0] ?? process.cwd();
+  const dryRun = args["--dry-run"] ?? false;
+  const force = args["--force"] ?? false;
+  const keepMirrors = args["--keep-mirrors"] ?? true;
+
+  // Validate workspace first
+  try {
+    await validateWorkspace(workspaceDir);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  // Show preview
+  const preview = await previewCleanup(workspaceDir);
+  log.info(`Workspace: ${preview.workspaceDir}`);
+  log.info(`Repositories: ${preview.repos.join(", ")}`);
+
+  // Confirm unless --force or --dry-run
+  if (!force && !dryRun) {
+    const readline = await import("node:readline");
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(
+        "This will delete the workspace directory. Continue? [y/N] ",
+        resolve,
+      );
+    });
+    rl.close();
+
+    if (answer.toLowerCase() !== "y") {
+      log.info("Cancelled.");
+      return;
+    }
+  }
+
+  await cleanupWorkspace(workspaceDir, { dryRun, force, keepMirrors });
+}
+
 async function runNewCommand(argv: string[]): Promise<void> {
   const args = arg(
     {
       "--help": Boolean,
       "--with": String,
+      "--template": String,
       "-h": "--help",
     },
     { argv },
@@ -117,11 +189,14 @@ async function runNewCommand(argv: string[]): Promise<void> {
     ? `${config.branchPrefix}${normalizedFeature}`
     : normalizedFeature;
 
+  const templateId = args["--template"];
+
   await stampWorkspace({
     featureName: normalizedFeature,
     branchName,
     workspaceDir,
     repos,
+    ...(templateId ? { templateId } : {}),
   });
 
   log.info("Happy shipping!");

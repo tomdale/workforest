@@ -11,7 +11,6 @@ import {
 } from "../utils/task-generator.ts";
 
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
-const TURBO_CONFIG_FILES = ["turbo.json", "turbo.jsonc"];
 
 /**
  * Generator-based dependency installation with frozen-lockfile optimization.
@@ -95,7 +94,10 @@ export async function* installDependencies(
       cwd: repoDir,
     });
 
-    yield* fallbackInstall;
+    // Track fallback result
+    for await (const state of fallbackInstall) {
+      yield state;
+    }
   } else if (failed && lastError) {
     yield { status: "failed", error: lastError };
   } else if (failed) {
@@ -104,48 +106,6 @@ export async function* installDependencies(
       error: new Error("Unknown error during install"),
     };
   }
-}
-
-/**
- * Generator-based turbo link.
- */
-export async function* linkTurbo(
-  _repo: RepoConfig,
-  repoDir: string,
-): TaskGenerator {
-  yield { status: "running", message: "Checking for turbo config" };
-
-  const hasTurboConfig = await hasAny(repoDir, TURBO_CONFIG_FILES);
-  if (!hasTurboConfig) {
-    yield { status: "skipped", reason: "No turbo config" };
-    return;
-  }
-
-  const versionPrefix = await getNodeVersionPrefix(repoDir);
-
-  yield { status: "running", message: "Linking turbo cache" };
-
-  let command: string;
-  let args: string[];
-  if (versionPrefix) {
-    command = versionPrefix.command;
-    args = [
-      ...versionPrefix.args,
-      "pnpm",
-      "turbo",
-      "link",
-      "--scope",
-      "vercel",
-      "--yes",
-    ];
-  } else {
-    command = "pnpm";
-    args = ["turbo", "link", "--scope", "vercel", "--yes"];
-  }
-
-  const linkGen = runCommandGenerator(command, args, { cwd: repoDir });
-
-  yield* linkGen;
 }
 
 /**
@@ -186,30 +146,6 @@ export async function installDependenciesIfNeeded(
     attempts: 3,
     label: `pnpm-install:${repo.name}`,
   });
-}
-
-/**
- * @deprecated Use linkTurbo generator instead
- */
-export async function turboLinkIfNeeded(
-  repo: RepoConfig,
-  repoDir: string,
-): Promise<void> {
-  const hasTurboConfig = await hasAny(repoDir, TURBO_CONFIG_FILES);
-
-  if (!hasTurboConfig) {
-    log.info(`${repo.name}: no turbo config detected. Skipping turbo link.`);
-    return;
-  }
-
-  log.info(`${repo.name}: linking turbo cache for scope "vercel".`);
-  await withRetry(
-    () =>
-      runPnpm(["turbo", "link", "--scope", "vercel", "--yes"], {
-        cwd: repoDir,
-      }),
-    { attempts: 3, label: `turbo-link:${repo.name}` },
-  );
 }
 
 // ============================================================================

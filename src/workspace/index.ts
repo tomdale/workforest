@@ -4,7 +4,7 @@ import path from "node:path";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
 import { fetchRepoDiskUsage } from "../services/github.ts";
-import { hasAny, installDependencies, linkTurbo } from "../services/pnpm.ts";
+import { hasAny, installDependencies } from "../services/pnpm.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
@@ -41,8 +41,6 @@ export type WorkspaceState =
   | { phase: "git-complete"; repo: string }
   | { phase: "install-start"; repos: PreparedRepo[] }
   | { phase: "install"; repo: string; state: TaskState }
-  | { phase: "turbo"; repo: string }
-  | { phase: "turbo-complete"; repo: string }
   | { phase: "finalize"; message: string }
   | { phase: "complete" };
 
@@ -117,22 +115,7 @@ export async function* stampWorkspaceGenerator({
     }
   }
 
-  // Phase C: Turbo link (sequential, fast)
-  for (const { repo, targetDir, hasLockfile } of preparedRepos) {
-    if (!hasLockfile) continue;
-
-    yield { phase: "turbo", repo: repo.name };
-
-    // Consume the turbo generator
-    for await (const _state of linkTurbo(repo, targetDir)) {
-      // We could yield these states too, but turbo link is fast
-      // Just wait for it to complete
-    }
-
-    yield { phase: "turbo-complete", repo: repo.name };
-  }
-
-  // Phase D: Finalize
+  // Phase C: Finalize
   yield { phase: "finalize", message: "Writing VS Code workspace file" };
   await writeVSCodeWorkspaceFile(workspaceDir, repos);
 
@@ -176,12 +159,6 @@ export async function stampWorkspace(
         } else if (state.state.status === "retrying") {
           log.warn(`${state.repo}: ${state.state.reason}, retrying...`);
         }
-        break;
-      case "turbo":
-        log.info(`${state.repo}: linking turbo cache`);
-        break;
-      case "turbo-complete":
-        log.success(`${state.repo}: turbo linked`);
         break;
       case "finalize":
         log.info(state.message);

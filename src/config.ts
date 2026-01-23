@@ -189,13 +189,18 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
   );
   const aliases = normalizeAliases(config.aliases ?? {}, configPath);
 
-  return {
-    defaultDir,
+  const result: WorkspaceConfig = {
     dirPrefix,
     branchPrefix,
     defaultRepos,
     aliases,
   };
+
+  if (defaultDir !== undefined) {
+    result.defaultDir = defaultDir;
+  }
+
+  return result;
 }
 
 function normalizeString(value: unknown): string | undefined {

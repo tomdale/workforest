@@ -1,5 +1,10 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
-import { cloneRepositoryGenerator, runGit } from "../services/git.ts";
+import {
+  cloneRepositoryGenerator,
+  fixBareRepoRefsGenerator,
+  runGit,
+} from "../services/git.ts";
 import type { RepoConfig } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import { asGenerator, withRetryGenerator } from "../utils/retry.ts";
@@ -21,6 +26,7 @@ export async function* ensureMirrorRepoGenerator(
       message: `Seeding pristine repo for ${repo.name}`,
     };
 
+    // Clone using gh CLI (with git fallback) - handles SAML SSO auth
     const cloneGen = () =>
       cloneRepositoryGenerator(
         repo.remote,
@@ -38,9 +44,21 @@ export async function* ensureMirrorRepoGenerator(
       attempts: 3,
       label: `clone-pristine:${repo.name}`,
     });
+
+    // Fix refs: move from refs/heads/* to refs/remotes/origin/*
+    // This is needed because git clone --bare creates local branches
+    yield* fixBareRepoRefsGenerator(mirrorDir);
   } else {
     yield* updatePristineRepoGenerator(repo, mirrorDir);
   }
+
+  // Prune stale worktree entries pointing to non-existent paths
+  yield {
+    status: "log",
+    level: "info",
+    message: "Pruning stale worktrees",
+  };
+  await runGit(["worktree", "prune"], { cwd: mirrorDir });
 }
 
 /**
@@ -90,7 +108,6 @@ export async function* ensureWorkingCopyGenerator(
       [
         "worktree",
         "add",
-        "--track",
         "-B",
         branchName,
         targetDir,
@@ -220,4 +237,54 @@ async function* updatePristineRepoGenerator(
       message: String(error_),
     };
   }
+}
+
+export type MirrorWithWorktrees = {
+  mirrorPath: string;
+  worktrees: string[];
+};
+
+/**
+ * List all mirror repositories in the cache directory with their associated worktrees.
+ * This is useful for identifying orphaned mirrors (mirrors with no worktrees) for cleanup.
+ */
+export async function listMirrorsWithWorktrees(
+  cacheDir: string,
+): Promise<MirrorWithWorktrees[]> {
+  const cacheDirExists = await pathExists(cacheDir);
+  if (!cacheDirExists) {
+    return [];
+  }
+
+  const entries = await fs.readdir(cacheDir, { withFileTypes: true });
+  const mirrors: MirrorWithWorktrees[] = [];
+
+  for (const entry of entries) {
+    // Look for directories ending with .git (bare git mirrors)
+    if (entry.isDirectory() && entry.name.endsWith(".git")) {
+      const mirrorPath = path.join(cacheDir, entry.name);
+
+      try {
+        // Get worktree list using --porcelain format for easier parsing
+        const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
+          cwd: mirrorPath,
+        });
+
+        // Parse worktree paths from porcelain output
+        // Format: "worktree /path/to/worktree"
+        const worktrees = stdout
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.startsWith("worktree "))
+          .map((line) => line.substring("worktree ".length).trim())
+          .filter(Boolean);
+
+        mirrors.push({ mirrorPath, worktrees });
+      } catch {
+        // If git worktree list fails (e.g., corrupted repo), skip this mirror
+      }
+    }
+  }
+
+  return mirrors;
 }

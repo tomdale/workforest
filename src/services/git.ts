@@ -74,6 +74,39 @@ export async function cloneRepository(
   return result.value;
 }
 
+/**
+ * Move all refs from refs/heads/* to refs/remotes/origin/* in a bare repo.
+ * This fixes the issue where git clone --bare creates local branches instead of remote-tracking refs.
+ */
+export async function* fixBareRepoRefsGenerator(
+  cwd: string,
+): AsyncGenerator<TaskState, void, undefined> {
+  // Get all refs in refs/heads/
+  const { stdout } = await runGit(
+    ["for-each-ref", "--format=%(refname)", "refs/heads/"],
+    { cwd },
+  );
+
+  const refs = stdout.trim().split("\n").filter(Boolean);
+  if (refs.length === 0) return;
+
+  yield {
+    status: "log",
+    level: "info",
+    message: `Moving ${refs.length} refs from refs/heads/* to refs/remotes/origin/*`,
+  };
+
+  for (const ref of refs) {
+    const branch = ref.replace("refs/heads/", "");
+    const newRef = `refs/remotes/origin/${branch}`;
+
+    // Create the remote-tracking ref
+    await runGit(["update-ref", newRef, ref], { cwd });
+    // Delete the local ref
+    await runGit(["update-ref", "-d", ref], { cwd });
+  }
+}
+
 export function getGitHubSlug(remote: string): string | null {
   const trimmed = remote.trim();
   if (!trimmed) {
