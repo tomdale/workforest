@@ -40,7 +40,6 @@ async function runConfigCommand(argv: string[]): Promise<void> {
   const args = arg(
     {
       "--help": Boolean,
-      "--no-tui": Boolean,
       "-h": "--help",
     },
     { argv },
@@ -51,14 +50,9 @@ async function runConfigCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  if (process.stdout.isTTY && !args["--no-tui"]) {
-    log.info("Launching config editor TUI (log: $WORKFOREST_TUI_LOG)");
-    await editConfigWithUI();
-    return;
-  }
-
-  log.error("Config editing requires a TTY. Use --no-tui to skip.");
-  process.exitCode = 1;
+  const { path: configPath } = await loadWorkspaceConfig();
+  log.info(`Config file location: ${configPath}`);
+  log.info("Edit the config file directly with your preferred editor.");
 }
 
 async function runNewCommand(argv: string[]): Promise<void> {
@@ -119,8 +113,13 @@ async function runNewCommand(argv: string[]): Promise<void> {
     `${prefix}${normalizedFeature}`,
   );
 
+  const branchName = config.branchPrefix
+    ? `${config.branchPrefix}${normalizedFeature}`
+    : normalizedFeature;
+
   await stampWorkspace({
     featureName: normalizedFeature,
+    branchName,
     workspaceDir,
     repos,
   });

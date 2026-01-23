@@ -15,9 +15,13 @@ const LEGACY_CONFIG_DIR = ".workforest";
 const XDG_CONFIG_DIR = "workforest";
 
 const DEFAULT_CONFIG: Required<
-  Pick<WorkspaceConfig, "dirPrefix" | "defaultRepos" | "aliases">
+  Pick<
+    WorkspaceConfig,
+    "dirPrefix" | "branchPrefix" | "defaultRepos" | "aliases"
+  >
 > = {
   dirPrefix: DEFAULT_DIR_PREFIX,
+  branchPrefix: "",
   defaultRepos: [],
   aliases: {},
 };
@@ -175,6 +179,7 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
 
   const config = value as WorkspaceConfig;
   const dirPrefix = normalizeString(config.dirPrefix) ?? DEFAULT_DIR_PREFIX;
+  const branchPrefix = normalizeString(config.branchPrefix) ?? "";
   const defaultDir = normalizeString(config.defaultDir);
   const defaultRepos = normalizeRepoTokens(
     config.defaultRepos ?? [],
@@ -187,6 +192,7 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
   return {
     defaultDir,
     dirPrefix,
+    branchPrefix,
     defaultRepos,
     aliases,
   };

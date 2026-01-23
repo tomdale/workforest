@@ -7,6 +7,7 @@ export type RepoConfig = {
 export type WorkspaceConfig = {
   defaultDir?: string;
   dirPrefix?: string;
+  branchPrefix?: string;
   defaultRepos?: string[];
   aliases?: Record<string, string[]>;
 };

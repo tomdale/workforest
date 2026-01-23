@@ -21,6 +21,7 @@ import {
 
 export type StampWorkspaceOptions = {
   featureName: string;
+  branchName?: string;
   workspaceDir: string;
   repos: readonly RepoConfig[];
 };
@@ -55,6 +56,7 @@ export type WorkspaceState =
  */
 export async function* stampWorkspaceGenerator({
   featureName,
+  branchName,
   workspaceDir,
   repos,
 }: StampWorkspaceOptions): AsyncGenerator<WorkspaceState> {
@@ -71,6 +73,7 @@ export async function* stampWorkspaceGenerator({
   yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
 
   // Phase A: Sequential git operations
+  const effectiveBranchName = branchName ?? featureName;
   const preparedRepos: PreparedRepo[] = [];
 
   for (const repo of repos) {
@@ -84,7 +87,7 @@ export async function* stampWorkspaceGenerator({
     await cleanupWorkspaceWorktrees(mirrorDir, workspaceDir);
 
     yield { phase: "git", repo: repo.name, step: "worktree" };
-    await ensureWorkingCopy(repo, mirrorDir, targetDir, featureName);
+    await ensureWorkingCopy(repo, mirrorDir, targetDir, effectiveBranchName);
 
     yield { phase: "git-complete", repo: repo.name };
 
