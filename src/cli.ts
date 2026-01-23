@@ -6,6 +6,7 @@ import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
 import { isInteractive, promptSelect, promptText } from "./utils/prompts.ts";
+import { generateSlugFromDescription } from "./utils/slug.ts";
 import {
   cleanupWorkspace,
   previewCleanup,
@@ -238,8 +239,19 @@ type InteractiveResult = {
 async function runInteractivePrompts(
   config: WorkspaceConfig,
 ): Promise<InteractiveResult | null> {
-  // Prompt for feature name
+  // Prompt for description first (optional) - used to generate slug suggestion
+  const description = await promptText("Description (optional)");
+
+  // Generate slug suggestion from description if provided
+  let slugSuggestion: string | undefined;
+  if (description.trim()) {
+    slugSuggestion =
+      (await generateSlugFromDescription(description.trim())) ?? undefined;
+  }
+
+  // Prompt for feature name with generated slug as default
   const featureName = await promptText("Feature name", {
+    defaultValue: slugSuggestion,
     validate: (input) => {
       if (!input.trim()) {
         return "Feature name is required";
@@ -253,9 +265,6 @@ async function runInteractivePrompts(
     process.exitCode = 1;
     return null;
   }
-
-  // Prompt for description (optional)
-  const description = await promptText("Description (optional)");
 
   // Build selection options from aliases and defaults
   const aliases = config.aliases ?? {};
