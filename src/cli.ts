@@ -5,6 +5,7 @@ import { loadWorkspaceConfig, resolveRepositories } from "./config.ts";
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
+import { isInteractive, promptSelect, promptText } from "./utils/prompts.ts";
 import {
   cleanupWorkspace,
   previewCleanup,
@@ -142,22 +143,6 @@ async function runNewCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  const featureName = args._[0];
-
-  if (!featureName?.trim()) {
-    log.error("Missing <feature-name> argument.");
-    console.log(await help());
-    process.exitCode = 1;
-    return;
-  }
-
-  const normalizedFeature = featureName.trim().replace(/\s+/g, "-");
-  const withArg = args["--with"] ?? "";
-  const repoArgs = withArg
-    .split("+")
-    .map((argValue) => argValue.trim())
-    .filter(Boolean);
-  let repos: RepoConfig[];
   let config: WorkspaceConfig;
   try {
     ({ config } = await loadWorkspaceConfig());
@@ -167,6 +152,43 @@ async function runNewCommand(argv: string[]): Promise<void> {
     return;
   }
 
+  let featureName = args._[0];
+  let repoArgs: string[];
+
+  // Check if we need interactive mode
+  if (!featureName?.trim() && !args["--with"]) {
+    if (!isInteractive()) {
+      log.error("Missing <feature-name> argument.");
+      console.log(await help());
+      process.exitCode = 1;
+      return;
+    }
+
+    // Interactive mode: prompt for feature name and repos
+    const interactiveResult = await runInteractivePrompts(config);
+    if (!interactiveResult) {
+      return;
+    }
+    featureName = interactiveResult.featureName;
+    repoArgs = interactiveResult.repoArgs;
+  } else {
+    if (!featureName?.trim()) {
+      log.error("Missing <feature-name> argument.");
+      console.log(await help());
+      process.exitCode = 1;
+      return;
+    }
+
+    const withArg = args["--with"] ?? "";
+    repoArgs = withArg
+      .split("+")
+      .map((argValue) => argValue.trim())
+      .filter(Boolean);
+  }
+
+  const normalizedFeature = featureName.trim().replace(/\s+/g, "-");
+
+  let repos: RepoConfig[];
   try {
     repos = resolveRepositories(repoArgs, config);
   } catch (error) {
@@ -200,6 +222,123 @@ async function runNewCommand(argv: string[]): Promise<void> {
   });
 
   log.info("Happy shipping!");
+}
+
+type InteractiveResult = {
+  featureName: string;
+  repoArgs: string[];
+};
+
+async function runInteractivePrompts(
+  config: WorkspaceConfig,
+): Promise<InteractiveResult | null> {
+  // Prompt for feature name
+  const featureName = await promptText("Feature name", {
+    validate: (input) => {
+      if (!input.trim()) {
+        return "Feature name is required";
+      }
+      return null;
+    },
+  });
+
+  if (!featureName.trim()) {
+    log.error("Feature name is required.");
+    process.exitCode = 1;
+    return null;
+  }
+
+  // Build selection options from aliases and defaults
+  const aliases = config.aliases ?? {};
+  const aliasEntries = Object.entries(aliases);
+  const hasAliases = aliasEntries.length > 0;
+  const hasDefaults =
+    config.defaultRepos !== undefined && config.defaultRepos.length > 0;
+
+  type SelectionValue =
+    | { type: "alias"; alias: string }
+    | { type: "defaults" }
+    | { type: "custom" };
+
+  const options: {
+    label: string;
+    description?: string;
+    value: SelectionValue;
+  }[] = [];
+
+  // Add default repos option if configured
+  if (hasDefaults) {
+    options.push({
+      label: "Default repositories",
+      description: config.defaultRepos?.join(", "),
+      value: { type: "defaults" },
+    });
+  }
+
+  // Add alias options
+  for (const [alias, repos] of aliasEntries) {
+    options.push({
+      label: alias,
+      description: repos.join(", "),
+      value: { type: "alias", alias },
+    });
+  }
+
+  // Add custom option
+  options.push({
+    label: "Enter repositories manually",
+    value: { type: "custom" },
+  });
+
+  // If no aliases and no defaults, skip selection and go straight to custom
+  let repoArgs: string[];
+  if (!hasAliases && !hasDefaults) {
+    const customRepos = await promptText(
+      "Repositories (org/repo, comma-separated)",
+      {
+        validate: (input) => {
+          if (!input.trim()) {
+            return "At least one repository is required";
+          }
+          return null;
+        },
+      },
+    );
+    repoArgs = customRepos
+      .split(",")
+      .map((r) => r.trim())
+      .filter(Boolean);
+  } else {
+    const selection = await promptSelect<SelectionValue>(
+      "Select repositories:",
+      { options },
+    );
+
+    if (selection.type === "defaults") {
+      repoArgs = [];
+    } else if (selection.type === "alias") {
+      repoArgs = [selection.alias];
+    } else {
+      const customRepos = await promptText(
+        "Repositories (org/repo, comma-separated)",
+        {
+          validate: (input) => {
+            if (!input.trim()) {
+              return "At least one repository is required";
+            }
+            return null;
+          },
+        },
+      );
+      repoArgs = customRepos
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+    }
+  }
+
+  console.log();
+  return { featureName, repoArgs };
 }
 
 function expandHome(value: string): string {
