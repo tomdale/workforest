@@ -8,8 +8,6 @@ export type WorkspaceConfig = {
   defaultDir?: string;
   dirPrefix?: string;
   branchPrefix?: string;
-  defaultRepos?: string[];
-  aliases?: Record<string, string[]>;
 };
 
 export type ResolvedWorkspaceConfig = {

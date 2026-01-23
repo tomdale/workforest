@@ -15,15 +15,10 @@ const LEGACY_CONFIG_DIR = ".workforest";
 const XDG_CONFIG_DIR = "workforest";
 
 const DEFAULT_CONFIG: Required<
-  Pick<
-    WorkspaceConfig,
-    "dirPrefix" | "branchPrefix" | "defaultRepos" | "aliases"
-  >
+  Pick<WorkspaceConfig, "dirPrefix" | "branchPrefix">
 > = {
   dirPrefix: DEFAULT_DIR_PREFIX,
   branchPrefix: "",
-  defaultRepos: [],
-  aliases: {},
 };
 
 type RepoSlug = {
@@ -82,60 +77,30 @@ export async function saveWorkspaceConfig(
   await fs.writeFile(configPath, `${contents}\n`, "utf8");
 }
 
-export function resolveRepositories(
-  selections: readonly string[],
-  config: WorkspaceConfig,
-): RepoConfig[] {
-  const tokens =
-    selections.length > 0 ? selections : (config.defaultRepos ?? []);
-  const aliases = config.aliases ?? {};
+/**
+ * Check if a string looks like an org/repo slug.
+ */
+export function isRepoSlug(token: string): boolean {
+  return parseRepoSlug(token) !== null;
+}
+
+/**
+ * Convert org/repo strings to RepoConfig objects.
+ * Deduplicates by slug and validates format.
+ */
+export function reposFromSlugs(slugs: readonly string[]): RepoConfig[] {
   const resolved: RepoConfig[] = [];
   const seen = new Set<string>();
   const names = new Map<string, string>();
 
-  for (const token of tokens) {
-    expandToken(token);
-  }
-
-  if (resolved.length === 0) {
-    throw new Error(
-      "No repositories selected. Provide org/repo entries or alias names to continue.",
-    );
-  }
-
-  return resolved;
-
-  function expandToken(token: string): void {
+  for (const token of slugs) {
     const normalized = token.trim();
-    if (!normalized) {
-      return;
-    }
+    if (!normalized) continue;
 
-    if (normalized.startsWith("@")) {
-      const aliasRepos = aliases[normalized];
-      if (!aliasRepos) {
-        const availableAliases = Object.keys(aliases);
-        const suffix =
-          availableAliases.length > 0
-            ? `Known aliases: ${availableAliases.join(", ")}.`
-            : "No aliases are currently defined.";
-        throw new Error(`Unknown repo alias "${normalized}". ${suffix}`);
-      }
-      for (const repoToken of aliasRepos) {
-        addRepoToken(repoToken, normalized);
-      }
-      return;
-    }
-
-    addRepoToken(normalized);
-  }
-
-  function addRepoToken(repoToken: string, source?: string): void {
-    const parsed = parseRepoSlug(repoToken);
+    const parsed = parseRepoSlug(normalized);
     if (!parsed) {
-      const origin = source ? `expanded from alias "${source}" ` : "";
       throw new Error(
-        `Invalid repository token "${repoToken}" ${origin}— expected "org/repo".`,
+        `Invalid repository "${normalized}" — expected "org/repo" format.`,
       );
     }
 
@@ -143,18 +108,18 @@ export function resolveRepositories(
     const existingSlug = names.get(repo);
     if (existingSlug && existingSlug !== slug) {
       throw new Error(
-        `Repository name "${repo}" is ambiguous (seen ${existingSlug} and ${slug}). Use aliases to avoid collisions.`,
+        `Repository name "${repo}" is ambiguous (seen ${existingSlug} and ${slug}).`,
       );
     }
 
-    if (seen.has(slug)) {
-      return;
-    }
+    if (seen.has(slug)) continue;
 
     names.set(repo, slug);
     seen.add(slug);
     resolved.push(createRepoConfig(org, repo));
   }
+
+  return resolved;
 }
 
 export function getConfigPaths(): {
@@ -181,19 +146,10 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
   const dirPrefix = normalizeString(config.dirPrefix) ?? DEFAULT_DIR_PREFIX;
   const branchPrefix = normalizeString(config.branchPrefix) ?? "";
   const defaultDir = normalizeString(config.defaultDir);
-  const defaultRepos = normalizeRepoTokens(
-    config.defaultRepos ?? [],
-    configPath,
-    "defaultRepos",
-    true,
-  );
-  const aliases = normalizeAliases(config.aliases ?? {}, configPath);
 
   const result: WorkspaceConfig = {
     dirPrefix,
     branchPrefix,
-    defaultRepos,
-    aliases,
   };
 
   if (defaultDir !== undefined) {
@@ -207,67 +163,6 @@ function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeAliases(
-  value: unknown,
-  configPath: string,
-): Record<string, string[]> {
-  if (value === null || typeof value !== "object") {
-    throw new Error(`"aliases" in ${configPath} must be an object.`);
-  }
-
-  const aliases: Record<string, string[]> = {};
-
-  for (const [key, rawRepos] of Object.entries(value)) {
-    if (!key.startsWith("@")) {
-      throw new Error(`Alias "${key}" in ${configPath} must start with "@".`);
-    }
-    const repos = normalizeRepoTokens(rawRepos, configPath, `aliases.${key}`);
-    aliases[key] = repos;
-  }
-
-  return aliases;
-}
-
-function normalizeRepoTokens(
-  value: unknown,
-  configPath: string,
-  label: string,
-  allowAliases = false,
-): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`"${label}" in ${configPath} must be an array.`);
-  }
-  const tokens: string[] = [];
-
-  for (const item of value) {
-    if (typeof item !== "string") {
-      throw new Error(`"${label}" in ${configPath} must be strings.`);
-    }
-    const trimmed = item.trim();
-    if (!trimmed) continue;
-
-    if (trimmed.startsWith("@")) {
-      if (!allowAliases) {
-        throw new Error(
-          `"${label}" in ${configPath} cannot reference alias "${trimmed}".`,
-        );
-      }
-      tokens.push(trimmed);
-      continue;
-    }
-
-    if (!parseRepoSlug(trimmed)) {
-      throw new Error(
-        `"${label}" in ${configPath} must use "org/repo" tokens. Received "${trimmed}".`,
-      );
-    }
-
-    tokens.push(trimmed);
-  }
-
-  return tokens;
 }
 
 function parseRepoSlug(token: string): RepoSlug | null {
