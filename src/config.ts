@@ -27,6 +27,11 @@ type RepoSlug = {
   slug: string;
 };
 
+type ParsedGitUrl = {
+  name: string;
+  remote: string;
+};
+
 export async function loadWorkspaceConfig(): Promise<ResolvedWorkspaceConfig> {
   const { xdgPath, legacyPath, preferredPath } = getConfigPaths();
   const [xdgExists, legacyExists] = await Promise.all([
@@ -78,45 +83,78 @@ export async function saveWorkspaceConfig(
 }
 
 /**
- * Check if a string looks like an org/repo slug.
+ * Check if a string looks like a repo reference (org/repo slug or git URL).
  */
 export function isRepoSlug(token: string): boolean {
-  return parseRepoSlug(token) !== null;
+  return parseRepoSlug(token) !== null || parseGitUrl(token) !== null;
 }
 
 /**
- * Convert org/repo strings to RepoConfig objects.
- * Deduplicates by slug and validates format.
+ * Convert repo inputs (org/repo slugs or git URLs) to RepoConfig objects.
+ * Deduplicates by remote URL and validates format.
+ *
+ * Supported formats:
+ * - org/repo (shorthand, defaults to GitHub SSH)
+ * - git@host:path/to/repo.git (SSH)
+ * - https://host/path/to/repo.git (HTTPS)
+ * - ssh://git@host/path/to/repo.git (SSH URL)
+ * - git://host/path/to/repo.git (Git protocol)
  */
-export function reposFromSlugs(slugs: readonly string[]): RepoConfig[] {
+export function reposFromSlugs(inputs: readonly string[]): RepoConfig[] {
   const resolved: RepoConfig[] = [];
-  const seen = new Set<string>();
+  const seenRemotes = new Set<string>();
   const names = new Map<string, string>();
 
-  for (const token of slugs) {
+  for (const token of inputs) {
     const normalized = token.trim();
     if (!normalized) continue;
 
-    const parsed = parseRepoSlug(normalized);
-    if (!parsed) {
-      throw new Error(
-        `Invalid repository "${normalized}" — expected "org/repo" format.`,
-      );
+    // Try parsing as a full git URL first
+    const urlParsed = parseGitUrl(normalized);
+    if (urlParsed) {
+      const { name, remote } = urlParsed;
+      const existingRemote = names.get(name);
+      if (existingRemote && existingRemote !== remote) {
+        throw new Error(
+          `Repository name "${name}" is ambiguous (seen from different remotes).`,
+        );
+      }
+
+      if (seenRemotes.has(remote)) continue;
+
+      names.set(name, remote);
+      seenRemotes.add(remote);
+      resolved.push({
+        name,
+        remote,
+        defaultBranch: DEFAULT_TRUNK_BRANCH,
+      });
+      continue;
     }
 
-    const { slug, org, repo } = parsed;
-    const existingSlug = names.get(repo);
-    if (existingSlug && existingSlug !== slug) {
-      throw new Error(
-        `Repository name "${repo}" is ambiguous (seen ${existingSlug} and ${slug}).`,
-      );
+    // Try parsing as org/repo shorthand
+    const slugParsed = parseRepoSlug(normalized);
+    if (slugParsed) {
+      const { slug, org, repo } = slugParsed;
+      const repoConfig = createRepoConfig(org, repo);
+      const existingRemote = names.get(repo);
+      if (existingRemote && existingRemote !== repoConfig.remote) {
+        throw new Error(
+          `Repository name "${repo}" is ambiguous (seen ${existingRemote} and ${slug}).`,
+        );
+      }
+
+      if (seenRemotes.has(repoConfig.remote)) continue;
+
+      names.set(repo, repoConfig.remote);
+      seenRemotes.add(repoConfig.remote);
+      resolved.push(repoConfig);
+      continue;
     }
 
-    if (seen.has(slug)) continue;
-
-    names.set(repo, slug);
-    seen.add(slug);
-    resolved.push(createRepoConfig(org, repo));
+    throw new Error(
+      `Invalid repository "${normalized}" — expected "org/repo" or a git URL.`,
+    );
   }
 
   return resolved;
@@ -168,11 +206,68 @@ function normalizeString(value: unknown): string | undefined {
 function parseRepoSlug(token: string): RepoSlug | null {
   const trimmed = token.trim().replace(/\.git$/i, "");
   if (!trimmed) return null;
+
+  // Don't match if it looks like a URL
+  if (
+    trimmed.includes("://") ||
+    trimmed.includes("@") ||
+    trimmed.startsWith("git:")
+  ) {
+    return null;
+  }
+
   const parts = trimmed.split("/");
   if (parts.length !== 2) return null;
   const [org, repo] = parts.map((part) => part.trim());
   if (!org || !repo) return null;
   return { org, repo, slug: `${org}/${repo}` };
+}
+
+/**
+ * Parse a full git URL and extract the repository name.
+ *
+ * Supported formats:
+ * - git@host:path/to/repo.git (SSH)
+ * - https://host/path/to/repo.git (HTTPS)
+ * - http://host/path/to/repo.git (HTTP)
+ * - ssh://git@host/path/to/repo.git (SSH URL)
+ * - git://host/path/to/repo.git (Git protocol)
+ */
+function parseGitUrl(token: string): ParsedGitUrl | null {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+
+  let remote = trimmed;
+  let repoPath: string | null = null;
+
+  // SSH format: git@host:org/repo.git
+  const sshMatch = trimmed.match(/^[\w-]+@[\w.-]+:(.+)$/);
+  if (sshMatch?.[1]) {
+    repoPath = sshMatch[1];
+  }
+
+  // URL formats: https://, http://, ssh://, git://
+  if (!repoPath) {
+    const urlMatch = trimmed.match(/^(?:https?|ssh|git):\/\/[^/]+\/(.+)$/);
+    if (urlMatch?.[1]) {
+      repoPath = urlMatch[1];
+    }
+  }
+
+  if (!repoPath) return null;
+
+  // Extract repo name from path (last component, without .git)
+  const pathParts = repoPath.replace(/\.git$/i, "").split("/");
+  const name = pathParts[pathParts.length - 1];
+
+  if (!name) return null;
+
+  // Normalize remote to include .git suffix for consistency
+  if (!remote.endsWith(".git")) {
+    remote = `${remote}.git`;
+  }
+
+  return { name, remote };
 }
 
 function createRepoConfig(org: string, repo: string): RepoConfig {

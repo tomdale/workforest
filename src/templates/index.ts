@@ -1,14 +1,17 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parse as parseJsonc } from "jsonc-parser";
 import type { TemplateConfig } from "../types.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 
 const XDG_TEMPLATES_DIR = "workforest/templates";
-const TEMPLATE_FILENAME = "template.json";
+const TEMPLATE_FILENAME_JSONC = "template.jsonc";
+const TEMPLATE_FILENAME_JSON = "template.json";
 
 export type Template = {
   id: string;
+  path: string;
   config: TemplateConfig;
 };
 
@@ -50,16 +53,23 @@ export async function loadTemplate(
 ): Promise<Template | null> {
   const templatesDir = getTemplatesDir();
   const templateDir = path.join(templatesDir, templateId);
-  const templatePath = path.join(templateDir, TEMPLATE_FILENAME);
 
-  const exists = await pathExists(templatePath);
-  if (!exists) {
+  // Try .jsonc first, then fall back to .json for backwards compatibility
+  const jsoncPath = path.join(templateDir, TEMPLATE_FILENAME_JSONC);
+  const jsonPath = path.join(templateDir, TEMPLATE_FILENAME_JSON);
+
+  let templatePath: string;
+  if (await pathExists(jsoncPath)) {
+    templatePath = jsoncPath;
+  } else if (await pathExists(jsonPath)) {
+    templatePath = jsonPath;
+  } else {
     return null;
   }
 
   try {
     const raw = await fs.readFile(templatePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = parseJsonc(raw);
 
     if (!isValidTemplateConfig(parsed)) {
       throw new Error(
@@ -69,6 +79,7 @@ export async function loadTemplate(
 
     return {
       id: templateId,
+      path: templatePath,
       config: parsed,
     };
   } catch (error_) {
@@ -85,12 +96,71 @@ export async function createTemplate(
 ): Promise<void> {
   const templatesDir = getTemplatesDir();
   const templateDir = path.join(templatesDir, templateId);
-  const templatePath = path.join(templateDir, TEMPLATE_FILENAME);
+  const templatePath = path.join(templateDir, TEMPLATE_FILENAME_JSONC);
 
   await ensureDir(templateDir);
 
-  const contents = JSON.stringify(config, null, 2);
-  await fs.writeFile(templatePath, `${contents}\n`, "utf8");
+  const contents = generateTemplateJsonc(config);
+  await fs.writeFile(templatePath, contents, "utf8");
+
+  // Remove old .json file if it exists (migration to .jsonc)
+  const oldJsonPath = path.join(templateDir, TEMPLATE_FILENAME_JSON);
+  if (await pathExists(oldJsonPath)) {
+    await fs.unlink(oldJsonPath);
+  }
+}
+
+function generateTemplateJsonc(config: TemplateConfig): string {
+  const lines: string[] = ["{"];
+
+  // repos (required)
+  lines.push("  // Repositories to clone (required)");
+  lines.push('  // Format: "org/repo" (GitHub shorthand) or full git URL');
+  lines.push(
+    `  "repos": ${JSON.stringify(config.repos, null, 2).replace(/\n/g, "\n  ")},`,
+  );
+
+  // description (optional)
+  lines.push("");
+  lines.push("  // Short description shown in template list (optional)");
+  if (config.description) {
+    lines.push(`  "description": ${JSON.stringify(config.description)},`);
+  } else {
+    lines.push('  // "description": "My workspace template",');
+  }
+
+  // branchPrefix (optional)
+  lines.push("");
+  lines.push('  // Prefix for branch names, e.g. "feature/" (optional)');
+  if (config.branchPrefix) {
+    lines.push(`  "branchPrefix": ${JSON.stringify(config.branchPrefix)},`);
+  } else {
+    lines.push('  // "branchPrefix": "feature/",');
+  }
+
+  // hooks (optional)
+  lines.push("");
+  lines.push("  // Hooks run after workspace setup (optional)");
+  lines.push(
+    "  // Each hook has: name (required), run (required), in (optional repo filter)",
+  );
+  if (config.hooks && config.hooks.length > 0) {
+    lines.push(
+      `  "hooks": ${JSON.stringify(config.hooks, null, 2).replace(/\n/g, "\n  ")}`,
+    );
+  } else {
+    lines.push('  // "hooks": [');
+    lines.push("  //   {");
+    lines.push('  //     "name": "Build project",');
+    lines.push('  //     "run": "pnpm build",');
+    lines.push('  //     "in": "my-org/my-repo"  // Run only in this repo');
+    lines.push("  //   }");
+    lines.push("  // ]");
+  }
+
+  lines.push("}");
+
+  return `${lines.join("\n")}\n`;
 }
 
 export async function deleteTemplate(templateId: string): Promise<void> {
