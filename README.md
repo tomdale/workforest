@@ -19,6 +19,18 @@ creates a single directory containing coordinated worktrees with all the repos
 you need, each on a consistently-named feature branch, with dependencies
 installed and ready to go.
 
+## Installation
+
+```bash
+npm install -g workforest
+```
+
+Or use npx without installing:
+
+```bash
+npx workforest new ...
+```
+
 ## Quick Start
 
 ```bash
@@ -180,7 +192,7 @@ wf template rm <name>           Delete a template
 wf config                       Show config file location
 ```
 
-## Installation
+## Building from Source
 
 Requires Node.js 25+ and pnpm.
 
