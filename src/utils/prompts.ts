@@ -82,8 +82,7 @@ export async function promptSelect<T>(
   const { options: selectOptions } = options;
 
   console.log(message);
-  for (let i = 0; i < selectOptions.length; i++) {
-    const opt = selectOptions[i];
+  for (const [i, opt] of selectOptions.entries()) {
     const desc = opt.description ? ` - ${opt.description}` : "";
     console.log(`  ${i + 1}. ${opt.label}${desc}`);
   }
@@ -95,14 +94,15 @@ export async function promptSelect<T>(
       });
 
       const num = Number.parseInt(answer.trim(), 10);
-      if (Number.isNaN(num) || num < 1 || num > selectOptions.length) {
+      const selected = selectOptions[num - 1];
+      if (Number.isNaN(num) || num < 1 || !selected) {
         console.log(
           `  Please enter a number between 1 and ${selectOptions.length}`,
         );
         continue;
       }
 
-      return selectOptions[num - 1].value;
+      return selected.value;
     }
   } finally {
     rl.close();
@@ -125,8 +125,7 @@ export async function promptMultiSelect<T>(
   const { options: selectOptions, allowAll = true } = options;
 
   console.log(message);
-  for (let i = 0; i < selectOptions.length; i++) {
-    const opt = selectOptions[i];
+  for (const [i, opt] of selectOptions.entries()) {
     const desc = opt.description ? ` - ${opt.description}` : "";
     console.log(`  ${i + 1}. ${opt.label}${desc}`);
   }
@@ -177,7 +176,10 @@ export async function promptMultiSelect<T>(
         continue;
       }
 
-      return indices.map((i) => selectOptions[i].value);
+      return indices
+        .map((i) => selectOptions[i])
+        .filter((opt) => opt !== undefined)
+        .map((opt) => opt.value);
     }
   } finally {
     rl.close();

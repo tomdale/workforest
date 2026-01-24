@@ -261,9 +261,10 @@ async function runTemplateNew(argv: string[]): Promise<void> {
     description = await promptText("Description (optional)");
   }
 
+  const trimmedDescription = description?.trim();
   await createTemplate(templateId, {
     repos,
-    description: description?.trim() || undefined,
+    ...(trimmedDescription && { description: trimmedDescription }),
   });
 
   log.success(`Template "${templateId}" created.`);
@@ -496,11 +497,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
 
   await stampWorkspace({
     featureName,
-    description,
     branchName,
     workspaceDir,
     repos,
-    templateId,
+    ...(description && { description }),
+    ...(templateId && { templateId }),
   });
 
   log.info("Happy shipping!");
@@ -552,8 +553,8 @@ async function resolveSelections(
 
   return {
     repos: reposFromSlugs(repoSlugs),
-    templateId,
-    templateBranchPrefix,
+    ...(templateId && { templateId }),
+    ...(templateBranchPrefix && { templateBranchPrefix }),
   };
 }
 

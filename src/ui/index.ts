@@ -177,9 +177,9 @@ export async function renderTemplateEditor({
   // Build config
   const config: TemplateConfig = {
     repos,
-    description: description || undefined,
-    branchPrefix: branchPrefix || undefined,
-    hooks: hooks.length > 0 ? hooks : undefined,
+    ...(description && { description }),
+    ...(branchPrefix && { branchPrefix }),
+    ...(hooks.length > 0 && { hooks }),
   };
 
   // Preview

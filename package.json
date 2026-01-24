@@ -3,8 +3,15 @@
   "version": "0.0.1",
   "description": "Initialize multiple repositories into a shared workspace",
   "author": "Tom Dale <tom.dale@vercel.com>",
-  "keywords": [],
-  "private": true,
+  "keywords": [
+    "cli",
+    "workspace",
+    "git",
+    "worktree",
+    "monorepo",
+    "multi-repo",
+    "developer-tools"
+  ],
   "type": "module",
   "types": "dist/index.d.ts",
   "bin": {

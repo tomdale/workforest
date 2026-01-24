@@ -147,14 +147,14 @@ export async function* stampWorkspaceGenerator({
   yield { phase: "finalize", message: "Writing workspace metadata" };
   await writeWorkspaceMetadata(workspaceDir, {
     featureName,
-    description,
-    templateId,
     repos: preparedRepos.map((r) => ({
       name: r.repo.name,
       remote: r.repo.remote,
       defaultBranch: r.repo.defaultBranch,
       hasLockfile: r.hasLockfile,
     })),
+    ...(description && { description }),
+    ...(templateId && { templateId }),
   });
 
   yield { phase: "finalize", message: "Writing VS Code workspace file" };
@@ -277,7 +277,7 @@ export async function warnAboutLargeRepositories(
         return;
       }
 
-      const sizeBytes = await fetchRepoDiskUsage(slug);
+      const { sizeBytes } = await fetchRepoDiskUsage(slug);
       if (sizeBytes === null) {
         return;
       }
