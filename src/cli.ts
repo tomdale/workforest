@@ -96,9 +96,12 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
     case "rm":
       await runTemplateDelete(subArgv);
       break;
+    case "edit":
+      await runTemplateEdit(subArgv);
+      break;
     default:
       log.error(`Unknown template subcommand: ${subcommand}`);
-      log.info("Available: list, show, new, delete");
+      log.info("Available: list, show, new, edit, delete");
       process.exitCode = 1;
   }
 }
@@ -166,16 +169,28 @@ async function runTemplateShow(argv: string[]): Promise<void> {
     console.log(`\nBranch prefix: ${template.config.branchPrefix}`);
   }
 
-  console.log(`\nLocation: ${getTemplatesDir()}/${template.id}/template.json`);
+  console.log(`\nLocation: ${template.path}`);
   console.log();
 }
 
 async function runTemplateNew(argv: string[]): Promise<void> {
-  let templateId = argv[0];
+  const args = arg(
+    {
+      "--description": String,
+      "-d": "--description",
+    },
+    { argv, permissive: true },
+  );
+
+  // First positional arg is template name, rest are repos
+  let templateId = args._[0];
+  let repos = args._.slice(1);
 
   if (!templateId) {
     if (!isInteractive()) {
-      log.error("Missing template name. Usage: workforest template new <name>");
+      log.error(
+        "Missing template name. Usage: workforest template new <name> [repo...]",
+      );
       process.exitCode = 1;
       return;
     }
@@ -201,43 +216,58 @@ async function runTemplateNew(argv: string[]): Promise<void> {
     return;
   }
 
-  // Prompt for repos
-  const reposInput = await promptText(
-    "Repositories (org/repo, comma-separated)",
-    {
-      validate: (input) => {
-        if (!input.trim()) {
-          return "At least one repository is required";
-        }
-        return null;
-      },
-    },
-  );
+  // If no repos provided via args, prompt for them
+  if (repos.length === 0) {
+    if (!isInteractive()) {
+      log.error(
+        "Missing repositories. Usage: workforest template new <name> <repo...>",
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const repos = reposInput
-    .split(",")
-    .map((r) => r.trim())
-    .filter(Boolean);
+    const reposInput = await promptText(
+      "Repositories (org/repo or git URL, comma-separated)",
+      {
+        validate: (input) => {
+          if (!input.trim()) {
+            return "At least one repository is required";
+          }
+          return null;
+        },
+      },
+    );
+
+    repos = reposInput
+      .split(",")
+      .map((r) => r.trim())
+      .filter(Boolean);
+  }
 
   // Validate repos
   for (const repo of repos) {
     if (!isRepoSlug(repo)) {
-      log.error(`Invalid repository format: "${repo}". Expected "org/repo".`);
+      log.error(
+        `Invalid repository format: "${repo}". Expected "org/repo" or a git URL.`,
+      );
       process.exitCode = 1;
       return;
     }
   }
 
-  // Prompt for description (optional)
-  const description = await promptText("Description (optional)");
+  // Get description from flag or prompt
+  let description = args["--description"];
+  if (description === undefined && isInteractive()) {
+    description = await promptText("Description (optional)");
+  }
 
   await createTemplate(templateId, {
     repos,
-    description: description.trim() || undefined,
+    description: description?.trim() || undefined,
   });
 
   log.success(`Template "${templateId}" created.`);
-  log.info(`Location: ${getTemplatesDir()}/${templateId}/template.json`);
+  log.info(`Location: ${getTemplatesDir()}/${templateId}/template.jsonc`);
 }
 
 async function runTemplateDelete(argv: string[]): Promise<void> {
@@ -260,6 +290,44 @@ async function runTemplateDelete(argv: string[]): Promise<void> {
 
   await deleteTemplate(templateId);
   log.success(`Template "${templateId}" deleted.`);
+}
+
+async function runTemplateEdit(argv: string[]): Promise<void> {
+  const templateId = argv[0];
+
+  if (!templateId) {
+    log.error("Missing template name. Usage: workforest template edit <name>");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!isInteractive()) {
+    log.error("Template editing requires an interactive terminal.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const template = await loadTemplate(templateId);
+  if (!template) {
+    log.error(`Template "${templateId}" not found.`);
+    const templates = await listTemplates();
+    if (templates.length > 0) {
+      log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const { renderTemplateEditor } = await import("./ui/index.ts");
+
+  await renderTemplateEditor({
+    templateId,
+    initialConfig: template.config,
+    onSave: async (config) => {
+      await createTemplate(templateId, config);
+      log.success(`Template "${templateId}" saved.`);
+    },
+  });
 }
 
 async function runCleanCommand(argv: string[]): Promise<void> {
@@ -589,7 +657,7 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
   // If no templates, go straight to manual entry
   if (templates.length === 0) {
     const customRepos = await promptText(
-      "Repositories (org/repo, comma-separated)",
+      "Repositories (org/repo or git URL, comma-separated)",
       {
         validate: (input) => {
           if (!input.trim()) {
@@ -616,7 +684,7 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
 
   // Custom entry
   const customRepos = await promptText(
-    "Repositories (org/repo, comma-separated)",
+    "Repositories (org/repo or git URL, comma-separated)",
     {
       validate: (input) => {
         if (!input.trim()) {
