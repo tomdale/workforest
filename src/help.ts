@@ -27,15 +27,17 @@ ${chalk.bold("Usage:")} wf <command> [options]
 ${chalk.bold("Commands:")}
   new [template|repo...]       Create a workspace
   clean [dir]                  Remove a workspace
-  template list|new|edit|rm    Manage templates
-  config                       Show config location
+  list                         List workspaces
+  template list|show|new|...   Manage templates
+  config [show|edit|init]      Manage configuration
 
 ${chalk.bold("Examples:")}
-  wf new my-template
-  wf new vercel/front vercel/api
-  wf new git@gitlab.com:org/repo.git
   wf new my-template -d "fixing the auth bug"
+  wf new vercel/front vercel/api -d "new feature"
+  wf new my-template --dry-run      Preview without creating
+  wf list                           Show all workspaces
   wf template new my-template org/repo1 org/repo2
+  wf config init                    Interactive setup
 
 ${chalk.bold("Templates:")}
   ${templateLines.join("\n  ")}

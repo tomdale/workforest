@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import arg from "arg";
-import { isRepoSlug, loadWorkspaceConfig, reposFromSlugs } from "./config.ts";
+import {
+  isRepoSlug,
+  loadWorkspaceConfig,
+  reposFromSlugs,
+  saveWorkspaceConfig,
+} from "./config.ts";
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import {
@@ -27,6 +32,7 @@ import {
   validateWorkspace,
 } from "./workspace/cleanup.ts";
 import { stampWorkspace } from "./workspace/index.ts";
+import { readWorkspaceMetadata } from "./workspace/metadata.ts";
 
 export { log };
 
@@ -62,6 +68,10 @@ export async function cli(): Promise<void> {
     case "template":
       await runTemplateCommand(commandArgv);
       break;
+    case "list":
+    case "ls":
+      await runListCommand();
+      break;
     case "version":
       await runVersionCommand();
       break;
@@ -73,19 +83,75 @@ export async function cli(): Promise<void> {
 }
 
 async function runConfigCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
+  const subcommand = argv[0];
 
-  if (args["--help"]) {
-    console.log(await help());
+  switch (subcommand) {
+    case "--help":
+    case "-h":
+      console.log(await help());
+      break;
+    case "edit":
+      await runConfigEdit();
+      break;
+    case "init":
+      await runConfigInit();
+      break;
+    case "show":
+    case undefined:
+      await runConfigShow();
+      break;
+    default:
+      log.error(`Unknown config subcommand: ${subcommand}`);
+      log.info("Available: show, edit, init");
+      process.exitCode = 1;
+  }
+}
+
+async function runConfigInit(): Promise<void> {
+  if (!isInteractive()) {
+    log.error("Config init requires an interactive terminal.");
+    log.info("Use 'wf config edit' to edit the config file directly.");
+    process.exitCode = 1;
     return;
   }
 
+  const { path: configPath, config } = await loadWorkspaceConfig();
+
+  console.log("\nConfigure workforest\n");
+
+  // Default directory
+  const currentDefaultDir = config.defaultDir ?? "";
+  const defaultDir = await promptText(
+    "Default workspace directory (where workspaces are created)",
+    { defaultValue: currentDefaultDir || "~/Code/workspaces" },
+  );
+
+  // Directory prefix
+  const currentDirPrefix = config.dirPrefix ?? "";
+  const dirPrefix = await promptText(
+    'Directory prefix (e.g., "wf-" for wf-feature-name)',
+    { defaultValue: currentDirPrefix },
+  );
+
+  // Branch prefix
+  const currentBranchPrefix = config.branchPrefix ?? "";
+  const branchPrefix = await promptText(
+    'Branch prefix (e.g., "feature/" for feature/name)',
+    { defaultValue: currentBranchPrefix },
+  );
+
+  const newConfig = {
+    ...config,
+    defaultDir: defaultDir || undefined,
+    dirPrefix: dirPrefix || undefined,
+    branchPrefix: branchPrefix || undefined,
+  };
+
+  await saveWorkspaceConfig(configPath, newConfig);
+  log.success(`Config saved to ${configPath}`);
+}
+
+async function runConfigShow(): Promise<void> {
   const { path: configPath, config } = await loadWorkspaceConfig();
 
   console.log("\nWorkspace Configuration\n");
@@ -113,11 +179,113 @@ async function runConfigCommand(argv: string[]): Promise<void> {
   console.log();
 }
 
+async function runConfigEdit(): Promise<void> {
+  const { spawn } = await import("node:child_process");
+  const { path: configPath } = await loadWorkspaceConfig();
+
+  // Get editor from environment
+  const editor = process.env["EDITOR"] || process.env["VISUAL"] || "vi";
+
+  log.info(`Opening ${configPath} in ${editor}...`);
+
+  const child = spawn(editor, [configPath], {
+    stdio: "inherit",
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    child.on("close", (code) => {
+      if (code === 0) {
+        log.success("Config file closed.");
+        resolve();
+      } else {
+        reject(new Error(`Editor exited with code ${code}`));
+      }
+    });
+    child.on("error", reject);
+  });
+}
+
 async function runVersionCommand(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = path.join(__dirname, "..", "package.json");
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
   console.log(`workforest ${packageJson.version}`);
+}
+
+async function runListCommand(): Promise<void> {
+  const { config } = await loadWorkspaceConfig();
+
+  if (!config.defaultDir) {
+    log.error(
+      "No defaultDir configured. Set it in your config to list workspaces.",
+    );
+    log.info("Run: wf config edit");
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceRoot = path.resolve(expandHome(config.defaultDir));
+
+  // Check if directory exists
+  let entries: string[];
+  try {
+    entries = await fs.readdir(workspaceRoot);
+  } catch {
+    log.error(`Directory not found: ${workspaceRoot}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Find workspaces (directories with .workforest metadata)
+  const workspaces: Array<{
+    name: string;
+    path: string;
+    description?: string;
+    template?: string;
+    created?: string;
+    repos: number;
+  }> = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(workspaceRoot, entry);
+    const stat = await fs.stat(entryPath);
+    if (!stat.isDirectory()) continue;
+
+    try {
+      const metadata = await readWorkspaceMetadata(entryPath);
+      if (metadata) {
+        workspaces.push({
+          name: entry,
+          path: entryPath,
+          description: metadata.workspace.description,
+          template: metadata.workspace.template_id,
+          created: metadata.workspace.created_at,
+          repos: metadata.repos.length,
+        });
+      }
+    } catch {
+      // Skip workspaces with unreadable metadata (e.g., legacy TOML format)
+    }
+  }
+
+  if (workspaces.length === 0) {
+    log.info(`No workspaces found in ${workspaceRoot}`);
+    return;
+  }
+
+  console.log(`\nWorkspaces in ${workspaceRoot}\n`);
+
+  for (const ws of workspaces) {
+    const desc = ws.description ? ` - ${ws.description}` : "";
+    const template = ws.template ? ` (${ws.template})` : "";
+    const created = ws.created
+      ? new Date(ws.created).toLocaleDateString()
+      : "unknown";
+    console.log(`  ${ws.name}${desc}`);
+    console.log(`    ${ws.repos} repos${template}, created ${created}`);
+  }
+
+  console.log();
 }
 
 async function runTemplateCommand(argv: string[]): Promise<void> {
@@ -148,9 +316,13 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
     case "edit":
       await runTemplateEdit(subArgv);
       break;
+    case "copy":
+    case "cp":
+      await runTemplateCopy(subArgv);
+      break;
     default:
       log.error(`Unknown template subcommand: ${subcommand}`);
-      log.info("Available: list, show, new, edit, delete");
+      log.info("Available: list, show, new, edit, delete, copy");
       process.exitCode = 1;
   }
 }
@@ -405,6 +577,41 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
   });
 }
 
+async function runTemplateCopy(argv: string[]): Promise<void> {
+  const sourceId = argv[0];
+  const destId = argv[1];
+
+  if (!sourceId || !destId) {
+    log.error("Usage: workforest template copy <source> <destination>");
+    process.exitCode = 1;
+    return;
+  }
+
+  // Load source template
+  const sourceTemplate = await loadTemplate(sourceId);
+  if (!sourceTemplate) {
+    log.error(`Source template "${sourceId}" not found.`);
+    const templates = await listTemplates();
+    if (templates.length > 0) {
+      log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  // Check destination doesn't exist
+  const destTemplate = await loadTemplate(destId);
+  if (destTemplate) {
+    log.error(`Template "${destId}" already exists.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Create the copy
+  await createTemplate(destId, sourceTemplate.config);
+  log.success(`Template "${sourceId}" copied to "${destId}".`);
+}
+
 async function runCleanCommand(argv: string[]): Promise<void> {
   const args = arg(
     {
@@ -473,8 +680,10 @@ async function runNewCommand(argv: string[]): Promise<void> {
     {
       "--help": Boolean,
       "--description": String,
+      "--dry-run": Boolean,
       "-h": "--help",
       "-d": "--description",
+      "-n": "--dry-run",
     },
     { argv },
   );
@@ -575,6 +784,27 @@ async function runNewCommand(argv: string[]): Promise<void> {
   const branchName = effectiveBranchPrefix
     ? `${effectiveBranchPrefix}${featureName}`
     : featureName;
+
+  // Dry-run mode: show what would be created
+  if (args["--dry-run"]) {
+    console.log("\nDry run - no changes will be made\n");
+    console.log("Workspace:");
+    console.log(`  Directory: ${workspaceDir}`);
+    console.log(`  Feature: ${featureName}`);
+    if (description) {
+      console.log(`  Description: ${description}`);
+    }
+    console.log(`  Branch: ${branchName}`);
+    if (templateId) {
+      console.log(`  Template: ${templateId}`);
+    }
+    console.log("\nRepositories:");
+    for (const repo of repos) {
+      console.log(`  - ${repo.name} (${repo.remote})`);
+    }
+    console.log();
+    return;
+  }
 
   await stampWorkspace({
     featureName,
