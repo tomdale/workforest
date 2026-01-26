@@ -70,9 +70,31 @@ async function runConfigCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  const { path: configPath } = await loadWorkspaceConfig();
-  log.info(`Config file location: ${configPath}`);
-  log.info("Edit the config file directly with your preferred editor.");
+  const { path: configPath, config } = await loadWorkspaceConfig();
+
+  console.log("\nWorkspace Configuration\n");
+
+  // Default directory
+  console.log("Default Directory:");
+  if (config.defaultDir) {
+    console.log(`  ${config.defaultDir}`);
+  } else {
+    console.log("  (not set - uses current directory)");
+  }
+  console.log("  Example: ~/Code/workspaces");
+
+  // Directory prefix
+  console.log("\nDirectory Prefix:");
+  console.log(`  "${config.dirPrefix ?? ""}"`);
+  console.log('  Example: "wf-" creates directories like wf-my-feature');
+
+  // Branch prefix
+  console.log("\nBranch Prefix:");
+  console.log(`  "${config.branchPrefix ?? ""}"`);
+  console.log('  Example: "tom/" creates branches like tom/my-feature');
+
+  console.log(`\nConfig Location: ${configPath}`);
+  console.log();
 }
 
 async function runTemplateCommand(argv: string[]): Promise<void> {

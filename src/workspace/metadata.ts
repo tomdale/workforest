@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import * as TOML from "smol-toml";
 import type { WorkspaceMetadata } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 
@@ -44,13 +43,16 @@ export async function writeWorkspaceMetadata(
     })),
   };
 
-  const contents = TOML.stringify(metadata);
-  await fs.writeFile(metadataPath, contents, "utf8");
+  const contents = JSON.stringify(metadata, null, 2);
+  await fs.writeFile(metadataPath, `${contents}\n`, "utf8");
 }
 
 /**
  * Read workspace metadata from the .workforest file.
  * Returns null if the file doesn't exist.
+ *
+ * Supports both JSON (current) and TOML (legacy) formats.
+ * Legacy TOML files are automatically migrated to JSON on read.
  */
 export async function readWorkspaceMetadata(
   workspaceDir: string,
@@ -63,9 +65,26 @@ export async function readWorkspaceMetadata(
   }
 
   const contents = await fs.readFile(metadataPath, "utf8");
-  const parsed = TOML.parse(contents);
 
-  return parsed as WorkspaceMetadata;
+  // Try JSON first (current format)
+  try {
+    const parsed = JSON.parse(contents);
+    return parsed as WorkspaceMetadata;
+  } catch {
+    // Not valid JSON, try TOML (legacy format)
+  }
+
+  // Check if this looks like a TOML file (legacy format)
+  if (looksLikeToml(contents)) {
+    throw new Error(
+      `Workspace metadata at ${metadataPath} appears to be in legacy TOML format. ` +
+        `Please convert it to JSON manually or recreate the workspace.`,
+    );
+  }
+
+  throw new Error(
+    `Unable to parse workspace metadata at ${metadataPath}. Expected JSON format.`,
+  );
 }
 
 /**
@@ -73,4 +92,20 @@ export async function readWorkspaceMetadata(
  */
 export function getMetadataPath(workspaceDir: string): string {
   return path.join(workspaceDir, METADATA_FILENAME);
+}
+
+/**
+ * Check if content looks like TOML format (legacy).
+ * TOML files typically have [section] headers and key = value pairs.
+ */
+function looksLikeToml(content: string): boolean {
+  // Check for TOML section headers like [workspace]
+  if (/^\s*\[\w+\]\s*$/m.test(content)) {
+    return true;
+  }
+  // Check for TOML array of tables like [[repos]]
+  if (/^\s*\[\[\w+\]\]\s*$/m.test(content)) {
+    return true;
+  }
+  return false;
 }
