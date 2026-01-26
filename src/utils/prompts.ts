@@ -28,6 +28,48 @@ export function isInteractive(): boolean {
 }
 
 /**
+ * Prompt for yes/no confirmation
+ * Returns true for yes, false for no
+ */
+export async function promptConfirm(
+  message: string,
+  defaultYes = false,
+): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const hint = defaultYes ? "[Y/n]" : "[y/N]";
+
+  try {
+    while (true) {
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(`${message} ${hint}: `, resolve);
+      });
+
+      const trimmed = answer.trim().toLowerCase();
+
+      if (trimmed === "") {
+        return defaultYes;
+      }
+
+      if (trimmed === "y" || trimmed === "yes") {
+        return true;
+      }
+
+      if (trimmed === "n" || trimmed === "no") {
+        return false;
+      }
+
+      console.log('  Please enter "y" or "n"');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
  * Prompt for text input with optional validation
  */
 export async function promptText(

@@ -1,5 +1,7 @@
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import arg from "arg";
 import { isRepoSlug, loadWorkspaceConfig, reposFromSlugs } from "./config.ts";
 import { help } from "./help.ts";
@@ -12,7 +14,12 @@ import {
   loadTemplate,
 } from "./templates/index.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
-import { isInteractive, promptSelect, promptText } from "./utils/prompts.ts";
+import {
+  isInteractive,
+  promptConfirm,
+  promptSelect,
+  promptText,
+} from "./utils/prompts.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   cleanupWorkspace,
@@ -32,6 +39,12 @@ export async function cli(): Promise<void> {
     return;
   }
 
+  // Check for version flag at top level
+  if (argv[0] === "--version" || argv[0] === "-V") {
+    await runVersionCommand();
+    return;
+  }
+
   // Route to subcommands
   const command = argv[0];
   const commandArgv = argv.slice(1);
@@ -48,6 +61,9 @@ export async function cli(): Promise<void> {
       break;
     case "template":
       await runTemplateCommand(commandArgv);
+      break;
+    case "version":
+      await runVersionCommand();
       break;
     default:
       log.error(`Unknown command: ${command}`);
@@ -97,11 +113,22 @@ async function runConfigCommand(argv: string[]): Promise<void> {
   console.log();
 }
 
+async function runVersionCommand(): Promise<void> {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const packageJsonPath = path.join(__dirname, "..", "package.json");
+  const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+  console.log(`workforest ${packageJson.version}`);
+}
+
 async function runTemplateCommand(argv: string[]): Promise<void> {
   const subcommand = argv[0];
   const subArgv = argv.slice(1);
 
   switch (subcommand) {
+    case "--help":
+    case "-h":
+      console.log(await help());
+      break;
     case "list":
     case "ls":
     case undefined:
@@ -294,7 +321,15 @@ async function runTemplateNew(argv: string[]): Promise<void> {
 }
 
 async function runTemplateDelete(argv: string[]): Promise<void> {
-  const templateId = argv[0];
+  const args = arg(
+    {
+      "--force": Boolean,
+      "-f": "--force",
+    },
+    { argv },
+  );
+
+  const templateId = args._[0];
 
   if (!templateId) {
     log.error(
@@ -309,6 +344,23 @@ async function runTemplateDelete(argv: string[]): Promise<void> {
     log.error(`Template "${templateId}" not found.`);
     process.exitCode = 1;
     return;
+  }
+
+  // Confirm deletion unless --force is passed
+  if (!args["--force"]) {
+    if (!isInteractive()) {
+      log.error(
+        "Cannot confirm deletion in non-interactive mode. Use --force.",
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    const confirmed = await promptConfirm(`Delete template "${templateId}"?`);
+    if (!confirmed) {
+      log.info("Deletion cancelled.");
+      return;
+    }
   }
 
   await deleteTemplate(templateId);
@@ -448,6 +500,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
   if (selections.length === 0) {
     if (!isInteractive()) {
       log.error("No template or repositories specified.");
+      log.info('Usage: wf new <template|repo...> -d "description"');
+      log.info('Example: wf new my-template -d "fixing auth bug"');
+      log.info(
+        'Example: wf new vercel/next.js vercel/turbo -d "testing feature"',
+      );
       process.exitCode = 1;
       return;
     }
@@ -493,6 +550,8 @@ async function runNewCommand(argv: string[]): Promise<void> {
       log.error(
         "Missing --description argument (required in non-interactive mode).",
       );
+      log.info('Usage: wf new <template|repo...> -d "description"');
+      log.info('Example: wf new my-template -d "fixing auth bug"');
       process.exitCode = 1;
       return;
     }

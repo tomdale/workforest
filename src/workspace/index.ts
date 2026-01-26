@@ -8,7 +8,7 @@ import { hasAny, installDependencies } from "../services/pnpm.ts";
 import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
-import { ensureDir } from "../utils/fs.ts";
+import { ensureDir, pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import { writeWorkspaceMetadata } from "./metadata.ts";
@@ -50,7 +50,7 @@ export type WorkspaceState =
   | { phase: "hook"; hookState: HookState }
   | { phase: "hooks-complete" }
   | { phase: "finalize"; message: string }
-  | { phase: "complete" };
+  | { phase: "complete"; workspaceDir: string; repos: readonly RepoConfig[] };
 
 // ============================================================================
 // Generator-based workspace stamping
@@ -72,6 +72,16 @@ export async function* stampWorkspaceGenerator({
     throw new Error(
       "stampWorkspaceGenerator requires at least one repository.",
     );
+  }
+
+  // Check if workspace directory already exists and has contents
+  if (await pathExists(workspaceDir)) {
+    const contents = await fs.readdir(workspaceDir);
+    if (contents.length > 0) {
+      throw new Error(
+        `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
+      );
+    }
   }
 
   yield { phase: "init", message: "Setting up cache directory" };
@@ -160,7 +170,7 @@ export async function* stampWorkspaceGenerator({
   yield { phase: "finalize", message: "Writing VS Code workspace file" };
   await writeVSCodeWorkspaceFile(workspaceDir, repos);
 
-  yield { phase: "complete" };
+  yield { phase: "complete", workspaceDir, repos };
 }
 
 /**
@@ -226,9 +236,18 @@ export async function stampWorkspace(
       case "finalize":
         log.info(state.message);
         break;
-      case "complete":
-        log.success("Workspace ready.");
+      case "complete": {
+        const workspaceName = path.basename(state.workspaceDir);
+        const vscodePath = `${workspaceName}.code-workspace`;
+
+        log.success("Workspace ready!");
+        console.log();
+        console.log("Next steps:");
+        console.log(`  cd ${state.workspaceDir}`);
+        console.log(`  code ${vscodePath}`);
+        console.log();
         break;
+      }
     }
   }
 }
@@ -240,7 +259,7 @@ export async function stampWorkspace(
 export async function ensureCacheDir(): Promise<string> {
   const cacheHome =
     process.env["XDG_CACHE_HOME"] ?? path.join(os.homedir(), ".cache");
-  const cacheRoot = path.join(cacheHome, "vercel-workspace");
+  const cacheRoot = path.join(cacheHome, "workforest");
   await ensureDir(cacheRoot);
   return cacheRoot;
 }
@@ -249,7 +268,7 @@ async function writeVSCodeWorkspaceFile(
   workspaceDir: string,
   repos: readonly RepoConfig[],
 ): Promise<void> {
-  const workspaceName = path.basename(workspaceDir) || "vercel-workspace";
+  const workspaceName = path.basename(workspaceDir) || "workforest";
   const workspaceFile = path.join(
     workspaceDir,
     `${workspaceName}.code-workspace`,

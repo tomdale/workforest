@@ -131,6 +131,49 @@ Templates are stored as JSONC files in
 }
 ```
 
+### Hook Configuration
+
+Hooks run shell commands after workspace setup. Each hook supports:
+
+- **name** (required): Description shown during execution
+- **run** (required): Shell command to execute
+- **in** (optional): Array of repo names to run in (runs in all repos if omitted)
+- **if** (optional): Only run if this file exists relative to the repo root
+- **continueOnError** (optional): Continue with next hook if this one fails
+
+```jsonc
+{
+  "hooks": [
+    // Run in specific repos
+    {
+      "name": "Install frontend deps",
+      "run": "pnpm install",
+      "in": ["frontend"],
+    },
+
+    // Conditional execution - only run if file exists
+    {
+      "name": "Setup database",
+      "run": "./scripts/setup-db.sh",
+      "if": "scripts/setup-db.sh",
+    },
+
+    // Continue even if hook fails
+    {
+      "name": "Optional optimization",
+      "run": "pnpm run optimize",
+      "continueOnError": true,
+    },
+
+    // Run in all repos (no "in" field)
+    {
+      "name": "Configure git hooks",
+      "run": "git config core.hooksPath .githooks",
+    },
+  ],
+}
+```
+
 Repos can be specified as:
 
 - `org/repo` — GitHub shorthand
@@ -218,3 +261,64 @@ wf clean ~/Code/my-workspace
 Mirrors in `~/.cache/workforest/` are preserved by default—they'll speed up
 future workspace creation. To remove everything including mirrors, delete the
 cache directory manually.
+
+## Troubleshooting
+
+### Git clone fails
+
+**SSH key issues**: Ensure your SSH key is added to the agent:
+
+```bash
+ssh-add -l  # List loaded keys
+ssh-add ~/.ssh/id_ed25519  # Add your key if missing
+```
+
+**Permission denied**: Verify you have access to the repository:
+
+```bash
+ssh -T git@github.com  # Test GitHub access
+```
+
+### Slow clone times
+
+Initial clones can be slow for large repositories. Workforest uses partial clones
+(`--filter=blob:none`) to minimize data transfer. Subsequent workspace creation
+is much faster since it reuses cached mirrors.
+
+### "Directory already exists" error
+
+This happens when you try to create a workspace in a directory that already has
+content. Either:
+
+- Choose a different feature name/description
+- Remove the existing directory: `rm -rf ~/Code/workspaces/existing-name`
+
+### Hooks fail
+
+If a hook command fails, workforest will stop and report the error. Common
+issues:
+
+- **Command not found**: Ensure the command is installed and in your PATH
+- **File not found**: Check that the `if` condition file path is correct
+- **Permission denied**: Make scripts executable: `chmod +x script.sh`
+
+To allow hooks to fail without stopping workspace creation, add
+`"continueOnError": true` to the hook.
+
+### Template not found
+
+Templates are stored in `~/.config/workforest/templates/`. List available
+templates with:
+
+```bash
+wf template list
+```
+
+### Cache directory issues
+
+Workforest caches bare mirrors in `~/.cache/workforest/`. If you encounter
+issues, you can safely delete this directory—it will be recreated on next use:
+
+```bash
+rm -rf ~/.cache/workforest
+```
