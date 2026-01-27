@@ -1,5 +1,5 @@
 import type { RunCommandOptions } from "../types.ts";
-import { runCommand } from "../utils/exec.ts";
+import { runCommand, runCommandWithStdin } from "../utils/exec.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 
 export function runGit(
@@ -7,6 +7,14 @@ export function runGit(
   options: RunCommandOptions = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return runCommand("git", args, options);
+}
+
+export function runGitWithStdin(
+  args: string[],
+  stdin: string,
+  options: { cwd?: string } = {},
+): Promise<{ stdout: string; stderr: string }> {
+  return runCommandWithStdin("git", args, stdin, options);
 }
 
 type CloneResult = { stdout: string; stderr: string };
@@ -77,34 +85,49 @@ export async function cloneRepository(
 /**
  * Move all refs from refs/heads/* to refs/remotes/origin/* in a bare repo.
  * This fixes the issue where git clone --bare creates local branches instead of remote-tracking refs.
+ * Uses batched git update-ref --stdin for efficiency (single git call instead of 2N calls).
  */
 export async function* fixBareRepoRefsGenerator(
   cwd: string,
 ): AsyncGenerator<TaskState, void, undefined> {
-  // Get all refs in refs/heads/
+  // Get all refs in refs/heads/ with their SHA
   const { stdout } = await runGit(
-    ["for-each-ref", "--format=%(refname)", "refs/heads/"],
+    ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"],
     { cwd },
   );
 
-  const refs = stdout.trim().split("\n").filter(Boolean);
-  if (refs.length === 0) return;
+  const lines = stdout.trim().split("\n").filter(Boolean);
+  if (lines.length === 0) return;
 
   yield {
     status: "log",
     level: "info",
-    message: `Moving ${refs.length} refs from refs/heads/* to refs/remotes/origin/*`,
+    message: `Moving ${lines.length} refs from refs/heads/* to refs/remotes/origin/*`,
   };
 
-  for (const ref of refs) {
+  // Build stdin commands for batched update-ref
+  // Format: "update <newref> <newsha> [<oldsha>]\ndelete <oldref>\n"
+  // Using "update" without oldsha allows creating or updating existing refs
+  const stdinLines: string[] = [];
+  for (const line of lines) {
+    const [ref, sha] = line.split(" ");
+    if (!ref || !sha) continue;
+
     const branch = ref.replace("refs/heads/", "");
     const newRef = `refs/remotes/origin/${branch}`;
 
-    // Create the remote-tracking ref
-    await runGit(["update-ref", newRef, ref], { cwd });
-    // Delete the local ref
-    await runGit(["update-ref", "-d", ref], { cwd });
+    // Use update without oldsha to create-or-update the remote ref
+    stdinLines.push(`update ${newRef} ${sha}`);
+    stdinLines.push(`delete ${ref}`);
   }
+
+  // Execute all ref updates in a single git call
+  // Each line must end with newline, and we need a final newline
+  await runGitWithStdin(
+    ["update-ref", "--stdin"],
+    stdinLines.join("\n") + "\n",
+    { cwd },
+  );
 }
 
 export function getGitHubSlug(remote: string): string | null {

@@ -49,6 +49,54 @@ export function runCommand(
 }
 
 /**
+ * Runs a command with stdin input.
+ * Used for commands that accept input via stdin (e.g., git update-ref --stdin).
+ */
+export function runCommandWithStdin(
+  command: string,
+  args: string[],
+  stdin: string,
+  { cwd }: { cwd?: string } = {},
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error_: Error) => reject(error_));
+    child.on("close", (code: number | null) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(
+          new Error(
+            `${command} ${args.join(" ")} exited with code ${code}. ${stderr}`,
+          ),
+        );
+      }
+    });
+
+    // Write stdin and close
+    child.stdin.write(stdin);
+    child.stdin.end();
+  });
+}
+
+/**
  * Runs a command with real-time output to the console.
  * Logs the command being executed and streams stdout/stderr.
  */

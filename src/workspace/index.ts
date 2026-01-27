@@ -13,11 +13,13 @@ import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
+import type { TaskState } from "../utils/task-generator.ts";
+import { runParallel } from "../utils/task-generator.ts";
 import { writeWorkspaceMetadata } from "./metadata.ts";
 import {
-  cleanupWorkspaceWorktrees,
-  ensureMirrorRepo,
-  ensureWorkingCopy,
+  cleanupWorkspaceWorktreesGenerator,
+  ensureMirrorRepoGenerator,
+  ensureWorkingCopyGenerator,
 } from "./repository.ts";
 
 // ============================================================================
@@ -93,31 +95,84 @@ export async function* stampWorkspaceGenerator({
 
   yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
 
-  // Phase A: Sequential git operations
+  // Phase A: Parallel git operations
   const effectiveBranchName = branchName ?? featureName;
   const preparedRepos: PreparedRepo[] = [];
 
+  // Build repo info map for later phases
+  const repoInfo = new Map(
+    repos.map((repo) => [
+      repo.name,
+      {
+        repo,
+        mirrorDir: path.join(cacheDir, `${repo.name}.git`),
+        targetDir: path.join(workspaceDir, repo.name),
+      },
+    ]),
+  );
+
+  // Phase A1: Parallel mirror operations (network I/O bound)
+  const mirrorTasks = new Map(
+    repos.map((repo) => {
+      const info = repoInfo.get(repo.name);
+      return [
+        repo.name,
+        ensureMirrorRepoGenerator(repo, info?.mirrorDir ?? ""),
+      ];
+    }),
+  );
+
+  for await (const { id, state } of runParallel(mirrorTasks)) {
+    yield { phase: "git", repo: id, step: "mirror" };
+  }
+
+  // Phase A2: Parallel cleanup + worktree creation (disk I/O bound)
+  // We create a combined generator for cleanup + worktree per repo
+  async function* cleanupAndWorktreeGenerator(
+    repoName: string,
+  ): AsyncGenerator<TaskState & { step: "cleanup" | "worktree" }> {
+    const info = repoInfo.get(repoName);
+    if (!info) return;
+
+    // Cleanup
+    for await (const state of cleanupWorkspaceWorktreesGenerator(
+      info.mirrorDir,
+      workspaceDir,
+    )) {
+      yield { ...state, step: "cleanup" as const };
+    }
+
+    // Worktree
+    for await (const state of ensureWorkingCopyGenerator(
+      info.repo,
+      info.mirrorDir,
+      info.targetDir,
+      effectiveBranchName,
+    )) {
+      yield { ...state, step: "worktree" as const };
+    }
+  }
+
+  const worktreeTasks = new Map(
+    repos.map((repo) => [repo.name, cleanupAndWorktreeGenerator(repo.name)]),
+  );
+
+  for await (const { id, state } of runParallel(worktreeTasks)) {
+    yield { phase: "git", repo: id, step: state.step };
+  }
+
+  // Mark all repos as git-complete and check for lockfiles
   for (const repo of repos) {
-    const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
-
-    yield { phase: "git", repo: repo.name, step: "mirror" };
-    await ensureMirrorRepo(repo, mirrorDir);
-
-    yield { phase: "git", repo: repo.name, step: "cleanup" };
-    const targetDir = path.join(workspaceDir, repo.name);
-    await cleanupWorkspaceWorktrees(mirrorDir, workspaceDir);
-
-    yield { phase: "git", repo: repo.name, step: "worktree" };
-    await ensureWorkingCopy(repo, mirrorDir, targetDir, effectiveBranchName);
-
     yield { phase: "git-complete", repo: repo.name };
 
-    // Check if repo has lockfile for install phase
-    const hasLockfile = await hasAny(targetDir, [
-      "pnpm-lock.yaml",
-      "pnpm-lock.yml",
-    ]);
-    preparedRepos.push({ repo, targetDir, hasLockfile });
+    const info = repoInfo.get(repo.name);
+    if (info) {
+      const hasLockfile = await hasAny(info.targetDir, [
+        "pnpm-lock.yaml",
+        "pnpm-lock.yml",
+      ]);
+      preparedRepos.push({ repo, targetDir: info.targetDir, hasLockfile });
+    }
   }
 
   // Load template config for disableInitializers and hooks
