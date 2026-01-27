@@ -20,6 +20,8 @@ export type TemplateConfig = {
   description?: string;
   hooks?: Hook[];
   branchPrefix?: string;
+  /** Disable automatic initializers. Set to true to disable all, or an array of initializer IDs to disable specific ones. */
+  disableInitializers?: boolean | string[];
 };
 
 export type Hook = {

@@ -146,7 +146,7 @@ function generateTemplateJsonc(config: TemplateConfig): string {
   );
   if (config.hooks && config.hooks.length > 0) {
     lines.push(
-      `  "hooks": ${JSON.stringify(config.hooks, null, 2).replace(/\n/g, "\n  ")}`,
+      `  "hooks": ${JSON.stringify(config.hooks, null, 2).replace(/\n/g, "\n  ")},`,
     );
   } else {
     lines.push('  // "hooks": [');
@@ -155,7 +155,24 @@ function generateTemplateJsonc(config: TemplateConfig): string {
     lines.push('  //     "run": "pnpm build",');
     lines.push('  //     "in": "my-org/my-repo"  // Run only in this repo');
     lines.push("  //   }");
-    lines.push("  // ]");
+    lines.push("  // ],");
+  }
+
+  // disableInitializers (optional)
+  lines.push("");
+  lines.push("  // Disable automatic initializers (optional)");
+  lines.push(
+    '  // Set to true to disable all, or an array like ["vercel-link"] to disable specific ones',
+  );
+  lines.push(
+    '  // Available: "pnpm-install", "yarn-install", "npm-install", "vercel-link", "turbo-link"',
+  );
+  if (config.disableInitializers !== undefined) {
+    lines.push(
+      `  "disableInitializers": ${JSON.stringify(config.disableInitializers)}`,
+    );
+  } else {
+    lines.push('  // "disableInitializers": false');
   }
 
   lines.push("}");
@@ -266,6 +283,21 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
           condition["fileExists"] !== undefined &&
           typeof condition["fileExists"] !== "string"
         ) {
+          return false;
+        }
+      }
+    }
+  }
+
+  // disableInitializers is optional but must be a boolean or array of strings if present
+  if (config["disableInitializers"] !== undefined) {
+    const val = config["disableInitializers"];
+    if (typeof val !== "boolean" && !Array.isArray(val)) {
+      return false;
+    }
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (typeof item !== "string") {
           return false;
         }
       }

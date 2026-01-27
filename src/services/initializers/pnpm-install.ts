@@ -1,0 +1,130 @@
+import { getNodeVersionPrefix } from "../../utils/node-version.ts";
+import { runCommandGenerator } from "../../utils/task-generator.ts";
+import { hasAny } from "../pnpm.ts";
+import type {
+  InitializerContext,
+  InitializerDefinition,
+  InitializerDetection,
+} from "./types.ts";
+
+const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
+
+/**
+ * Detect if this is a pnpm project.
+ */
+async function detect(
+  context: InitializerContext,
+): Promise<InitializerDetection> {
+  const hasLockfile = await hasAny(context.repoDir, PNPM_LOCK_FILES);
+  return { shouldRun: hasLockfile };
+}
+
+/**
+ * Check if the error is due to frozen-lockfile mismatch.
+ * pnpm emits ERR_PNPM_OUTDATED_LOCKFILE when the lockfile doesn't match package.json.
+ */
+function isFrozenLockfileError(error: Error, output: string): boolean {
+  const combined = `${error.message} ${output}`;
+  return (
+    combined.includes("ERR_PNPM_OUTDATED_LOCKFILE") ||
+    combined.includes('Cannot install with "frozen-lockfile"') ||
+    combined.includes("frozen-lockfile")
+  );
+}
+
+/**
+ * Install pnpm dependencies with frozen-lockfile optimization.
+ * Strategy:
+ * 1. Try fast path with --frozen-lockfile --prefer-offline
+ * 2. If frozen-lockfile fails (stale lockfile), retry without it
+ */
+async function* execute(context: InitializerContext) {
+  const { repoDir } = context;
+
+  const versionPrefix = await getNodeVersionPrefix(repoDir);
+
+  yield { status: "running" as const, message: "Installing (frozen-lockfile)" };
+
+  // Collect output from the fast install to check for errors
+  let failed = false;
+  let lastError: Error | undefined;
+  let collectedOutput = "";
+
+  // Try fast path first: frozen-lockfile + prefer-offline
+  let command: string;
+  let args: string[];
+  if (versionPrefix) {
+    command = versionPrefix.command;
+    args = [
+      ...versionPrefix.args,
+      "pnpm",
+      "install",
+      "--frozen-lockfile",
+      "--prefer-offline",
+    ];
+  } else {
+    command = "pnpm";
+    args = ["install", "--frozen-lockfile", "--prefer-offline"];
+  }
+
+  const fastInstall = runCommandGenerator(command, args, { cwd: repoDir });
+
+  for await (const state of fastInstall) {
+    if (state.status === "failed") {
+      failed = true;
+      lastError = state.error;
+      // Don't yield failure yet - check if it's recoverable
+    } else if (state.status === "output") {
+      collectedOutput += state.data;
+      yield state;
+    } else {
+      yield state;
+    }
+  }
+
+  // Check if this was a frozen-lockfile error (recoverable)
+  if (
+    failed &&
+    lastError &&
+    isFrozenLockfileError(lastError, collectedOutput)
+  ) {
+    yield {
+      status: "retrying" as const,
+      reason: "Lockfile out of sync",
+      attempt: 1,
+    };
+
+    // Retry without --frozen-lockfile
+    if (versionPrefix) {
+      command = versionPrefix.command;
+      args = [...versionPrefix.args, "pnpm", "install"];
+    } else {
+      command = "pnpm";
+      args = ["install"];
+    }
+
+    const fallbackInstall = runCommandGenerator(command, args, {
+      cwd: repoDir,
+    });
+
+    // Track fallback result
+    for await (const state of fallbackInstall) {
+      yield state;
+    }
+  } else if (failed && lastError) {
+    yield { status: "failed" as const, error: lastError };
+  } else if (failed) {
+    yield {
+      status: "failed" as const,
+      error: new Error("Unknown error during install"),
+    };
+  }
+}
+
+export const pnpmInstallInitializer: InitializerDefinition = {
+  id: "pnpm-install",
+  name: "pnpm install",
+  priority: 100,
+  detect,
+  execute,
+};

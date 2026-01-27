@@ -14,6 +14,32 @@ const CONFIG_FILENAME = "config.json";
 const LEGACY_CONFIG_DIR = ".workforest";
 const XDG_CONFIG_DIR = "workforest";
 
+// Environment variable overrides for testing and benchmarking
+const ENV_CACHE_DIR = "WORKFOREST_CACHE_DIR";
+const ENV_CONFIG_DIR = "WORKFOREST_CONFIG_DIR";
+const ENV_TIMING_FILE = "WORKFOREST_TIMING_FILE";
+
+/**
+ * Get the cache directory, respecting WORKFOREST_CACHE_DIR environment variable.
+ */
+export function getCacheDir(): string {
+  const envCacheDir = process.env[ENV_CACHE_DIR];
+  if (envCacheDir) {
+    return envCacheDir;
+  }
+
+  const cacheHome =
+    process.env["XDG_CACHE_HOME"] ?? path.join(os.homedir(), ".cache");
+  return path.join(cacheHome, "workforest");
+}
+
+/**
+ * Get the timing file path from environment variable, or null if not set.
+ */
+export function getTimingFilePath(): string | null {
+  return process.env[ENV_TIMING_FILE] ?? null;
+}
+
 const DEFAULT_CONFIG: Required<
   Pick<WorkspaceConfig, "dirPrefix" | "branchPrefix">
 > = {
@@ -165,6 +191,17 @@ export function getConfigPaths(): {
   legacyPath: string;
   preferredPath: string;
 } {
+  // Check for WORKFOREST_CONFIG_DIR environment variable override first
+  const envConfigDir = process.env[ENV_CONFIG_DIR];
+  if (envConfigDir) {
+    const overridePath = path.join(envConfigDir, CONFIG_FILENAME);
+    return {
+      xdgPath: overridePath,
+      legacyPath: overridePath,
+      preferredPath: overridePath,
+    };
+  }
+
   const homeDir = os.homedir();
   const legacyPath = path.join(homeDir, LEGACY_CONFIG_DIR, CONFIG_FILENAME);
   const xdgHome = process.env["XDG_CONFIG_HOME"];

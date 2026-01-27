@@ -110,24 +110,46 @@ Templates are stored as JSONC files in
   // Optional branch prefix
   "branchPrefix": "feature/",
 
-  // Optional hooks run after setup
+  // Optional hooks run after automatic initializers
   "hooks": [
     {
-      "name": "Install dependencies",
-      "run": "pnpm install",
-      "in": ["frontend", "api"],
-    },
-    {
-      "name": "Link to Vercel",
-      "run": "pnpm run vercel link --yes",
+      "name": "Build project",
+      "run": "pnpm build",
       "in": ["frontend"],
     },
-    {
-      "name": "Enable remote caching",
-      "run": "pnpm turbo link",
-      "in": ["frontend", "api"],
-    },
   ],
+}
+```
+
+## Automatic Initializers
+
+Workforest automatically detects project configurations and runs setup commands
+during workspace creation. Initializers run in priority order before any custom
+hooks.
+
+**Built-in initializers:**
+
+| Initializer      | Priority | Detects                                   |
+| ---------------- | -------- | ----------------------------------------- |
+| `pnpm-install`   | 100      | `pnpm-lock.yaml` or `pnpm-lock.yml`       |
+| `yarn-install`   | 101      | `yarn.lock` (no pnpm lockfile)            |
+| `npm-install`    | 102      | `package-lock.json` (no pnpm/yarn)        |
+| `vercel-link`    | 200      | `vercel.json` or vercel in package.json   |
+| `turbo-link`     | 201      | `turbo.json` in repo or workspace root    |
+
+**Disabling initializers:**
+
+You can disable initializers per-template using `disableInitializers`:
+
+```jsonc
+{
+  "repos": ["org/repo"],
+
+  // Disable all automatic initializers
+  "disableInitializers": true,
+
+  // Or disable specific ones
+  "disableInitializers": ["vercel-link", "turbo-link"],
 }
 ```
 

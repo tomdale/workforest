@@ -1,16 +1,18 @@
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
 import { fetchRepoDiskUsage } from "../services/github.ts";
-import { hasAny, installDependencies } from "../services/pnpm.ts";
+import {
+  type InitializerState,
+  runInitializersGenerator,
+} from "../services/initializers/index.ts";
+import { hasAny } from "../services/pnpm.ts";
 import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
-import type { TaskState } from "../utils/task-generator.ts";
-import { runParallel } from "../utils/task-generator.ts";
 import { writeWorkspaceMetadata } from "./metadata.ts";
 import {
   cleanupWorkspaceWorktrees,
@@ -44,8 +46,9 @@ export type WorkspaceState =
   | { phase: "init"; message: string }
   | { phase: "git"; repo: string; step: "mirror" | "cleanup" | "worktree" }
   | { phase: "git-complete"; repo: string }
-  | { phase: "install-start"; repos: PreparedRepo[] }
-  | { phase: "install"; repo: string; state: TaskState }
+  | { phase: "initializers-start"; repoCount: number }
+  | { phase: "initializer"; state: InitializerState }
+  | { phase: "initializers-complete" }
   | { phase: "hooks-start"; templateId: string }
   | { phase: "hook"; hookState: HookState }
   | { phase: "hooks-complete" }
@@ -117,28 +120,30 @@ export async function* stampWorkspaceGenerator({
     preparedRepos.push({ repo, targetDir, hasLockfile });
   }
 
-  // Phase B: Parallel pnpm installs
-  const reposWithLockfiles = preparedRepos.filter((r) => r.hasLockfile);
+  // Load template config for disableInitializers and hooks
+  const template = templateId ? await loadTemplate(templateId) : null;
 
-  if (reposWithLockfiles.length > 0) {
-    yield { phase: "install-start", repos: reposWithLockfiles };
+  // Phase B: Run initializers (package managers, vercel link, turbo link, etc.)
+  const contexts = preparedRepos.map((r) => ({
+    repoDir: r.targetDir,
+    workspaceDir,
+    repo: r.repo,
+  }));
 
-    const installTasks = new Map(
-      reposWithLockfiles.map(({ repo, targetDir }) => [
-        repo.name,
-        installDependencies(repo, targetDir),
-      ]),
-    );
+  yield { phase: "initializers-start", repoCount: contexts.length };
 
-    for await (const { id, state } of runParallel(installTasks)) {
-      yield { phase: "install", repo: id, state };
-    }
+  for await (const state of runInitializersGenerator({
+    contexts,
+    disabledInitializers: template?.config.disableInitializers,
+  })) {
+    yield { phase: "initializer", state };
   }
 
+  yield { phase: "initializers-complete" };
+
   // Phase C: Run template hooks
-  if (templateId) {
-    const template = await loadTemplate(templateId);
-    if (template?.config.hooks && template.config.hooks.length > 0) {
+  if (template) {
+    if (template.config.hooks && template.config.hooks.length > 0) {
       yield { phase: "hooks-start", templateId };
 
       for await (const hookState of applyTemplateGenerator({
@@ -191,25 +196,43 @@ export async function stampWorkspace(
       case "git-complete":
         log.success(`${state.repo}: git setup complete`);
         break;
-      case "install-start":
-        log.info(
-          `Installing dependencies for: ${state.repos.map((r) => r.repo.name).join(", ")}`,
-        );
+      case "initializers-start":
+        log.info(`Running initializers for ${state.repoCount} repositories...`);
         break;
-      case "install":
-        if (state.state.status === "running" && state.state.message) {
-          log.info(`${state.repo}: ${state.state.message}`);
-        } else if (state.state.status === "completed") {
-          log.success(`${state.repo}: dependencies installed`);
-        } else if (state.state.status === "failed") {
-          log.error(
-            `${state.repo}: install failed - ${state.state.error.message}`,
+      case "initializer": {
+        const { state: initState } = state;
+        if (initState.phase === "detecting") {
+          log.info(`${initState.repoName}: detecting project type`);
+        } else if (initState.phase === "running") {
+          const { state: taskState } = initState;
+          if (taskState.status === "running" && taskState.message) {
+            log.info(
+              `${initState.repoName}: ${initState.initializerName} - ${taskState.message}`,
+            );
+          } else if (taskState.status === "completed") {
+            log.success(
+              `${initState.repoName}: ${initState.initializerName} complete`,
+            );
+          } else if (taskState.status === "failed") {
+            log.error(
+              `${initState.repoName}: ${initState.initializerName} failed - ${taskState.error.message}`,
+            );
+          } else if (taskState.status === "retrying") {
+            log.warn(
+              `${initState.repoName}: ${initState.initializerName} - ${taskState.reason}, retrying...`,
+            );
+          }
+        } else if (initState.phase === "skipped") {
+          log.info(
+            `${initState.repoName}: ${initState.initializerId} skipped - ${initState.reason}`,
           );
-        } else if (state.state.status === "skipped") {
-          log.info(`${state.repo}: ${state.state.reason}`);
-        } else if (state.state.status === "retrying") {
-          log.warn(`${state.repo}: ${state.state.reason}, retrying...`);
+        } else if (initState.phase === "repo-complete") {
+          log.success(`${initState.repoName}: initializers complete`);
         }
+        break;
+      }
+      case "initializers-complete":
+        log.success("All initializers completed.");
         break;
       case "hooks-start":
         log.info(`Running hooks from template "${state.templateId}"...`);
@@ -257,9 +280,7 @@ export async function stampWorkspace(
 // ============================================================================
 
 export async function ensureCacheDir(): Promise<string> {
-  const cacheHome =
-    process.env["XDG_CACHE_HOME"] ?? path.join(os.homedir(), ".cache");
-  const cacheRoot = path.join(cacheHome, "workforest");
+  const cacheRoot = getCacheDir();
   await ensureDir(cacheRoot);
   return cacheRoot;
 }
