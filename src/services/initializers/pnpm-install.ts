@@ -38,17 +38,17 @@ function isFrozenLockfileError(error: Error, output: string): boolean {
 }
 
 /**
- * Install pnpm dependencies with frozen-lockfile optimization.
+ * Install pnpm dependencies with lockfile hash optimization.
  * Strategy:
  * 1. Check if install can be skipped (lockfile hash matches stored hash)
- * 2. Try fast path with --frozen-lockfile --prefer-offline
+ * 2. Run pnpm install with --frozen-lockfile --prefer-offline
  * 3. If frozen-lockfile fails (stale lockfile), retry without it
  * 4. Store lockfile hash after successful install
  */
 async function* execute(context: InitializerContext) {
   const { repoDir } = context;
 
-  // Check if we can skip install based on lockfile hash
+  // Check if we can skip install based on lockfile hash (node_modules exists and matches)
   if (await canSkipInstall(repoDir)) {
     yield {
       status: "skipped" as const,
@@ -57,7 +57,7 @@ async function* execute(context: InitializerContext) {
     return;
   }
 
-  // Compute hash for storing after successful install
+  // Compute hash for storing after install
   const lockfileHash = await computeLockfileHash(repoDir);
 
   const versionPrefix = await getNodeVersionPrefix(repoDir);

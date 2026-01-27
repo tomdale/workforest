@@ -97,7 +97,7 @@ async function main(): Promise<void> {
 
   // Clean if requested
   if (options.clean) {
-    console.log("Cleaning benchmark directories...");
+    console.log("Cleaning all benchmark directories...");
     await cleanupAllBenchmarkDirs();
     const dirs = await setupBenchmarkDirs();
     Object.assign({ cacheDir: dirs.cacheDir, configDir: dirs.configDir, workspaceBaseDir: dirs.workspaceBaseDir });
