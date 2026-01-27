@@ -122,7 +122,7 @@ export async function* stampWorkspaceGenerator({
     }),
   );
 
-  for await (const { id, state } of runParallel(mirrorTasks)) {
+  for await (const { id } of runParallel(mirrorTasks)) {
     yield { phase: "git", repo: id, step: "mirror" };
   }
 

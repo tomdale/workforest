@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { log } from "../logger.ts";
 import type { RepoConfig, RunCommandOptions } from "../types.ts";
@@ -11,6 +13,7 @@ import {
 } from "../utils/task-generator.ts";
 
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
+const LOCKFILE_HASH_FILE = ".pnpm-lockfile-hash";
 
 /**
  * Generator-based dependency installation with frozen-lockfile optimization.
@@ -169,4 +172,73 @@ function runPnpm(
   options: RunCommandOptions = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return runCommand("pnpm", args, options);
+}
+
+// ============================================================================
+// Lockfile hash caching for skipping unnecessary installs
+// ============================================================================
+
+/**
+ * Compute SHA256 hash of the pnpm lockfile.
+ * Returns null if no lockfile exists.
+ */
+export async function computeLockfileHash(
+  repoDir: string,
+): Promise<string | null> {
+  for (const filename of PNPM_LOCK_FILES) {
+    const lockfilePath = path.join(repoDir, filename);
+    if (await pathExists(lockfilePath)) {
+      const content = await fs.readFile(lockfilePath);
+      return crypto.createHash("sha256").update(content).digest("hex");
+    }
+  }
+  return null;
+}
+
+/**
+ * Get the stored lockfile hash from a previous install.
+ * Returns null if no hash is stored.
+ */
+export async function getStoredLockfileHash(
+  repoDir: string,
+): Promise<string | null> {
+  const hashFilePath = path.join(repoDir, "node_modules", LOCKFILE_HASH_FILE);
+  if (await pathExists(hashFilePath)) {
+    const content = await fs.readFile(hashFilePath, "utf8");
+    return content.trim();
+  }
+  return null;
+}
+
+/**
+ * Store the lockfile hash after a successful install.
+ */
+export async function storeLockfileHash(
+  repoDir: string,
+  hash: string,
+): Promise<void> {
+  const nodeModulesDir = path.join(repoDir, "node_modules");
+  if (await pathExists(nodeModulesDir)) {
+    const hashFilePath = path.join(nodeModulesDir, LOCKFILE_HASH_FILE);
+    await fs.writeFile(hashFilePath, hash, "utf8");
+  }
+}
+
+/**
+ * Check if install can be skipped based on lockfile hash.
+ * Returns true if node_modules exists and lockfile hash matches.
+ */
+export async function canSkipInstall(repoDir: string): Promise<boolean> {
+  const nodeModulesDir = path.join(repoDir, "node_modules");
+  if (!(await pathExists(nodeModulesDir))) {
+    return false;
+  }
+
+  const currentHash = await computeLockfileHash(repoDir);
+  if (!currentHash) {
+    return false;
+  }
+
+  const storedHash = await getStoredLockfileHash(repoDir);
+  return currentHash === storedHash;
 }

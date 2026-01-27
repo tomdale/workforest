@@ -1,6 +1,11 @@
 import { getNodeVersionPrefix } from "../../utils/node-version.ts";
 import { runCommandGenerator } from "../../utils/task-generator.ts";
-import { hasAny } from "../pnpm.ts";
+import {
+  canSkipInstall,
+  computeLockfileHash,
+  hasAny,
+  storeLockfileHash,
+} from "../pnpm.ts";
 import type {
   InitializerContext,
   InitializerDefinition,
@@ -35,11 +40,25 @@ function isFrozenLockfileError(error: Error, output: string): boolean {
 /**
  * Install pnpm dependencies with frozen-lockfile optimization.
  * Strategy:
- * 1. Try fast path with --frozen-lockfile --prefer-offline
- * 2. If frozen-lockfile fails (stale lockfile), retry without it
+ * 1. Check if install can be skipped (lockfile hash matches stored hash)
+ * 2. Try fast path with --frozen-lockfile --prefer-offline
+ * 3. If frozen-lockfile fails (stale lockfile), retry without it
+ * 4. Store lockfile hash after successful install
  */
 async function* execute(context: InitializerContext) {
   const { repoDir } = context;
+
+  // Check if we can skip install based on lockfile hash
+  if (await canSkipInstall(repoDir)) {
+    yield {
+      status: "skipped" as const,
+      reason: "Lockfile unchanged, node_modules up to date",
+    };
+    return;
+  }
+
+  // Compute hash for storing after successful install
+  const lockfileHash = await computeLockfileHash(repoDir);
 
   const versionPrefix = await getNodeVersionPrefix(repoDir);
 
@@ -108,8 +127,17 @@ async function* execute(context: InitializerContext) {
     });
 
     // Track fallback result
+    let fallbackFailed = false;
     for await (const state of fallbackInstall) {
+      if (state.status === "failed") {
+        fallbackFailed = true;
+      }
       yield state;
+    }
+
+    // Store hash on successful fallback install
+    if (!fallbackFailed && lockfileHash) {
+      await storeLockfileHash(repoDir, lockfileHash);
     }
   } else if (failed && lastError) {
     yield { status: "failed" as const, error: lastError };
@@ -118,6 +146,11 @@ async function* execute(context: InitializerContext) {
       status: "failed" as const,
       error: new Error("Unknown error during install"),
     };
+  } else {
+    // Fast install succeeded - store the lockfile hash
+    if (lockfileHash) {
+      await storeLockfileHash(repoDir, lockfileHash);
+    }
   }
 }
 
