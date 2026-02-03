@@ -52,7 +52,41 @@ export async function* ensureMirrorRepoGenerator(
     yield* updatePristineRepoGenerator(repo, mirrorDir);
   }
 
-  // Prune stale worktree entries pointing to non-existent paths
+  // Prune stale worktree entries only if needed
+  yield* pruneStaleWorktreesIfNeededGenerator(mirrorDir);
+}
+
+/**
+ * Prune stale worktree entries only if there are any pointing to non-existent paths.
+ * This avoids the overhead of running `git worktree prune` when it's not needed.
+ */
+async function* pruneStaleWorktreesIfNeededGenerator(
+  mirrorDir: string,
+): AsyncGenerator<TaskState, void, undefined> {
+  // Get list of worktrees
+  const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
+    cwd: mirrorDir,
+  });
+
+  const worktreePaths = stdout
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.substring("worktree ".length).trim())
+    .filter(Boolean);
+
+  // Check if any worktree paths don't exist (stale entries)
+  let hasStale = false;
+  for (const worktreePath of worktreePaths) {
+    if (!(await pathExists(worktreePath))) {
+      hasStale = true;
+      break;
+    }
+  }
+
+  if (!hasStale) {
+    return; // No stale worktrees, skip pruning
+  }
+
   yield {
     status: "log",
     level: "info",
@@ -216,8 +250,10 @@ async function* updatePristineRepoGenerator(
   repo: RepoConfig,
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
+  // --no-tags: Skip fetching tags (faster, we only need branches)
+  // --prune: Remove stale remote-tracking refs
   const fetchGen = asGenerator(() =>
-    runGit(["fetch", "origin", "--prune"], { cwd: mirrorDir }),
+    runGit(["fetch", "origin", "--prune", "--no-tags"], { cwd: mirrorDir }),
   );
 
   try {

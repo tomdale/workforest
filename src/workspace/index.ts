@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import * as p from "@clack/prompts";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
@@ -91,15 +92,23 @@ export async function* stampWorkspaceGenerator({
 
   yield { phase: "init", message: "Setting up cache directory" };
   const cacheDir = await ensureCacheDir();
+
+  // Track if workspace is new (skip cleanup if so - no stale worktrees possible)
+  const isNewWorkspace = !(await pathExists(workspaceDir));
   await ensureDir(workspaceDir);
 
   yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
 
-  // Phase A: Parallel git operations
+  // Start template loading early (runs in parallel with git operations)
+  const templatePromise = templateId ? loadTemplate(templateId) : null;
+
+  // Phase A: Unified parallel git operations per repo
+  // Each repo runs: mirror → cleanup (if needed) → worktree → lockfile check
+  // This overlaps I/O better than sequential phases
   const effectiveBranchName = branchName ?? featureName;
   const preparedRepos: PreparedRepo[] = [];
 
-  // Build repo info map for later phases
+  // Build repo info map
   const repoInfo = new Map(
     repos.map((repo) => [
       repo.name,
@@ -111,38 +120,37 @@ export async function* stampWorkspaceGenerator({
     ]),
   );
 
-  // Phase A1: Parallel mirror operations (network I/O bound)
-  const mirrorTasks = new Map(
-    repos.map((repo) => {
-      const info = repoInfo.get(repo.name);
-      return [
-        repo.name,
-        ensureMirrorRepoGenerator(repo, info?.mirrorDir ?? ""),
-      ];
-    }),
-  );
+  // Combined generator for all git operations per repo
+  type GitOpState = TaskState & {
+    step: "mirror" | "cleanup" | "worktree";
+    hasLockfile?: boolean;
+  };
 
-  for await (const { id } of runParallel(mirrorTasks)) {
-    yield { phase: "git", repo: id, step: "mirror" };
-  }
-
-  // Phase A2: Parallel cleanup + worktree creation (disk I/O bound)
-  // We create a combined generator for cleanup + worktree per repo
-  async function* cleanupAndWorktreeGenerator(
+  async function* repoGitOperationsGenerator(
     repoName: string,
-  ): AsyncGenerator<TaskState & { step: "cleanup" | "worktree" }> {
+  ): AsyncGenerator<GitOpState> {
     const info = repoInfo.get(repoName);
     if (!info) return;
 
-    // Cleanup
-    for await (const state of cleanupWorkspaceWorktreesGenerator(
+    // Step 1: Mirror (fetch or clone)
+    for await (const state of ensureMirrorRepoGenerator(
+      info.repo,
       info.mirrorDir,
-      workspaceDir,
     )) {
-      yield { ...state, step: "cleanup" as const };
+      yield { ...state, step: "mirror" as const };
     }
 
-    // Worktree
+    // Step 2: Cleanup (skip for new workspaces - no stale worktrees possible)
+    if (!isNewWorkspace) {
+      for await (const state of cleanupWorkspaceWorktreesGenerator(
+        info.mirrorDir,
+        workspaceDir,
+      )) {
+        yield { ...state, step: "cleanup" as const };
+      }
+    }
+
+    // Step 3: Worktree creation
     for await (const state of ensureWorkingCopyGenerator(
       info.repo,
       info.mirrorDir,
@@ -151,32 +159,49 @@ export async function* stampWorkspaceGenerator({
     )) {
       yield { ...state, step: "worktree" as const };
     }
+
+    // Step 4: Check for lockfile (done here to avoid sequential loop later)
+    const hasLockfile = await hasAny(info.targetDir, [
+      "pnpm-lock.yaml",
+      "pnpm-lock.yml",
+    ]);
+
+    // Yield final state with lockfile info
+    yield {
+      status: "completed" as const,
+      step: "worktree" as const,
+      hasLockfile,
+    };
   }
 
-  const worktreeTasks = new Map(
-    repos.map((repo) => [repo.name, cleanupAndWorktreeGenerator(repo.name)]),
+  // Run all repos in parallel
+  const gitTasks = new Map(
+    repos.map((repo) => [repo.name, repoGitOperationsGenerator(repo.name)]),
   );
 
-  for await (const { id, state } of runParallel(worktreeTasks)) {
+  for await (const { id, state } of runParallel(gitTasks)) {
     yield { phase: "git", repo: id, step: state.step };
-  }
 
-  // Mark all repos as git-complete and check for lockfiles
-  for (const repo of repos) {
-    yield { phase: "git-complete", repo: repo.name };
-
-    const info = repoInfo.get(repo.name);
-    if (info) {
-      const hasLockfile = await hasAny(info.targetDir, [
-        "pnpm-lock.yaml",
-        "pnpm-lock.yml",
-      ]);
-      preparedRepos.push({ repo, targetDir: info.targetDir, hasLockfile });
+    // Collect prepared repo info when worktree completes
+    if (state.status === "completed" && state.hasLockfile !== undefined) {
+      const info = repoInfo.get(id);
+      if (info) {
+        preparedRepos.push({
+          repo: info.repo,
+          targetDir: info.targetDir,
+          hasLockfile: state.hasLockfile,
+        });
+      }
     }
   }
 
-  // Load template config for disableInitializers and hooks
-  const template = templateId ? await loadTemplate(templateId) : null;
+  // Mark all repos as git-complete
+  for (const repo of repos) {
+    yield { phase: "git-complete", repo: repo.name };
+  }
+
+  // Await template (should be ready by now, was loading in parallel)
+  const template = templatePromise ? await templatePromise : null;
 
   // Phase B: Run initializers (package managers, vercel link, turbo link, etc.)
   const contexts = preparedRepos.map((r) => ({
@@ -324,6 +349,96 @@ export async function stampWorkspace(
         console.log(`  cd ${state.workspaceDir}`);
         console.log(`  code ${vscodePath}`);
         console.log();
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Interactive workspace stamping with clack spinner progress.
+ * Provides a polished user experience with real-time feedback.
+ */
+export async function stampWorkspaceInteractive(
+  options: StampWorkspaceOptions,
+): Promise<void> {
+  const s = p.spinner();
+  let lastRepo = "";
+
+  for await (const state of stampWorkspaceGenerator(options)) {
+    switch (state.phase) {
+      case "init":
+        s.start(state.message);
+        break;
+
+      case "git":
+        // Show current repo and step
+        if (state.repo !== lastRepo) {
+          lastRepo = state.repo;
+        }
+        s.message(`${state.repo}: ${state.step}`);
+        break;
+
+      case "git-complete":
+        // Just update spinner, don't stop
+        break;
+
+      case "initializers-start":
+        s.message("Running initializers...");
+        break;
+
+      case "initializer": {
+        const { state: initState } = state;
+        if (initState.phase === "running") {
+          const { state: taskState } = initState;
+          if (taskState.status === "running" && taskState.message) {
+            s.message(`${initState.repoName}: ${taskState.message}`);
+          } else if (taskState.status === "failed") {
+            // Log errors but continue
+            p.log.error(
+              `${initState.repoName}: ${initState.initializerName} failed`,
+            );
+          }
+        }
+        break;
+      }
+
+      case "initializers-complete":
+        break;
+
+      case "hooks-start":
+        s.message("Running template hooks...");
+        break;
+
+      case "hook": {
+        const { hookState } = state;
+        if (hookState.phase === "hook-start") {
+          s.message(`Hook: ${hookState.hookName}`);
+        } else if (hookState.phase === "hook") {
+          const { state: taskState } = hookState;
+          if (taskState.status === "failed") {
+            p.log.error(`Hook failed: ${hookState.hookName}`);
+          }
+        }
+        break;
+      }
+
+      case "hooks-complete":
+        break;
+
+      case "finalize":
+        s.message(state.message);
+        break;
+
+      case "complete": {
+        s.stop("Workspace ready!");
+
+        const workspaceName = path.basename(state.workspaceDir);
+
+        p.note(
+          `cd ${state.workspaceDir}\ncode ${workspaceName}.code-workspace`,
+          "Next steps",
+        );
         break;
       }
     }

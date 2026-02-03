@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as p from "@clack/prompts";
 import arg from "arg";
 import {
   isRepoSlug,
@@ -19,12 +20,7 @@ import {
   loadTemplate,
 } from "./templates/index.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
-import {
-  isInteractive,
-  promptConfirm,
-  promptSelect,
-  promptText,
-} from "./utils/prompts.ts";
+import { isInteractive, promptConfirm, promptText } from "./utils/prompts.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   cleanupWorkspace,
@@ -693,21 +689,28 @@ async function runNewCommand(argv: string[]): Promise<void> {
     return;
   }
 
+  const interactive = isInteractive();
+  let selections = args._;
+
+  // Interactive mode with intro framing
+  if (interactive && selections.length === 0) {
+    p.intro("Create a new workspace");
+  }
+
+  // Load config
   let config: WorkspaceConfig;
   try {
     ({ config } = await loadWorkspaceConfig());
   } catch (error) {
+    if (interactive) p.cancel("Configuration error");
     log.error(getErrorMessage(error));
     process.exitCode = 1;
     return;
   }
 
-  // Positional args are templates or org/repo strings
-  let selections = args._;
-
-  // If no selections provided, prompt interactively or error
+  // Prompt for template/repos if not provided
   if (selections.length === 0) {
-    if (!isInteractive()) {
+    if (!interactive) {
       log.error("No template or repositories specified.");
       log.info('Usage: wf new <template|repo...> -d "description"');
       log.info('Example: wf new my-template -d "fixing auth bug"');
@@ -719,13 +722,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
     }
 
     const selected = await promptForTemplateOrRepos();
-    if (!selected) {
-      return;
-    }
+    if (!selected) return;
     selections = selected;
   }
 
-  // Resolve selections to repos and collect template info
+  // Resolve to repos
   let repos: RepoConfig[];
   let templateId: string | undefined;
   let templateBranchPrefix: string | undefined;
@@ -736,12 +737,13 @@ async function runNewCommand(argv: string[]): Promise<void> {
     templateId = resolved.templateId;
     templateBranchPrefix = resolved.templateBranchPrefix;
   } catch (error) {
+    if (interactive) p.cancel("Failed to resolve repositories");
     log.error(getErrorMessage(error));
     process.exitCode = 1;
     return;
   }
 
-  // Get feature name from --description or interactive prompt
+  // Get feature name
   let featureName: string;
   let description: string | undefined;
 
@@ -751,11 +753,20 @@ async function runNewCommand(argv: string[]): Promise<void> {
       featureName = input;
     } else {
       description = input;
-      const generated = await generateSlugFromDescription(input);
-      featureName = generated ?? sanitizeToSlug(input);
+      // Show spinner for AI generation in interactive mode
+      if (interactive) {
+        const s = p.spinner();
+        s.start("Generating feature name...");
+        const generated = await generateSlugFromDescription(input);
+        s.stop("Feature name ready");
+        featureName = generated ?? sanitizeToSlug(input);
+      } else {
+        const generated = await generateSlugFromDescription(input);
+        featureName = generated ?? sanitizeToSlug(input);
+      }
     }
   } else {
-    if (!isInteractive()) {
+    if (!interactive) {
       log.error(
         "Missing --description argument (required in non-interactive mode).",
       );
@@ -766,56 +777,80 @@ async function runNewCommand(argv: string[]): Promise<void> {
     }
 
     const result = await promptForFeatureName();
-    if (!result) {
-      return;
-    }
+    if (!result) return;
     featureName = result.featureName;
     description = result.description;
   }
 
+  // Build paths
   const workspaceRoot = config.defaultDir
     ? path.resolve(expandHome(config.defaultDir))
     : process.cwd();
   const prefix = config.dirPrefix ?? "";
   const workspaceDir = path.resolve(workspaceRoot, `${prefix}${featureName}`);
-
-  // Use template's branchPrefix if provided, otherwise fall back to config
   const effectiveBranchPrefix = templateBranchPrefix ?? config.branchPrefix;
   const branchName = effectiveBranchPrefix
     ? `${effectiveBranchPrefix}${featureName}`
     : featureName;
 
-  // Dry-run mode: show what would be created
+  // Dry-run mode
   if (args["--dry-run"]) {
-    console.log("\nDry run - no changes will be made\n");
-    console.log("Workspace:");
-    console.log(`  Directory: ${workspaceDir}`);
-    console.log(`  Feature: ${featureName}`);
-    if (description) {
-      console.log(`  Description: ${description}`);
+    if (interactive) {
+      p.note(
+        [
+          `Directory: ${workspaceDir}`,
+          `Feature: ${featureName}`,
+          description ? `Description: ${description}` : null,
+          `Branch: ${branchName}`,
+          templateId ? `Template: ${templateId}` : null,
+          "",
+          "Repositories:",
+          ...repos.map((r) => `  • ${r.name}`),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        "Dry run preview",
+      );
+      p.outro("No changes made");
+    } else {
+      console.log("\nDry run - no changes will be made\n");
+      console.log("Workspace:");
+      console.log(`  Directory: ${workspaceDir}`);
+      console.log(`  Feature: ${featureName}`);
+      if (description) {
+        console.log(`  Description: ${description}`);
+      }
+      console.log(`  Branch: ${branchName}`);
+      if (templateId) {
+        console.log(`  Template: ${templateId}`);
+      }
+      console.log("\nRepositories:");
+      for (const repo of repos) {
+        console.log(`  - ${repo.name} (${repo.remote})`);
+      }
+      console.log();
     }
-    console.log(`  Branch: ${branchName}`);
-    if (templateId) {
-      console.log(`  Template: ${templateId}`);
-    }
-    console.log("\nRepositories:");
-    for (const repo of repos) {
-      console.log(`  - ${repo.name} (${repo.remote})`);
-    }
-    console.log();
     return;
   }
 
-  await stampWorkspace({
+  // Stamp workspace
+  const options = {
     featureName,
     branchName,
     workspaceDir,
     repos,
     ...(description && { description }),
     ...(templateId && { templateId }),
-  });
+  };
 
-  log.info("Happy shipping!");
+  if (interactive) {
+    const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
+    await stampWorkspaceInteractive(options);
+    p.outro("Happy shipping!");
+  } else {
+    await stampWorkspace(options);
+    log.info("Happy shipping!");
+  }
 }
 
 type ResolvedSelections = {
@@ -889,44 +924,51 @@ type FeatureNameResult = {
 };
 
 /**
- * Prompt user for feature name interactively.
+ * Prompt user for feature name interactively using clack prompts.
  * Detects if input is a slug or prose, and generates slug if needed.
  */
 async function promptForFeatureName(): Promise<FeatureNameResult | null> {
-  const input = await promptText("What are you working on?", {
+  const input = await p.text({
+    message: "What are you working on?",
+    placeholder: "describe your task, or enter a slug like fix-auth-bug",
     validate: (value) => {
-      if (!value.trim()) {
-        return "Please describe what you're working on";
-      }
-      return null;
+      if (!value.trim()) return "Please describe what you're working on";
+      return undefined;
     },
   });
+
+  if (p.isCancel(input)) {
+    p.cancel("Cancelled");
+    return null;
+  }
 
   const trimmed = input.trim();
 
-  // If it's already a slug, use it directly
+  // If it's already a slug, use it directly with confirmation
   if (isSlug(trimmed)) {
+    p.log.info(`Using "${trimmed}" as feature name`);
     return { featureName: trimmed };
   }
 
-  // It's prose - generate a slug
-  log.info("Generating feature name...");
+  // It's prose - generate a slug with spinner
+  const s = p.spinner();
+  s.start("Generating feature name...");
   const generated = await generateSlugFromDescription(trimmed);
+  s.stop("Feature name ready");
+
   const defaultSlug = generated ?? sanitizeToSlug(trimmed);
 
-  const featureName = await promptText("Feature name", {
+  const featureName = await p.text({
+    message: "Feature name",
     defaultValue: defaultSlug,
     validate: (value) => {
-      if (!value.trim()) {
-        return "Feature name is required";
-      }
-      return null;
+      if (!value.trim()) return "Feature name is required";
+      return undefined;
     },
   });
 
-  if (!featureName.trim()) {
-    log.error("Feature name is required.");
-    process.exitCode = 1;
+  if (p.isCancel(featureName)) {
+    p.cancel("Cancelled");
     return null;
   }
 
@@ -937,86 +979,81 @@ async function promptForFeatureName(): Promise<FeatureNameResult | null> {
 }
 
 /**
- * Prompt user to select a template or enter repos manually.
+ * Prompt user to select a template or enter repos manually using clack prompts.
  */
 async function promptForTemplateOrRepos(): Promise<string[] | null> {
   const templates = await listTemplates();
 
   type SelectionValue = { type: "template"; id: string } | { type: "custom" };
 
-  const options: {
-    label: string;
-    description?: string;
-    value: SelectionValue;
-  }[] = [];
-
-  // Add template options
-  for (const template of templates) {
-    options.push({
-      label: template.id,
-      description:
-        template.config.description ?? template.config.repos.join(", "),
-      value: { type: "template", id: template.id },
-    });
-  }
-
-  // Add custom option
-  options.push({
-    label: "Enter repositories manually",
-    value: { type: "custom" },
-  });
-
   // If no templates, go straight to manual entry
   if (templates.length === 0) {
-    const customRepos = await promptText(
-      "Repositories (org/repo or git URL, comma-separated)",
-      {
-        validate: (input) => {
-          if (!input.trim()) {
-            return "At least one repository is required";
-          }
-          return null;
-        },
+    const repos = await p.text({
+      message: "Repositories",
+      placeholder: "org/repo or git URL, comma-separated",
+      validate: (input) => {
+        if (!input.trim()) return "At least one repository is required";
+        return undefined;
       },
-    );
-    return customRepos
+    });
+
+    if (p.isCancel(repos)) {
+      p.cancel("Cancelled");
+      return null;
+    }
+
+    return repos
       .split(",")
       .map((r) => r.trim())
       .filter(Boolean);
   }
 
-  const selection = await promptSelect<SelectionValue>(
-    "Select workspace setup:",
-    { options },
-  );
+  // Build options for select
+  const options: { value: SelectionValue; label: string; hint?: string }[] =
+    templates.map((t) => ({
+      value: { type: "template", id: t.id },
+      label: t.id,
+      hint: t.config.description ?? t.config.repos.join(", "),
+    }));
+
+  options.push({
+    value: { type: "custom" },
+    label: "Enter repositories manually",
+  });
+
+  const selection = await p.select({
+    message: "Select workspace setup",
+    options,
+  });
+
+  if (p.isCancel(selection)) {
+    p.cancel("Cancelled");
+    return null;
+  }
 
   if (selection.type === "template") {
     return [selection.id];
   }
 
   // Custom entry
-  const customRepos = await promptText(
-    "Repositories (org/repo or git URL, comma-separated)",
-    {
-      validate: (input) => {
-        if (!input.trim()) {
-          return "At least one repository is required";
-        }
-        return null;
-      },
+  const repos = await p.text({
+    message: "Repositories",
+    placeholder: "org/repo or git URL, comma-separated",
+    validate: (input) => {
+      if (!input.trim()) return "At least one repository is required";
+      return undefined;
     },
-  );
+  });
 
-  const repos = customRepos
-    .split(",")
-    .map((r) => r.trim())
-    .filter(Boolean);
-
-  if (repos.length === 0) {
+  if (p.isCancel(repos)) {
+    p.cancel("Cancelled");
     return null;
   }
 
-  return repos;
+  return repos
+    .split(",")
+    .map((r) => r.trim())
+    .filter(Boolean);
 }
 
 function expandHome(value: string): string {
