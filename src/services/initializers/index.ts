@@ -35,6 +35,25 @@ export type InitializerState =
   | { phase: "repo-complete"; repoName: string };
 
 /**
+ * State emitted by a single-repo initializer run.
+ * Used for per-repo pipeline orchestration.
+ */
+export type SingleRepoInitializerState =
+  | { phase: "detecting" }
+  | {
+      phase: "running";
+      initializerId: string;
+      initializerName: string;
+      state: TaskState;
+    }
+  | {
+      phase: "skipped";
+      initializerId: string;
+      reason: string;
+    }
+  | { phase: "complete" };
+
+/**
  * Registry of built-in initializers, sorted by priority.
  */
 export const builtInInitializers: InitializerDefinition[] = [
@@ -210,4 +229,74 @@ export async function* runInitializersGenerator({
   for (const context of contexts) {
     yield { phase: "repo-complete", repoName: context.repo.name };
   }
+}
+
+export type RunSingleRepoInitializersOptions = {
+  context: InitializerContext;
+  disabledInitializers?: boolean | string[];
+};
+
+/**
+ * Generator that runs initializers for a single repository.
+ * Used by the per-repo pipeline to enable cross-phase parallelism.
+ *
+ * Runs install initializers first (priority 100-199), then linking (200-299).
+ * Within each phase, initializers run sequentially for this repo.
+ */
+export async function* runSingleRepoInitializersGenerator({
+  context,
+  disabledInitializers,
+}: RunSingleRepoInitializersOptions): AsyncGenerator<SingleRepoInitializerState> {
+  const enabledInitializers = getEnabledInitializers(disabledInitializers);
+
+  if (enabledInitializers.length === 0) {
+    yield { phase: "complete" };
+    return;
+  }
+
+  // Group initializers by priority range
+  const installInitializers = enabledInitializers.filter(
+    (init) => init.priority >= 100 && init.priority < 200,
+  );
+  const linkingInitializers = enabledInitializers.filter(
+    (init) => init.priority >= 200 && init.priority < 300,
+  );
+
+  yield { phase: "detecting" };
+
+  // Phase 1: Run install initializer (only one per repo - mutually exclusive)
+  if (installInitializers.length > 0) {
+    const detected = await detectInitializers(context, installInitializers);
+
+    if (detected.length > 0) {
+      const { initializer, metadata } = detected[0];
+
+      for await (const state of initializer.execute(context, metadata)) {
+        yield {
+          phase: "running",
+          initializerId: initializer.id,
+          initializerName: initializer.name,
+          state,
+        };
+      }
+    }
+  }
+
+  // Phase 2: Run linking initializers (can have multiple)
+  if (linkingInitializers.length > 0) {
+    const detected = await detectInitializers(context, linkingInitializers);
+
+    for (const { initializer, metadata } of detected) {
+      for await (const state of initializer.execute(context, metadata)) {
+        yield {
+          phase: "running",
+          initializerId: initializer.id,
+          initializerName: initializer.name,
+          state,
+        };
+      }
+    }
+  }
+
+  yield { phase: "complete" };
 }

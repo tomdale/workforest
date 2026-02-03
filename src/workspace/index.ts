@@ -13,10 +13,12 @@ import { hasAny } from "../services/pnpm.ts";
 import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
+import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import { writeWorkspaceMetadata } from "./metadata.ts";
+import { repoPipelineGenerator } from "./pipeline.ts";
 import {
   cleanupWorkspaceWorktreesGenerator,
   ensureMirrorRepoGenerator,
@@ -356,93 +358,175 @@ export async function stampWorkspace(
 }
 
 /**
- * Interactive workspace stamping with clack spinner progress.
- * Provides a polished user experience with real-time feedback.
+ * Interactive workspace stamping with grid or spinner progress.
+ * Uses a tmux-style grid layout for concurrent repo output when terminal supports it.
+ * Falls back to spinner for non-TTY, small terminals, or CI environments.
  */
 export async function stampWorkspaceInteractive(
   options: StampWorkspaceOptions,
 ): Promise<void> {
-  const s = p.spinner();
-  let lastRepo = "";
+  const {
+    featureName,
+    description,
+    branchName,
+    workspaceDir,
+    repos,
+    templateId,
+  } = options;
 
-  for await (const state of stampWorkspaceGenerator(options)) {
-    switch (state.phase) {
-      case "init":
-        s.start(state.message);
-        break;
+  if (repos.length === 0) {
+    throw new Error(
+      "stampWorkspaceInteractive requires at least one repository.",
+    );
+  }
 
-      case "git":
-        // Show current repo and step
-        if (state.repo !== lastRepo) {
-          lastRepo = state.repo;
-        }
-        s.message(`${state.repo}: ${state.step}`);
-        break;
-
-      case "git-complete":
-        // Just update spinner, don't stop
-        break;
-
-      case "initializers-start":
-        s.message("Running initializers...");
-        break;
-
-      case "initializer": {
-        const { state: initState } = state;
-        if (initState.phase === "running") {
-          const { state: taskState } = initState;
-          if (taskState.status === "running" && taskState.message) {
-            s.message(`${initState.repoName}: ${taskState.message}`);
-          } else if (taskState.status === "failed") {
-            // Log errors but continue
-            p.log.error(
-              `${initState.repoName}: ${initState.initializerName} failed`,
-            );
-          }
-        }
-        break;
-      }
-
-      case "initializers-complete":
-        break;
-
-      case "hooks-start":
-        s.message("Running template hooks...");
-        break;
-
-      case "hook": {
-        const { hookState } = state;
-        if (hookState.phase === "hook-start") {
-          s.message(`Hook: ${hookState.hookName}`);
-        } else if (hookState.phase === "hook") {
-          const { state: taskState } = hookState;
-          if (taskState.status === "failed") {
-            p.log.error(`Hook failed: ${hookState.hookName}`);
-          }
-        }
-        break;
-      }
-
-      case "hooks-complete":
-        break;
-
-      case "finalize":
-        s.message(state.message);
-        break;
-
-      case "complete": {
-        s.stop("Workspace ready!");
-
-        const workspaceName = path.basename(state.workspaceDir);
-
-        p.note(
-          `cd ${state.workspaceDir}\ncode ${workspaceName}.code-workspace`,
-          "Next steps",
-        );
-        break;
-      }
+  // Check if workspace directory already exists and has contents
+  if (await pathExists(workspaceDir)) {
+    const contents = await fs.readdir(workspaceDir);
+    if (contents.length > 0) {
+      throw new Error(
+        `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
+      );
     }
   }
+
+  const s = p.spinner();
+  s.start("Setting up workspace...");
+
+  await ensureCacheDir();
+
+  // Track if workspace is new (skip cleanup if so - no stale worktrees possible)
+  const isNewWorkspace = !(await pathExists(workspaceDir));
+  await ensureDir(workspaceDir);
+
+  // Start template loading early (runs in parallel with git operations)
+  const templatePromise = templateId ? loadTemplate(templateId) : null;
+
+  const effectiveBranchName = branchName ?? featureName;
+  const repoNames = repos.map((r) => r.name);
+
+  // Determine template settings before creating pipelines
+  const template = templatePromise ? await templatePromise : null;
+
+  // Create per-repo pipeline generators
+  const pipelines = new Map(
+    repos.map((repo) => [
+      repo.name,
+      repoPipelineGenerator({
+        repo,
+        workspaceDir,
+        branchName: effectiveBranchName,
+        isNewWorkspace,
+        disabledInitializers: template?.config.disableInitializers,
+      }),
+    ]),
+  );
+
+  s.stop("Starting repository setup...");
+
+  // Run all repo pipelines in parallel (git + initializers per repo)
+  let repoResults: Map<string, { hasLockfile: boolean }>;
+
+  if (shouldUseGrid() && repos.length > 1) {
+    // Grid mode: visual concurrent output
+    repoResults = await renderPipelinesGrid({
+      pipelines,
+      repoNames,
+    });
+  } else {
+    // Spinner mode: simple progress indicator
+    repoResults = await runPipelinesWithSpinner(pipelines, repoNames);
+  }
+
+  // Hooks run after all repos complete (can reference multiple repos)
+  if (template?.config.hooks && template.config.hooks.length > 0) {
+    const hookSpinner = p.spinner();
+    hookSpinner.start("Running template hooks...");
+
+    for await (const hookState of applyTemplateGenerator({
+      template,
+      workspaceDir,
+      repoDirs: repoNames,
+    })) {
+      if (hookState.phase === "hook-start") {
+        hookSpinner.message(`Hook: ${hookState.hookName}`);
+      } else if (hookState.phase === "hook") {
+        const { state: taskState } = hookState;
+        if (taskState.status === "failed") {
+          p.log.error(`Hook failed: ${hookState.hookName}`);
+        }
+      }
+    }
+
+    hookSpinner.stop("Hooks complete");
+  }
+
+  // Finalize
+  const preparedRepos = repos.map((repo) => ({
+    name: repo.name,
+    remote: repo.remote,
+    defaultBranch: repo.defaultBranch,
+    hasLockfile: repoResults.get(repo.name)?.hasLockfile ?? false,
+  }));
+
+  await writeWorkspaceMetadata(workspaceDir, {
+    featureName,
+    repos: preparedRepos,
+    ...(description && { description }),
+    ...(templateId && { templateId }),
+  });
+
+  await writeVSCodeWorkspaceFile(workspaceDir, repos);
+
+  const workspaceName = path.basename(workspaceDir);
+  p.note(
+    `cd ${workspaceDir}\ncode ${workspaceName}.code-workspace`,
+    "Next steps",
+  );
+}
+
+/**
+ * Run pipelines with a simple spinner (fallback for non-grid mode).
+ */
+async function runPipelinesWithSpinner(
+  pipelines: Map<
+    string,
+    AsyncGenerator<import("./pipeline.ts").RepoPipelineState>
+  >,
+  _repoNames: string[],
+): Promise<Map<string, { hasLockfile: boolean }>> {
+  const s = p.spinner();
+  s.start("Setting up repositories...");
+
+  const results = new Map<string, { hasLockfile: boolean }>();
+  const repoPhases = new Map<string, string>();
+
+  for await (const { id, state } of runParallel(pipelines)) {
+    switch (state.phase) {
+      case "git":
+        repoPhases.set(id, state.step);
+        s.message(`${id}: ${state.step}`);
+        break;
+
+      case "initializer":
+        repoPhases.set(id, state.name);
+        s.message(`${id}: ${state.name}`);
+        break;
+
+      case "complete":
+        repoPhases.set(id, "complete");
+        results.set(id, { hasLockfile: state.hasLockfile });
+        break;
+
+      case "failed":
+        repoPhases.set(id, "failed");
+        p.log.error(`${id}: ${state.error.message}`);
+        break;
+    }
+  }
+
+  s.stop("Repository setup complete");
+  return results;
 }
 
 // ============================================================================

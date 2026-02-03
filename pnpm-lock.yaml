@@ -11,6 +11,9 @@ importers:
       '@clack/prompts':
         specifier: ^0.10.0
         version: 0.10.1
+      '@unblessed/node':
+        specifier: 1.0.0-alpha.23
+        version: 1.0.0-alpha.23(omggif@1.0.10)(pngjs@7.0.0)
       arg:
         specifier: ^5.0.2
         version: 5.0.2
@@ -630,6 +633,17 @@ packages:
   '@types/semver@7.7.1':
     resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
+  '@unblessed/core@1.0.0-alpha.23':
+    resolution: {integrity: sha512-SHGQUsUSGnO4kCQIzAijFuEe6hog3e9KYC2Cc6gZqxPeiLpwg0TXVs5PeswSO8GrkgYQyC/kVAKNGbC4ASsSEw==}
+    engines: {node: '>= 22.0.0'}
+
+  '@unblessed/node@1.0.0-alpha.23':
+    resolution: {integrity: sha512-040TwF8h2f2LJ8lKs5ftKt/WLOaBcjKfkKtith3w6YOgm6ZcygCNJu5fDOwqpxqJtukPG5/JvIhnCmgnNORCdQ==}
+    engines: {node: '>= 22.0.0'}
+    peerDependencies:
+      omggif: ^1.0.10
+      pngjs: ^7.0.0
+
   '@vitest/expect@4.0.17':
     resolution: {integrity: sha512-mEoqP3RqhKlbmUmntNDDCJeTDavDR+fVYkSOw8qRwJFaW/0/5zA9zFeTrHqNtcmwh6j26yMmwx2PqUDPzt5ZAQ==}
 
@@ -764,6 +778,9 @@ packages:
   obug@2.1.1:
     resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
 
+  omggif@1.0.10:
+    resolution: {integrity: sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw==}
+
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
@@ -773,6 +790,10 @@ packages:
   picomatch@4.0.3:
     resolution: {integrity: sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==}
     engines: {node: '>=12'}
+
+  pngjs@7.0.0:
+    resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
+    engines: {node: '>=14.19.0'}
 
   postcss@8.5.6:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
@@ -1373,6 +1394,14 @@ snapshots:
 
   '@types/semver@7.7.1': {}
 
+  '@unblessed/core@1.0.0-alpha.23': {}
+
+  '@unblessed/node@1.0.0-alpha.23(omggif@1.0.10)(pngjs@7.0.0)':
+    dependencies:
+      '@unblessed/core': 1.0.0-alpha.23
+      omggif: 1.0.10
+      pngjs: 7.0.0
+
   '@vitest/expect@4.0.17':
     dependencies:
       '@standard-schema/spec': 1.1.0
@@ -1503,11 +1532,15 @@ snapshots:
 
   obug@2.1.1: {}
 
+  omggif@1.0.10: {}
+
   pathe@2.0.3: {}
 
   picocolors@1.1.1: {}
 
   picomatch@4.0.3: {}
+
+  pngjs@7.0.0: {}
 
   postcss@8.5.6:
     dependencies:
