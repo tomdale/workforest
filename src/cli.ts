@@ -979,81 +979,468 @@ async function promptForFeatureName(): Promise<FeatureNameResult | null> {
 }
 
 /**
+ * Format a template hint showing description, repo count, and hook count.
+ */
+function formatTemplateHint(
+  template: Awaited<ReturnType<typeof loadTemplate>>,
+): string {
+  if (!template) return "";
+  const parts: string[] = [];
+  if (template.config.description) {
+    parts.push(template.config.description);
+  }
+  const repoCount = template.config.repos.length;
+  parts.push(`${repoCount} repo${repoCount !== 1 ? "s" : ""}`);
+  const hookCount = template.config.hooks?.length ?? 0;
+  if (hookCount > 0) {
+    parts.push(`${hookCount} hook${hookCount !== 1 ? "s" : ""}`);
+  }
+  return parts.join(" | ");
+}
+
+/**
+ * Show template preview and prompt for action.
+ * Returns: "use" to use the template, "edit" to edit first, "back" to go back
+ */
+async function showTemplatePreview(
+  template: NonNullable<Awaited<ReturnType<typeof loadTemplate>>>,
+): Promise<"use" | "edit" | "back" | null> {
+  const lines: string[] = [];
+
+  if (template.config.description) {
+    lines.push(`Description: ${template.config.description}`);
+    lines.push("");
+  }
+
+  lines.push("Repositories:");
+  for (const repo of template.config.repos) {
+    lines.push(`  • ${repo}`);
+  }
+
+  if (template.config.hooks && template.config.hooks.length > 0) {
+    lines.push("");
+    lines.push("Hooks:");
+    for (const hook of template.config.hooks) {
+      lines.push(`  • ${hook.name}`);
+    }
+  }
+
+  if (template.config.branchPrefix) {
+    lines.push("");
+    lines.push(`Branch prefix: ${template.config.branchPrefix}`);
+  }
+
+  p.note(lines.join("\n"), `Template: ${template.id}`);
+
+  const action = await p.select({
+    message: "What would you like to do?",
+    options: [
+      { value: "use" as const, label: "Use this template" },
+      { value: "edit" as const, label: "Edit template first" },
+      { value: "back" as const, label: "Choose different template" },
+    ],
+  });
+
+  if (p.isCancel(action)) {
+    return null;
+  }
+
+  return action;
+}
+
+/**
+ * Validate template name format (lowercase alphanumeric with hyphens).
+ */
+function validateTemplateName(input: string): string | undefined {
+  if (!input.trim()) {
+    return "Template name is required";
+  }
+  if (!/^[a-z0-9-]+$/.test(input.trim())) {
+    return "Template name must be lowercase alphanumeric with hyphens";
+  }
+  return undefined;
+}
+
+/**
+ * Interactive flow to create a new template.
+ * Returns the new template ID if successful, null if cancelled.
+ */
+async function wizardCreateTemplate(): Promise<string | null> {
+  const templateId = await p.text({
+    message: "Template name",
+    placeholder: "my-template",
+    validate: validateTemplateName,
+  });
+
+  if (p.isCancel(templateId)) {
+    return null;
+  }
+
+  // Check if template already exists
+  const existing = await loadTemplate(templateId);
+  if (existing) {
+    p.log.error(`Template "${templateId}" already exists.`);
+    return null;
+  }
+
+  const { renderTemplateEditor } = await import("./ui/index.ts");
+
+  let savedTemplateId: string | null = null;
+
+  await renderTemplateEditor({
+    templateId,
+    initialConfig: { repos: [] },
+    onSave: async (config) => {
+      await createTemplate(templateId, config);
+      savedTemplateId = templateId;
+    },
+  });
+
+  return savedTemplateId;
+}
+
+/**
+ * Interactive flow to edit an existing template.
+ * Returns the template ID if saved, null if cancelled.
+ */
+async function wizardEditTemplate(
+  templates: Awaited<ReturnType<typeof listTemplates>>,
+): Promise<string | null> {
+  if (templates.length === 0) {
+    p.log.warn("No templates to edit.");
+    return null;
+  }
+
+  const selection = await p.select({
+    message: "Select template to edit",
+    options: templates.map((t) => ({
+      value: t.id,
+      label: t.id,
+      hint: formatTemplateHint(t),
+    })),
+  });
+
+  if (p.isCancel(selection)) {
+    return null;
+  }
+
+  const template = await loadTemplate(selection);
+  if (!template) {
+    p.log.error(`Template "${selection}" not found.`);
+    return null;
+  }
+
+  const { renderTemplateEditor } = await import("./ui/index.ts");
+
+  let savedTemplateId: string | null = null;
+
+  await renderTemplateEditor({
+    templateId: template.id,
+    initialConfig: template.config,
+    onSave: async (config) => {
+      await createTemplate(template.id, config);
+      savedTemplateId = template.id;
+    },
+  });
+
+  return savedTemplateId;
+}
+
+/**
+ * Interactive flow to clone an existing template.
+ * Returns the new template ID if successful, null if cancelled.
+ */
+async function wizardCloneTemplate(
+  templates: Awaited<ReturnType<typeof listTemplates>>,
+): Promise<string | null> {
+  if (templates.length === 0) {
+    p.log.warn("No templates to clone.");
+    return null;
+  }
+
+  const sourceSelection = await p.select({
+    message: "Select template to clone",
+    options: templates.map((t) => ({
+      value: t.id,
+      label: t.id,
+      hint: formatTemplateHint(t),
+    })),
+  });
+
+  if (p.isCancel(sourceSelection)) {
+    return null;
+  }
+
+  const sourceTemplate = await loadTemplate(sourceSelection);
+  if (!sourceTemplate) {
+    p.log.error(`Template "${sourceSelection}" not found.`);
+    return null;
+  }
+
+  const newTemplateId = await p.text({
+    message: "New template name",
+    placeholder: `${sourceTemplate.id}-copy`,
+    validate: validateTemplateName,
+  });
+
+  if (p.isCancel(newTemplateId)) {
+    return null;
+  }
+
+  // Check if new template already exists
+  const existing = await loadTemplate(newTemplateId);
+  if (existing) {
+    p.log.error(`Template "${newTemplateId}" already exists.`);
+    return null;
+  }
+
+  const { renderTemplateEditor } = await import("./ui/index.ts");
+
+  let savedTemplateId: string | null = null;
+
+  await renderTemplateEditor({
+    templateId: newTemplateId,
+    initialConfig: sourceTemplate.config,
+    onSave: async (config) => {
+      await createTemplate(newTemplateId, config);
+      savedTemplateId = newTemplateId;
+    },
+  });
+
+  return savedTemplateId;
+}
+
+type ManageAction = "create" | "edit" | "clone" | "back";
+
+/**
+ * Show template management submenu.
+ * Returns the action taken, or null if cancelled.
+ */
+async function handleTemplateManagement(
+  templates: Awaited<ReturnType<typeof listTemplates>>,
+): Promise<{ action: ManageAction; newTemplateId?: string } | null> {
+  const hasTemplates = templates.length > 0;
+
+  const options: { value: ManageAction; label: string; hint?: string }[] = [
+    {
+      value: "create",
+      label: "Create new template",
+      hint: "Start from scratch",
+    },
+  ];
+
+  if (hasTemplates) {
+    options.push(
+      {
+        value: "edit",
+        label: "Edit existing template",
+        hint: "Modify a template",
+      },
+      {
+        value: "clone",
+        label: "Clone and modify template",
+        hint: "Copy as starting point",
+      },
+    );
+  }
+
+  options.push({
+    value: "back",
+    label: "Back to workspace setup",
+  });
+
+  const action = await p.select({
+    message: "Template management",
+    options,
+  });
+
+  if (p.isCancel(action)) {
+    return null;
+  }
+
+  if (action === "back") {
+    return { action: "back" };
+  }
+
+  let newTemplateId: string | null = null;
+
+  switch (action) {
+    case "create":
+      newTemplateId = await wizardCreateTemplate();
+      break;
+    case "edit":
+      newTemplateId = await wizardEditTemplate(templates);
+      break;
+    case "clone":
+      newTemplateId = await wizardCloneTemplate(templates);
+      break;
+  }
+
+  return { action, newTemplateId: newTemplateId ?? undefined };
+}
+
+/**
  * Prompt user to select a template or enter repos manually using clack prompts.
  */
 async function promptForTemplateOrRepos(): Promise<string[] | null> {
-  const templates = await listTemplates();
+  // Main loop to allow returning from template management
+  while (true) {
+    const templates = await listTemplates();
 
-  type SelectionValue = { type: "template"; id: string } | { type: "custom" };
+    type SelectionValue =
+      | { type: "template"; id: string }
+      | { type: "custom" }
+      | { type: "manage" };
 
-  // If no templates, go straight to manual entry
-  if (templates.length === 0) {
-    const repos = await p.text({
-      message: "Repositories",
-      placeholder: "org/repo or git URL, comma-separated",
-      validate: (input) => {
-        if (!input.trim()) return "At least one repository is required";
-        return undefined;
-      },
+    // If no templates, offer to create one first
+    if (templates.length === 0) {
+      const createFirst = await p.confirm({
+        message: "No templates found. Create one now?",
+        initialValue: true,
+      });
+
+      if (p.isCancel(createFirst)) {
+        p.cancel("Cancelled");
+        return null;
+      }
+
+      if (createFirst) {
+        const newTemplateId = await wizardCreateTemplate();
+        if (newTemplateId) {
+          p.log.success(`Template "${newTemplateId}" created.`);
+          // Loop back to show templates
+          continue;
+        }
+        // If cancelled, fall through to manual entry
+      }
+
+      // Manual entry
+      const repos = await p.text({
+        message: "Repositories",
+        placeholder: "org/repo or git URL, comma-separated",
+        validate: (input) => {
+          if (!input.trim()) return "At least one repository is required";
+          return undefined;
+        },
+      });
+
+      if (p.isCancel(repos)) {
+        p.cancel("Cancelled");
+        return null;
+      }
+
+      return repos
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+    }
+
+    // Build options for select
+    const options: { value: SelectionValue; label: string; hint?: string }[] =
+      templates.map((t) => ({
+        value: { type: "template", id: t.id },
+        label: t.id,
+        hint: formatTemplateHint(t),
+      }));
+
+    options.push({
+      value: { type: "manage" },
+      label: "Manage templates...",
+      hint: "Create, edit, or clone",
     });
 
-    if (p.isCancel(repos)) {
+    options.push({
+      value: { type: "custom" },
+      label: "Enter repositories manually",
+    });
+
+    const selection = await p.select({
+      message: "Select workspace setup",
+      options,
+    });
+
+    if (p.isCancel(selection)) {
       p.cancel("Cancelled");
       return null;
     }
 
-    return repos
-      .split(",")
-      .map((r) => r.trim())
-      .filter(Boolean);
-  }
+    if (selection.type === "manage") {
+      const result = await handleTemplateManagement(templates);
+      if (result === null) {
+        p.cancel("Cancelled");
+        return null;
+      }
+      if (result.newTemplateId) {
+        p.log.success(`Template "${result.newTemplateId}" saved.`);
+      }
+      // Loop back to show updated template list
+      continue;
+    }
 
-  // Build options for select
-  const options: { value: SelectionValue; label: string; hint?: string }[] =
-    templates.map((t) => ({
-      value: { type: "template", id: t.id },
-      label: t.id,
-      hint: t.config.description ?? t.config.repos.join(", "),
-    }));
+    if (selection.type === "custom") {
+      const repos = await p.text({
+        message: "Repositories",
+        placeholder: "org/repo or git URL, comma-separated",
+        validate: (input) => {
+          if (!input.trim()) return "At least one repository is required";
+          return undefined;
+        },
+      });
 
-  options.push({
-    value: { type: "custom" },
-    label: "Enter repositories manually",
-  });
+      if (p.isCancel(repos)) {
+        p.cancel("Cancelled");
+        return null;
+      }
 
-  const selection = await p.select({
-    message: "Select workspace setup",
-    options,
-  });
+      return repos
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+    }
 
-  if (p.isCancel(selection)) {
-    p.cancel("Cancelled");
-    return null;
-  }
+    // Template selected - show preview
+    const template = await loadTemplate(selection.id);
+    if (!template) {
+      p.log.error(`Template "${selection.id}" not found.`);
+      continue;
+    }
 
-  if (selection.type === "template") {
+    const action = await showTemplatePreview(template);
+
+    if (action === null) {
+      p.cancel("Cancelled");
+      return null;
+    }
+
+    if (action === "back") {
+      // Loop back to selection
+      continue;
+    }
+
+    if (action === "edit") {
+      const { renderTemplateEditor } = await import("./ui/index.ts");
+      let saved = false;
+
+      await renderTemplateEditor({
+        templateId: template.id,
+        initialConfig: template.config,
+        onSave: async (config) => {
+          await createTemplate(template.id, config);
+          saved = true;
+        },
+      });
+
+      if (!saved) {
+        // Cancelled, go back to selection
+        continue;
+      }
+
+      p.log.success(`Template "${template.id}" updated.`);
+    }
+
+    // Use the template
     return [selection.id];
   }
-
-  // Custom entry
-  const repos = await p.text({
-    message: "Repositories",
-    placeholder: "org/repo or git URL, comma-separated",
-    validate: (input) => {
-      if (!input.trim()) return "At least one repository is required";
-      return undefined;
-    },
-  });
-
-  if (p.isCancel(repos)) {
-    p.cancel("Cancelled");
-    return null;
-  }
-
-  return repos
-    .split(",")
-    .map((r) => r.trim())
-    .filter(Boolean);
 }
 
 function expandHome(value: string): string {

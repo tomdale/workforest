@@ -242,4 +242,3 @@ export async function canSkipInstall(repoDir: string): Promise<boolean> {
   const storedHash = await getStoredLockfileHash(repoDir);
   return currentHash === storedHash;
 }
-

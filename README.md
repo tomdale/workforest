@@ -43,6 +43,37 @@ wf template new full-stack org/frontend org/api
 wf new full-stack -d "implementing user avatars"
 ```
 
+### Interactive Wizard
+
+Run `wf new` without arguments for the interactive wizard:
+
+```bash
+wf new
+```
+
+The wizard guides you through:
+
+1. **Template selection** — Choose a template or enter repositories manually
+2. **Template preview** — See full details before committing to a template
+3. **Feature name** — Describe your work in prose or enter a slug directly
+
+When you select a template, you'll see a preview showing repositories, hooks,
+and branch prefix. From the preview, you can:
+
+- **Use this template** — Proceed with workspace creation
+- **Edit template first** — Modify the template before using it
+- **Choose different template** — Go back to template selection
+
+The wizard also provides inline **template management** without leaving the
+flow. Select "Manage templates..." to:
+
+- **Create new template** — Start from scratch with the interactive editor
+- **Edit existing template** — Modify any saved template
+- **Clone and modify** — Copy a template as a starting point for a new one
+
+If no templates exist, the wizard offers to create one before falling back to
+manual repository entry.
+
 This example creates a directory like `user-avatars/` containing:
 
 - Fresh checkouts of each repository
