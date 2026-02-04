@@ -979,23 +979,127 @@ async function promptForFeatureName(): Promise<FeatureNameResult | null> {
 }
 
 /**
- * Format a template hint showing description, repo count, and hook count.
+ * Get terminal width with fallback.
+ */
+function getTerminalWidth(): number {
+  return process.stdout.columns ?? 80;
+}
+
+/**
+ * Extract a display-friendly `org/repo` name from various git URL formats.
+ *
+ * Supported formats:
+ * - `org/repo` (shorthand) → `org/repo`
+ * - `git@github.com:org/repo.git` → `org/repo`
+ * - `https://github.com/org/repo.git` → `org/repo`
+ * - `ssh://git@github.com/org/repo.git` → `org/repo`
+ */
+function getRepoDisplayName(repo: string): string {
+  const trimmed = repo.trim();
+
+  // Already shorthand format (org/repo without special chars at start)
+  if (/^[\w.-]+\/[\w.-]+$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // SSH format: git@host:path/to/repo.git
+  const sshMatch = trimmed.match(/^[\w-]+@[\w.-]+:(.+)$/);
+  if (sshMatch?.[1]) {
+    const path = sshMatch[1].replace(/\.git$/i, "");
+    const parts = path.split("/");
+    if (parts.length >= 2) {
+      return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+    }
+    return parts[parts.length - 1] ?? trimmed;
+  }
+
+  // URL formats: https://, http://, ssh://, git://
+  const urlMatch = trimmed.match(/^(?:https?|ssh|git):\/\/[^/]+\/(.+)$/);
+  if (urlMatch?.[1]) {
+    const path = urlMatch[1].replace(/\.git$/i, "");
+    const parts = path.split("/");
+    if (parts.length >= 2) {
+      return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+    }
+    return parts[parts.length - 1] ?? trimmed;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Format repository names with intelligent truncation.
+ *
+ * Returns a string like "org/repo1, org/repo2" or "org/repo1, 2 more"
+ * if the full list doesn't fit within maxWidth.
+ */
+function formatRepoNames(repos: string[], maxWidth: number): string {
+  if (repos.length === 0) {
+    return "0 repos";
+  }
+
+  const displayNames = repos.map(getRepoDisplayName);
+  const minWidth = 20;
+
+  // Fall back to count only if very narrow
+  if (maxWidth < minWidth) {
+    return `${repos.length} repo${repos.length !== 1 ? "s" : ""}`;
+  }
+
+  // Try to fit all names
+  const fullList = displayNames.join(", ");
+  if (fullList.length <= maxWidth) {
+    return fullList;
+  }
+
+  // Progressively truncate with ", N more"
+  for (let shown = displayNames.length - 1; shown >= 1; shown--) {
+    const remaining = displayNames.length - shown;
+    const partial = displayNames.slice(0, shown).join(", ");
+    const suffix = `, ${remaining} more`;
+    const result = partial + suffix;
+    if (result.length <= maxWidth) {
+      return result;
+    }
+  }
+
+  // Nothing fits, fall back to count
+  return `${repos.length} repo${repos.length !== 1 ? "s" : ""}`;
+}
+
+/**
+ * Format a template hint showing description and repository names.
  */
 function formatTemplateHint(
   template: Awaited<ReturnType<typeof loadTemplate>>,
+  labelWidth = 0,
 ): string {
   if (!template) return "";
-  const parts: string[] = [];
-  if (template.config.description) {
-    parts.push(template.config.description);
+
+  const terminalWidth = getTerminalWidth();
+  // Account for prompt overhead: "? message" prefix, spacing, and cursor
+  const promptOverhead = 6;
+  const separatorWidth = 3; // " | "
+
+  const description = template.config.description ?? "";
+  const descriptionWidth = description
+    ? description.length + separatorWidth
+    : 0;
+
+  // Available width for repo names
+  const availableWidth =
+    terminalWidth -
+    promptOverhead -
+    labelWidth -
+    descriptionWidth -
+    separatorWidth;
+
+  const repoNames = formatRepoNames(template.config.repos, availableWidth);
+
+  if (description) {
+    return `${description} | ${repoNames}`;
   }
-  const repoCount = template.config.repos.length;
-  parts.push(`${repoCount} repo${repoCount !== 1 ? "s" : ""}`);
-  const hookCount = template.config.hooks?.length ?? 0;
-  if (hookCount > 0) {
-    parts.push(`${hookCount} hook${hookCount !== 1 ? "s" : ""}`);
-  }
-  return parts.join(" | ");
+  return repoNames;
 }
 
 /**
@@ -1116,7 +1220,7 @@ async function wizardEditTemplate(
     options: templates.map((t) => ({
       value: t.id,
       label: t.id,
-      hint: formatTemplateHint(t),
+      hint: formatTemplateHint(t, t.id.length),
     })),
   });
 
@@ -1163,7 +1267,7 @@ async function wizardCloneTemplate(
     options: templates.map((t) => ({
       value: t.id,
       label: t.id,
-      hint: formatTemplateHint(t),
+      hint: formatTemplateHint(t, t.id.length),
     })),
   });
 
@@ -1340,7 +1444,7 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
       templates.map((t) => ({
         value: { type: "template", id: t.id },
         label: t.id,
-        hint: formatTemplateHint(t),
+        hint: formatTemplateHint(t, t.id.length),
       }));
 
     options.push({
