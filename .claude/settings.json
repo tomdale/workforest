@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(~/.config/workforest/**)"
+    ]
+  },
+  "additionalDirectories": [
+    "~/Code/ink",
+    "~/.cache/workforest",
+    "~/.config/workforest"
+  ]
+}
