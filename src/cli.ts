@@ -23,6 +23,7 @@ import type { RepoConfig, WorkspaceConfig } from "./types.ts";
 import { isInteractive, promptConfirm, promptText } from "./utils/prompts.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
+  type CleanupPreview,
   cleanupWorkspace,
   previewCleanup,
   validateWorkspace,
@@ -615,9 +616,11 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       "--dry-run": Boolean,
       "--force": Boolean,
       "--keep-mirrors": Boolean,
+      "--delete-remote-branches": Boolean,
       "-h": "--help",
       "-n": "--dry-run",
       "-f": "--force",
+      "-r": "--delete-remote-branches",
     },
     { argv },
   );
@@ -627,10 +630,45 @@ async function runCleanCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  const workspaceDir = args._[0] ?? process.cwd();
+  const interactive = isInteractive();
+  let workspaceDir = args._[0];
+  let isInsideWorkspace = false;
+
+  // Determine workspace directory
+  if (!workspaceDir) {
+    // First: check if we're inside a workspace (self-destruct mode)
+    const detectedWorkspace = await detectWorkspaceFromCwd();
+
+    if (detectedWorkspace) {
+      workspaceDir = detectedWorkspace;
+      isInsideWorkspace = true;
+    } else if (interactive) {
+      // Not in a workspace, offer interactive selection
+      const selected = await selectWorkspaceInteractive();
+      if (!selected) {
+        p.cancel("Cancelled");
+        return;
+      }
+      workspaceDir = selected;
+    } else {
+      log.error("No workspace path specified and not inside a workspace.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // Check if user is inside the workspace (even if they specified a path)
+  if (!isInsideWorkspace) {
+    const resolvedWorkspace = path.resolve(workspaceDir);
+    const cwd = process.cwd();
+    isInsideWorkspace =
+      cwd === resolvedWorkspace || cwd.startsWith(`${resolvedWorkspace}/`);
+  }
+
   const dryRun = args["--dry-run"] ?? false;
   const force = args["--force"] ?? false;
   const keepMirrors = args["--keep-mirrors"] ?? true;
+  let deleteRemoteBranches = args["--delete-remote-branches"] ?? false;
 
   // Validate workspace first
   try {
@@ -641,34 +679,72 @@ async function runCleanCommand(argv: string[]): Promise<void> {
     return;
   }
 
+  // Get preview with remote branch check (always check to potentially prompt)
+  const preview = await previewCleanup(workspaceDir, {
+    checkRemoteBranches: true,
+  });
+
   // Show preview
-  const preview = await previewCleanup(workspaceDir);
-  log.info(`Workspace: ${preview.workspaceDir}`);
-  log.info(`Repositories: ${preview.repos.join(", ")}`);
+  if (interactive) {
+    showCleanupPreview(preview);
 
-  // Confirm unless --force or --dry-run
-  if (!force && !dryRun) {
-    const readline = await import("node:readline");
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    const answer = await new Promise<string>((resolve) => {
-      rl.question(
-        "This will delete the workspace directory. Continue? [y/N] ",
-        resolve,
-      );
-    });
-    rl.close();
-
-    if (answer.toLowerCase() !== "y") {
-      log.info("Cancelled.");
-      return;
+    if (isInsideWorkspace) {
+      p.log.warn("You are inside the workspace being deleted");
+    }
+  } else {
+    log.info(`Workspace: ${preview.workspaceDir}`);
+    log.info(`Repositories: ${preview.repos.join(", ")}`);
+    if (isInsideWorkspace) {
+      log.warn("You are inside the workspace being deleted");
     }
   }
 
-  await cleanupWorkspace(workspaceDir, { dryRun, force, keepMirrors });
+  // Confirm unless --force or --dry-run
+  if (!force && !dryRun) {
+    if (!interactive) {
+      log.error("Cannot confirm in non-interactive mode. Use --force.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const confirmed = await promptConfirm(
+      "This will delete the workspace directory. Continue?",
+      false,
+    );
+    if (!confirmed) {
+      p.cancel("Cancelled");
+      return;
+    }
+
+    // If -r flag not set, prompt only if there are eligible merged branches
+    if (!deleteRemoteBranches && preview.remoteBranches?.length) {
+      const branchCount = preview.remoteBranches.length;
+      const branchList = preview.remoteBranches
+        .map((b) => `${b.repo}: ${b.branch}`)
+        .join(", ");
+      deleteRemoteBranches = await promptConfirm(
+        `Delete ${branchCount} merged remote branch${branchCount !== 1 ? "es" : ""} (${branchList})?`,
+        false,
+      );
+    }
+  }
+
+  await cleanupWorkspace(workspaceDir, {
+    dryRun,
+    force,
+    keepMirrors,
+    deleteRemoteBranches,
+  });
+
+  // Post-cleanup message if user was inside the workspace
+  if (isInsideWorkspace && !dryRun) {
+    const parentDir = path.dirname(path.resolve(workspaceDir));
+    if (interactive) {
+      p.log.info(`Workspace deleted. Run: cd ${parentDir}`);
+    } else {
+      log.info(`Workspace deleted. Run: cd ${parentDir}`);
+    }
+  }
 }
 
 async function runNewCommand(argv: string[]): Promise<void> {
@@ -1559,4 +1635,133 @@ function expandHome(value: string): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Detect if the current working directory is inside a workforest workspace.
+ * Walks up the directory tree looking for a .workforest file.
+ * Returns the workspace directory path if found, null otherwise.
+ */
+async function detectWorkspaceFromCwd(): Promise<string | null> {
+  let dir = process.cwd();
+
+  while (dir !== path.dirname(dir)) {
+    const metadataPath = path.join(dir, ".workforest");
+    try {
+      await fs.stat(metadataPath);
+      return dir;
+    } catch {
+      // Not found, continue up
+    }
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/**
+ * Workspace information for listing and selection.
+ */
+type WorkspaceInfo = {
+  name: string;
+  path: string;
+  description?: string;
+  template?: string;
+  created?: string;
+  repoCount: number;
+};
+
+/**
+ * Find all workspaces in a directory.
+ */
+async function findWorkspaces(rootDir: string): Promise<WorkspaceInfo[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(rootDir);
+  } catch {
+    return [];
+  }
+
+  const workspaces: WorkspaceInfo[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(rootDir, entry);
+    try {
+      const stat = await fs.stat(entryPath);
+      if (!stat.isDirectory()) continue;
+
+      const metadata = await readWorkspaceMetadata(entryPath);
+      if (metadata) {
+        workspaces.push({
+          name: entry,
+          path: entryPath,
+          description: metadata.workspace.description,
+          template: metadata.workspace.template_id,
+          created: metadata.workspace.created_at,
+          repoCount: metadata.repos.length,
+        });
+      }
+    } catch {
+      // Skip entries that can't be read
+    }
+  }
+
+  return workspaces;
+}
+
+/**
+ * Interactive workspace selection using @clack/prompts.
+ * Returns the selected workspace path, or null if cancelled.
+ */
+async function selectWorkspaceInteractive(): Promise<string | null> {
+  const { config } = await loadWorkspaceConfig();
+
+  if (!config.defaultDir) {
+    p.log.error(
+      "No defaultDir configured. Specify workspace path or run: wf config init",
+    );
+    return null;
+  }
+
+  const workspaceRoot = path.resolve(expandHome(config.defaultDir));
+  const workspaces = await findWorkspaces(workspaceRoot);
+
+  if (workspaces.length === 0) {
+    p.log.info(`No workspaces found in ${workspaceRoot}`);
+    return null;
+  }
+
+  const selection = await p.select({
+    message: "Select workspace to clean",
+    options: workspaces.map((ws) => ({
+      value: ws.path,
+      label: ws.name,
+      hint: `${ws.repoCount} repo${ws.repoCount !== 1 ? "s" : ""}${ws.template ? ` (${ws.template})` : ""}`,
+    })),
+  });
+
+  if (p.isCancel(selection)) {
+    return null;
+  }
+
+  return selection;
+}
+
+/**
+ * Display a cleanup preview using @clack/prompts note format.
+ */
+function showCleanupPreview(preview: CleanupPreview): void {
+  const lines: string[] = [
+    `Directory: ${preview.workspaceDir}`,
+    `Repositories: ${preview.repos.join(", ")}`,
+  ];
+
+  if (preview.remoteBranches && preview.remoteBranches.length > 0) {
+    lines.push("");
+    lines.push("Merged remote branches available for deletion:");
+    for (const branch of preview.remoteBranches) {
+      lines.push(`  • ${branch.repo}: ${branch.branch}`);
+    }
+  }
+
+  p.note(lines.join("\n"), "Cleanup preview");
 }

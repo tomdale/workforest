@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { log } from "../logger.ts";
+import { runGit } from "../services/git.ts";
 import type { CleanupOptions } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
@@ -15,8 +16,24 @@ export type CleanupState =
   | { phase: "init"; message: string }
   | { phase: "worktree"; repo: string; state: TaskState }
   | { phase: "worktree-complete"; repo: string }
+  | {
+      phase: "remote-branch";
+      repo: string;
+      branch: string;
+      status: "checking" | "deleting" | "deleted" | "skipped" | "failed";
+      reason?: string;
+    }
   | { phase: "remove-dir"; message: string }
-  | { phase: "complete"; removedRepos: string[] };
+  | { phase: "complete"; removedRepos: string[]; deletedBranches?: string[] };
+
+/**
+ * Information about a remote branch that can be deleted.
+ */
+export type RemoteBranchInfo = {
+  repo: string;
+  branch: string;
+  merged: boolean;
+};
 
 /**
  * Result of a dry-run cleanup showing what would be deleted.
@@ -26,7 +43,51 @@ export type CleanupPreview = {
   repos: string[];
   workspaceFile: string;
   metadataFile?: string;
+  remoteBranches?: RemoteBranchInfo[];
 };
+
+/**
+ * Check if a remote branch exists on origin.
+ */
+async function remoteBranchExists(
+  repoDir: string,
+  branch: string,
+): Promise<boolean> {
+  try {
+    await runGit(["ls-remote", "--exit-code", "--heads", "origin", branch], {
+      cwd: repoDir,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a branch has been merged into the default branch.
+ * Returns true if the branch is fully merged (no commits beyond default branch).
+ */
+async function isBranchMerged(
+  repoDir: string,
+  branch: string,
+  defaultBranch: string,
+): Promise<boolean> {
+  try {
+    // Fetch latest to ensure we have up-to-date refs
+    await runGit(["fetch", "origin", defaultBranch], { cwd: repoDir });
+
+    // Check if the branch commit is reachable from default branch
+    // If `git log origin/main..origin/branch` returns nothing, branch is merged
+    const { stdout } = await runGit(
+      ["log", "--oneline", `origin/${defaultBranch}..origin/${branch}`],
+      { cwd: repoDir },
+    );
+    return stdout.trim() === "";
+  } catch {
+    // If check fails, assume not merged (safer default)
+    return false;
+  }
+}
 
 /**
  * Validates that a directory is a workforest workspace.
@@ -87,21 +148,63 @@ export async function validateWorkspace(
 
 /**
  * Preview what would be cleaned up without actually deleting anything.
+ * Optionally checks for merged remote branches that can be deleted.
  */
 export async function previewCleanup(
   workspaceDir: string,
+  options: { checkRemoteBranches?: boolean } = {},
 ): Promise<CleanupPreview> {
   const resolvedDir = path.resolve(workspaceDir);
   const workspaceName = path.basename(resolvedDir);
   const workspace = await validateWorkspace(resolvedDir);
 
   const metadataExists = await pathExists(getMetadataPath(resolvedDir));
+  const metadata = await readWorkspaceMetadata(resolvedDir);
+
+  // Check for merged remote branches if requested
+  const remoteBranches: RemoteBranchInfo[] = [];
+  if (options.checkRemoteBranches && metadata) {
+    for (const repo of metadata.repos) {
+      // Skip if no feature branch recorded or if it's the same as default
+      if (!repo.feature_branch || repo.feature_branch === repo.default_branch) {
+        continue;
+      }
+
+      const repoDir = path.join(resolvedDir, repo.name);
+      if (!(await pathExists(repoDir))) {
+        continue;
+      }
+
+      // Check if branch exists on remote
+      const exists = await remoteBranchExists(repoDir, repo.feature_branch);
+      if (!exists) {
+        continue;
+      }
+
+      // Check if branch is merged
+      const merged = await isBranchMerged(
+        repoDir,
+        repo.feature_branch,
+        repo.default_branch,
+      );
+
+      // Only include merged branches (safe to delete)
+      if (merged) {
+        remoteBranches.push({
+          repo: repo.name,
+          branch: repo.feature_branch,
+          merged: true,
+        });
+      }
+    }
+  }
 
   return {
     workspaceDir: resolvedDir,
     repos: workspace.folders.map((f) => f.path),
     workspaceFile: `${workspaceName}.code-workspace`,
     ...(metadataExists ? { metadataFile: ".workforest" } : {}),
+    ...(remoteBranches.length > 0 ? { remoteBranches } : {}),
   };
 }
 
@@ -112,13 +215,18 @@ export async function* cleanupWorkspaceGenerator(
   workspaceDir: string,
   options: CleanupOptions = {},
 ): AsyncGenerator<CleanupState> {
-  const { dryRun = false, keepMirrors = true } = options;
+  const {
+    dryRun = false,
+    keepMirrors = true,
+    deleteRemoteBranches = false,
+  } = options;
   const resolvedDir = path.resolve(workspaceDir);
 
   yield { phase: "init", message: "Validating workspace" };
 
   const workspace = await validateWorkspace(resolvedDir);
   const repos = workspace.folders.map((f) => f.path);
+  const metadata = await readWorkspaceMetadata(resolvedDir);
 
   yield {
     phase: "init",
@@ -127,6 +235,99 @@ export async function* cleanupWorkspaceGenerator(
 
   const cacheDir = await ensureCacheDir();
   const removedRepos: string[] = [];
+  const deletedBranches: string[] = [];
+
+  // Delete remote branches first (before removing worktrees)
+  if (deleteRemoteBranches && metadata) {
+    for (const repo of metadata.repos) {
+      // Skip if no feature branch recorded or if it's the same as default
+      if (!repo.feature_branch || repo.feature_branch === repo.default_branch) {
+        continue;
+      }
+
+      const repoDir = path.join(resolvedDir, repo.name);
+      if (!(await pathExists(repoDir))) {
+        continue;
+      }
+
+      yield {
+        phase: "remote-branch",
+        repo: repo.name,
+        branch: repo.feature_branch,
+        status: "checking",
+      };
+
+      // Check if branch exists on remote
+      const exists = await remoteBranchExists(repoDir, repo.feature_branch);
+      if (!exists) {
+        yield {
+          phase: "remote-branch",
+          repo: repo.name,
+          branch: repo.feature_branch,
+          status: "skipped",
+          reason: "Branch does not exist on remote",
+        };
+        continue;
+      }
+
+      // Check if branch is merged (safety check)
+      const merged = await isBranchMerged(
+        repoDir,
+        repo.feature_branch,
+        repo.default_branch,
+      );
+
+      if (!merged) {
+        yield {
+          phase: "remote-branch",
+          repo: repo.name,
+          branch: repo.feature_branch,
+          status: "skipped",
+          reason: "Branch has unmerged changes",
+        };
+        continue;
+      }
+
+      if (dryRun) {
+        yield {
+          phase: "remote-branch",
+          repo: repo.name,
+          branch: repo.feature_branch,
+          status: "skipped",
+          reason: "Would delete (dry-run)",
+        };
+      } else {
+        yield {
+          phase: "remote-branch",
+          repo: repo.name,
+          branch: repo.feature_branch,
+          status: "deleting",
+        };
+
+        try {
+          await runGit(["push", "origin", "--delete", repo.feature_branch], {
+            cwd: repoDir,
+          });
+          yield {
+            phase: "remote-branch",
+            repo: repo.name,
+            branch: repo.feature_branch,
+            status: "deleted",
+          };
+          deletedBranches.push(`${repo.name}:${repo.feature_branch}`);
+        } catch (error) {
+          yield {
+            phase: "remote-branch",
+            repo: repo.name,
+            branch: repo.feature_branch,
+            status: "failed",
+            reason:
+              error instanceof Error ? error.message : "Unknown error occurred",
+          };
+        }
+      }
+    }
+  }
 
   // Remove worktrees from mirrors
   for (const repoName of repos) {
@@ -226,7 +427,11 @@ export async function* cleanupWorkspaceGenerator(
     }
   }
 
-  yield { phase: "complete", removedRepos };
+  yield {
+    phase: "complete",
+    removedRepos,
+    ...(deletedBranches.length > 0 ? { deletedBranches } : {}),
+  };
 }
 
 /**
@@ -254,6 +459,29 @@ export async function cleanupWorkspace(
       case "worktree-complete":
         log.success(`${state.repo}: worktree removed from mirror`);
         break;
+      case "remote-branch":
+        switch (state.status) {
+          case "checking":
+            log.info(`${state.repo}: checking remote branch ${state.branch}`);
+            break;
+          case "deleting":
+            log.info(`${state.repo}: deleting remote branch ${state.branch}`);
+            break;
+          case "deleted":
+            log.success(`${state.repo}: deleted remote branch ${state.branch}`);
+            break;
+          case "skipped":
+            log.info(
+              `${state.repo}: skipped ${state.branch} - ${state.reason}`,
+            );
+            break;
+          case "failed":
+            log.error(
+              `${state.repo}: failed to delete ${state.branch} - ${state.reason}`,
+            );
+            break;
+        }
+        break;
       case "remove-dir":
         log.info(state.message);
         break;
@@ -261,8 +489,11 @@ export async function cleanupWorkspace(
         if (options.dryRun) {
           log.info("Dry-run complete. No changes made.");
         } else {
+          const branchMsg = state.deletedBranches?.length
+            ? `, deleted ${state.deletedBranches.length} remote branch(es)`
+            : "";
           log.success(
-            `Cleanup complete. Removed ${state.removedRepos.length} worktree(s).`,
+            `Cleanup complete. Removed ${state.removedRepos.length} worktree(s)${branchMsg}.`,
           );
         }
         break;
