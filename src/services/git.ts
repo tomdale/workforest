@@ -125,7 +125,7 @@ export async function* fixBareRepoRefsGenerator(
   // Each line must end with newline, and we need a final newline
   await runGitWithStdin(
     ["update-ref", "--stdin"],
-    stdinLines.join("\n") + "\n",
+    `${stdinLines.join("\n")}\n`,
     { cwd },
   );
 }
