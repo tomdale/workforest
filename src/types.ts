@@ -42,6 +42,7 @@ export type CleanupOptions = {
   keepMirrors?: boolean;
   dryRun?: boolean;
   force?: boolean;
+  deleteRemoteBranches?: boolean;
 };
 
 /**
@@ -64,4 +65,5 @@ export type WorkspaceRepoMetadata = {
   remote: string;
   default_branch: string;
   has_lockfile: boolean;
+  feature_branch?: string;
 };

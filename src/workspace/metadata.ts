@@ -10,6 +10,7 @@ export type WriteMetadataOptions = {
   featureName: string;
   description?: string;
   templateId?: string;
+  branchName?: string;
   repos: readonly {
     name: string;
     remote: string;
@@ -40,6 +41,7 @@ export async function writeWorkspaceMetadata(
       remote: repo.remote,
       default_branch: repo.defaultBranch,
       has_lockfile: repo.hasLockfile,
+      ...(options.branchName ? { feature_branch: options.branchName } : {}),
     })),
   };
 

@@ -244,6 +244,7 @@ export async function* stampWorkspaceGenerator({
   yield { phase: "finalize", message: "Writing workspace metadata" };
   await writeWorkspaceMetadata(workspaceDir, {
     featureName,
+    branchName: effectiveBranchName,
     repos: preparedRepos.map((r) => ({
       name: r.repo.name,
       remote: r.repo.remote,
@@ -471,6 +472,7 @@ export async function stampWorkspaceInteractive(
 
   await writeWorkspaceMetadata(workspaceDir, {
     featureName,
+    branchName: effectiveBranchName,
     repos: preparedRepos,
     ...(description && { description }),
     ...(templateId && { templateId }),
