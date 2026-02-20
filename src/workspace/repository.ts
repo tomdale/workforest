@@ -111,6 +111,38 @@ export async function ensureMirrorRepo(
 }
 
 /**
+ * Detect the actual default branch of a bare mirror repo by reading its HEAD symref.
+ *
+ * After fixBareRepoRefsGenerator moves refs/heads/* to refs/remotes/origin/*,
+ * HEAD still preserves the original default branch name. We verify the
+ * corresponding remote ref exists before trusting it, falling back to the
+ * configured value if anything goes wrong.
+ */
+async function detectDefaultBranch(
+  mirrorDir: string,
+  fallback: string,
+): Promise<string> {
+  try {
+    const { stdout } = await runGit(["symbolic-ref", "HEAD"], {
+      cwd: mirrorDir,
+    });
+    const branch = stdout.trim().replace("refs/heads/", "");
+
+    const { stdout: refOutput } = await runGit(
+      ["for-each-ref", `refs/remotes/origin/${branch}`],
+      { cwd: mirrorDir },
+    );
+
+    if (refOutput.trim()) {
+      return branch;
+    }
+  } catch {
+    // Fall through to return fallback
+  }
+  return fallback;
+}
+
+/**
  * Generator version of ensureWorkingCopy that yields log messages.
  */
 export async function* ensureWorkingCopyGenerator(
@@ -130,10 +162,17 @@ export async function* ensureWorkingCopyGenerator(
     return;
   }
 
+  // The configured defaultBranch defaults to "main" for org/repo slugs, but
+  // many repos use a different trunk (e.g. "canary", "master", "develop").
+  // Read the actual default branch from the mirror's HEAD symref, which is
+  // set by git during clone and remains accurate even after fixBareRepoRefsGenerator
+  // moves the local branch refs to refs/remotes/origin/*.
+  const defaultBranch = await detectDefaultBranch(mirrorDir, repo.defaultBranch);
+
   yield {
     status: "log",
     level: "info",
-    message: `Creating worktree for ${repo.name} on branch "${branchName}" from origin/${repo.defaultBranch}`,
+    message: `Creating worktree for ${repo.name} on branch "${branchName}" from origin/${defaultBranch}`,
   };
 
   // Wrap the git command in a generator for withRetryGenerator
@@ -145,7 +184,7 @@ export async function* ensureWorkingCopyGenerator(
         "-B",
         branchName,
         targetDir,
-        `origin/${repo.defaultBranch}`,
+        `origin/${defaultBranch}`,
       ],
       { cwd: mirrorDir },
     ),
