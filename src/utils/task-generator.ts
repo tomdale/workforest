@@ -35,11 +35,13 @@ export async function* runCommandGenerator(
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let stderr = "";
-
   // Set up data handlers that collect and yield output
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
+
+  // Keep only the tail of stderr for error messages to avoid OOM on verbose commands.
+  const MAX_STDERR_CHARS = 4096;
+  let stderrTail = "";
 
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -49,7 +51,7 @@ export async function* runCommandGenerator(
   });
 
   child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
+    stderrTail = (stderrTail + chunk).slice(-MAX_STDERR_CHARS);
     stderrChunks.push(chunk);
   });
 
@@ -95,7 +97,7 @@ export async function* runCommandGenerator(
         yield {
           status: "failed",
           error: new Error(
-            `${command} ${args.join(" ")} exited with code ${exitCode}. ${stderr}`,
+            `${command} ${args.join(" ")} exited with code ${exitCode}. ${stderrTail}`,
           ),
         };
       }
