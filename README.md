@@ -95,6 +95,24 @@ wf new frontend backend -d "add dark mode support"
 
 Both repos get a `dark-mode-support` branch, ready for coordinated development.
 
+### Forking a Workspace
+
+When you want to try a different approach without losing your current work, fork
+the workspace. This creates a new sibling workspace with the same repos and
+template hooks, but with fresh branches off each repo's default branch:
+
+```bash
+cd ~/Code/workspaces/fix-auth-bug
+wf fork new-approach
+```
+
+The fork inherits the branch prefix, directory prefix, and template from the
+source workspace. You can also use a description:
+
+```bash
+wf fork -d "trying a different strategy"
+```
+
 ### Code Review
 
 Check out someone's PR across multiple repos without switching branches in your
@@ -279,6 +297,7 @@ run in parallel.
 
 ```
 wf new [template|repo...]       Create a workspace
+wf fork <name>                  Fork current workspace with new branches
 wf clean [dir]                  Remove a workspace
 wf template list                List templates
 wf template new                 Create a template

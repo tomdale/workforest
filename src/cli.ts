@@ -19,7 +19,11 @@ import {
   listTemplates,
   loadTemplate,
 } from "./templates/index.ts";
-import type { RepoConfig, WorkspaceConfig } from "./types.ts";
+import type {
+  RepoConfig,
+  WorkspaceConfig,
+  WorkspaceMetadata,
+} from "./types.ts";
 import { isInteractive, promptConfirm, promptText } from "./utils/prompts.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
@@ -64,6 +68,9 @@ export async function cli(): Promise<void> {
       break;
     case "template":
       await runTemplateCommand(commandArgv);
+      break;
+    case "fork":
+      await runForkCommand(commandArgv);
       break;
     case "list":
     case "ls":
@@ -927,6 +934,206 @@ async function runNewCommand(argv: string[]): Promise<void> {
     await stampWorkspace(options);
     log.info("Happy shipping!");
   }
+}
+
+async function runForkCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--description": String,
+      "--dry-run": Boolean,
+      "-h": "--help",
+      "-d": "--description",
+      "-n": "--dry-run",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  const interactive = isInteractive();
+
+  // Must be inside a workspace
+  const sourceDir = await detectWorkspaceFromCwd();
+  if (!sourceDir) {
+    log.error(
+      "Not inside a workspace. Run this command from within an existing workspace.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const metadata = await readWorkspaceMetadata(sourceDir);
+  if (!metadata) {
+    log.error(`Could not read workspace metadata from ${sourceDir}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (interactive && args._.length === 0) {
+    p.intro("Fork workspace");
+  }
+
+  // Get feature name from positional arg, --description, or interactive prompt
+  let featureName: string;
+  let description: string | undefined;
+
+  if (args._.length > 0) {
+    const input = args._[0];
+    if (isSlug(input)) {
+      featureName = input;
+    } else {
+      description = input;
+      const generated = await generateSlugFromDescription(input);
+      featureName = generated ?? sanitizeToSlug(input);
+    }
+  } else if (args["--description"]) {
+    const input = args["--description"];
+    if (isSlug(input)) {
+      featureName = input;
+    } else {
+      description = input;
+      if (interactive) {
+        const s = p.spinner();
+        s.start("Generating feature name...");
+        const generated = await generateSlugFromDescription(input);
+        s.stop("Feature name ready");
+        featureName = generated ?? sanitizeToSlug(input);
+      } else {
+        const generated = await generateSlugFromDescription(input);
+        featureName = generated ?? sanitizeToSlug(input);
+      }
+    }
+  } else {
+    if (!interactive) {
+      log.error(
+        "Missing name or --description argument (required in non-interactive mode).",
+      );
+      log.info("Usage: wf fork <name>");
+      log.info("Example: wf fork new-approach");
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = await promptForFeatureName();
+    if (!result) return;
+    featureName = result.featureName;
+    description = result.description;
+  }
+
+  // Reconstruct RepoConfig[] from metadata
+  const repos: RepoConfig[] = metadata.repos.map((r) => ({
+    name: r.name,
+    remote: r.remote,
+    defaultBranch: r.default_branch,
+  }));
+
+  // Infer prefixes from the source workspace
+  const branchPrefix = inferBranchPrefix(metadata);
+  const dirPrefix = inferDirPrefix(sourceDir, metadata.workspace.feature_name);
+  const branchName = branchPrefix
+    ? `${branchPrefix}${featureName}`
+    : featureName;
+
+  // Build new workspace as a sibling of the source
+  const workspaceDir = path.join(
+    path.dirname(sourceDir),
+    `${dirPrefix}${featureName}`,
+  );
+
+  const templateId = metadata.workspace.template_id;
+
+  // Dry-run mode
+  if (args["--dry-run"]) {
+    if (interactive) {
+      p.note(
+        [
+          `Source:    ${path.basename(sourceDir)}`,
+          `Directory: ${workspaceDir}`,
+          `Feature: ${featureName}`,
+          description ? `Description: ${description}` : null,
+          `Branch: ${branchName}`,
+          templateId ? `Template: ${templateId}` : null,
+          "",
+          "Repositories:",
+          ...repos.map((r) => `  • ${r.name}`),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        "Dry run preview",
+      );
+      p.outro("No changes made");
+    } else {
+      console.log("\nDry run - no changes will be made\n");
+      console.log(`Source workspace: ${path.basename(sourceDir)}`);
+      console.log("New workspace:");
+      console.log(`  Directory: ${workspaceDir}`);
+      console.log(`  Feature: ${featureName}`);
+      if (description) {
+        console.log(`  Description: ${description}`);
+      }
+      console.log(`  Branch: ${branchName}`);
+      if (templateId) {
+        console.log(`  Template: ${templateId}`);
+      }
+      console.log("\nRepositories:");
+      for (const repo of repos) {
+        console.log(`  - ${repo.name} (${repo.remote})`);
+      }
+      console.log();
+    }
+    return;
+  }
+
+  // Stamp workspace
+  const options = {
+    featureName,
+    branchName,
+    workspaceDir,
+    repos,
+    ...(description && { description }),
+    ...(templateId && { templateId }),
+  };
+
+  if (interactive) {
+    const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
+    await stampWorkspaceInteractive(options);
+    p.outro("Happy shipping!");
+  } else {
+    await stampWorkspace(options);
+    log.info("Happy shipping!");
+  }
+}
+
+/**
+ * Extract the branch prefix by comparing feature_branch to feature_name.
+ * E.g. branch "td/fix-auth" with name "fix-auth" → prefix "td/".
+ */
+function inferBranchPrefix(metadata: WorkspaceMetadata): string {
+  const { feature_name } = metadata.workspace;
+  const firstRepo = metadata.repos[0];
+  if (!firstRepo?.feature_branch) return "";
+
+  const branch = firstRepo.feature_branch;
+  if (branch.endsWith(feature_name)) {
+    return branch.slice(0, -feature_name.length);
+  }
+  return "";
+}
+
+/**
+ * Extract the directory prefix by comparing the directory name to feature_name.
+ * E.g. dir "wf-fix-auth" with name "fix-auth" → prefix "wf-".
+ */
+function inferDirPrefix(workspaceDir: string, featureName: string): string {
+  const dirName = path.basename(workspaceDir);
+  if (dirName.endsWith(featureName)) {
+    return dirName.slice(0, -featureName.length);
+  }
+  return "";
 }
 
 type ResolvedSelections = {

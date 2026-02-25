@@ -26,6 +26,7 @@ ${chalk.bold("Usage:")} wf <command> [options]
 
 ${chalk.bold("Commands:")}
   new [template|repo...]       Create a workspace
+  fork <name>                  Fork current workspace with new branches
   clean [dir]                  Remove a workspace (or run inside workspace)
   list                         List workspaces
   template list|show|new|...   Manage templates
@@ -41,6 +42,7 @@ ${chalk.bold("Examples:")}
   wf new my-template -d "fixing the auth bug"
   wf new vercel/front vercel/api -d "new feature"
   wf new my-template --dry-run      Preview without creating
+  wf fork new-approach              Fork workspace with new branch names
   wf list                           Show all workspaces
   wf clean                          Clean current workspace (self-destruct)
   wf clean ./my-workspace -r        Clean and delete merged remote branches
