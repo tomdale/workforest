@@ -359,11 +359,22 @@ export async function* cleanupWorkspaceGenerator(
         },
       };
     } else {
-      for await (const state of cleanupWorkspaceWorktreesGenerator(
-        mirrorDir,
-        resolvedDir,
-      )) {
-        yield { phase: "worktree", repo: repoName, state };
+      try {
+        for await (const state of cleanupWorkspaceWorktreesGenerator(
+          mirrorDir,
+          resolvedDir,
+        )) {
+          yield { phase: "worktree", repo: repoName, state };
+        }
+      } catch (error) {
+        yield {
+          phase: "worktree",
+          repo: repoName,
+          state: {
+            status: "failed",
+            error: error instanceof Error ? error : new Error(String(error)),
+          },
+        };
       }
     }
 

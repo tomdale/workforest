@@ -36,6 +36,7 @@ export type RunCommandOptions = {
   cwd?: string;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  timeout?: number;
 };
 
 export type CleanupOptions = {

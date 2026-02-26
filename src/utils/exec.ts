@@ -7,10 +7,12 @@ import type { RunCommandOptions } from "../types.ts";
  * Always pipes stdout/stderr and returns the captured output.
  * Optionally streams output via callbacks for real-time display.
  */
+const FORCE_KILL_DELAY = 5_000;
+
 export function runCommand(
   command: string,
   args: string[],
-  { cwd, onStdout, onStderr }: RunCommandOptions = {},
+  { cwd, onStdout, onStderr, timeout }: RunCommandOptions = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -20,6 +22,16 @@ export function runCommand(
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeout) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        setTimeout(() => child.kill("SIGKILL"), FORCE_KILL_DELAY);
+      }, timeout);
+    }
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -33,9 +45,19 @@ export function runCommand(
       onStderr?.(chunk);
     });
 
-    child.on("error", (error_: Error) => reject(error_));
+    child.on("error", (error_: Error) => {
+      if (timer) clearTimeout(timer);
+      reject(error_);
+    });
     child.on("close", (code: number | null) => {
-      if (code === 0) {
+      if (timer) clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `${command} ${args.join(" ")} timed out after ${timeout}ms`,
+          ),
+        );
+      } else if (code === 0) {
         resolve({ stdout, stderr });
       } else {
         reject(
