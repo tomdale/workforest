@@ -488,7 +488,9 @@ async function runTemplateNew(argv: string[]): Promise<void> {
   // Get description from flag or prompt
   let description = args["--description"];
   if (description === undefined && isInteractive()) {
-    description = await promptText("Description (optional)");
+    description = await promptText("Description", {
+      placeholder: "(optional)",
+    });
   }
 
   const trimmedDescription = description?.trim();

@@ -3,6 +3,7 @@ import * as p from "@clack/prompts";
 export type PromptTextOptions = {
   validate?: (input: string) => string | null;
   defaultValue?: string;
+  placeholder?: string;
 };
 
 export type PromptSelectOption<T> = {
@@ -50,9 +51,16 @@ export async function promptText(
   message: string,
   options: PromptTextOptions = {},
 ): Promise<string> {
+  const hasDefault =
+    options.defaultValue !== undefined && options.defaultValue !== "";
+  const placeholderText = hasDefault
+    ? undefined
+    : (options.placeholder ?? "(none)");
   const result = await p.text({
     message,
-    defaultValue: options.defaultValue || undefined,
+    ...(hasDefault
+      ? { defaultValue: options.defaultValue }
+      : { placeholder: placeholderText }),
     validate: options.validate
       ? (v) => options.validate?.(v) ?? undefined
       : undefined,
@@ -60,6 +68,10 @@ export async function promptText(
   if (p.isCancel(result)) {
     p.cancel("Cancelled");
     process.exit(0);
+  }
+  // Clack returns the placeholder text when the user submits without typing
+  if (placeholderText && result === placeholderText) {
+    return "";
   }
   return result;
 }
