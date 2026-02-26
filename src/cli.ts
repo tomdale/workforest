@@ -247,6 +247,7 @@ async function runListCommand(): Promise<void> {
     description?: string;
     template?: string;
     created?: string;
+    branch?: string;
     repos: number;
   }> = [];
 
@@ -263,6 +264,7 @@ async function runListCommand(): Promise<void> {
           path: entryPath,
           description: metadata.workspace.description,
           template: metadata.workspace.template_id,
+          branch: metadata.repos[0]?.feature_branch,
           created: metadata.workspace.created_at,
           repos: metadata.repos.length,
         });
@@ -282,11 +284,14 @@ async function runListCommand(): Promise<void> {
   for (const ws of workspaces) {
     const desc = ws.description ? ` - ${ws.description}` : "";
     const template = ws.template ? ` (${ws.template})` : "";
+    const branch = ws.branch ? `, branch: ${ws.branch}` : "";
     const created = ws.created
       ? new Date(ws.created).toLocaleDateString()
       : "unknown";
     console.log(`  ${ws.name}${desc}`);
-    console.log(`    ${ws.repos} repos${template}, created ${created}`);
+    console.log(
+      `    ${ws.repos} repos${template}${branch}, created ${created}`,
+    );
   }
 
   console.log();
