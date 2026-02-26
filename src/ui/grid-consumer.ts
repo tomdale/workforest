@@ -1,7 +1,11 @@
-import { Screen } from "@unblessed/node";
+import { NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import { runParallel } from "../utils/task-generator.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
+
+// @unblessed/core requires a runtime to be registered before any Screen is created.
+// NodeRuntime provides the Node.js-specific implementations (fs, process, tty, etc.).
+setRuntime(new NodeRuntime());
 
 export type RenderPipelinesGridOptions = {
   pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;

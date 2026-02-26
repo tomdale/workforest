@@ -51,6 +51,37 @@ Long-running operations use async generators that yield state updates, enabling 
 - Node.js >= 25 required
 - NEVER use `any` or `!` non-null assertions
 
+## Testing the CLI in Interactive Mode
+
+`pnpm test` and the Bash tool both run in non-interactive shells without a real TTY.
+This silently bypasses large parts of the CLI:
+
+- `shouldUseGrid()` returns `false` (no TTY → spinner fallback, never `renderPipelinesGrid`)
+- Clack prompts (`@clack/prompts`) skip or behave differently without a TTY
+- Any code path gated on `process.stdout.isTTY` is invisible to automated tests
+
+**After any change that touches the TUI, prompt flow, or `wf new` end-to-end path,
+smoke-test in a real terminal using tmux:**
+
+```bash
+# Spin up a PTY session that exercises the full interactive path
+tmux new-session -d -s wf-smoke -x 220 -y 50
+tmux send-keys -t wf-smoke 'node /Users/tomdale/Code/workforest/bin/workforest.js new' Enter
+sleep 1
+tmux capture-pane -t wf-smoke -p   # inspect what the user actually sees
+# Drive the prompts, then watch the TUI grid render
+tmux kill-session -t wf-smoke
+```
+
+Key things to verify:
+- Clack prompts render and accept input correctly
+- `shouldUseGrid()` returns `true` in the tmux PTY (it has a real TTY)
+- The `@unblessed` grid appears and updates as repos are set up
+- The process exits cleanly after completion
+
+Do not rely solely on `pnpm test` to validate user-facing behavior — the test suite
+only covers logic that runs outside the TTY-gated paths.
+
 ## Documentation
 
 - Update `README.md` after making any user-visible changes (new commands, changed behavior, new features, etc.)
