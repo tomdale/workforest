@@ -52,7 +52,7 @@ export async function promptText(
 ): Promise<string> {
   const result = await p.text({
     message,
-    defaultValue: options.defaultValue,
+    defaultValue: options.defaultValue || undefined,
     validate: options.validate
       ? (v) => options.validate?.(v) ?? undefined
       : undefined,
