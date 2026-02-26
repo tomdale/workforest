@@ -38,8 +38,7 @@ export async function renderTemplateEditor({
   }
 
   // Clack returns the placeholder text when the user submits without typing
-  const cleanedDescription =
-    description === "(optional)" ? "" : description;
+  const cleanedDescription = description === "(optional)" ? "" : description;
 
   // Branch prefix
   const branchPrefix = await p.text({
@@ -53,8 +52,7 @@ export async function renderTemplateEditor({
     return;
   }
 
-  const cleanedBranchPrefix =
-    branchPrefix === "(optional)" ? "" : branchPrefix;
+  const cleanedBranchPrefix = branchPrefix === "(optional)" ? "" : branchPrefix;
 
   // Repositories
   let repos: string[] = [...initialConfig.repos];

@@ -10,7 +10,9 @@ vi.mock("@unblessed/node", () => {
   return {
     setRuntime: vi.fn(),
     NodeRuntime: vi.fn(),
-    Screen: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
+    Screen: vi.fn().mockImplementation(function (
+      this: Record<string, unknown>,
+    ) {
       this.key = vi.fn();
       this.render = vi.fn();
       this.destroy = vi.fn();
@@ -21,16 +23,16 @@ vi.mock("@unblessed/node", () => {
     Box: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
       this.destroy = vi.fn();
     }),
-    ScrollableBox: vi.fn().mockImplementation(
-      function (this: Record<string, unknown>) {
-        this.key = vi.fn();
-        this.setContent = vi.fn();
-        this.setScrollPerc = vi.fn();
-        this.destroy = vi.fn();
-        this.height = 20;
-        this.scroll = vi.fn();
-      },
-    ),
+    ScrollableBox: vi.fn().mockImplementation(function (
+      this: Record<string, unknown>,
+    ) {
+      this.key = vi.fn();
+      this.setContent = vi.fn();
+      this.setScrollPerc = vi.fn();
+      this.destroy = vi.fn();
+      this.height = 20;
+      this.scroll = vi.fn();
+    }),
   };
 });
 
@@ -158,7 +160,9 @@ describe("renderPipelinesGrid", () => {
     });
     await vi.runAllTimersAsync();
 
-    expect(await promise).toEqual(new Map([["repo-a", { hasLockfile: false }]]));
+    expect(await promise).toEqual(
+      new Map([["repo-a", { hasLockfile: false }]]),
+    );
   });
 
   it("omits failed repos from results", async () => {
@@ -199,9 +203,10 @@ describe("renderPipelinesGrid", () => {
   });
 
   it("returns partial results when some repos fail", async () => {
-    const successPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield { phase: "complete", hasLockfile: true };
-    };
+    const successPipeline =
+      async function* (): AsyncGenerator<RepoPipelineState> {
+        yield { phase: "complete", hasLockfile: true };
+      };
     const failPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
       yield { phase: "failed", error: new Error("Network error") };
     };
@@ -222,13 +227,33 @@ describe("renderPipelinesGrid", () => {
 
   it("handles all pipeline state phases without throwing", async () => {
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield { phase: "git", step: "mirror", status: "running", message: "Fetching..." };
-      yield { phase: "git", step: "mirror", status: "output", output: "remote: Counting objects: 100" };
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "running",
+        message: "Fetching...",
+      };
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "output",
+        output: "remote: Counting objects: 100",
+      };
       yield { phase: "git", step: "mirror", status: "completed" };
       yield { phase: "git", step: "worktree", status: "running" };
       yield { phase: "git", step: "worktree", status: "completed" };
-      yield { phase: "initializer", name: "pnpm", status: "running", message: "Installing..." };
-      yield { phase: "initializer", name: "pnpm", status: "output", output: "node_modules added" };
+      yield {
+        phase: "initializer",
+        name: "pnpm",
+        status: "running",
+        message: "Installing...",
+      };
+      yield {
+        phase: "initializer",
+        name: "pnpm",
+        status: "output",
+        output: "node_modules added",
+      };
       yield { phase: "initializer", name: "pnpm", status: "completed" };
       yield { phase: "complete", hasLockfile: true };
     };

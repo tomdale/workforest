@@ -167,7 +167,10 @@ export async function* ensureWorkingCopyGenerator(
   // Read the actual default branch from the mirror's HEAD symref, which is
   // set by git during clone and remains accurate even after fixBareRepoRefsGenerator
   // moves the local branch refs to refs/remotes/origin/*.
-  const defaultBranch = await detectDefaultBranch(mirrorDir, repo.defaultBranch);
+  const defaultBranch = await detectDefaultBranch(
+    mirrorDir,
+    repo.defaultBranch,
+  );
 
   yield {
     status: "log",
