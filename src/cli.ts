@@ -1239,24 +1239,11 @@ async function promptForFeatureName(): Promise<FeatureNameResult | null> {
   const generated = await generateSlugFromDescription(trimmed);
   s.stop("Feature name ready");
 
-  const defaultSlug = generated ?? sanitizeToSlug(trimmed);
-
-  const featureName = await p.text({
-    message: "Feature name",
-    defaultValue: defaultSlug,
-    validate: (value) => {
-      if (!value.trim()) return "Feature name is required";
-      return undefined;
-    },
-  });
-
-  if (p.isCancel(featureName)) {
-    p.cancel("Cancelled");
-    return null;
-  }
+  const featureName = generated ?? sanitizeToSlug(trimmed);
+  p.log.info(`Using "${featureName}" as feature name`);
 
   return {
-    featureName: featureName.trim(),
+    featureName,
     description: trimmed,
   };
 }
@@ -1383,56 +1370,6 @@ function formatTemplateHint(
     return `${description} | ${repoNames}`;
   }
   return repoNames;
-}
-
-/**
- * Show template preview and prompt for action.
- * Returns: "use" to use the template, "edit" to edit first, "back" to go back
- */
-async function showTemplatePreview(
-  template: NonNullable<Awaited<ReturnType<typeof loadTemplate>>>,
-): Promise<"use" | "edit" | "back" | null> {
-  const lines: string[] = [];
-
-  if (template.config.description) {
-    lines.push(`Description: ${template.config.description}`);
-    lines.push("");
-  }
-
-  lines.push("Repositories:");
-  for (const repo of template.config.repos) {
-    lines.push(`  • ${repo}`);
-  }
-
-  if (template.config.hooks && template.config.hooks.length > 0) {
-    lines.push("");
-    lines.push("Hooks:");
-    for (const hook of template.config.hooks) {
-      lines.push(`  • ${hook.name}`);
-    }
-  }
-
-  if (template.config.branchPrefix) {
-    lines.push("");
-    lines.push(`Branch prefix: ${template.config.branchPrefix}`);
-  }
-
-  p.note(lines.join("\n"), `Template: ${template.id}`);
-
-  const action = await p.select({
-    message: "What would you like to do?",
-    options: [
-      { value: "use" as const, label: "Use this template" },
-      { value: "edit" as const, label: "Edit template first" },
-      { value: "back" as const, label: "Choose different template" },
-    ],
-  });
-
-  if (p.isCancel(action)) {
-    return null;
-  }
-
-  return action;
 }
 
 /**
@@ -1731,14 +1668,14 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
       }));
 
     options.push({
-      value: { type: "manage" },
-      label: "Manage templates...",
-      hint: "Create, edit, or clone",
+      value: { type: "custom" },
+      label: "Enter repositories manually",
     });
 
     options.push({
-      value: { type: "custom" },
-      label: "Enter repositories manually",
+      value: { type: "manage" },
+      label: "Manage templates...",
+      hint: "Create, edit, or clone",
     });
 
     const selection = await p.select({
@@ -1785,47 +1722,7 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
         .filter(Boolean);
     }
 
-    // Template selected - show preview
-    const template = await loadTemplate(selection.id);
-    if (!template) {
-      p.log.error(`Template "${selection.id}" not found.`);
-      continue;
-    }
-
-    const action = await showTemplatePreview(template);
-
-    if (action === null) {
-      p.cancel("Cancelled");
-      return null;
-    }
-
-    if (action === "back") {
-      // Loop back to selection
-      continue;
-    }
-
-    if (action === "edit") {
-      const { renderTemplateEditor } = await import("./ui/index.ts");
-      let saved = false;
-
-      await renderTemplateEditor({
-        templateId: template.id,
-        initialConfig: template.config,
-        onSave: async (config) => {
-          await createTemplate(template.id, config);
-          saved = true;
-        },
-      });
-
-      if (!saved) {
-        // Cancelled, go back to selection
-        continue;
-      }
-
-      p.log.success(`Template "${template.id}" updated.`);
-    }
-
-    // Use the template
+    // Use the selected template directly
     return [selection.id];
   }
 }
