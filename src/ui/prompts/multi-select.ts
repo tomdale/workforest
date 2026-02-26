@@ -96,62 +96,79 @@ export async function multiSelect<T>(
     renderFrame();
 
     function onData(data: Buffer): void {
-      const key = data.toString();
+      const input = data.toString();
+      let i = 0;
+      let changed = false;
 
-      if (key === "\x03") {
-        handleCancel();
-        return;
-      }
+      while (i < input.length) {
+        const ch = input[i];
 
-      if (key === "\r" || key === "\n") {
-        if (required && checked.size === 0) {
-          // Don't submit if required and nothing selected
+        if (ch === "\x03") {
+          handleCancel();
           return;
         }
-        commitDone();
-        cleanup();
-        resolve(
-          items.filter((_, i) => checked.has(i)).map((item) => item.value),
-        );
-        return;
-      }
 
-      // Space toggles the current item
-      if (key === " ") {
-        if (checked.has(cursorIndex)) {
-          checked.delete(cursorIndex);
-        } else {
-          checked.add(cursorIndex);
-        }
-        renderFrame();
-        return;
-      }
-
-      // Up arrow or k
-      if (key === "\x1B[A" || key === "k") {
-        cursorIndex = (cursorIndex - 1 + items.length) % items.length;
-        renderFrame();
-        return;
-      }
-
-      // Down arrow or j
-      if (key === "\x1B[B" || key === "j") {
-        cursorIndex = (cursorIndex + 1) % items.length;
-        renderFrame();
-        return;
-      }
-
-      // Select all (a)
-      if (key === "a") {
-        if (checked.size === items.length) {
-          checked.clear();
-        } else {
-          for (let i = 0; i < items.length; i++) {
-            checked.add(i);
+        if (ch === "\r" || ch === "\n") {
+          if (required && checked.size === 0) {
+            return;
           }
+          commitDone();
+          cleanup();
+          resolve(
+            items
+              .filter((_, idx) => checked.has(idx))
+              .map((item) => item.value),
+          );
+          return;
         }
+
+        if (ch === "\x1B" && i + 2 < input.length) {
+          const seq = input.slice(i, i + 3);
+          if (seq === "\x1B[A") {
+            cursorIndex = (cursorIndex - 1 + items.length) % items.length;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (seq === "\x1B[B") {
+            cursorIndex = (cursorIndex + 1) % items.length;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          i++;
+          continue;
+        }
+
+        if (ch === " ") {
+          if (checked.has(cursorIndex)) {
+            checked.delete(cursorIndex);
+          } else {
+            checked.add(cursorIndex);
+          }
+          changed = true;
+        } else if (ch === "k") {
+          cursorIndex = (cursorIndex - 1 + items.length) % items.length;
+          changed = true;
+        } else if (ch === "j") {
+          cursorIndex = (cursorIndex + 1) % items.length;
+          changed = true;
+        } else if (ch === "a") {
+          if (checked.size === items.length) {
+            checked.clear();
+          } else {
+            for (let idx = 0; idx < items.length; idx++) {
+              checked.add(idx);
+            }
+          }
+          changed = true;
+        }
+
+        i++;
+      }
+
+      if (changed) {
         renderFrame();
-        return;
       }
     }
 

@@ -78,46 +78,69 @@ export async function select<T>(
     renderFrame();
 
     function onData(data: Buffer): void {
-      const key = data.toString();
+      const input = data.toString();
+      let i = 0;
+      let changed = false;
 
-      if (key === "\x03") {
-        handleCancel();
-        return;
+      while (i < input.length) {
+        const ch = input[i];
+
+        if (ch === "\x03") {
+          handleCancel();
+          return;
+        }
+
+        if (ch === "\r" || ch === "\n") {
+          commitDone();
+          cleanup();
+          resolve(items[selectedIndex].value);
+          return;
+        }
+
+        if (ch === "\x1B" && i + 2 < input.length) {
+          const seq = input.slice(i, i + 3);
+          if (seq === "\x1B[A") {
+            selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (seq === "\x1B[B") {
+            selectedIndex = (selectedIndex + 1) % items.length;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (seq === "\x1B[H") {
+            selectedIndex = 0;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (seq === "\x1B[F") {
+            selectedIndex = items.length - 1;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          // Skip unknown escape sequence
+          i++;
+          continue;
+        }
+
+        if (ch === "k") {
+          selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+          changed = true;
+        } else if (ch === "j") {
+          selectedIndex = (selectedIndex + 1) % items.length;
+          changed = true;
+        }
+
+        i++;
       }
 
-      if (key === "\r" || key === "\n") {
-        commitDone();
-        cleanup();
-        resolve(items[selectedIndex].value);
-        return;
-      }
-
-      // Up arrow or k
-      if (key === "\x1B[A" || key === "k") {
-        selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+      if (changed) {
         renderFrame();
-        return;
-      }
-
-      // Down arrow or j
-      if (key === "\x1B[B" || key === "j") {
-        selectedIndex = (selectedIndex + 1) % items.length;
-        renderFrame();
-        return;
-      }
-
-      // Home
-      if (key === "\x1B[H") {
-        selectedIndex = 0;
-        renderFrame();
-        return;
-      }
-
-      // End
-      if (key === "\x1B[F") {
-        selectedIndex = items.length - 1;
-        renderFrame();
-        return;
       }
     }
 

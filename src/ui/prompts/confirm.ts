@@ -64,57 +64,75 @@ export async function confirm(
     renderFrame();
 
     function onData(data: Buffer): void {
-      const key = data.toString();
+      const input = data.toString();
+      let i = 0;
+      let changed = false;
 
-      if (key === "\x03") {
-        handleCancel();
-        return;
+      while (i < input.length) {
+        const ch = input[i];
+
+        if (ch === "\x03") {
+          handleCancel();
+          return;
+        }
+
+        if (ch === "\r" || ch === "\n") {
+          commitDone();
+          cleanup();
+          resolve(value);
+          return;
+        }
+
+        if (ch === "\x1B" && i + 2 < input.length) {
+          const seq = input.slice(i, i + 3);
+          if (seq === "\x1B[D") {
+            value = true;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (seq === "\x1B[C") {
+            value = false;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          i++;
+          continue;
+        }
+
+        if (ch === "y" || ch === "Y") {
+          value = true;
+          commitDone();
+          cleanup();
+          resolve(value);
+          return;
+        }
+
+        if (ch === "n" || ch === "N") {
+          value = false;
+          commitDone();
+          cleanup();
+          resolve(value);
+          return;
+        }
+
+        if (ch === "h") {
+          value = true;
+          changed = true;
+        } else if (ch === "l") {
+          value = false;
+          changed = true;
+        } else if (ch === "\t") {
+          value = !value;
+          changed = true;
+        }
+
+        i++;
       }
 
-      if (key === "\r" || key === "\n") {
-        commitDone();
-        cleanup();
-        resolve(value);
-        return;
-      }
-
-      // Left arrow or h — select Yes
-      if (key === "\x1B[D" || key === "h") {
-        value = true;
+      if (changed) {
         renderFrame();
-        return;
-      }
-
-      // Right arrow or l — select No
-      if (key === "\x1B[C" || key === "l") {
-        value = false;
-        renderFrame();
-        return;
-      }
-
-      // y/Y — select Yes and submit
-      if (key === "y" || key === "Y") {
-        value = true;
-        commitDone();
-        cleanup();
-        resolve(value);
-        return;
-      }
-
-      // n/N — select No and submit
-      if (key === "n" || key === "N") {
-        value = false;
-        commitDone();
-        cleanup();
-        resolve(value);
-        return;
-      }
-
-      // Tab toggles
-      if (key === "\t") {
-        value = !value;
-        renderFrame();
-        return;
       }
     }
 

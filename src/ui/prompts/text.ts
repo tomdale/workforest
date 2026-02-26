@@ -97,76 +97,107 @@ export async function text(
     renderFrame();
 
     function onData(data: Buffer): void {
-      const key = data.toString();
+      const input = data.toString();
       errorMessage = "";
 
-      if (key === "\x03") {
-        // Ctrl+C
-        handleCancel();
-        return;
-      }
+      // Process input character by character, extracting escape sequences
+      let i = 0;
+      let changed = false;
 
-      if (key === "\r" || key === "\n") {
-        submit();
-        return;
-      }
+      while (i < input.length) {
+        const ch = input[i];
 
-      if (key === "\x7F" || key === "\b") {
-        // Backspace
-        if (cursor > 0) {
-          value = value.slice(0, cursor - 1) + value.slice(cursor);
-          cursor--;
+        if (ch === "\x03") {
+          handleCancel();
+          return;
         }
-        renderFrame();
-        return;
-      }
 
-      // Delete key (escape sequence)
-      if (key === "\x1B[3~") {
-        if (cursor < value.length) {
-          value = value.slice(0, cursor) + value.slice(cursor + 1);
+        if (ch === "\r" || ch === "\n") {
+          submit();
+          return;
         }
-        renderFrame();
-        return;
+
+        if (ch === "\x7F" || ch === "\b") {
+          if (cursor > 0) {
+            value = value.slice(0, cursor - 1) + value.slice(cursor);
+            cursor--;
+            changed = true;
+          }
+          i++;
+          continue;
+        }
+
+        // Escape sequences
+        if (ch === "\x1B" && i + 1 < input.length) {
+          const rest = input.slice(i);
+
+          if (rest.startsWith("\x1B[3~")) {
+            if (cursor < value.length) {
+              value = value.slice(0, cursor) + value.slice(cursor + 1);
+              changed = true;
+            }
+            i += 4;
+            continue;
+          }
+          if (rest.startsWith("\x1B[D")) {
+            if (cursor > 0) cursor--;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (rest.startsWith("\x1B[C")) {
+            if (cursor < value.length) cursor++;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (rest.startsWith("\x1B[H")) {
+            cursor = 0;
+            changed = true;
+            i += 3;
+            continue;
+          }
+          if (rest.startsWith("\x1B[F")) {
+            cursor = value.length;
+            changed = true;
+            i += 3;
+            continue;
+          }
+
+          // Skip unknown escape sequences
+          i++;
+          while (i < input.length && input[i] >= " " && input[i] <= "/") i++;
+          if (i < input.length) i++; // skip final byte
+          continue;
+        }
+
+        // Ctrl+A (Home)
+        if (ch === "\x01") {
+          cursor = 0;
+          changed = true;
+          i++;
+          continue;
+        }
+
+        // Ctrl+E (End)
+        if (ch === "\x05") {
+          cursor = value.length;
+          changed = true;
+          i++;
+          continue;
+        }
+
+        // Regular printable character
+        if (ch >= " ") {
+          value = value.slice(0, cursor) + ch + value.slice(cursor);
+          cursor++;
+          changed = true;
+        }
+
+        i++;
       }
 
-      // Arrow keys
-      if (key === "\x1B[D") {
-        // Left
-        if (cursor > 0) cursor--;
-        renderFrame();
-        return;
-      }
-      if (key === "\x1B[C") {
-        // Right
-        if (cursor < value.length) cursor++;
-        renderFrame();
-        return;
-      }
-
-      // Home
-      if (key === "\x1B[H" || key === "\x01") {
-        cursor = 0;
-        renderFrame();
-        return;
-      }
-
-      // End
-      if (key === "\x1B[F" || key === "\x05") {
-        cursor = value.length;
-        renderFrame();
-        return;
-      }
-
-      // Ignore other escape sequences
-      if (key.startsWith("\x1B")) {
-        return;
-      }
-
-      // Regular character input
-      if (key.length === 1 && key >= " ") {
-        value = value.slice(0, cursor) + key + value.slice(cursor);
-        cursor++;
+      if (changed) {
         renderFrame();
       }
     }
