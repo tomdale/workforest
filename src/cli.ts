@@ -792,11 +792,9 @@ async function runNewCommand(argv: string[]): Promise<void> {
 
   const interactive = isInteractive();
   let selections = args._;
-
-  // Interactive mode with intro framing
-  if (interactive && selections.length === 0) {
-    intro("Create a new workspace");
-  }
+  let featureName: string | undefined;
+  let description: string | undefined;
+  let templateBranchPrefix: string | undefined;
 
   // Load config
   let config: WorkspaceConfig;
@@ -822,21 +820,41 @@ async function runNewCommand(argv: string[]): Promise<void> {
       return;
     }
 
-    const selected = await promptForTemplateOrRepos();
-    if (!selected) return;
-    selections = selected;
+    const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
+    if (shouldUseGrid()) {
+      const { runNewWizard } = await import("./ui/new-wizard.ts");
+      const templates = await listTemplates();
+      const wizardResult = await runNewWizard({
+        config,
+        templates,
+        handleTemplateManagement,
+      });
+      selections = wizardResult.templateId
+        ? [wizardResult.templateId]
+        : wizardResult.repoSlugs;
+      featureName = wizardResult.featureName;
+      description = wizardResult.description;
+      templateBranchPrefix = wizardResult.templateBranchPrefix;
+    } else {
+      // Fallback: existing sequential prompts
+      intro("Create a new workspace");
+      const selected = await promptForTemplateOrRepos();
+      if (!selected) return;
+      selections = selected;
+    }
   }
 
   // Resolve to repos
   let repos: RepoConfig[];
   let templateId: string | undefined;
-  let templateBranchPrefix: string | undefined;
 
   try {
     const resolved = await resolveSelections(selections);
     repos = resolved.repos;
     templateId = resolved.templateId;
-    templateBranchPrefix = resolved.templateBranchPrefix;
+    if (!templateBranchPrefix) {
+      templateBranchPrefix = resolved.templateBranchPrefix;
+    }
   } catch (error) {
     if (interactive) cancel("Failed to resolve repositories");
     log.error(getErrorMessage(error));
@@ -844,43 +862,42 @@ async function runNewCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  // Get feature name
-  let featureName: string;
-  let description: string | undefined;
-
-  if (args["--description"]) {
-    const input = args["--description"];
-    if (isSlug(input)) {
-      featureName = input;
-    } else {
-      description = input;
-      // Show spinner for AI generation in interactive mode
-      if (interactive) {
-        const s = spinner();
-        s.start("Generating feature name...");
-        const generated = await generateSlugFromDescription(input);
-        s.stop("Feature name ready");
-        featureName = generated ?? sanitizeToSlug(input);
+  // Get feature name (skip if wizard already provided it)
+  if (!featureName) {
+    if (args["--description"]) {
+      const input = args["--description"];
+      if (isSlug(input)) {
+        featureName = input;
       } else {
-        const generated = await generateSlugFromDescription(input);
-        featureName = generated ?? sanitizeToSlug(input);
+        description = input;
+        // Show spinner for AI generation in interactive mode
+        if (interactive) {
+          const s = spinner();
+          s.start("Generating feature name...");
+          const generated = await generateSlugFromDescription(input);
+          s.stop("Feature name ready");
+          featureName = generated ?? sanitizeToSlug(input);
+        } else {
+          const generated = await generateSlugFromDescription(input);
+          featureName = generated ?? sanitizeToSlug(input);
+        }
       }
-    }
-  } else {
-    if (!interactive) {
-      log.error(
-        "Missing --description argument (required in non-interactive mode).",
-      );
-      log.info('Usage: wf new <template|repo...> -d "description"');
-      log.info('Example: wf new my-template -d "fixing auth bug"');
-      process.exitCode = 1;
-      return;
-    }
+    } else {
+      if (!interactive) {
+        log.error(
+          "Missing --description argument (required in non-interactive mode).",
+        );
+        log.info('Usage: wf new <template|repo...> -d "description"');
+        log.info('Example: wf new my-template -d "fixing auth bug"');
+        process.exitCode = 1;
+        return;
+      }
 
-    const result = await promptForFeatureName();
-    if (!result) return;
-    featureName = result.featureName;
-    description = result.description;
+      const result = await promptForFeatureName();
+      if (!result) return;
+      featureName = result.featureName;
+      description = result.description;
+    }
   }
 
   // Build paths
