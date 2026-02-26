@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as p from "@clack/prompts";
 import arg from "arg";
 import {
   isRepoSlug,
@@ -24,7 +23,19 @@ import type {
   WorkspaceConfig,
   WorkspaceMetadata,
 } from "./types.ts";
-import { isInteractive, promptConfirm, promptText } from "./utils/prompts.ts";
+import {
+  CancelError,
+  cancel,
+  intro,
+  isInteractive,
+  note,
+  outro,
+  promptConfirm,
+  promptLog,
+  promptSelect,
+  promptText,
+  spinner,
+} from "./ui/prompts/index.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
@@ -660,7 +671,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       // Not in a workspace, offer interactive selection
       const selected = await selectWorkspaceInteractive();
       if (!selected) {
-        p.cancel("Cancelled");
+        cancel("Cancelled");
         return;
       }
       workspaceDir = selected;
@@ -703,7 +714,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
     showCleanupPreview(preview);
 
     if (isInsideWorkspace) {
-      p.log.warn("You are inside the workspace being deleted");
+      promptLog.warn("You are inside the workspace being deleted");
     }
   } else {
     log.info(`Workspace: ${preview.workspaceDir}`);
@@ -726,7 +737,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       false,
     );
     if (!confirmed) {
-      p.cancel("Cancelled");
+      cancel("Cancelled");
       return;
     }
 
@@ -754,7 +765,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
   if (isInsideWorkspace && !dryRun) {
     const parentDir = path.dirname(path.resolve(workspaceDir));
     if (interactive) {
-      p.log.info(`Workspace deleted. Run: cd ${parentDir}`);
+      promptLog.info(`Workspace deleted. Run: cd ${parentDir}`);
     } else {
       log.info(`Workspace deleted. Run: cd ${parentDir}`);
     }
@@ -784,7 +795,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
 
   // Interactive mode with intro framing
   if (interactive && selections.length === 0) {
-    p.intro("Create a new workspace");
+    intro("Create a new workspace");
   }
 
   // Load config
@@ -792,7 +803,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   try {
     ({ config } = await loadWorkspaceConfig());
   } catch (error) {
-    if (interactive) p.cancel("Configuration error");
+    if (interactive) cancel("Configuration error");
     log.error(getErrorMessage(error));
     process.exitCode = 1;
     return;
@@ -827,7 +838,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
     templateId = resolved.templateId;
     templateBranchPrefix = resolved.templateBranchPrefix;
   } catch (error) {
-    if (interactive) p.cancel("Failed to resolve repositories");
+    if (interactive) cancel("Failed to resolve repositories");
     log.error(getErrorMessage(error));
     process.exitCode = 1;
     return;
@@ -845,7 +856,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
       description = input;
       // Show spinner for AI generation in interactive mode
       if (interactive) {
-        const s = p.spinner();
+        const s = spinner();
         s.start("Generating feature name...");
         const generated = await generateSlugFromDescription(input);
         s.stop("Feature name ready");
@@ -886,7 +897,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   // Dry-run mode
   if (args["--dry-run"]) {
     if (interactive) {
-      p.note(
+      note(
         [
           `Directory: ${workspaceDir}`,
           `Feature: ${featureName}`,
@@ -901,7 +912,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
           .join("\n"),
         "Dry run preview",
       );
-      p.outro("No changes made");
+      outro("No changes made");
     } else {
       console.log("\nDry run - no changes will be made\n");
       console.log("Workspace:");
@@ -936,7 +947,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   if (interactive) {
     const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
     await stampWorkspaceInteractive(options);
-    p.outro("Happy shipping!");
+    outro("Happy shipping!");
   } else {
     await stampWorkspace(options);
     log.info("Happy shipping!");
@@ -981,7 +992,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
   }
 
   if (interactive && args._.length === 0) {
-    p.intro("Fork workspace");
+    intro("Fork workspace");
   }
 
   // Get feature name from positional arg, --description, or interactive prompt
@@ -1004,7 +1015,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
     } else {
       description = input;
       if (interactive) {
-        const s = p.spinner();
+        const s = spinner();
         s.start("Generating feature name...");
         const generated = await generateSlugFromDescription(input);
         s.stop("Feature name ready");
@@ -1056,7 +1067,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
   // Dry-run mode
   if (args["--dry-run"]) {
     if (interactive) {
-      p.note(
+      note(
         [
           `Source:    ${path.basename(sourceDir)}`,
           `Directory: ${workspaceDir}`,
@@ -1072,7 +1083,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
           .join("\n"),
         "Dry run preview",
       );
-      p.outro("No changes made");
+      outro("No changes made");
     } else {
       console.log("\nDry run - no changes will be made\n");
       console.log(`Source workspace: ${path.basename(sourceDir)}`);
@@ -1108,7 +1119,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
   if (interactive) {
     const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
     await stampWorkspaceInteractive(options);
-    p.outro("Happy shipping!");
+    outro("Happy shipping!");
   } else {
     await stampWorkspace(options);
     log.info("Happy shipping!");
@@ -1214,45 +1225,48 @@ type FeatureNameResult = {
 };
 
 /**
- * Prompt user for feature name interactively using clack prompts.
+ * Prompt user for feature name interactively.
  * Detects if input is a slug or prose, and generates slug if needed.
  */
 async function promptForFeatureName(): Promise<FeatureNameResult | null> {
-  const input = await p.text({
-    message: "What are you working on?",
-    placeholder: "describe your task, or enter a slug like fix-auth-bug",
-    validate: (value) => {
-      if (!value.trim()) return "Please describe what you're working on";
-      return undefined;
-    },
-  });
+  try {
+    const input = await promptText("What are you working on?", {
+      placeholder: "describe your task, or enter a slug like fix-auth-bug",
+      validate: (value) => {
+        if (!value.trim()) return "Please describe what you're working on";
+        return null;
+      },
+      throwOnCancel: true,
+    });
 
-  if (p.isCancel(input)) {
-    p.cancel("Cancelled");
-    return null;
+    const trimmed = input.trim();
+
+    // If it's already a slug, use it directly with confirmation
+    if (isSlug(trimmed)) {
+      promptLog.info(`Using "${trimmed}" as feature name`);
+      return { featureName: trimmed };
+    }
+
+    // It's prose - generate a slug with spinner
+    const s = spinner();
+    s.start("Generating feature name...");
+    const generated = await generateSlugFromDescription(trimmed);
+    s.stop("Feature name ready");
+
+    const featureName = generated ?? sanitizeToSlug(trimmed);
+    promptLog.info(`Using "${featureName}" as feature name`);
+
+    return {
+      featureName,
+      description: trimmed,
+    };
+  } catch (e) {
+    if (e instanceof CancelError) {
+      cancel("Cancelled");
+      return null;
+    }
+    throw e;
   }
-
-  const trimmed = input.trim();
-
-  // If it's already a slug, use it directly with confirmation
-  if (isSlug(trimmed)) {
-    p.log.info(`Using "${trimmed}" as feature name`);
-    return { featureName: trimmed };
-  }
-
-  // It's prose - generate a slug with spinner
-  const s = p.spinner();
-  s.start("Generating feature name...");
-  const generated = await generateSlugFromDescription(trimmed);
-  s.stop("Feature name ready");
-
-  const featureName = generated ?? sanitizeToSlug(trimmed);
-  p.log.info(`Using "${featureName}" as feature name`);
-
-  return {
-    featureName,
-    description: trimmed,
-  };
 }
 
 /**
@@ -1397,37 +1411,38 @@ function validateTemplateName(input: string): string | undefined {
  * Returns the new template ID if successful, null if cancelled.
  */
 async function wizardCreateTemplate(): Promise<string | null> {
-  const templateId = await p.text({
-    message: "Template name",
-    placeholder: "my-template",
-    validate: validateTemplateName,
-  });
+  try {
+    const templateId = await promptText("Template name", {
+      placeholder: "my-template",
+      validate: (input) => validateTemplateName(input) ?? null,
+      throwOnCancel: true,
+    });
 
-  if (p.isCancel(templateId)) {
-    return null;
+    // Check if template already exists
+    const existing = await loadTemplate(templateId);
+    if (existing) {
+      promptLog.error(`Template "${templateId}" already exists.`);
+      return null;
+    }
+
+    const { renderTemplateEditor } = await import("./ui/index.ts");
+
+    let savedTemplateId: string | null = null;
+
+    await renderTemplateEditor({
+      templateId,
+      initialConfig: { repos: [] },
+      onSave: async (config) => {
+        await createTemplate(templateId, config);
+        savedTemplateId = templateId;
+      },
+    });
+
+    return savedTemplateId;
+  } catch (e) {
+    if (e instanceof CancelError) return null;
+    throw e;
   }
-
-  // Check if template already exists
-  const existing = await loadTemplate(templateId);
-  if (existing) {
-    p.log.error(`Template "${templateId}" already exists.`);
-    return null;
-  }
-
-  const { renderTemplateEditor } = await import("./ui/index.ts");
-
-  let savedTemplateId: string | null = null;
-
-  await renderTemplateEditor({
-    templateId,
-    initialConfig: { repos: [] },
-    onSave: async (config) => {
-      await createTemplate(templateId, config);
-      savedTemplateId = templateId;
-    },
-  });
-
-  return savedTemplateId;
 }
 
 /**
@@ -1438,43 +1453,44 @@ async function wizardEditTemplate(
   templates: Awaited<ReturnType<typeof listTemplates>>,
 ): Promise<string | null> {
   if (templates.length === 0) {
-    p.log.warn("No templates to edit.");
+    promptLog.warn("No templates to edit.");
     return null;
   }
 
-  const selection = await p.select({
-    message: "Select template to edit",
-    options: templates.map((t) => ({
-      value: t.id,
-      label: t.id,
-      hint: formatTemplateHint(t, t.id.length),
-    })),
-  });
+  try {
+    const selection = await promptSelect("Select template to edit", {
+      options: templates.map((t) => ({
+        value: t.id,
+        label: t.id,
+        description: formatTemplateHint(t, t.id.length),
+      })),
+      throwOnCancel: true,
+    });
 
-  if (p.isCancel(selection)) {
-    return null;
+    const template = await loadTemplate(selection);
+    if (!template) {
+      promptLog.error(`Template "${selection}" not found.`);
+      return null;
+    }
+
+    const { renderTemplateEditor } = await import("./ui/index.ts");
+
+    let savedTemplateId: string | null = null;
+
+    await renderTemplateEditor({
+      templateId: template.id,
+      initialConfig: template.config,
+      onSave: async (config) => {
+        await createTemplate(template.id, config);
+        savedTemplateId = template.id;
+      },
+    });
+
+    return savedTemplateId;
+  } catch (e) {
+    if (e instanceof CancelError) return null;
+    throw e;
   }
-
-  const template = await loadTemplate(selection);
-  if (!template) {
-    p.log.error(`Template "${selection}" not found.`);
-    return null;
-  }
-
-  const { renderTemplateEditor } = await import("./ui/index.ts");
-
-  let savedTemplateId: string | null = null;
-
-  await renderTemplateEditor({
-    templateId: template.id,
-    initialConfig: template.config,
-    onSave: async (config) => {
-      await createTemplate(template.id, config);
-      savedTemplateId = template.id;
-    },
-  });
-
-  return savedTemplateId;
 }
 
 /**
@@ -1485,60 +1501,57 @@ async function wizardCloneTemplate(
   templates: Awaited<ReturnType<typeof listTemplates>>,
 ): Promise<string | null> {
   if (templates.length === 0) {
-    p.log.warn("No templates to clone.");
+    promptLog.warn("No templates to clone.");
     return null;
   }
 
-  const sourceSelection = await p.select({
-    message: "Select template to clone",
-    options: templates.map((t) => ({
-      value: t.id,
-      label: t.id,
-      hint: formatTemplateHint(t, t.id.length),
-    })),
-  });
+  try {
+    const sourceSelection = await promptSelect("Select template to clone", {
+      options: templates.map((t) => ({
+        value: t.id,
+        label: t.id,
+        description: formatTemplateHint(t, t.id.length),
+      })),
+      throwOnCancel: true,
+    });
 
-  if (p.isCancel(sourceSelection)) {
-    return null;
+    const sourceTemplate = await loadTemplate(sourceSelection);
+    if (!sourceTemplate) {
+      promptLog.error(`Template "${sourceSelection}" not found.`);
+      return null;
+    }
+
+    const newTemplateId = await promptText("New template name", {
+      placeholder: `${sourceTemplate.id}-copy`,
+      validate: (input) => validateTemplateName(input) ?? null,
+      throwOnCancel: true,
+    });
+
+    // Check if new template already exists
+    const existing = await loadTemplate(newTemplateId);
+    if (existing) {
+      promptLog.error(`Template "${newTemplateId}" already exists.`);
+      return null;
+    }
+
+    const { renderTemplateEditor } = await import("./ui/index.ts");
+
+    let savedTemplateId: string | null = null;
+
+    await renderTemplateEditor({
+      templateId: newTemplateId,
+      initialConfig: sourceTemplate.config,
+      onSave: async (config) => {
+        await createTemplate(newTemplateId, config);
+        savedTemplateId = newTemplateId;
+      },
+    });
+
+    return savedTemplateId;
+  } catch (e) {
+    if (e instanceof CancelError) return null;
+    throw e;
   }
-
-  const sourceTemplate = await loadTemplate(sourceSelection);
-  if (!sourceTemplate) {
-    p.log.error(`Template "${sourceSelection}" not found.`);
-    return null;
-  }
-
-  const newTemplateId = await p.text({
-    message: "New template name",
-    placeholder: `${sourceTemplate.id}-copy`,
-    validate: validateTemplateName,
-  });
-
-  if (p.isCancel(newTemplateId)) {
-    return null;
-  }
-
-  // Check if new template already exists
-  const existing = await loadTemplate(newTemplateId);
-  if (existing) {
-    p.log.error(`Template "${newTemplateId}" already exists.`);
-    return null;
-  }
-
-  const { renderTemplateEditor } = await import("./ui/index.ts");
-
-  let savedTemplateId: string | null = null;
-
-  await renderTemplateEditor({
-    templateId: newTemplateId,
-    initialConfig: sourceTemplate.config,
-    onSave: async (config) => {
-      await createTemplate(newTemplateId, config);
-      savedTemplateId = newTemplateId;
-    },
-  });
-
-  return savedTemplateId;
 }
 
 type ManageAction = "create" | "edit" | "clone" | "back";
@@ -1580,13 +1593,19 @@ async function handleTemplateManagement(
     label: "Back to workspace setup",
   });
 
-  const action = await p.select({
-    message: "Template management",
-    options,
-  });
-
-  if (p.isCancel(action)) {
-    return null;
+  let action: ManageAction;
+  try {
+    action = await promptSelect("Template management", {
+      options: options.map((o) => ({
+        value: o.value,
+        label: o.label,
+        description: o.hint,
+      })),
+      throwOnCancel: true,
+    });
+  } catch (e) {
+    if (e instanceof CancelError) return null;
+    throw e;
   }
 
   if (action === "back") {
@@ -1611,126 +1630,118 @@ async function handleTemplateManagement(
 }
 
 /**
- * Prompt user to select a template or enter repos manually using clack prompts.
+ * Prompt user to select a template or enter repos manually.
  */
 async function promptForTemplateOrRepos(): Promise<string[] | null> {
-  // Main loop to allow returning from template management
-  while (true) {
-    const templates = await listTemplates();
+  try {
+    // Main loop to allow returning from template management
+    while (true) {
+      const templates = await listTemplates();
 
-    type SelectionValue =
-      | { type: "template"; id: string }
-      | { type: "custom" }
-      | { type: "manage" };
+      type SelectionValue =
+        | { type: "template"; id: string }
+        | { type: "custom" }
+        | { type: "manage" };
 
-    // If no templates, offer to create one first
-    if (templates.length === 0) {
-      const createFirst = await p.confirm({
-        message: "No templates found. Create one now?",
-        initialValue: true,
-      });
+      // If no templates, offer to create one first
+      if (templates.length === 0) {
+        const createFirst = await promptConfirm(
+          "No templates found. Create one now?",
+          true,
+          { throwOnCancel: true },
+        );
 
-      if (p.isCancel(createFirst)) {
-        p.cancel("Cancelled");
-        return null;
-      }
-
-      if (createFirst) {
-        const newTemplateId = await wizardCreateTemplate();
-        if (newTemplateId) {
-          p.log.success(`Template "${newTemplateId}" created.`);
-          // Loop back to show templates
-          continue;
+        if (createFirst) {
+          const newTemplateId = await wizardCreateTemplate();
+          if (newTemplateId) {
+            promptLog.success(`Template "${newTemplateId}" created.`);
+            // Loop back to show templates
+            continue;
+          }
+          // If cancelled, fall through to manual entry
         }
-        // If cancelled, fall through to manual entry
+
+        // Manual entry
+        const repos = await promptText("Repositories", {
+          placeholder: "org/repo or git URL, comma-separated",
+          validate: (input) => {
+            if (!input.trim()) return "At least one repository is required";
+            return null;
+          },
+          throwOnCancel: true,
+        });
+
+        return repos
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean);
       }
 
-      // Manual entry
-      const repos = await p.text({
-        message: "Repositories",
-        placeholder: "org/repo or git URL, comma-separated",
-        validate: (input) => {
-          if (!input.trim()) return "At least one repository is required";
-          return undefined;
-        },
-      });
-
-      if (p.isCancel(repos)) {
-        p.cancel("Cancelled");
-        return null;
-      }
-
-      return repos
-        .split(",")
-        .map((r) => r.trim())
-        .filter(Boolean);
-    }
-
-    // Build options for select
-    const options: { value: SelectionValue; label: string; hint?: string }[] =
-      templates.map((t) => ({
+      // Build options for select
+      const selectOptions: {
+        value: SelectionValue;
+        label: string;
+        description?: string;
+      }[] = templates.map((t) => ({
         value: { type: "template", id: t.id },
         label: t.id,
-        hint: formatTemplateHint(t, t.id.length),
+        description: formatTemplateHint(t, t.id.length),
       }));
 
-    options.push({
-      value: { type: "custom" },
-      label: "Enter repositories manually",
-    });
-
-    options.push({
-      value: { type: "manage" },
-      label: "Manage templates...",
-      hint: "Create, edit, or clone",
-    });
-
-    const selection = await p.select({
-      message: "Select workspace setup",
-      options,
-    });
-
-    if (p.isCancel(selection)) {
-      p.cancel("Cancelled");
-      return null;
-    }
-
-    if (selection.type === "manage") {
-      const result = await handleTemplateManagement(templates);
-      if (result === null) {
-        p.cancel("Cancelled");
-        return null;
-      }
-      if (result.newTemplateId) {
-        p.log.success(`Template "${result.newTemplateId}" saved.`);
-      }
-      // Loop back to show updated template list
-      continue;
-    }
-
-    if (selection.type === "custom") {
-      const repos = await p.text({
-        message: "Repositories",
-        placeholder: "org/repo or git URL, comma-separated",
-        validate: (input) => {
-          if (!input.trim()) return "At least one repository is required";
-          return undefined;
-        },
+      selectOptions.push({
+        value: { type: "custom" },
+        label: "Enter repositories manually",
       });
 
-      if (p.isCancel(repos)) {
-        p.cancel("Cancelled");
-        return null;
+      selectOptions.push({
+        value: { type: "manage" },
+        label: "Manage templates...",
+        description: "Create, edit, or clone",
+      });
+
+      const selection = await promptSelect<SelectionValue>(
+        "Select workspace setup",
+        { options: selectOptions, throwOnCancel: true },
+      );
+
+      if (selection.type === "manage") {
+        const result = await handleTemplateManagement(templates);
+        if (result === null) {
+          cancel("Cancelled");
+          return null;
+        }
+        if (result.newTemplateId) {
+          promptLog.success(`Template "${result.newTemplateId}" saved.`);
+        }
+        // Loop back to show updated template list
+        continue;
       }
 
-      return repos
-        .split(",")
-        .map((r) => r.trim())
-        .filter(Boolean);
-    }
+      if (selection.type === "custom") {
+        const repos = await promptText("Repositories", {
+          placeholder: "org/repo or git URL, comma-separated",
+          validate: (input) => {
+            if (!input.trim()) return "At least one repository is required";
+            return null;
+          },
+          throwOnCancel: true,
+        });
 
-    // Use the selected template directly
-    return [selection.id];
+        return repos
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean);
+      }
+
+      // Use the selected template directly
+      return [selection.id];
+    }
+  } catch (e) {
+    if (e instanceof CancelError) {
+      cancel("Cancelled");
+      return null;
+    }
+    throw e;
   }
 }
 
@@ -1820,14 +1831,14 @@ async function findWorkspaces(rootDir: string): Promise<WorkspaceInfo[]> {
 }
 
 /**
- * Interactive workspace selection using @clack/prompts.
+ * Interactive workspace selection.
  * Returns the selected workspace path, or null if cancelled.
  */
 async function selectWorkspaceInteractive(): Promise<string | null> {
   const { config } = await loadWorkspaceConfig();
 
   if (!config.defaultDir) {
-    p.log.error(
+    promptLog.error(
       "No defaultDir configured. Specify workspace path or run: wf config init",
     );
     return null;
@@ -1837,28 +1848,29 @@ async function selectWorkspaceInteractive(): Promise<string | null> {
   const workspaces = await findWorkspaces(workspaceRoot);
 
   if (workspaces.length === 0) {
-    p.log.info(`No workspaces found in ${workspaceRoot}`);
+    promptLog.info(`No workspaces found in ${workspaceRoot}`);
     return null;
   }
 
-  const selection = await p.select({
-    message: "Select workspace to clean",
-    options: workspaces.map((ws) => ({
-      value: ws.path,
-      label: ws.name,
-      hint: `${ws.repoCount} repo${ws.repoCount !== 1 ? "s" : ""}${ws.template ? ` (${ws.template})` : ""}`,
-    })),
-  });
+  try {
+    const selection = await promptSelect("Select workspace to clean", {
+      options: workspaces.map((ws) => ({
+        value: ws.path,
+        label: ws.name,
+        description: `${ws.repoCount} repo${ws.repoCount !== 1 ? "s" : ""}${ws.template ? ` (${ws.template})` : ""}`,
+      })),
+      throwOnCancel: true,
+    });
 
-  if (p.isCancel(selection)) {
-    return null;
+    return selection;
+  } catch (e) {
+    if (e instanceof CancelError) return null;
+    throw e;
   }
-
-  return selection;
 }
 
 /**
- * Display a cleanup preview using @clack/prompts note format.
+ * Display a cleanup preview as a note box.
  */
 function showCleanupPreview(preview: CleanupPreview): void {
   const lines: string[] = [
@@ -1874,5 +1886,5 @@ function showCleanupPreview(preview: CleanupPreview): void {
     }
   }
 
-  p.note(lines.join("\n"), "Cleanup preview");
+  note(lines.join("\n"), "Cleanup preview");
 }

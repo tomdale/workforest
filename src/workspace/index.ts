@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import * as p from "@clack/prompts";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
@@ -14,6 +13,7 @@ import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
+import { note, promptLog, spinner } from "../ui/prompts/index.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
@@ -391,7 +391,7 @@ export async function stampWorkspaceInteractive(
     }
   }
 
-  const s = p.spinner();
+  const s = spinner();
   s.start("Setting up workspace...");
 
   await ensureCacheDir();
@@ -441,7 +441,7 @@ export async function stampWorkspaceInteractive(
 
   // Hooks run after all repos complete (can reference multiple repos)
   if (template?.config.hooks && template.config.hooks.length > 0) {
-    const hookSpinner = p.spinner();
+    const hookSpinner = spinner();
     hookSpinner.start("Running template hooks...");
 
     for await (const hookState of applyTemplateGenerator({
@@ -454,7 +454,7 @@ export async function stampWorkspaceInteractive(
       } else if (hookState.phase === "hook") {
         const { state: taskState } = hookState;
         if (taskState.status === "failed") {
-          p.log.error(`Hook failed: ${hookState.hookName}`);
+          promptLog.error(`Hook failed: ${hookState.hookName}`);
         }
       }
     }
@@ -481,7 +481,7 @@ export async function stampWorkspaceInteractive(
   await writeVSCodeWorkspaceFile(workspaceDir, repos);
 
   const workspaceName = path.basename(workspaceDir);
-  p.note(
+  note(
     `cd ${workspaceDir}\ncode ${workspaceName}.code-workspace`,
     "Next steps",
   );
@@ -497,7 +497,7 @@ async function runPipelinesWithSpinner(
   >,
   _repoNames: string[],
 ): Promise<Map<string, { hasLockfile: boolean }>> {
-  const s = p.spinner();
+  const s = spinner();
   s.start("Setting up repositories...");
 
   const results = new Map<string, { hasLockfile: boolean }>();
@@ -522,7 +522,7 @@ async function runPipelinesWithSpinner(
 
       case "failed":
         repoPhases.set(id, "failed");
-        p.log.error(`${id}: ${state.error.message}`);
+        promptLog.error(`${id}: ${state.error.message}`);
         break;
     }
   }

@@ -57,7 +57,7 @@ Long-running operations use async generators that yield state updates, enabling 
 This silently bypasses large parts of the CLI:
 
 - `shouldUseGrid()` returns `false` (no TTY → spinner fallback, never `renderPipelinesGrid`)
-- Clack prompts (`@clack/prompts`) skip or behave differently without a TTY
+- Custom prompts (`src/ui/prompts/`) require raw mode on stdin and skip without a TTY
 - Any code path gated on `process.stdout.isTTY` is invisible to automated tests
 
 **After any change that touches the TUI, prompt flow, or `wf new` end-to-end path,

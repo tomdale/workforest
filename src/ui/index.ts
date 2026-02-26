@@ -1,5 +1,14 @@
-import * as p from "@clack/prompts";
 import type { Hook, TemplateConfig } from "../types.ts";
+import {
+  CancelError,
+  cancel,
+  intro,
+  note,
+  outro,
+  promptConfirm,
+  promptMultiSelect,
+  promptText,
+} from "./prompts/index.ts";
 
 type RenderTemplateEditorOptions = {
   templateId: string;
@@ -23,184 +32,139 @@ export async function renderTemplateEditor({
   initialConfig,
   onSave,
 }: RenderTemplateEditorOptions): Promise<void> {
-  p.intro(`Editing template: ${templateId}`);
+  intro(`Editing template: ${templateId}`);
 
-  // Description
-  const description = await p.text({
-    message: "Description",
-    placeholder: "(optional)",
-    initialValue: initialConfig.description ?? "",
-  });
-
-  if (p.isCancel(description)) {
-    p.cancel("Cancelled");
-    return;
-  }
-
-  // Clack returns the placeholder text when the user submits without typing
-  const cleanedDescription = description === "(optional)" ? "" : description;
-
-  // Branch prefix
-  const branchPrefix = await p.text({
-    message: "Branch prefix",
-    placeholder: "(optional)",
-    initialValue: initialConfig.branchPrefix ?? "",
-  });
-
-  if (p.isCancel(branchPrefix)) {
-    p.cancel("Cancelled");
-    return;
-  }
-
-  const cleanedBranchPrefix = branchPrefix === "(optional)" ? "" : branchPrefix;
-
-  // Repositories
-  let repos: string[] = [...initialConfig.repos];
-
-  // If there are existing repos, let user select which to keep
-  if (repos.length > 0) {
-    const keepRepos = await p.multiselect({
-      message: "Select repositories to keep",
-      options: repos.map((r) => ({ value: r, label: r })),
-      initialValues: repos,
-      required: false,
+  try {
+    // Description
+    const description = await promptText("Description", {
+      placeholder: "(optional)",
+      defaultValue: initialConfig.description ?? "",
+      throwOnCancel: true,
     });
 
-    if (p.isCancel(keepRepos)) {
-      p.cancel("Cancelled");
-      return;
-    }
-
-    repos = keepRepos;
-  }
-
-  // Add new repos
-  let addMore = repos.length === 0;
-  if (!addMore && repos.length > 0) {
-    const wantMore = await p.confirm({
-      message: "Add more repositories?",
-      initialValue: false,
-    });
-    if (p.isCancel(wantMore)) {
-      p.cancel("Cancelled");
-      return;
-    }
-    addMore = wantMore;
-  }
-
-  while (addMore) {
-    const repo = await p.text({
-      message: "Repository (org/repo or git URL)",
-      placeholder: "e.g., vercel/next.js or git@gitlab.com:org/repo.git",
-      validate: (value) => {
-        if (!value) return "Repository is required";
-        return validateRepo(value);
-      },
+    // Branch prefix
+    const branchPrefix = await promptText("Branch prefix", {
+      placeholder: "(optional)",
+      defaultValue: initialConfig.branchPrefix ?? "",
+      throwOnCancel: true,
     });
 
-    if (p.isCancel(repo)) {
-      p.cancel("Cancelled");
-      return;
-    }
+    // Repositories
+    let repos: string[] = [...initialConfig.repos];
 
-    repos.push(repo);
-
-    const continueAdding = await p.confirm({
-      message: "Add another repository?",
-      initialValue: false,
-    });
-
-    if (p.isCancel(continueAdding)) {
-      p.cancel("Cancelled");
-      return;
-    }
-
-    addMore = continueAdding;
-  }
-
-  if (repos.length === 0) {
-    p.cancel("At least one repository is required");
-    return;
-  }
-
-  // Hooks
-  const hooks: Hook[] = [...(initialConfig.hooks ?? [])];
-
-  if (hooks.length > 0) {
-    p.note(
-      hooks.map((h, i) => `${i + 1}. ${h.name}: ${h.run}`).join("\n"),
-      "Current hooks",
-    );
-  }
-
-  const addHooks = await p.confirm({
-    message: hooks.length > 0 ? "Add more hooks?" : "Add hooks?",
-    initialValue: false,
-  });
-
-  if (p.isCancel(addHooks)) {
-    p.cancel("Cancelled");
-    return;
-  }
-
-  if (addHooks) {
-    let addingHooks = true;
-    while (addingHooks) {
-      const hookName = await p.text({
-        message: "Hook name (or leave empty to continue)",
-        placeholder: "e.g., post-install",
+    // If there are existing repos, let user select which to keep
+    if (repos.length > 0) {
+      repos = await promptMultiSelect("Select repositories to keep", {
+        options: repos.map((r) => ({ value: r, label: r })),
+        initialValues: repos,
+        required: false,
+        throwOnCancel: true,
       });
+    }
 
-      if (p.isCancel(hookName)) {
-        p.cancel("Cancelled");
-        return;
-      }
+    // Add new repos
+    let addMore = repos.length === 0;
+    if (!addMore && repos.length > 0) {
+      addMore = await promptConfirm("Add more repositories?", false, {
+        throwOnCancel: true,
+      });
+    }
 
-      if (!hookName) {
-        addingHooks = false;
-        continue;
-      }
-
-      const hookRun = await p.text({
-        message: "Hook command",
-        placeholder: "e.g., pnpm build",
+    while (addMore) {
+      const repo = await promptText("Repository (org/repo or git URL)", {
+        placeholder: "e.g., vercel/next.js or git@gitlab.com:org/repo.git",
         validate: (value) => {
-          if (!value) return "Command is required";
-          return undefined;
+          if (!value) return "Repository is required";
+          return validateRepo(value) ?? null;
         },
+        throwOnCancel: true,
       });
 
-      if (p.isCancel(hookRun)) {
-        p.cancel("Cancelled");
-        return;
-      }
+      repos.push(repo);
 
-      hooks.push({ name: hookName, run: hookRun });
+      addMore = await promptConfirm("Add another repository?", false, {
+        throwOnCancel: true,
+      });
     }
+
+    if (repos.length === 0) {
+      cancel("At least one repository is required");
+      return;
+    }
+
+    // Hooks
+    const hooks: Hook[] = [...(initialConfig.hooks ?? [])];
+
+    if (hooks.length > 0) {
+      note(
+        hooks.map((h, i) => `${i + 1}. ${h.name}: ${h.run}`).join("\n"),
+        "Current hooks",
+      );
+    }
+
+    const addHooks = await promptConfirm(
+      hooks.length > 0 ? "Add more hooks?" : "Add hooks?",
+      false,
+      { throwOnCancel: true },
+    );
+
+    if (addHooks) {
+      let addingHooks = true;
+      while (addingHooks) {
+        const hookName = await promptText(
+          "Hook name (or leave empty to continue)",
+          {
+            placeholder: "e.g., post-install",
+            throwOnCancel: true,
+          },
+        );
+
+        if (!hookName) {
+          addingHooks = false;
+          continue;
+        }
+
+        const hookRun = await promptText("Hook command", {
+          placeholder: "e.g., pnpm build",
+          validate: (value) => {
+            if (!value) return "Command is required";
+            return null;
+          },
+          throwOnCancel: true,
+        });
+
+        hooks.push({ name: hookName, run: hookRun });
+      }
+    }
+
+    // Build config
+    const config: TemplateConfig = {
+      repos,
+      ...(description && { description }),
+      ...(branchPrefix && { branchPrefix }),
+      ...(hooks.length > 0 && { hooks }),
+    };
+
+    // Preview
+    note(formatConfig(config), "Preview");
+
+    // Confirm save
+    const shouldSave = await promptConfirm("Save template?", true, {
+      throwOnCancel: true,
+    });
+
+    if (!shouldSave) {
+      cancel("Cancelled");
+      return;
+    }
+
+    await onSave(config);
+    outro("Template saved");
+  } catch (e) {
+    if (e instanceof CancelError) {
+      cancel("Cancelled");
+      return;
+    }
+    throw e;
   }
-
-  // Build config
-  const config: TemplateConfig = {
-    repos,
-    ...(cleanedDescription && { description: cleanedDescription }),
-    ...(cleanedBranchPrefix && { branchPrefix: cleanedBranchPrefix }),
-    ...(hooks.length > 0 && { hooks }),
-  };
-
-  // Preview
-  p.note(formatConfig(config), "Preview");
-
-  // Confirm save
-  const shouldSave = await p.confirm({
-    message: "Save template?",
-    initialValue: true,
-  });
-
-  if (p.isCancel(shouldSave) || !shouldSave) {
-    p.cancel("Cancelled");
-    return;
-  }
-
-  await onSave(config);
-  p.outro("Template saved");
 }
