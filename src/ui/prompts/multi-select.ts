@@ -95,8 +95,11 @@ export async function multiSelect<T>(
 
     renderFrame();
 
+    let pendingEscape = "";
+
     function onData(data: Buffer): void {
-      const input = data.toString();
+      const input = pendingEscape + data.toString();
+      pendingEscape = "";
       let i = 0;
       let changed = false;
 
@@ -122,7 +125,11 @@ export async function multiSelect<T>(
           return;
         }
 
-        if (ch === "\x1B" && i + 2 < input.length) {
+        if (ch === "\x1B") {
+          if (input.length - i < 3) {
+            pendingEscape = input.slice(i);
+            break;
+          }
           const seq = input.slice(i, i + 3);
           if (seq === "\x1B[A") {
             cursorIndex = (cursorIndex - 1 + items.length) % items.length;

@@ -63,8 +63,11 @@ export async function confirm(
 
     renderFrame();
 
+    let pendingEscape = "";
+
     function onData(data: Buffer): void {
-      const input = data.toString();
+      const input = pendingEscape + data.toString();
+      pendingEscape = "";
       let i = 0;
       let changed = false;
 
@@ -83,7 +86,11 @@ export async function confirm(
           return;
         }
 
-        if (ch === "\x1B" && i + 2 < input.length) {
+        if (ch === "\x1B") {
+          if (input.length - i < 3) {
+            pendingEscape = input.slice(i);
+            break;
+          }
           const seq = input.slice(i, i + 3);
           if (seq === "\x1B[D") {
             value = true;

@@ -96,8 +96,11 @@ export async function text(
 
     renderFrame();
 
+    let pendingEscape = "";
+
     function onData(data: Buffer): void {
-      const input = data.toString();
+      const input = pendingEscape + data.toString();
+      pendingEscape = "";
       errorMessage = "";
 
       // Process input character by character, extracting escape sequences
@@ -128,7 +131,11 @@ export async function text(
         }
 
         // Escape sequences
-        if (ch === "\x1B" && i + 1 < input.length) {
+        if (ch === "\x1B") {
+          if (input.length - i < 3) {
+            pendingEscape = input.slice(i);
+            break;
+          }
           const rest = input.slice(i);
 
           if (rest.startsWith("\x1B[3~")) {

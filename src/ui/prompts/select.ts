@@ -18,15 +18,22 @@ export type SelectOption<T> = {
   hint?: string;
 };
 
+export type SelectHotkey<T> = {
+  key: string;
+  value: T;
+  hint: string;
+};
+
 export type SelectOptions<T> = PromptBaseOptions & {
   options: SelectOption<T>[];
+  hotkeys?: SelectHotkey<T>[];
 };
 
 export async function select<T>(
   message: string,
   options: SelectOptions<T>,
 ): Promise<T> {
-  const { options: items, throwOnCancel } = options;
+  const { options: items, hotkeys, throwOnCancel } = options;
 
   return new Promise((resolve, reject) => {
     const renderer = new FrameRenderer();
@@ -43,6 +50,15 @@ export async function select<T>(
         const label = isSelected ? item.label : chalk.dim(item.label);
         const hint = item.hint ? chalk.dim(` ${item.hint}`) : "";
         lines.push(`  ${barColor(S_BAR)}  ${radio} ${label}${hint}`);
+      }
+
+      if (hotkeys && hotkeys.length > 0) {
+        lines.push(`  ${barColor(S_BAR)}`);
+        for (const hk of hotkeys) {
+          lines.push(
+            `  ${barColor(S_BAR)}  ${chalk.dim(`${hk.key} to ${hk.hint}`)}`,
+          );
+        }
       }
 
       lines.push(`  ${barColor(S_BAR_END)}`);
@@ -77,8 +93,11 @@ export async function select<T>(
 
     renderFrame();
 
+    let pendingEscape = "";
+
     function onData(data: Buffer): void {
-      const input = data.toString();
+      const input = pendingEscape + data.toString();
+      pendingEscape = "";
       let i = 0;
       let changed = false;
 
@@ -97,7 +116,11 @@ export async function select<T>(
           return;
         }
 
-        if (ch === "\x1B" && i + 2 < input.length) {
+        if (ch === "\x1B") {
+          if (input.length - i < 3) {
+            pendingEscape = input.slice(i);
+            break;
+          }
           const seq = input.slice(i, i + 3);
           if (seq === "\x1B[A") {
             selectedIndex = (selectedIndex - 1 + items.length) % items.length;
@@ -126,6 +149,18 @@ export async function select<T>(
           // Skip unknown escape sequence
           i++;
           continue;
+        }
+
+        if (hotkeys) {
+          const hotkey = hotkeys.find((hk) => hk.key === ch);
+          if (hotkey) {
+            renderer.commit([
+              `  ${S_STEP_DONE}  ${message} ${chalk.dim("·")} ${hotkey.hint}`,
+            ]);
+            cleanup();
+            resolve(hotkey.value);
+            return;
+          }
         }
 
         if (ch === "k") {
