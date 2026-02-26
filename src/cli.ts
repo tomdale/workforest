@@ -1230,6 +1230,7 @@ type FeatureNameResult = {
  */
 async function promptForFeatureName(): Promise<FeatureNameResult | null> {
   try {
+    promptLog.info("Used for the directory, branch, and worktree names.");
     const input = await promptText("What are you working on?", {
       placeholder: "describe your task, or enter a slug like fix-auth-bug",
       validate: (value) => {
@@ -1693,15 +1694,20 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
         label: "Enter repositories manually",
       });
 
-      selectOptions.push({
-        value: { type: "manage" },
-        label: "Manage templates...",
-        description: "Create, edit, or clone",
-      });
-
+      promptLog.info("Choose a template or enter repos directly.");
       const selection = await promptSelect<SelectionValue>(
         "Select workspace setup",
-        { options: selectOptions, throwOnCancel: true },
+        {
+          options: selectOptions,
+          hotkeys: [
+            {
+              key: "t",
+              value: { type: "manage" } as SelectionValue,
+              hint: "manage templates",
+            },
+          ],
+          throwOnCancel: true,
+        },
       );
 
       if (selection.type === "manage") {

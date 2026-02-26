@@ -38,6 +38,7 @@ export type PromptSelectOption<T> = {
 
 export type PromptSelectOptions<T> = {
   options: PromptSelectOption<T>[];
+  hotkeys?: { key: string; value: T; hint: string }[];
   throwOnCancel?: boolean;
 };
 
@@ -84,6 +85,7 @@ export async function promptSelect<T>(
       label: o.label,
       hint: o.description,
     })),
+    hotkeys: options.hotkeys,
     throwOnCancel: options.throwOnCancel,
   });
 }
