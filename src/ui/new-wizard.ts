@@ -39,6 +39,7 @@ type WizardState = {
   templateId: string | undefined;
   templateBranchPrefix: string | undefined;
   repoSlugs: string[];
+  reposInputText: string;
   inputValue: string;
   inputCursor: number;
   errorMessage: string;
@@ -60,6 +61,14 @@ const BRAILLE_FRAMES = [
   "\u2834",
   "\u2826",
 ];
+
+// Step labels for the box title
+const STEP_LABELS: Record<WizardPhase, string> = {
+  selectTemplate: "Select Template",
+  reposInput: "Repositories",
+  featureName: "Feature Name",
+  generating: "Feature Name",
+};
 
 export async function runNewWizard(
   options: WizardOptions,
@@ -103,7 +112,7 @@ function buildSelectItems(
   for (const t of templates) {
     const repos = t.config.repos.map(getRepoDisplayName).join(", ");
     const desc = t.config.description
-      ? `${t.config.description} | ${repos}`
+      ? `${t.config.description} \u00b7 ${repos}`
       : repos;
     items.push({ label: t.id, description: desc, templateId: t.id });
   }
@@ -141,6 +150,17 @@ function getRepoDisplayName(repo: string): string {
   return trimmed;
 }
 
+function stepNumber(phase: WizardPhase): number {
+  if (phase === "selectTemplate" || phase === "reposInput") return 1;
+  return 2;
+}
+
+function formatFooterHint(pairs: [key: string, desc: string][]): string {
+  return pairs
+    .map(([key, desc]) => `{white-fg}${key}{/white-fg} ${desc}`)
+    .join("  {gray-fg}\u2502{/gray-fg}  ");
+}
+
 function runWizardScreen(
   config: WorkspaceConfig,
   templates: Template[],
@@ -157,9 +177,9 @@ function runWizardScreen(
       top: 0,
       left: 0,
       width: "60%",
-      height: "100%-2",
+      height: "100%-1",
       border: { type: "line" },
-      label: " wf new ",
+      label: " wf new \u2500 Select Template ",
       style: { border: { fg: "cyan" } },
       tags: true,
       padding: { left: 1, top: 1 },
@@ -170,7 +190,7 @@ function runWizardScreen(
       top: 0,
       right: 0,
       width: "40%",
-      height: "100%-2",
+      height: "100%-1",
       border: { type: "line" },
       label: " Preview ",
       style: { border: { fg: "gray" } },
@@ -197,6 +217,7 @@ function runWizardScreen(
       templateId: undefined,
       templateBranchPrefix: undefined,
       repoSlugs: [],
+      reposInputText: "",
       inputValue: "",
       inputCursor: 0,
       errorMessage: "",
@@ -222,84 +243,107 @@ function runWizardScreen(
       resolve(result);
     }
 
+    // Available width inside the content box (accounting for border + padding)
+    function contentWidth(): number {
+      const w = contentBox.width as number;
+      // border (1+1) + padding left (1+1 spaces from padding:{left:1}) = ~4
+      return Math.max(20, w - 4);
+    }
+
+    function renderTextInput(value: string, cursor: number): string {
+      const before = value.slice(0, cursor);
+      const cursorChar = value[cursor] ?? " ";
+      const after = value.slice(cursor + 1);
+      return `  {cyan-fg}\u276f{/cyan-fg} ${before}{inverse}${cursorChar}{/inverse}${after}`;
+    }
+
     function renderContent() {
       const lines: string[] = [];
+      const step = stepNumber(state.phase);
+      const stepHint = `{gray-fg}step ${step}/2{/gray-fg}`;
 
       if (state.phase === "selectTemplate") {
         lines.push(
-          "{bold}Choose a template or enter repos directly.{/bold}",
+          `{bold}Choose a template or enter repos directly{/bold}  ${stepHint}`,
           "",
         );
 
+        const maxDescWidth = contentWidth() - 8; // account for indent + radio + spacing
+
         for (let i = 0; i < selectItems.length; i++) {
           const item = selectItems[i];
+          const desc = item.description
+            ? truncate(item.description, maxDescWidth)
+            : "";
+
           if (i === state.selectedIndex) {
             lines.push(
               `  {cyan-fg}\u25cf{/cyan-fg} {bold}${item.label}{/bold}`,
             );
-            if (item.description) {
-              lines.push(`    {gray-fg}${item.description}{/gray-fg}`);
+            if (desc) {
+              lines.push(`    ${desc}`);
             }
           } else {
-            lines.push(`  {gray-fg}\u25cb ${item.label}{/gray-fg}`);
-            if (item.description) {
-              lines.push(`    {gray-fg}${item.description}{/gray-fg}`);
+            lines.push(`  {gray-fg}\u25cb{/gray-fg} ${item.label}`);
+            if (desc) {
+              lines.push(`    {gray-fg}${desc}{/gray-fg}`);
             }
           }
         }
       } else if (state.phase === "reposInput") {
         lines.push(
-          "{bold}Repositories{/bold} {gray-fg}(comma-separated){/gray-fg}",
+          `{bold}Enter repositories{/bold}  ${stepHint}`,
+          "{gray-fg}org/repo or git URL, comma-separated{/gray-fg}",
           "",
         );
 
-        const before = state.inputValue.slice(0, state.inputCursor);
-        const cursor = state.inputValue[state.inputCursor] ?? " ";
-        const after = state.inputValue.slice(state.inputCursor + 1);
-        lines.push(`  > ${before}{inverse}${cursor}{/inverse}${after}`);
+        lines.push(renderTextInput(state.inputValue, state.inputCursor));
 
         if (state.errorMessage) {
           lines.push("", `  {red-fg}${state.errorMessage}{/red-fg}`);
         }
       } else if (state.phase === "featureName") {
+        // Completed step summary
         if (state.templateId) {
-          lines.push(`  {green-fg}\u2713{/green-fg} ${state.templateId}`, "");
+          lines.push(
+            `  {green-fg}\u2713{/green-fg} {green-fg}${state.templateId}{/green-fg}`,
+          );
         } else {
           lines.push(
-            `  {green-fg}\u2713{/green-fg} ${state.repoSlugs.map(getRepoDisplayName).join(", ")}`,
-            "",
+            `  {green-fg}\u2713{/green-fg} {green-fg}${state.repoSlugs.map(getRepoDisplayName).join(", ")}{/green-fg}`,
           );
         }
 
+        lines.push("");
+
         lines.push(
-          "{bold}What are you working on?{/bold}",
+          `{bold}What are you working on?{/bold}  ${stepHint}`,
           "{gray-fg}slug or describe your task{/gray-fg}",
           "",
         );
 
-        const before = state.inputValue.slice(0, state.inputCursor);
-        const cursor = state.inputValue[state.inputCursor] ?? " ";
-        const after = state.inputValue.slice(state.inputCursor + 1);
-        lines.push(`  > ${before}{inverse}${cursor}{/inverse}${after}`);
+        lines.push(renderTextInput(state.inputValue, state.inputCursor));
 
         if (state.errorMessage) {
           lines.push("", `  {red-fg}${state.errorMessage}{/red-fg}`);
         }
       } else if (state.phase === "generating") {
         if (state.templateId) {
-          lines.push(`  {green-fg}\u2713{/green-fg} ${state.templateId}`, "");
+          lines.push(
+            `  {green-fg}\u2713{/green-fg} {green-fg}${state.templateId}{/green-fg}`,
+          );
         } else {
           lines.push(
-            `  {green-fg}\u2713{/green-fg} ${state.repoSlugs.map(getRepoDisplayName).join(", ")}`,
-            "",
+            `  {green-fg}\u2713{/green-fg} {green-fg}${state.repoSlugs.map(getRepoDisplayName).join(", ")}{/green-fg}`,
           );
         }
+        lines.push("");
 
         const frame = BRAILLE_FRAMES[spinnerFrame % BRAILLE_FRAMES.length];
         lines.push(`  {cyan-fg}${frame}{/cyan-fg} Generating feature name...`);
       }
 
-      contentBox.setContent(lines.join("\n"));
+      contentBox.setContent(padToBox(lines, contentBox));
     }
 
     function renderPreview() {
@@ -310,33 +354,51 @@ function runWizardScreen(
         if (item.templateId) {
           const template = templates.find((t) => t.id === item.templateId);
           if (template) {
-            lines.push(`{bold}${template.id}{/bold}`, "");
-            for (const repo of template.config.repos) {
-              lines.push(`  ${getRepoDisplayName(repo)}`);
+            lines.push(`{bold}${template.id}{/bold}`);
+            if (template.config.description) {
+              lines.push(`{gray-fg}${template.config.description}{/gray-fg}`);
             }
             lines.push("");
+
+            lines.push("{gray-fg}Repos{/gray-fg}");
+            for (const repo of template.config.repos) {
+              lines.push(`  \u25e6 ${getRepoDisplayName(repo)}`);
+            }
+
+            const meta: string[] = [];
             if (template.config.hooks?.length) {
-              lines.push(
-                `{gray-fg}${template.config.hooks.length} hook${template.config.hooks.length !== 1 ? "s" : ""}{/gray-fg}`,
+              meta.push(
+                `${template.config.hooks.length} hook${template.config.hooks.length !== 1 ? "s" : ""}`,
               );
             }
             if (template.config.branchPrefix) {
-              lines.push(
-                `{gray-fg}prefix: ${template.config.branchPrefix}{/gray-fg}`,
-              );
+              meta.push(`prefix: ${template.config.branchPrefix}`);
+            }
+            if (meta.length > 0) {
+              lines.push("");
+              for (const m of meta) {
+                lines.push(`{gray-fg}${m}{/gray-fg}`);
+              }
             }
           }
         } else {
-          lines.push("{gray-fg}(select a template to preview){/gray-fg}");
+          lines.push(
+            "{gray-fg}Select a template to see{/gray-fg}",
+            "{gray-fg}its configuration here.{/gray-fg}",
+          );
         }
       } else if (state.phase === "reposInput") {
         const parsed = parseRepoInput(state.inputValue);
         if (parsed.length > 0) {
+          lines.push("{gray-fg}Repos{/gray-fg}");
           for (const repo of parsed) {
-            lines.push(`  ${getRepoDisplayName(repo)}`);
+            lines.push(`  \u25e6 ${getRepoDisplayName(repo)}`);
           }
         } else {
-          lines.push("{gray-fg}(type repos to preview){/gray-fg}");
+          lines.push(
+            "{gray-fg}Repos will appear here{/gray-fg}",
+            "{gray-fg}as you type.{/gray-fg}",
+          );
         }
       } else if (
         state.phase === "featureName" ||
@@ -345,13 +407,16 @@ function runWizardScreen(
         if (state.templateId) {
           lines.push(`{bold}${state.templateId}{/bold}`, "");
         }
+
+        lines.push("{gray-fg}Repos{/gray-fg}");
         for (const repo of state.repoSlugs) {
-          lines.push(`  ${getRepoDisplayName(repo)}`);
+          lines.push(`  \u25e6 ${getRepoDisplayName(repo)}`);
         }
         lines.push("");
 
         if (state.phase === "generating") {
-          lines.push("{gray-fg}(generating...){/gray-fg}");
+          lines.push("{gray-fg}dir{/gray-fg}  {cyan-fg}\u2026{/cyan-fg}");
+          lines.push("{gray-fg}git{/gray-fg}  {cyan-fg}\u2026{/cyan-fg}");
         } else {
           const trimmed = state.inputValue.trim();
           if (trimmed && isSlug(trimmed)) {
@@ -368,41 +433,86 @@ function runWizardScreen(
               ? `${branchPrefix}${trimmed}`
               : trimmed;
 
-            lines.push(`{gray-fg}dir{/gray-fg}  ${dirDisplay}`);
-            lines.push(`{gray-fg}git{/gray-fg}  ${branchDisplay}`);
+            lines.push(
+              `{gray-fg}dir{/gray-fg}  {white-fg}${dirDisplay}{/white-fg}`,
+            );
+            lines.push(
+              `{gray-fg}git{/gray-fg}  {white-fg}${branchDisplay}{/white-fg}`,
+            );
           } else if (trimmed) {
-            lines.push("{gray-fg}(enter to generate){/gray-fg}");
+            lines.push(
+              "{gray-fg}dir{/gray-fg}  {gray-fg}(enter to generate){/gray-fg}",
+            );
+            lines.push(
+              "{gray-fg}git{/gray-fg}  {gray-fg}(enter to generate){/gray-fg}",
+            );
           }
         }
       }
 
-      previewBox.setContent(lines.join("\n"));
+      previewBox.setContent(padToBox(lines, previewBox));
     }
 
     function renderFooter() {
       let hint = "";
       if (state.phase === "selectTemplate") {
-        const parts = ["\u2191\u2193 navigate", "enter select"];
+        const pairs: [string, string][] = [
+          ["\u2191\u2193", "navigate"],
+          ["\u23ce", "select"],
+        ];
         if (templates.length > 0) {
-          parts.push("t templates");
+          pairs.push(["t", "templates"]);
         }
-        parts.push("esc quit");
-        hint = parts.join("  ");
+        pairs.push(["esc", "quit"]);
+        hint = formatFooterHint(pairs);
       } else if (state.phase === "reposInput") {
-        hint = "enter confirm  esc back";
+        hint = formatFooterHint([
+          ["\u23ce", "confirm"],
+          ["esc", "back"],
+        ]);
       } else if (state.phase === "featureName") {
-        hint = "enter confirm  esc back";
+        hint = formatFooterHint([
+          ["\u23ce", "confirm"],
+          ["esc", "back"],
+        ]);
       } else if (state.phase === "generating") {
-        hint = "ctrl-c cancel";
+        hint = formatFooterHint([["\u2303c", "cancel"]]);
       }
 
-      footerBox.setContent(`{gray-fg}${hint}{/gray-fg}`);
+      footerBox.setContent(hint);
+    }
+
+    function updateBoxLabel() {
+      const label = STEP_LABELS[state.phase];
+      contentBox.setLabel(` wf new \u2500 ${label} `);
+    }
+
+    // Strip blessed tags to estimate visible character count
+    function visibleLength(line: string): number {
+      return line.replace(/\{[^}]+\}/g, "").length;
+    }
+
+    // Pad lines to fill box dimensions, clearing leftover content
+    function padToBox(lines: string[], box: typeof contentBox): string {
+      const availH = (box.height as number) - 2; // minus top+bottom border
+      const availW = (box.width as number) - 3; // border left + padding left + border right
+      const padded = lines.map((line) => {
+        const gap = Math.max(0, availW - visibleLength(line));
+        return gap > 0 ? `${line}${" ".repeat(gap)}` : line;
+      });
+      const blankLine = " ".repeat(Math.max(0, availW));
+      while (padded.length < availH) {
+        padded.push(blankLine);
+      }
+      return padded.join("\n");
     }
 
     function render() {
+      updateBoxLabel();
       renderContent();
       renderPreview();
       renderFooter();
+      screen.alloc();
       screen.render();
     }
 
@@ -442,8 +552,8 @@ function runWizardScreen(
         } else {
           // "Enter repositories manually"
           state.phase = "reposInput";
-          state.inputValue = "";
-          state.inputCursor = 0;
+          state.inputValue = state.reposInputText;
+          state.inputCursor = state.reposInputText.length;
           state.errorMessage = "";
           skipNextEnter = true;
         }
@@ -469,18 +579,21 @@ function runWizardScreen(
 
       if (key.name === "escape") {
         if (state.phase === "reposInput") {
+          state.reposInputText = state.inputValue;
           state.phase = "selectTemplate";
           state.errorMessage = "";
         } else if (state.phase === "featureName") {
-          state.phase = state.prevPhase;
-          state.inputValue = "";
-          state.inputCursor = 0;
-          state.errorMessage = "";
-          if (state.prevPhase === "selectTemplate") {
+          if (state.prevPhase === "reposInput") {
+            state.phase = "reposInput";
+            state.inputValue = state.reposInputText;
+            state.inputCursor = state.reposInputText.length;
+          } else {
+            state.phase = "selectTemplate";
             state.templateId = undefined;
             state.templateBranchPrefix = undefined;
             state.repoSlugs = [];
           }
+          state.errorMessage = "";
         }
         render();
         return;
@@ -502,6 +615,7 @@ function runWizardScreen(
             render();
             return;
           }
+          state.reposInputText = state.inputValue;
           state.repoSlugs = parsed;
           state.templateId = undefined;
           state.templateBranchPrefix = undefined;
@@ -653,4 +767,10 @@ function expandHome(value: string): string {
 function shortenPath(p: string, homeDir: string): string {
   if (p.startsWith(homeDir)) return `~${p.slice(homeDir.length)}`;
   return p;
+}
+
+function truncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  if (maxLen <= 1) return "\u2026";
+  return `${str.slice(0, maxLen - 1)}\u2026`;
 }
