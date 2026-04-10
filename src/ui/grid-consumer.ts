@@ -1,4 +1,7 @@
-import { Box, Screen } from "@unblessed/node";
+import { promises as fs } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import { runParallel } from "../utils/task-generator.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
@@ -11,6 +14,8 @@ export type RenderPipelinesGridOptions = {
 type RepoDisplayStatus = "pending" | "running" | "complete" | "failed";
 type RepoTaskState = Extract<RepoPipelineState, { status: string }>;
 type RepoTaskStatus = RepoTaskState["status"];
+const require = createRequire(import.meta.url);
+let unblessedSetupPromise: Promise<void> | null = null;
 
 /**
  * Check if the terminal supports grid rendering.
@@ -53,6 +58,8 @@ export async function renderPipelinesGrid({
   pipelines,
   repoNames,
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
+  await ensureUnblessedCompatibility();
+  setRuntime(new NodeRuntime());
   const screen = new Screen({
     smartCSR: true,
     fullUnicode: true,
@@ -243,6 +250,39 @@ export async function renderPipelinesGrid({
   return repoResults;
 }
 
+async function ensureUnblessedCompatibility(): Promise<void> {
+  if (!unblessedSetupPromise) {
+    unblessedSetupPromise = ensureUnblessedDataPath();
+  }
+  await unblessedSetupPromise;
+}
+
+async function ensureUnblessedDataPath(): Promise<void> {
+  const coreEntryPath = require.resolve("@unblessed/core");
+  const corePackageRoot = path.dirname(path.dirname(coreEntryPath));
+  const sourceDataDir = path.join(corePackageRoot, "data");
+  const expectedDataDir = path.join(corePackageRoot, "dist", "data");
+
+  if (await pathExists(expectedDataDir)) {
+    return;
+  }
+
+  if (!(await pathExists(sourceDataDir))) {
+    return;
+  }
+
+  await fs.mkdir(path.dirname(expectedDataDir), { recursive: true });
+
+  try {
+    await fs.symlink(sourceDataDir, expectedDataDir, "dir");
+  } catch (error_) {
+    const error = error_ as NodeJS.ErrnoException;
+    if (error.code !== "EEXIST") {
+      throw error;
+    }
+  }
+}
+
 /**
  * Append output to a pane, handling newlines and ANSI codes.
  */
@@ -418,3 +458,16 @@ async function waitForCloseOrTimeout(
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape detection requires control characters
 const ANSI_ESCAPE_PATTERN =
   /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\)|[@-_])/g;
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch (error_) {
+    const error = error_ as NodeJS.ErrnoException;
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
