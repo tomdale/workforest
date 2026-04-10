@@ -82,6 +82,11 @@ This example creates a directory like `user-avatars/` containing:
 - Dependencies installed
 - A VS Code workspace file for multi-root editing
 
+During workspace creation, workforest uses an interactive terminal progress UI
+when your terminal is large enough. The grid now adapts to the number of
+repositories, works for single-repo setups too, and lets you switch panes with
+Tab while scrolling output with Up/Down or PageUp/PageDown.
+
 ## Use Cases
 
 ### Feature Development Across Repos

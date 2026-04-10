@@ -16,9 +16,12 @@ export interface GridPane {
   row: number;
   col: number;
   setLabel(label: string): void;
+  setFocused(focused: boolean): void;
   appendLine(line: string): void;
   setContent(content: string): void;
   getLineCount(): number;
+  scrollLines(lines: number): void;
+  scrollPage(direction: number): void;
 }
 
 /**
@@ -30,6 +33,7 @@ export class GridLayout {
   private screen: Screen;
   private frame: Box;
   private panes: GridPaneImpl[] = [];
+  private activePaneIndex = 0;
   private rows: number;
   private cols: number;
   private borderColor: string;
@@ -69,6 +73,9 @@ export class GridLayout {
     this.screen.append(this.frame);
 
     this.createPanes();
+    if (this.panes.length > 0) {
+      this.setActivePane(0);
+    }
   }
 
   private resolvePosition(value: number | string, total: number): number {
@@ -172,18 +179,6 @@ export class GridLayout {
         },
       });
 
-      // Enable scrolling with arrow keys
-      box.key(
-        ["up", "down", "pageup", "pagedown"],
-        (_ch: string, key: { name: string }) => {
-          if (key.name === "up") box.scroll?.(-1);
-          else if (key.name === "down") box.scroll?.(1);
-          else if (key.name === "pageup") box.scroll?.(-(box.height as number));
-          else if (key.name === "pagedown") box.scroll?.(box.height as number);
-          this.screen.render();
-        },
-      );
-
       this.screen.append(box);
 
       const pane = new GridPaneImpl(
@@ -218,6 +213,52 @@ export class GridLayout {
     return [...this.panes];
   }
 
+  getActivePaneIndex(): number {
+    return this.activePaneIndex;
+  }
+
+  setActivePane(index: number): GridPane | undefined {
+    const nextPane = this.panes[index];
+    if (!nextPane) {
+      return undefined;
+    }
+
+    const previousPane = this.panes[this.activePaneIndex];
+    if (previousPane && previousPane !== nextPane) {
+      previousPane.setFocused(false);
+    }
+
+    this.activePaneIndex = index;
+    nextPane.setFocused(true);
+    return nextPane;
+  }
+
+  focusNextPane(): GridPane | undefined {
+    if (this.panes.length === 0) {
+      return undefined;
+    }
+    return this.setActivePane((this.activePaneIndex + 1) % this.panes.length);
+  }
+
+  focusPreviousPane(): GridPane | undefined {
+    if (this.panes.length === 0) {
+      return undefined;
+    }
+    const nextIndex =
+      (this.activePaneIndex - 1 + this.panes.length) % this.panes.length;
+    return this.setActivePane(nextIndex);
+  }
+
+  scrollActivePane(lines: number): void {
+    const pane = this.panes[this.activePaneIndex];
+    pane?.scrollLines(lines);
+  }
+
+  scrollActivePaneByPage(direction: number): void {
+    const pane = this.panes[this.activePaneIndex];
+    pane?.scrollPage(direction);
+  }
+
   render(): void {
     this.screen.render();
   }
@@ -239,6 +280,8 @@ class GridPaneImpl implements GridPane {
   private maxLines: number;
   private screen: Screen;
   private labelBox: Box | null = null;
+  private currentLabel = "";
+  private focused = false;
 
   // Position info for label rendering
   private frameTop: number;
@@ -272,42 +315,50 @@ class GridPaneImpl implements GridPane {
   }
 
   setLabel(label: string): void {
+    this.currentLabel = label;
+    this.renderLabel();
+  }
+
+  setFocused(focused: boolean): void {
+    if (this.focused === focused) {
+      return;
+    }
+    this.focused = focused;
+    if (focused) {
+      this.box.focus();
+    }
+    this.renderLabel();
+  }
+
+  scrollLines(lines: number): void {
+    this.box.scroll?.(lines);
+  }
+
+  scrollPage(direction: number): void {
+    const pageSize = Math.max(1, Number(this.box.height) || 1);
+    this.box.scroll?.(direction * pageSize);
+  }
+
+  private renderLabel(): void {
     // Remove old label if exists
     if (this.labelBox) {
       this.labelBox.destroy();
       this.labelBox = null;
     }
 
+    const prefix = this.focused ? "\u2500 > " : "\u2500 ";
+    const suffix = this.focused ? " <\u2500" : "\u2500";
+    const maxVisualWidth = Math.max(
+      1,
+      this.cellWidth - this.getVisualLength(prefix) - this.getVisualLength(suffix),
+    );
+    const truncatedLabel = this.truncateLabel(this.currentLabel, maxVisualWidth);
+
     // Calculate position for the label (on the top border of the cell)
     const labelTop = this.frameTop + this.row * this.cellHeight;
     const labelLeft = this.frameLeft + this.col * this.cellWidth + 1;
-    // Calculate max visual width (excluding markup tags)
-    const maxVisualWidth = this.cellWidth - 4;
 
-    // Truncate based on visual length
-    let truncatedLabel = label;
-    const labelVisualLength = this.getVisualLength(label);
-    if (labelVisualLength > maxVisualWidth) {
-      // Find where to cut by tracking visual length
-      let visualLen = 0;
-      let cutIndex = 0;
-      let inTag = false;
-      for (let i = 0; i < label.length; i++) {
-        if (label[i] === "{") inTag = true;
-        else if (label[i] === "}") inTag = false;
-        else if (!inTag) {
-          visualLen++;
-          if (visualLen >= maxVisualWidth - 1) {
-            cutIndex = i + 1;
-            break;
-          }
-        }
-      }
-      truncatedLabel = `${label.slice(0, cutIndex)}\u2026`;
-    }
-
-    // Create label box with border chars as padding
-    const content = `\u2500 ${truncatedLabel}\u2500`;
+    const content = `${prefix}${truncatedLabel}${suffix}`;
     const visualWidth = this.getVisualLength(content);
     this.labelBox = new Box({
       top: labelTop,
@@ -357,6 +408,31 @@ class GridPaneImpl implements GridPane {
     }
   }
 
+  private truncateLabel(label: string, maxVisualWidth: number): string {
+    if (this.getVisualLength(label) <= maxVisualWidth) {
+      return label;
+    }
+
+    let visualLen = 0;
+    let cutIndex = 0;
+    let inTag = false;
+    for (let i = 0; i < label.length; i++) {
+      if (label[i] === "{") {
+        inTag = true;
+      } else if (label[i] === "}") {
+        inTag = false;
+      } else if (!inTag) {
+        visualLen++;
+        if (visualLen >= maxVisualWidth - 1) {
+          cutIndex = i + 1;
+          break;
+        }
+      }
+    }
+
+    return `${label.slice(0, cutIndex)}\u2026`;
+  }
+
   private getVisualLength(str: string): number {
     // Remove blessed tags like {red-fg}, {/}, {bold}, etc.
     return str.replace(/\{[^}]*\}/g, "").length;
@@ -370,9 +446,8 @@ export function calculateGridDimensions(count: number): {
   rows: number;
   cols: number;
 } {
-  if (count <= 1) return { rows: 1, cols: 1 };
-  if (count === 2) return { rows: 1, cols: 2 };
-  if (count <= 4) return { rows: 2, cols: 2 };
-  if (count <= 6) return { rows: 2, cols: 3 };
-  return { rows: 3, cols: 3 };
+  const safeCount = Math.max(1, count);
+  const cols = Math.ceil(Math.sqrt(safeCount));
+  const rows = Math.ceil(safeCount / cols);
+  return { rows, cols };
 }

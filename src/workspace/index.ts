@@ -428,7 +428,7 @@ export async function stampWorkspaceInteractive(
   // Run all repo pipelines in parallel (git + initializers per repo)
   let repoResults: Map<string, { hasLockfile: boolean }>;
 
-  if (shouldUseGrid() && repos.length > 1) {
+  if (shouldUseGrid(repos.length)) {
     // Grid mode: visual concurrent output
     repoResults = await renderPipelinesGrid({
       pipelines,
