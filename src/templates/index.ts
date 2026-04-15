@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 import type { TemplateConfig } from "../types.ts";
+import { normalizeBranchPrefix } from "../utils/branch-prefix.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 
 const XDG_TEMPLATES_DIR = "workforest/templates";
@@ -80,7 +81,7 @@ export async function loadTemplate(
     return {
       id: templateId,
       path: templatePath,
-      config: parsed,
+      config: normalizeTemplateConfig(parsed),
     };
   } catch (error_) {
     if ((error_ as NodeJS.ErrnoException).code === "ENOENT") {
@@ -100,7 +101,7 @@ export async function createTemplate(
 
   await ensureDir(templateDir);
 
-  const contents = generateTemplateJsonc(config);
+  const contents = generateTemplateJsonc(normalizeTemplateConfig(config));
   await fs.writeFile(templatePath, contents, "utf8");
 
   // Remove old .json file if it exists (migration to .jsonc)
@@ -178,6 +179,18 @@ function generateTemplateJsonc(config: TemplateConfig): string {
   lines.push("}");
 
   return `${lines.join("\n")}\n`;
+}
+
+function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
+  const { branchPrefix: _branchPrefix, ...rest } = config;
+  const branchPrefix = normalizeBranchPrefix(config.branchPrefix);
+
+  return branchPrefix === undefined
+    ? rest
+    : {
+        ...rest,
+        branchPrefix,
+      };
 }
 
 export async function deleteTemplate(templateId: string): Promise<void> {

@@ -3,6 +3,7 @@ import path from "node:path";
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import type { Template } from "../templates/index.ts";
 import type { WorkspaceConfig } from "../types.ts";
+import { buildBranchName } from "../utils/branch-prefix.ts";
 import { generateSlugFromDescription, isSlug } from "../utils/slug.ts";
 
 setRuntime(new NodeRuntime());
@@ -427,11 +428,10 @@ function runWizardScreen(
               : "...";
             const dirDisplay = `${shortenPath(baseDir, homeDir)}/${prefix}${trimmed}`;
 
-            const branchPrefix =
-              state.templateBranchPrefix ?? config.branchPrefix ?? "";
-            const branchDisplay = branchPrefix
-              ? `${branchPrefix}${trimmed}`
-              : trimmed;
+            const branchDisplay = buildBranchName(
+              trimmed,
+              state.templateBranchPrefix ?? config.branchPrefix,
+            );
 
             lines.push(
               `{gray-fg}dir{/gray-fg}  {white-fg}${dirDisplay}{/white-fg}`,
