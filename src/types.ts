@@ -4,10 +4,21 @@ export type RepoConfig = {
   defaultBranch: string;
 };
 
+export type VercelRepoOverride = {
+  team?: string;
+  disabled?: boolean;
+};
+
+export type VercelLinkConfig = {
+  teamByGitHubOwner?: Record<string, string>;
+  repoOverrides?: Record<string, VercelRepoOverride>;
+};
+
 export type WorkspaceConfig = {
   defaultDir?: string;
   dirPrefix?: string;
   branchPrefix?: string;
+  vercelLink?: VercelLinkConfig;
 };
 
 export type ResolvedWorkspaceConfig = {

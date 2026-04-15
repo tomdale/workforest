@@ -21,7 +21,6 @@ import {
 import type {
   RepoConfig,
   WorkspaceConfig,
-  WorkspaceMetadata,
 } from "./types.ts";
 import {
   CancelError,
@@ -36,6 +35,7 @@ import {
   promptText,
   spinner,
 } from "./ui/prompts/index.ts";
+import { buildBranchName, inferBranchPrefix } from "./utils/branch-prefix.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
@@ -189,6 +189,38 @@ async function runConfigShow(): Promise<void> {
   console.log("\nBranch Prefix:");
   console.log(`  "${config.branchPrefix ?? ""}"`);
   console.log('  Example: "tom/" creates branches like tom/my-feature');
+
+  if (config.vercelLink) {
+    console.log("\nVercel Auto-Link:");
+
+    const ownerMappings = Object.entries(
+      config.vercelLink.teamByGitHubOwner ?? {},
+    );
+    if (ownerMappings.length > 0) {
+      console.log("  Team by GitHub Owner:");
+      for (const [owner, team] of ownerMappings) {
+        console.log(`    ${owner} -> ${team}`);
+      }
+    } else {
+      console.log("  Team by GitHub Owner: (none)");
+    }
+
+    const repoOverrides = Object.entries(config.vercelLink.repoOverrides ?? {});
+    if (repoOverrides.length > 0) {
+      console.log("  Repo Overrides:");
+      for (const [repo, override] of repoOverrides) {
+        if (override.disabled) {
+          console.log(`    ${repo}: disabled`);
+        } else if (override.team) {
+          console.log(`    ${repo}: ${override.team}`);
+        } else {
+          console.log(`    ${repo}: (no-op override)`);
+        }
+      }
+    } else {
+      console.log("  Repo Overrides: (none)");
+    }
+  }
 
   console.log(`\nConfig Location: ${configPath}`);
   console.log();
@@ -906,10 +938,10 @@ async function runNewCommand(argv: string[]): Promise<void> {
     : process.cwd();
   const prefix = config.dirPrefix ?? "";
   const workspaceDir = path.resolve(workspaceRoot, `${prefix}${featureName}`);
-  const effectiveBranchPrefix = templateBranchPrefix ?? config.branchPrefix;
-  const branchName = effectiveBranchPrefix
-    ? `${effectiveBranchPrefix}${featureName}`
-    : featureName;
+  const branchName = buildBranchName(
+    featureName,
+    templateBranchPrefix ?? config.branchPrefix,
+  );
 
   // Dry-run mode
   if (args["--dry-run"]) {
@@ -1067,11 +1099,12 @@ async function runForkCommand(argv: string[]): Promise<void> {
   }));
 
   // Infer prefixes from the source workspace
-  const branchPrefix = inferBranchPrefix(metadata);
+  const branchPrefix = inferBranchPrefix(
+    metadata.repos[0]?.feature_branch,
+    metadata.workspace.feature_name,
+  );
   const dirPrefix = inferDirPrefix(sourceDir, metadata.workspace.feature_name);
-  const branchName = branchPrefix
-    ? `${branchPrefix}${featureName}`
-    : featureName;
+  const branchName = buildBranchName(featureName, branchPrefix);
 
   // Build new workspace as a sibling of the source
   const workspaceDir = path.join(
@@ -1141,22 +1174,6 @@ async function runForkCommand(argv: string[]): Promise<void> {
     await stampWorkspace(options);
     log.info("Happy shipping!");
   }
-}
-
-/**
- * Extract the branch prefix by comparing feature_branch to feature_name.
- * E.g. branch "td/fix-auth" with name "fix-auth" → prefix "td/".
- */
-function inferBranchPrefix(metadata: WorkspaceMetadata): string {
-  const { feature_name } = metadata.workspace;
-  const firstRepo = metadata.repos[0];
-  if (!firstRepo?.feature_branch) return "";
-
-  const branch = firstRepo.feature_branch;
-  if (branch.endsWith(feature_name)) {
-    return branch.slice(0, -feature_name.length);
-  }
-  return "";
 }
 
 /**

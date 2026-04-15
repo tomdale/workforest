@@ -186,6 +186,12 @@ hooks.
 | `vercel-link`    | 200      | `vercel.json` or vercel in package.json   |
 | `turbo-link`     | 201      | `turbo.json` in repo or workspace root    |
 
+The `vercel-link` initializer is fail-closed. When it can resolve a Vercel
+team for a GitHub repo, it runs `vercel link --yes --repo --scope <team>` and
+only succeeds if Vercel already has an existing project linked to that GitHub
+repository under the chosen team. It will not create a new Vercel project
+automatically.
+
 **Disabling initializers:**
 
 You can disable initializers per-template using `disableInitializers`:
@@ -261,11 +267,25 @@ wf template list
 
 Global settings live in `~/.config/workforest/config.json`:
 
-```json
+```jsonc
 {
   "defaultDir": "~/Code/workspaces",
   "dirPrefix": "workspace-",
-  "branchPrefix": "feature/"
+  "branchPrefix": "feature/",
+  "vercelLink": {
+    "teamByGitHubOwner": {
+      "vercel": "vercel",
+      "vercel-labs": "vercel-labs"
+    },
+    "repoOverrides": {
+      "vercel/omniagent": {
+        "team": "vercel"
+      },
+      "vercel/internal-only": {
+        "disabled": true
+      }
+    }
+  }
 }
 ```
 
@@ -273,6 +293,14 @@ Global settings live in `~/.config/workforest/config.json`:
 - **dirPrefix**: Prefix for workspace directory names
 - **branchPrefix**: Default prefix for feature branch names (can be overridden
   per-template)
+- **vercelLink.teamByGitHubOwner**: Optional owner-to-team mappings for
+  automatic Vercel repo-linking
+- **vercelLink.repoOverrides**: Optional per-repo overrides or disables for
+  Vercel auto-linking
+
+Workforest includes built-in Vercel owner defaults for `vercel -> vercel` and
+`vercel-labs -> vercel-labs`. Any other owner must be configured explicitly or
+automatic Vercel linking is skipped.
 
 ## Performance
 

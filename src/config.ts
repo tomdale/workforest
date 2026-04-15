@@ -4,8 +4,11 @@ import path from "node:path";
 import type {
   RepoConfig,
   ResolvedWorkspaceConfig,
+  VercelLinkConfig,
+  VercelRepoOverride,
   WorkspaceConfig,
 } from "./types.ts";
+import { normalizeBranchPrefix } from "./utils/branch-prefix.ts";
 import { ensureDir, pathExists } from "./utils/fs.ts";
 
 const DEFAULT_TRUNK_BRANCH = "main";
@@ -18,6 +21,11 @@ const XDG_CONFIG_DIR = "workforest";
 const ENV_CACHE_DIR = "WORKFOREST_CACHE_DIR";
 const ENV_CONFIG_DIR = "WORKFOREST_CONFIG_DIR";
 const ENV_TIMING_FILE = "WORKFOREST_TIMING_FILE";
+
+export const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
+  vercel: "vercel",
+  "vercel-labs": "vercel-labs",
+};
 
 /**
  * Get the cache directory, respecting WORKFOREST_CACHE_DIR environment variable.
@@ -217,10 +225,15 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
     throw new Error(`Workspace config at ${configPath} must be a JSON object.`);
   }
 
-  const config = value as WorkspaceConfig;
+  const config = value as Record<string, unknown>;
   const dirPrefix = normalizeString(config.dirPrefix) ?? DEFAULT_DIR_PREFIX;
-  const branchPrefix = normalizeString(config.branchPrefix) ?? "";
+  const branchPrefix =
+    normalizeBranchPrefix(normalizeString(config.branchPrefix)) ?? "";
   const defaultDir = normalizeString(config.defaultDir);
+  const vercelLink = normalizeVercelLinkConfig(
+    config.vercelLink,
+    `${configPath}.vercelLink`,
+  );
 
   const result: WorkspaceConfig = {
     dirPrefix,
@@ -231,6 +244,10 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
     result.defaultDir = defaultDir;
   }
 
+  if (vercelLink !== undefined) {
+    result.vercelLink = vercelLink;
+  }
+
   return result;
 }
 
@@ -238,6 +255,111 @@ function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeVercelLinkConfig(
+  value: unknown,
+  pathLabel: string,
+): VercelLinkConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  const teamByGitHubOwner = normalizeStringRecord(
+    config.teamByGitHubOwner,
+    `${pathLabel}.teamByGitHubOwner`,
+  );
+  const repoOverrides = normalizeRepoOverrides(
+    config.repoOverrides,
+    `${pathLabel}.repoOverrides`,
+  );
+
+  const result: VercelLinkConfig = {};
+  if (teamByGitHubOwner && Object.keys(teamByGitHubOwner).length > 0) {
+    result.teamByGitHubOwner = teamByGitHubOwner;
+  }
+  if (repoOverrides && Object.keys(repoOverrides).length > 0) {
+    result.repoOverrides = repoOverrides;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeStringRecord(
+  value: unknown,
+  pathLabel: string,
+): Record<string, string> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.trim();
+    const normalizedValue = normalizeString(entry);
+    if (!normalizedKey) {
+      throw new Error(`${pathLabel} contains an empty key.`);
+    }
+    if (normalizedValue === undefined) {
+      throw new Error(`${pathLabel}.${normalizedKey} must be a string.`);
+    }
+    result[normalizedKey] = normalizedValue;
+  }
+
+  return result;
+}
+
+function normalizeRepoOverrides(
+  value: unknown,
+  pathLabel: string,
+): Record<string, VercelRepoOverride> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const result: Record<string, VercelRepoOverride> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) {
+      throw new Error(`${pathLabel} contains an empty key.`);
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`${pathLabel}.${normalizedKey} must be an object.`);
+    }
+
+    const override = entry as Record<string, unknown>;
+    const team = normalizeString(override.team);
+    const disabledValue = override.disabled;
+    if (disabledValue !== undefined && typeof disabledValue !== "boolean") {
+      throw new Error(
+        `${pathLabel}.${normalizedKey}.disabled must be a boolean.`,
+      );
+    }
+    if (override.team !== undefined && team === undefined) {
+      throw new Error(`${pathLabel}.${normalizedKey}.team must be a string.`);
+    }
+
+    const normalizedOverride: VercelRepoOverride = {};
+    if (team !== undefined) {
+      normalizedOverride.team = team;
+    }
+    if (disabledValue !== undefined) {
+      normalizedOverride.disabled = disabledValue;
+    }
+    result[normalizedKey] = normalizedOverride;
+  }
+
+  return result;
 }
 
 function parseRepoSlug(token: string): RepoSlug | null {

@@ -1,7 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import {
+  DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER,
+  loadWorkspaceConfig,
+} from "../../config.ts";
+import type { WorkspaceConfig } from "../../types.ts";
 import { pathExists } from "../../utils/fs.ts";
 import { runCommandGenerator } from "../../utils/task-generator.ts";
+import { getGitHubSlug } from "../git.ts";
 import { hasAny } from "../pnpm.ts";
 import type {
   InitializerContext,
@@ -43,31 +49,61 @@ async function hasVercelInPackageJson(dir: string): Promise<boolean> {
   }
 }
 
-/**
- * Detect if this is a monorepo (has turbo.json or workspaces in package.json).
- */
-async function isMonorepo(workspaceDir: string): Promise<boolean> {
-  // Check for turbo.json in workspace root
-  if (await pathExists(path.join(workspaceDir, "turbo.json"))) {
-    return true;
-  }
-
-  // Check for workspaces in root package.json
-  try {
-    const packageJsonPath = path.join(workspaceDir, "package.json");
-    const content = await fs.readFile(packageJsonPath, "utf8");
-    const pkg = JSON.parse(content) as {
-      workspaces?: string[] | { packages?: string[] };
-    };
-
-    if (pkg.workspaces) {
-      return true;
+type VercelRepoLinkTarget =
+  | {
+      kind: "link";
+      githubOwner: string;
+      githubSlug: string;
+      team: string;
     }
-  } catch {
-    // No package.json or invalid JSON
+  | { kind: "skip"; reason: string };
+
+export function resolveVercelRepoLinkTarget(
+  remote: string,
+  config: WorkspaceConfig,
+): VercelRepoLinkTarget {
+  const githubSlug = getGitHubSlug(remote);
+  if (!githubSlug) {
+    return {
+      kind: "skip",
+      reason: "Vercel auto-link only supports GitHub repositories.",
+    };
   }
 
-  return false;
+  const [githubOwner] = githubSlug.split("/");
+  if (!githubOwner) {
+    return {
+      kind: "skip",
+      reason: `Unable to determine GitHub owner from "${githubSlug}".`,
+    };
+  }
+
+  const repoOverride = config.vercelLink?.repoOverrides?.[githubSlug];
+  if (repoOverride?.disabled) {
+    return {
+      kind: "skip",
+      reason: `Vercel auto-link disabled for GitHub repo "${githubSlug}".`,
+    };
+  }
+
+  const team =
+    repoOverride?.team ??
+    config.vercelLink?.teamByGitHubOwner?.[githubOwner] ??
+    DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER[githubOwner];
+
+  if (!team) {
+    return {
+      kind: "skip",
+      reason: `No Vercel team mapping configured for GitHub owner "${githubOwner}".`,
+    };
+  }
+
+  return {
+    kind: "link",
+    githubOwner,
+    githubSlug,
+    team,
+  };
 }
 
 /**
@@ -94,14 +130,7 @@ async function detect(
   if (!hasVercelJson && !hasVercelDep) {
     return { shouldRun: false };
   }
-
-  // Detect if this is a monorepo to use --repo flag
-  const useRepoFlag = await isMonorepo(context.workspaceDir);
-
-  return {
-    shouldRun: true,
-    metadata: { useRepoFlag },
-  };
+  return { shouldRun: true };
 }
 
 /**
@@ -109,23 +138,54 @@ async function detect(
  */
 async function* execute(
   context: InitializerContext,
-  metadata: Record<string, unknown>,
+  _metadata: Record<string, unknown>,
 ) {
   const { repoDir } = context;
-  const useRepoFlag = metadata["useRepoFlag"] === true;
 
-  const args = ["link", "--yes"];
-  if (useRepoFlag) {
-    args.push("--repo");
+  let config: WorkspaceConfig;
+  try {
+    ({ config } = await loadWorkspaceConfig());
+  } catch (error) {
+    yield {
+      status: "failed" as const,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+    return;
   }
 
-  yield { status: "running" as const, message: `vercel ${args.join(" ")}` };
+  const target = resolveVercelRepoLinkTarget(context.repo.remote, config);
+  if (target.kind === "skip") {
+    yield { status: "skipped" as const, reason: target.reason };
+    return;
+  }
+
+  const args = ["link", "--yes", "--repo", "--scope", target.team];
 
   const link = runCommandGenerator("vercel", args, { cwd: repoDir });
+  let completed = false;
 
   for await (const state of link) {
+    if (state.status === "completed") {
+      completed = true;
+      continue;
+    }
     yield state;
   }
+
+  if (!completed) {
+    return;
+  }
+
+  const repoConfigPath = path.join(repoDir, ".vercel", "repo.json");
+  if (!(await pathExists(repoConfigPath))) {
+    yield {
+      status: "skipped" as const,
+      reason: `No existing Vercel projects linked to GitHub repo "${target.githubSlug}" under team "${target.team}".`,
+    };
+    return;
+  }
+
+  yield { status: "completed" as const };
 }
 
 export const vercelLinkInitializer: InitializerDefinition = {
