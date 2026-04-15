@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { WorkspaceMetadata } from "../types.ts";
+import type { WorkspaceMetadata, WorkspaceRepoMetadata } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 
 const METADATA_FILENAME = ".workforest";
@@ -26,8 +26,6 @@ export async function writeWorkspaceMetadata(
   workspaceDir: string,
   options: WriteMetadataOptions,
 ): Promise<void> {
-  const metadataPath = path.join(workspaceDir, METADATA_FILENAME);
-
   const metadata: WorkspaceMetadata = {
     workspace: {
       version: SCHEMA_VERSION,
@@ -45,8 +43,43 @@ export async function writeWorkspaceMetadata(
     })),
   };
 
+  await saveWorkspaceMetadata(workspaceDir, metadata);
+}
+
+/**
+ * Persist workspace metadata without modifying workspace-level fields.
+ */
+export async function saveWorkspaceMetadata(
+  workspaceDir: string,
+  metadata: WorkspaceMetadata,
+): Promise<void> {
+  const metadataPath = path.join(workspaceDir, METADATA_FILENAME);
   const contents = JSON.stringify(metadata, null, 2);
   await fs.writeFile(metadataPath, `${contents}\n`, "utf8");
+}
+
+/**
+ * Append repository entries to an existing workspace metadata file.
+ */
+export async function appendWorkspaceRepos(
+  workspaceDir: string,
+  repos: readonly WorkspaceRepoMetadata[],
+): Promise<WorkspaceMetadata> {
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+
+  if (!metadata) {
+    throw new Error(
+      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+    );
+  }
+
+  const nextMetadata: WorkspaceMetadata = {
+    ...metadata,
+    repos: [...metadata.repos, ...repos],
+  };
+
+  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
+  return nextMetadata;
 }
 
 /**

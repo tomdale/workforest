@@ -71,6 +71,9 @@ export async function cli(): Promise<void> {
     case "new":
       await runNewCommand(commandArgv);
       break;
+    case "add":
+      await runAddCommand(commandArgv);
+      break;
     case "clean":
       await runCleanCommand(commandArgv);
       break;
@@ -1000,6 +1003,151 @@ async function runNewCommand(argv: string[]): Promise<void> {
   } else {
     await stampWorkspace(options);
     log.info("Happy shipping!");
+  }
+}
+
+async function runAddCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--workspace": String,
+      "--dry-run": Boolean,
+      "-h": "--help",
+      "-w": "--workspace",
+      "-n": "--dry-run",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  const interactive = isInteractive();
+  let selections = args._;
+
+  if (selections.length === 0) {
+    if (!interactive) {
+      log.error("No repositories specified.");
+      log.info("Usage: wf add <repo...> [--workspace <dir>]");
+      process.exitCode = 1;
+      return;
+    }
+
+    const repos = await promptText("Repositories to add", {
+      placeholder: "org/repo or git URL, comma-separated",
+      validate: (input) => {
+        if (!input.trim()) return "At least one repository is required";
+        return null;
+      },
+    });
+
+    selections = repos
+      .split(",")
+      .map((repo) => repo.trim())
+      .filter(Boolean);
+  }
+
+  const workspaceDir = args["--workspace"]
+    ? path.resolve(expandHome(args["--workspace"]))
+    : await detectWorkspaceFromCwd();
+
+  if (!workspaceDir) {
+    log.error(
+      "Not inside a workspace. Run this command from a workspace or pass --workspace <dir>.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  let metadata: Awaited<ReturnType<typeof readWorkspaceMetadata>>;
+  try {
+    metadata = await readWorkspaceMetadata(workspaceDir);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!metadata) {
+    log.error(`Could not read workspace metadata from ${workspaceDir}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let repos: RepoConfig[];
+  try {
+    repos = reposFromSlugs(selections);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  const branchName =
+    metadata.repos.find((repo) => repo.feature_branch)?.feature_branch ??
+    metadata.workspace.feature_name;
+
+  if (args["--dry-run"]) {
+    if (interactive) {
+      note(
+        [
+          `Workspace: ${workspaceDir}`,
+          `Branch: ${branchName}`,
+          "",
+          "Repositories to add:",
+          ...repos.map((repo) => `  • ${repo.name}`),
+        ].join("\n"),
+        "Dry run preview",
+      );
+      outro("No changes made");
+    } else {
+      console.log("\nDry run - no changes will be made\n");
+      console.log(`Workspace: ${workspaceDir}`);
+      console.log(`Branch: ${branchName}`);
+      console.log("\nRepositories to add:");
+      for (const repo of repos) {
+        console.log(`  - ${repo.name} (${repo.remote})`);
+      }
+      console.log();
+    }
+    return;
+  }
+
+  const template = metadata.workspace.template_id
+    ? await loadTemplate(metadata.workspace.template_id)
+    : null;
+
+  try {
+    const { addReposToWorkspace } = await import("./workspace/index.ts");
+    const result = await addReposToWorkspace({
+      workspaceDir,
+      repos,
+      branchName,
+      disabledInitializers: template?.config.disableInitializers,
+    });
+
+    if (result.addedRepos.length > 0) {
+      log.success(
+        `Added ${result.addedRepos.length} repos to ${path.basename(workspaceDir)}.`,
+      );
+    }
+
+    if (result.failedRepos.length > 0) {
+      process.exitCode = 1;
+      log.error(
+        `Failed to add ${result.failedRepos.length} repo${result.failedRepos.length === 1 ? "" : "s"}.`,
+      );
+      return;
+    }
+
+    if (interactive) {
+      outro("Workspace updated");
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
   }
 }
 

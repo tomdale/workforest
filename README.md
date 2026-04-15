@@ -38,6 +38,9 @@ npx workforest new ...
 # on new branches named after the feature.
 wf new vercel/front vercel/api -d "fixing the auth bug"
 
+# Add another repo to the current workspace later
+wf add vercel/docs
+
 # Or save frequently used groups as templates
 wf template new full-stack org/frontend org/api
 wf new full-stack -d "implementing user avatars"
@@ -94,6 +97,25 @@ wf new frontend backend -d "add dark mode support"
 ```
 
 Both repos get a `dark-mode-support` branch, ready for coordinated development.
+
+### Adding a Repo Later
+
+If the workspace already exists and you need to bring in another repository,
+run `wf add` from inside that workspace:
+
+```bash
+cd ~/Code/workspaces/fix-auth-bug
+wf add vercel/docs
+```
+
+You can also target a workspace explicitly:
+
+```bash
+wf add vercel/docs --workspace ~/Code/workspaces/fix-auth-bug
+```
+
+The new repo is checked out onto the workspace's existing feature branch, then
+the `.workforest` metadata and VS Code workspace file are updated in place.
 
 ### Forking a Workspace
 

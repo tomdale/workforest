@@ -17,7 +17,11 @@ import { note, promptLog, spinner } from "../ui/prompts/index.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
-import { writeWorkspaceMetadata } from "./metadata.ts";
+import {
+  appendWorkspaceRepos,
+  readWorkspaceMetadata,
+  writeWorkspaceMetadata,
+} from "./metadata.ts";
 import { repoPipelineGenerator } from "./pipeline.ts";
 import {
   cleanupWorkspaceWorktreesGenerator,
@@ -42,6 +46,21 @@ export type PreparedRepo = {
   repo: RepoConfig;
   targetDir: string;
   hasLockfile: boolean;
+};
+
+export type AddReposOptions = {
+  workspaceDir: string;
+  repos: readonly RepoConfig[];
+  branchName: string;
+  disabledInitializers?: boolean | string[];
+};
+
+export type AddReposResult = {
+  addedRepos: readonly RepoConfig[];
+  failedRepos: readonly {
+    name: string;
+    error: Error;
+  }[];
 };
 
 /**
@@ -487,6 +506,136 @@ export async function stampWorkspaceInteractive(
   );
 }
 
+export async function addReposToWorkspace({
+  workspaceDir,
+  repos,
+  branchName,
+  disabledInitializers,
+}: AddReposOptions): Promise<AddReposResult> {
+  if (repos.length === 0) {
+    throw new Error("addReposToWorkspace requires at least one repository.");
+  }
+
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (!metadata) {
+    throw new Error(
+      `Could not read workspace metadata from ${path.join(workspaceDir, ".workforest")}`,
+    );
+  }
+
+  const existingNames = new Set(metadata.repos.map((repo) => repo.name));
+  const existingRemotes = new Map(
+    metadata.repos.map((repo) => [repo.remote, repo.name]),
+  );
+
+  for (const repo of repos) {
+    if (existingNames.has(repo.name)) {
+      throw new Error(
+        `Workspace already contains a repository named "${repo.name}".`,
+      );
+    }
+
+    const existingRemote = existingRemotes.get(repo.remote);
+    if (existingRemote) {
+      throw new Error(
+        `Workspace already contains repository "${existingRemote}" from ${repo.remote}.`,
+      );
+    }
+
+    const targetDir = path.join(workspaceDir, repo.name);
+    if (await pathExists(targetDir)) {
+      throw new Error(
+        `Target directory already exists: ${targetDir}\nRefusing to adopt an unmanaged checkout.`,
+      );
+    }
+  }
+
+  const pipelines = new Map(
+    repos.map((repo) => [
+      repo.name,
+      repoPipelineGenerator({
+        repo,
+        workspaceDir,
+        branchName,
+        isNewWorkspace: false,
+        disabledInitializers,
+      }),
+    ]),
+  );
+
+  const completed = new Map<string, { hasLockfile: boolean }>();
+  const failures = new Map<string, Error>();
+
+  for await (const { id, state } of runParallel(pipelines)) {
+    switch (state.phase) {
+      case "git":
+        if (state.status === "running" && state.message) {
+          log.info(`${id}: ${state.step} - ${state.message}`);
+        } else if (state.status === "retrying" && state.message) {
+          log.warn(`${id}: ${state.step} - ${state.message}`);
+        } else if (state.status === "completed") {
+          log.success(`${id}: ${state.step} complete`);
+        } else if (state.status === "failed") {
+          log.error(`${id}: ${state.step} failed`);
+        }
+        break;
+
+      case "initializer":
+        if (state.status === "running" && state.message) {
+          log.info(`${id}: ${state.name} - ${state.message}`);
+        } else if (state.status === "retrying" && state.message) {
+          log.warn(`${id}: ${state.name} - ${state.message}`);
+        } else if (state.status === "completed") {
+          log.success(`${id}: ${state.name} complete`);
+        } else if (state.status === "failed") {
+          log.error(`${id}: ${state.name} failed`);
+        }
+        break;
+
+      case "complete":
+        completed.set(id, { hasLockfile: state.hasLockfile });
+        break;
+
+      case "failed":
+        failures.set(id, state.error);
+        log.error(`${id}: ${state.error.message}`);
+        break;
+    }
+  }
+
+  const addedRepos = repos.filter((repo) => completed.has(repo.name));
+
+  if (addedRepos.length > 0) {
+    await appendWorkspaceRepos(
+      workspaceDir,
+      addedRepos.map((repo) => ({
+        name: repo.name,
+        remote: repo.remote,
+        default_branch: repo.defaultBranch,
+        has_lockfile: completed.get(repo.name)?.hasLockfile ?? false,
+        feature_branch: branchName,
+      })),
+    );
+
+    await writeVSCodeWorkspaceFile(workspaceDir, [
+      ...metadata.repos.map((repo) => ({
+        name: repo.name,
+        remote: repo.remote,
+        defaultBranch: repo.default_branch,
+      })),
+      ...addedRepos,
+    ]);
+  }
+
+  return {
+    addedRepos,
+    failedRepos: Array.from(failures, ([name, error]) => ({
+      name,
+      error,
+    })),
+  };
+}
+
 /**
  * Run pipelines with a simple spinner (fallback for non-grid mode).
  */
@@ -551,8 +700,29 @@ async function writeVSCodeWorkspaceFile(
     `${workspaceName}.code-workspace`,
   );
 
+  let baseContents: Record<string, unknown> = {};
+  if (await pathExists(workspaceFile)) {
+    try {
+      const existing = JSON.parse(await fs.readFile(workspaceFile, "utf8"));
+      if (
+        existing &&
+        typeof existing === "object" &&
+        !Array.isArray(existing)
+      ) {
+        baseContents = existing as Record<string, unknown>;
+      }
+    } catch {
+      log.warn(
+        `Unable to parse existing VS Code workspace file at ${workspaceFile}; overwriting it.`,
+      );
+    }
+  }
+
   const contents = JSON.stringify(
-    { folders: repos.map((repo) => ({ path: repo.name })) },
+    {
+      ...baseContents,
+      folders: repos.map((repo) => ({ path: repo.name })),
+    },
     null,
     2,
   );
