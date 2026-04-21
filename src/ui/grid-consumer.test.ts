@@ -21,6 +21,7 @@ vi.mock("@unblessed/node", () => {
       this.height = 50;
     }),
     Box: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
+      this.setContent = vi.fn();
       this.destroy = vi.fn();
     }),
     ScrollableBox: vi.fn().mockImplementation(function (
@@ -37,6 +38,7 @@ vi.mock("@unblessed/node", () => {
 });
 
 import { NodeRuntime, setRuntime } from "@unblessed/node";
+import { Screen, ScrollableBox } from "@unblessed/node";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "./grid-consumer.ts";
 
@@ -266,5 +268,114 @@ describe("renderPipelinesGrid", () => {
 
     const results = await promise;
     expect(results.get("repo")).toEqual({ hasLockfile: true });
+  });
+
+  it("batches bursty output into a small number of renders", async () => {
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      for (let i = 0; i < 50; i++) {
+        yield {
+          phase: "git",
+          step: "mirror",
+          status: "output",
+          output: `chunk-${i}\n`,
+        };
+      }
+      yield { phase: "complete", hasLockfile: true };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+    });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    const screen = vi.mocked(Screen).mock.instances.at(-1) as {
+      render: ReturnType<typeof vi.fn>;
+    };
+
+    expect(screen.render.mock.calls.length).toBeLessThan(10);
+  });
+
+  it("coalesces chunked output and drops carriage-return rewrites", async () => {
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "output",
+        output: "Receiving obj",
+      };
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "output",
+        output: "ects 50%\r",
+      };
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "output",
+        output: "Receiving objects 100%\nDone",
+      };
+      yield { phase: "complete", hasLockfile: true };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+    });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    const pane = vi.mocked(ScrollableBox).mock.instances.at(-1) as {
+      setContent: ReturnType<typeof vi.fn>;
+    };
+    const lastContent = pane.setContent.mock.lastCall?.[0];
+
+    expect(lastContent).toBe("Receiving objects 100%\nDone");
+  });
+
+  it("supports eager render mode for benchmark environments", async () => {
+    const pane = {
+      setLabel: vi.fn(),
+      appendLine: vi.fn(),
+    };
+    const grid = {
+      getPane: vi.fn(() => pane),
+      render: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const screen = {
+      key: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "output",
+        output: "a\n",
+      };
+      yield {
+        phase: "git",
+        step: "mirror",
+        status: "output",
+        output: "b\n",
+      };
+      yield { phase: "complete", hasLockfile: true };
+    };
+
+    await renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+      environment: {
+        createScreen: () => screen,
+        createGrid: () => grid,
+        renderIntervalMs: 0,
+        finalHoldMs: 0,
+      },
+    });
+
+    expect(grid.render).toHaveBeenCalledTimes(4);
   });
 });

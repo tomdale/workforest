@@ -20,6 +20,8 @@
   },
   "scripts": {
     "build": "tsdown",
+    "bench:ghostty": "tsx benchmarks/ghostty-real.ts",
+    "bench:tui": "tsx benchmarks/tui-grid.ts",
     "prepack": "pnpm build",
     "test": "vitest run"
   },

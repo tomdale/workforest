@@ -10,7 +10,65 @@ setRuntime(new NodeRuntime());
 export type RenderPipelinesGridOptions = {
   pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;
   repoNames: string[];
+  environment?: GridRenderEnvironment;
 };
+
+const DEFAULT_RENDER_INTERVAL_MS = 33;
+const DEFAULT_FINAL_HOLD_MS = 500;
+
+export interface GridPaneLike {
+  setLabel(label: string): void;
+  appendLine(line: string): void;
+}
+
+export interface GridLayoutLike {
+  getPane(index: number): GridPaneLike | undefined;
+  render(): void;
+  destroy(): void;
+}
+
+export interface GridScreenLike {
+  key(
+    keys: string[],
+    handler: (_ch?: string, _key?: { name?: string }) => void,
+  ): void;
+  destroy(): void;
+}
+
+export interface GridRenderEnvironment {
+  createScreen(): GridScreenLike;
+  createGrid(options: {
+    screen: GridScreenLike;
+    rows: number;
+    cols: number;
+  }): GridLayoutLike;
+  renderIntervalMs?: number;
+  finalHoldMs?: number;
+}
+
+function createDefaultEnvironment(): GridRenderEnvironment {
+  return {
+    createScreen: () =>
+      new Screen({
+        smartCSR: true,
+        fullUnicode: true,
+        title: "workforest",
+      }),
+    createGrid: ({ screen, rows, cols }) =>
+      new GridLayout({
+        screen: screen as Screen,
+        rows,
+        cols,
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        borderColor: "cyan",
+      }),
+    renderIntervalMs: DEFAULT_RENDER_INTERVAL_MS,
+    finalHoldMs: DEFAULT_FINAL_HOLD_MS,
+  };
+}
 
 /**
  * Check if the terminal supports grid rendering.
@@ -45,24 +103,19 @@ const STATUS_ICONS = {
 export async function renderPipelinesGrid({
   pipelines,
   repoNames,
+  environment = createDefaultEnvironment(),
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
-  const screen = new Screen({
-    smartCSR: true,
-    fullUnicode: true,
-    title: "workforest",
-  });
+  const renderIntervalMs =
+    environment.renderIntervalMs ?? DEFAULT_RENDER_INTERVAL_MS;
+  const finalHoldMs = environment.finalHoldMs ?? DEFAULT_FINAL_HOLD_MS;
+  const screen = environment.createScreen();
 
   const { rows, cols } = calculateGridDimensions(repoNames.length);
 
-  const grid = new GridLayout({
+  const grid = environment.createGrid({
     screen,
     rows,
     cols,
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    borderColor: "cyan",
   });
 
   // Map repo names to pane indices
@@ -77,7 +130,24 @@ export async function renderPipelinesGrid({
 
   // Track repo states for return value
   const repoResults = new Map<string, { hasLockfile: boolean }>();
-  const repoPhases = new Map<string, string>();
+  const outputBuffers = new Map<string, string>();
+  let pendingRender: Promise<void> | null = null;
+
+  const scheduleRender = (): void => {
+    if (renderIntervalMs <= 0) {
+      grid.render();
+      return;
+    }
+
+    if (pendingRender) return;
+    pendingRender = new Promise((resolve) => {
+      setTimeout(() => {
+        pendingRender = null;
+        grid.render();
+        resolve();
+      }, renderIntervalMs);
+    });
+  };
 
   // Handle keyboard events
   screen.key(["escape", "q", "C-c"], () => {
@@ -99,49 +169,61 @@ export async function renderPipelinesGrid({
 
     switch (state.phase) {
       case "git": {
-        repoPhases.set(id, state.step);
         pane.setLabel(`${id}: ${state.step} ${STATUS_ICONS.running}`);
 
         if (state.output) {
-          appendOutput(pane, state.output);
+          appendOutput(pane, id, state.output, outputBuffers);
         } else if (state.message) {
+          flushOutputBuffer(pane, id, outputBuffers);
           pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
         }
         break;
       }
 
       case "initializer": {
-        repoPhases.set(id, state.name);
         pane.setLabel(`${id}: ${state.name} ${STATUS_ICONS.running}`);
 
         if (state.output) {
-          appendOutput(pane, state.output);
+          appendOutput(pane, id, state.output, outputBuffers);
         } else if (state.message) {
+          flushOutputBuffer(pane, id, outputBuffers);
           pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
         }
         break;
       }
 
       case "complete": {
-        repoPhases.set(id, "complete");
+        flushOutputBuffer(pane, id, outputBuffers);
         pane.setLabel(`{green-fg}${id} ${STATUS_ICONS.complete}{/green-fg}`);
         repoResults.set(id, { hasLockfile: state.hasLockfile });
         break;
       }
 
       case "failed": {
-        repoPhases.set(id, "failed");
+        flushOutputBuffer(pane, id, outputBuffers);
         pane.setLabel(`{red-fg}${id} ${STATUS_ICONS.failed}{/red-fg}`);
         pane.appendLine(`{red-fg}Error: ${state.error.message}{/red-fg}`);
         break;
       }
     }
 
-    grid.render();
+    scheduleRender();
+  }
+
+  for (const [repoId, paneIndex] of paneMap) {
+    const pane = grid.getPane(paneIndex);
+    if (!pane) continue;
+    flushOutputBuffer(pane, repoId, outputBuffers);
+  }
+
+  if (pendingRender) {
+    await pendingRender;
   }
 
   // Keep grid visible briefly so user can see final state
-  await sleep(500);
+  if (finalHoldMs > 0) {
+    await sleep(finalHoldMs);
+  }
 
   grid.destroy();
   screen.destroy();
@@ -154,12 +236,41 @@ export async function renderPipelinesGrid({
  */
 function appendOutput(
   pane: { appendLine: (line: string) => void },
+  repoId: string,
   output: string,
+  buffers: Map<string, string>,
 ): void {
-  // Strip ANSI codes but keep blessed tags
-  const cleaned = stripAnsi(output);
-  // appendLine handles splitting on newlines internally
-  pane.appendLine(cleaned);
+  const buffered = `${buffers.get(repoId) ?? ""}${stripAnsi(output)}`;
+  let currentLine = "";
+
+  for (const char of buffered) {
+    if (char === "\r") {
+      currentLine = "";
+      continue;
+    }
+
+    if (char === "\n") {
+      pane.appendLine(currentLine);
+      currentLine = "";
+      continue;
+    }
+
+    currentLine += char;
+  }
+
+  buffers.set(repoId, currentLine);
+}
+
+function flushOutputBuffer(
+  pane: { appendLine: (line: string) => void },
+  repoId: string,
+  buffers: Map<string, string>,
+): void {
+  const pending = buffers.get(repoId);
+  if (!pending) return;
+
+  pane.appendLine(pending);
+  buffers.delete(repoId);
 }
 
 /**

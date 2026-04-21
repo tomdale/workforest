@@ -236,9 +236,13 @@ export class GridLayout {
 class GridPaneImpl implements GridPane {
   private box: ScrollableBox;
   private lines: string[] = [];
+  private content = "";
   private maxLines: number;
   private screen: Screen;
   private labelBox: Box | null = null;
+  private currentLabel: string | null = null;
+  private readonly visibleLineBudget: number;
+  private readonly labelWidth: number;
 
   // Position info for label rendering
   private frameTop: number;
@@ -269,80 +273,64 @@ class GridPaneImpl implements GridPane {
     this.frameLeft = frameLeft;
     this.cellWidth = cellWidth;
     this.cellHeight = cellHeight;
+    this.visibleLineBudget = Math.max(this.cellHeight - 2, 1);
+    this.labelWidth = Math.max(this.cellWidth - 2, 1);
   }
 
   setLabel(label: string): void {
-    // Remove old label if exists
-    if (this.labelBox) {
-      this.labelBox.destroy();
-      this.labelBox = null;
+    if (label === this.currentLabel) {
+      return;
+    }
+    this.currentLabel = label;
+
+    if (!this.labelBox) {
+      const labelTop = this.frameTop + this.row * this.cellHeight;
+      const labelLeft = this.frameLeft + this.col * this.cellWidth + 1;
+      this.labelBox = new Box({
+        top: labelTop,
+        left: labelLeft,
+        width: this.labelWidth,
+        height: 1,
+        tags: true,
+      });
+      this.screen.append(this.labelBox);
     }
 
-    // Calculate position for the label (on the top border of the cell)
-    const labelTop = this.frameTop + this.row * this.cellHeight;
-    const labelLeft = this.frameLeft + this.col * this.cellWidth + 1;
-    // Calculate max visual width (excluding markup tags)
-    const maxVisualWidth = this.cellWidth - 4;
-
-    // Truncate based on visual length
-    let truncatedLabel = label;
-    const labelVisualLength = this.getVisualLength(label);
-    if (labelVisualLength > maxVisualWidth) {
-      // Find where to cut by tracking visual length
-      let visualLen = 0;
-      let cutIndex = 0;
-      let inTag = false;
-      for (let i = 0; i < label.length; i++) {
-        if (label[i] === "{") inTag = true;
-        else if (label[i] === "}") inTag = false;
-        else if (!inTag) {
-          visualLen++;
-          if (visualLen >= maxVisualWidth - 1) {
-            cutIndex = i + 1;
-            break;
-          }
-        }
-      }
-      truncatedLabel = `${label.slice(0, cutIndex)}\u2026`;
-    }
-
-    // Create label box with border chars as padding
-    const content = `\u2500 ${truncatedLabel}\u2500`;
-    const visualWidth = this.getVisualLength(content);
-    this.labelBox = new Box({
-      top: labelTop,
-      left: labelLeft,
-      width: visualWidth,
-      height: 1,
-      content,
-      tags: true,
-    });
-
-    this.screen.append(this.labelBox);
+    this.labelBox.setContent(this.formatLabelContent(label));
   }
 
   appendLine(line: string): void {
-    // Split on newlines and add each as a separate line
     const newLines = line.split("\n");
+    let needsRebuild = false;
+    const retainedLineBudget = this.getRetainedLineBudget();
+
     for (const newLine of newLines) {
       this.lines.push(newLine);
+      if (this.lines.length > retainedLineBudget) {
+        const excess = this.lines.length - retainedLineBudget;
+        this.lines.splice(0, excess);
+        needsRebuild = true;
+      }
     }
 
-    // Trim to max lines (keep most recent)
-    if (this.lines.length > this.maxLines) {
-      this.lines = this.lines.slice(this.lines.length - this.maxLines);
+    if (needsRebuild || this.content.length === 0) {
+      this.content = this.lines.join("\n");
+    } else {
+      this.content += `\n${newLines.join("\n")}`;
     }
 
-    this.box.setContent(this.lines.join("\n"));
+    this.box.setContent(this.content);
     this.box.setScrollPerc?.(100);
   }
 
   setContent(content: string): void {
     this.lines = content.split("\n");
-    if (this.lines.length > this.maxLines) {
-      this.lines = this.lines.slice(this.lines.length - this.maxLines);
+    const retainedLineBudget = this.getRetainedLineBudget();
+    if (this.lines.length > retainedLineBudget) {
+      this.lines = this.lines.slice(this.lines.length - retainedLineBudget);
     }
-    this.box.setContent(this.lines.join("\n"));
+    this.content = this.lines.join("\n");
+    this.box.setContent(this.content);
     this.box.setScrollPerc?.(100);
   }
 
@@ -360,6 +348,45 @@ class GridPaneImpl implements GridPane {
   private getVisualLength(str: string): number {
     // Remove blessed tags like {red-fg}, {/}, {bold}, etc.
     return str.replace(/\{[^}]*\}/g, "").length;
+  }
+
+  private getRetainedLineBudget(): number {
+    return Math.min(
+      this.maxLines,
+      Math.max(this.visibleLineBudget * 2, this.visibleLineBudget + 4),
+    );
+  }
+
+  private formatLabelContent(label: string): string {
+    const maxLabelWidth = Math.max(this.labelWidth - 4, 1);
+    const truncatedLabel = this.truncateToVisualWidth(label, maxLabelWidth);
+    const labelVisualWidth = this.getVisualLength(truncatedLabel);
+    const content = `\u2500 ${truncatedLabel} `;
+    const remaining = Math.max(this.labelWidth - (labelVisualWidth + 3), 0);
+    return `${content}${"\u2500".repeat(remaining)}`;
+  }
+
+  private truncateToVisualWidth(value: string, maxVisualWidth: number): string {
+    if (this.getVisualLength(value) <= maxVisualWidth) {
+      return value;
+    }
+
+    let visualLen = 0;
+    let cutIndex = 0;
+    let inTag = false;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === "{") inTag = true;
+      else if (value[i] === "}") inTag = false;
+      else if (!inTag) {
+        visualLen++;
+        if (visualLen >= maxVisualWidth - 1) {
+          cutIndex = i + 1;
+          break;
+        }
+      }
+    }
+
+    return `${value.slice(0, cutIndex)}\u2026`;
   }
 }
 
