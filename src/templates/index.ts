@@ -132,8 +132,11 @@ function generateTemplateJsonc(config: TemplateConfig): string {
 
   // branchPrefix (optional)
   lines.push("");
-  lines.push('  // Prefix for branch names, e.g. "feature/" (optional)');
-  if (config.branchPrefix) {
+  lines.push(
+    '  // Override the global branch prefix, e.g. "feature/" (optional)',
+  );
+  lines.push('  // Use "" to disable the global prefix for this template');
+  if (config.branchPrefix !== undefined) {
     lines.push(`  "branchPrefix": ${JSON.stringify(config.branchPrefix)},`);
   } else {
     lines.push('  // "branchPrefix": "feature/",');
@@ -182,15 +185,20 @@ function generateTemplateJsonc(config: TemplateConfig): string {
 }
 
 function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
+  const hasBranchPrefix = Object.prototype.hasOwnProperty.call(
+    config,
+    "branchPrefix",
+  );
   const { branchPrefix: _branchPrefix, ...rest } = config;
-  const branchPrefix = normalizeBranchPrefix(config.branchPrefix);
 
-  return branchPrefix === undefined
-    ? rest
-    : {
-        ...rest,
-        branchPrefix,
-      };
+  if (!hasBranchPrefix) {
+    return rest;
+  }
+
+  return {
+    ...rest,
+    branchPrefix: normalizeBranchPrefix(config.branchPrefix) ?? "",
+  };
 }
 
 export async function deleteTemplate(templateId: string): Promise<void> {

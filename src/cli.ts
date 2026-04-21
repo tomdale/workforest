@@ -12,16 +12,20 @@ import {
 import { help } from "./help.ts";
 import { log } from "./logger.ts";
 import {
+  isShellAutoCdEnabled,
+  normalizeShellName,
+  renderShellInit,
+  resolveCleanupCdTarget,
+  writeShellCdPath,
+} from "./shell.ts";
+import {
   createTemplate,
   deleteTemplate,
   getTemplatesDir,
   listTemplates,
   loadTemplate,
 } from "./templates/index.ts";
-import type {
-  RepoConfig,
-  WorkspaceConfig,
-} from "./types.ts";
+import type { RepoConfig, WorkspaceConfig } from "./types.ts";
 import {
   CancelError,
   cancel,
@@ -35,7 +39,11 @@ import {
   promptText,
   spinner,
 } from "./ui/prompts/index.ts";
-import { buildBranchName, inferBranchPrefix } from "./utils/branch-prefix.ts";
+import {
+  buildBranchName,
+  inferBranchPrefix,
+  resolveBranchPrefix,
+} from "./utils/branch-prefix.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
@@ -71,6 +79,9 @@ export async function cli(): Promise<void> {
     case "new":
       await runNewCommand(commandArgv);
       break;
+    case "cd":
+      await runCdCommand(commandArgv);
+      break;
     case "add":
       await runAddCommand(commandArgv);
       break;
@@ -79,6 +90,9 @@ export async function cli(): Promise<void> {
       break;
     case "config":
       await runConfigCommand(commandArgv);
+      break;
+    case "init":
+      await runInitCommand(commandArgv);
       break;
     case "template":
       await runTemplateCommand(commandArgv);
@@ -123,6 +137,32 @@ async function runConfigCommand(argv: string[]): Promise<void> {
       log.info("Available: show, edit, init");
       process.exitCode = 1;
   }
+}
+
+async function runInitCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "-h": "--help",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  const requestedShell = args._[0] ?? process.env["SHELL"];
+  const shell = normalizeShellName(requestedShell);
+
+  if (!shell) {
+    log.error("Unsupported shell. Use 'wf init zsh' or 'wf init bash'.");
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(renderShellInit(shell));
 }
 
 async function runConfigInit(): Promise<void> {
@@ -343,6 +383,60 @@ async function runListCommand(): Promise<void> {
   console.log();
 }
 
+async function runCdCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "-h": "--help",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  const interactive = isInteractive();
+  let workspaceDir: string | null = null;
+
+  try {
+    if (args._[0]) {
+      workspaceDir = await resolveWorkspaceByName(args._[0]);
+      if (!workspaceDir) {
+        process.exitCode = 1;
+        return;
+      }
+    } else if (interactive) {
+      workspaceDir = await selectWorkspaceInteractive(
+        "Select workspace to open",
+      );
+      if (!workspaceDir) {
+        cancel("Cancelled");
+        return;
+      }
+    } else {
+      log.error("Missing workspace name. Usage: wf cd <name>");
+      process.exitCode = 1;
+      return;
+    }
+
+    await writeShellCdPath(workspaceDir);
+
+    if (!isShellAutoCdEnabled()) {
+      const message = `Run: cd ${workspaceDir}`;
+      if (interactive) {
+        promptLog.info(message);
+      } else {
+        log.info(message);
+      }
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
 async function runTemplateCommand(argv: string[]): Promise<void> {
   const subcommand = argv[0];
   const subArgv = argv.slice(1);
@@ -441,9 +535,22 @@ async function runTemplateShow(argv: string[]): Promise<void> {
     }
   }
 
-  if (template.config.branchPrefix) {
-    console.log(`\nBranch prefix: ${template.config.branchPrefix}`);
+  let workspaceBranchPrefix: string | undefined;
+  try {
+    ({ config: { branchPrefix: workspaceBranchPrefix } } =
+      await loadWorkspaceConfig());
+  } catch {
+    workspaceBranchPrefix = undefined;
   }
+  const branchPrefixSummary =
+    template.config.branchPrefix === undefined
+      ? workspaceBranchPrefix
+        ? `inherits global (${workspaceBranchPrefix})`
+        : "inherits global (none)"
+      : template.config.branchPrefix === ""
+        ? "disabled for this template"
+        : template.config.branchPrefix;
+  console.log(`\nBranch prefix: ${branchPrefixSummary}`);
 
   console.log(`\nLocation: ${template.path}`);
   console.log();
@@ -622,11 +729,13 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
     return;
   }
 
+  const { config: workspaceConfig } = await loadWorkspaceConfig();
   const { renderTemplateEditor } = await import("./ui/index.ts");
 
   await renderTemplateEditor({
     templateId,
     initialConfig: template.config,
+    workspaceConfig,
     onSave: async (config) => {
       await createTemplate(templateId, config);
       log.success(`Template "${templateId}" saved.`);
@@ -691,6 +800,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
   }
 
   const interactive = isInteractive();
+  const initialCwd = process.cwd();
   let workspaceDir = args._[0];
   let isInsideWorkspace = false;
 
@@ -704,7 +814,9 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       isInsideWorkspace = true;
     } else if (interactive) {
       // Not in a workspace, offer interactive selection
-      const selected = await selectWorkspaceInteractive();
+      const selected = await selectWorkspaceInteractive(
+        "Select workspace to clean",
+      );
       if (!selected) {
         cancel("Cancelled");
         return;
@@ -720,7 +832,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
   // Check if user is inside the workspace (even if they specified a path)
   if (!isInsideWorkspace) {
     const resolvedWorkspace = path.resolve(workspaceDir);
-    const cwd = process.cwd();
+    const cwd = initialCwd;
     isInsideWorkspace =
       cwd === resolvedWorkspace || cwd.startsWith(`${resolvedWorkspace}/`);
   }
@@ -798,10 +910,13 @@ async function runCleanCommand(argv: string[]): Promise<void> {
 
   // Post-cleanup message if user was inside the workspace
   if (isInsideWorkspace && !dryRun) {
-    const parentDir = path.dirname(path.resolve(workspaceDir));
-    if (interactive) {
+    const parentDir =
+      resolveCleanupCdTarget(initialCwd, workspaceDir) ??
+      path.dirname(path.resolve(workspaceDir));
+    await writeShellCdPath(parentDir);
+    if (!isShellAutoCdEnabled() && interactive) {
       promptLog.info(`Workspace deleted. Run: cd ${parentDir}`);
-    } else {
+    } else if (!isShellAutoCdEnabled()) {
       log.info(`Workspace deleted. Run: cd ${parentDir}`);
     }
   }
@@ -887,7 +1002,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
     const resolved = await resolveSelections(selections);
     repos = resolved.repos;
     templateId = resolved.templateId;
-    if (!templateBranchPrefix) {
+    if (templateBranchPrefix === undefined) {
       templateBranchPrefix = resolved.templateBranchPrefix;
     }
   } catch (error) {
@@ -943,7 +1058,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   const workspaceDir = path.resolve(workspaceRoot, `${prefix}${featureName}`);
   const branchName = buildBranchName(
     featureName,
-    templateBranchPrefix ?? config.branchPrefix,
+    resolveBranchPrefix(config.branchPrefix, templateBranchPrefix),
   );
 
   // Dry-run mode
@@ -999,9 +1114,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
   if (interactive) {
     const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
     await stampWorkspaceInteractive(options);
+    await writeShellCdPath(workspaceDir);
     outro("Happy shipping!");
   } else {
     await stampWorkspace(options);
+    await writeShellCdPath(workspaceDir);
     log.info("Happy shipping!");
   }
 }
@@ -1317,9 +1434,11 @@ async function runForkCommand(argv: string[]): Promise<void> {
   if (interactive) {
     const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
     await stampWorkspaceInteractive(options);
+    await writeShellCdPath(workspaceDir);
     outro("Happy shipping!");
   } else {
     await stampWorkspace(options);
+    await writeShellCdPath(workspaceDir);
     log.info("Happy shipping!");
   }
 }
@@ -1383,7 +1502,7 @@ async function resolveSelections(
   return {
     repos: reposFromSlugs(repoSlugs),
     ...(templateId && { templateId }),
-    ...(templateBranchPrefix && { templateBranchPrefix }),
+    ...(templateBranchPrefix !== undefined && { templateBranchPrefix }),
   };
 }
 
@@ -1608,6 +1727,7 @@ async function wizardCreateTemplate(): Promise<string | null> {
       return null;
     }
 
+    const { config: workspaceConfig } = await loadWorkspaceConfig();
     const { renderTemplateEditor } = await import("./ui/index.ts");
 
     let savedTemplateId: string | null = null;
@@ -1615,6 +1735,7 @@ async function wizardCreateTemplate(): Promise<string | null> {
     await renderTemplateEditor({
       templateId,
       initialConfig: { repos: [] },
+      workspaceConfig,
       onSave: async (config) => {
         await createTemplate(templateId, config);
         savedTemplateId = templateId;
@@ -1656,6 +1777,7 @@ async function wizardEditTemplate(
       return null;
     }
 
+    const { config: workspaceConfig } = await loadWorkspaceConfig();
     const { renderTemplateEditor } = await import("./ui/index.ts");
 
     let savedTemplateId: string | null = null;
@@ -1663,6 +1785,7 @@ async function wizardEditTemplate(
     await renderTemplateEditor({
       templateId: template.id,
       initialConfig: template.config,
+      workspaceConfig,
       onSave: async (config) => {
         await createTemplate(template.id, config);
         savedTemplateId = template.id;
@@ -1717,6 +1840,7 @@ async function wizardCloneTemplate(
       return null;
     }
 
+    const { config: workspaceConfig } = await loadWorkspaceConfig();
     const { renderTemplateEditor } = await import("./ui/index.ts");
 
     let savedTemplateId: string | null = null;
@@ -1724,6 +1848,7 @@ async function wizardCloneTemplate(
     await renderTemplateEditor({
       templateId: newTemplateId,
       initialConfig: sourceTemplate.config,
+      workspaceConfig,
       onSave: async (config) => {
         await createTemplate(newTemplateId, config);
         savedTemplateId = newTemplateId;
@@ -2018,11 +2143,53 @@ async function findWorkspaces(rootDir: string): Promise<WorkspaceInfo[]> {
   return workspaces;
 }
 
+async function resolveWorkspaceByName(name: string): Promise<string | null> {
+  const { config } = await loadWorkspaceConfig();
+
+  if (!config.defaultDir) {
+    log.error("No defaultDir configured. Run: wf config init");
+    return null;
+  }
+
+  const workspaceRoot = path.resolve(expandHome(config.defaultDir));
+  const candidateNames = new Set([name]);
+
+  if (config.dirPrefix && !name.startsWith(config.dirPrefix)) {
+    candidateNames.add(`${config.dirPrefix}${name}`);
+  }
+
+  for (const candidateName of candidateNames) {
+    const candidatePath = path.join(workspaceRoot, candidateName);
+    try {
+      const stat = await fs.stat(candidatePath);
+      if (!stat.isDirectory()) {
+        continue;
+      }
+
+      const metadata = await readWorkspaceMetadata(candidatePath);
+      if (metadata) {
+        return candidatePath;
+      }
+    } catch {
+      // Keep trying other candidates.
+    }
+  }
+
+  const workspaces = await findWorkspaces(workspaceRoot);
+  log.error(`Workspace "${name}" not found in ${workspaceRoot}`);
+  if (workspaces.length > 0) {
+    log.info(`Available: ${workspaces.map((ws) => ws.name).join(", ")}`);
+  }
+  return null;
+}
+
 /**
  * Interactive workspace selection.
  * Returns the selected workspace path, or null if cancelled.
  */
-async function selectWorkspaceInteractive(): Promise<string | null> {
+async function selectWorkspaceInteractive(
+  prompt = "Select workspace",
+): Promise<string | null> {
   const { config } = await loadWorkspaceConfig();
 
   if (!config.defaultDir) {
@@ -2041,7 +2208,7 @@ async function selectWorkspaceInteractive(): Promise<string | null> {
   }
 
   try {
-    const selection = await promptSelect("Select workspace to clean", {
+    const selection = await promptSelect(prompt, {
       options: workspaces.map((ws) => ({
         value: ws.path,
         label: ws.name,

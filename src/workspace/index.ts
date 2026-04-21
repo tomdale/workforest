@@ -9,6 +9,7 @@ import {
   runInitializersGenerator,
 } from "../services/initializers/index.ts";
 import { hasAny } from "../services/pnpm.ts";
+import { isShellAutoCdEnabled } from "../shell.ts";
 import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
@@ -362,14 +363,12 @@ export async function stampWorkspace(
         log.info(state.message);
         break;
       case "complete": {
-        const workspaceName = path.basename(state.workspaceDir);
-        const vscodePath = `${workspaceName}.code-workspace`;
-
         log.success("Workspace ready!");
         console.log();
         console.log("Next steps:");
-        console.log(`  cd ${state.workspaceDir}`);
-        console.log(`  code ${vscodePath}`);
+        for (const step of getNextSteps(state.workspaceDir)) {
+          console.log(`  ${step}`);
+        }
         console.log();
         break;
       }
@@ -499,11 +498,7 @@ export async function stampWorkspaceInteractive(
 
   await writeVSCodeWorkspaceFile(workspaceDir, repos);
 
-  const workspaceName = path.basename(workspaceDir);
-  note(
-    `cd ${workspaceDir}\ncode ${workspaceName}.code-workspace`,
-    "Next steps",
-  );
+  note(getNextSteps(workspaceDir).join("\n"), "Next steps");
 }
 
 export async function addReposToWorkspace({
@@ -688,6 +683,17 @@ export async function ensureCacheDir(): Promise<string> {
   const cacheRoot = getCacheDir();
   await ensureDir(cacheRoot);
   return cacheRoot;
+}
+
+function getNextSteps(workspaceDir: string): string[] {
+  const workspaceName = path.basename(workspaceDir);
+  const vscodePath = `${workspaceName}.code-workspace`;
+
+  if (isShellAutoCdEnabled()) {
+    return [`code ${vscodePath}`];
+  }
+
+  return [`cd ${workspaceDir}`, `code ${vscodePath}`];
 }
 
 async function writeVSCodeWorkspaceFile(

@@ -1,4 +1,4 @@
-import type { Hook, TemplateConfig } from "../types.ts";
+import type { Hook, TemplateConfig, WorkspaceConfig } from "../types.ts";
 import {
   CancelError,
   cancel,
@@ -7,12 +7,14 @@ import {
   outro,
   promptConfirm,
   promptMultiSelect,
+  promptSelect,
   promptText,
 } from "./prompts/index.ts";
 
 type RenderTemplateEditorOptions = {
   templateId: string;
   initialConfig: TemplateConfig;
+  workspaceConfig?: WorkspaceConfig;
   onSave: (config: TemplateConfig) => Promise<void>;
 };
 
@@ -27,9 +29,19 @@ function formatConfig(config: TemplateConfig): string {
   return JSON.stringify(config, null, 2);
 }
 
+function sortBranchPrefixOptions(
+  options: { value: "inherit" | "override" | "disable"; label: string; description: string }[],
+  selected: "inherit" | "override" | "disable",
+) {
+  const selectedOption = options.find((option) => option.value === selected);
+  const remaining = options.filter((option) => option.value !== selected);
+  return selectedOption ? [selectedOption, ...remaining] : options;
+}
+
 export async function renderTemplateEditor({
   templateId,
   initialConfig,
+  workspaceConfig,
   onSave,
 }: RenderTemplateEditorOptions): Promise<void> {
   intro(`Editing template: ${templateId}`);
@@ -43,11 +55,59 @@ export async function renderTemplateEditor({
     });
 
     // Branch prefix
-    const branchPrefix = await promptText("Branch prefix", {
-      placeholder: "(optional)",
-      defaultValue: initialConfig.branchPrefix ?? "",
+    const globalBranchPrefix = workspaceConfig?.branchPrefix;
+    const initialBranchMode =
+      initialConfig.branchPrefix === undefined
+        ? "inherit"
+        : initialConfig.branchPrefix === ""
+          ? "disable"
+          : "override";
+
+    const branchPrefixMode = await promptSelect("Branch prefix behavior", {
+      options: sortBranchPrefixOptions(
+        [
+          {
+            value: "inherit",
+            label: "Use global setting",
+            description: globalBranchPrefix
+              ? `${globalBranchPrefix}`
+              : "(no global prefix)",
+          },
+          {
+            value: "override",
+            label: "Override for this template",
+            description: "Set a template-specific prefix",
+          },
+          {
+            value: "disable",
+            label: "Disable for this template",
+            description: "Create branches without any prefix",
+          },
+        ],
+        initialBranchMode,
+      ),
       throwOnCancel: true,
     });
+
+    let branchPrefix: string | undefined;
+    if (branchPrefixMode === "override") {
+      branchPrefix = await promptText("Branch prefix override", {
+        placeholder: "feature/",
+        defaultValue:
+          initialBranchMode === "override"
+            ? initialConfig.branchPrefix
+            : undefined,
+        validate: (value) => {
+          if (!value.trim()) {
+            return "Branch prefix is required";
+          }
+          return null;
+        },
+        throwOnCancel: true,
+      });
+    } else if (branchPrefixMode === "disable") {
+      branchPrefix = "";
+    }
 
     // Repositories
     let repos: string[] = [...initialConfig.repos];
@@ -141,7 +201,7 @@ export async function renderTemplateEditor({
     const config: TemplateConfig = {
       repos,
       ...(description && { description }),
-      ...(branchPrefix && { branchPrefix }),
+      ...(branchPrefix !== undefined && { branchPrefix }),
       ...(hooks.length > 0 && { hooks }),
     };
 

@@ -30,6 +30,7 @@ export type TemplateConfig = {
   repos: string[];
   description?: string;
   hooks?: Hook[];
+  /** Undefined inherits the global setting. Empty string disables it for this template. */
   branchPrefix?: string;
   /** Disable automatic initializers. Set to true to disable all, or an array of initializer IDs to disable specific ones. */
   disableInitializers?: boolean | string[];

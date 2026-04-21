@@ -3,6 +3,7 @@ import {
   buildBranchName,
   inferBranchPrefix,
   normalizeBranchPrefix,
+  resolveBranchPrefix,
 } from "./branch-prefix.ts";
 
 describe("normalizeBranchPrefix", () => {
@@ -28,6 +29,20 @@ describe("buildBranchName", () => {
 
   it("falls back to the feature name when no prefix is set", () => {
     expect(buildBranchName("feature-work", undefined)).toBe("feature-work");
+  });
+});
+
+describe("resolveBranchPrefix", () => {
+  it("falls back to the workspace default when the template does not override", () => {
+    expect(resolveBranchPrefix("feature/", undefined)).toBe("feature/");
+  });
+
+  it("uses the template override when provided", () => {
+    expect(resolveBranchPrefix("feature/", "release")).toBe("release/");
+  });
+
+  it("allows a template to explicitly disable the global prefix", () => {
+    expect(resolveBranchPrefix("feature/", "")).toBeUndefined();
   });
 });
 

@@ -3,7 +3,10 @@ import path from "node:path";
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import type { Template } from "../templates/index.ts";
 import type { WorkspaceConfig } from "../types.ts";
-import { buildBranchName } from "../utils/branch-prefix.ts";
+import {
+  buildBranchName,
+  resolveBranchPrefix,
+} from "../utils/branch-prefix.ts";
 import { generateSlugFromDescription, isSlug } from "../utils/slug.ts";
 
 setRuntime(new NodeRuntime());
@@ -154,6 +157,23 @@ function getRepoDisplayName(repo: string): string {
 function stepNumber(phase: WizardPhase): number {
   if (phase === "selectTemplate" || phase === "reposInput") return 1;
   return 2;
+}
+
+function formatBranchPrefixSummary(
+  templateBranchPrefix: string | undefined,
+  workspaceBranchPrefix: string | undefined,
+): string {
+  if (templateBranchPrefix === undefined) {
+    return workspaceBranchPrefix
+      ? `inherits global: ${workspaceBranchPrefix}`
+      : "inherits global: none";
+  }
+
+  if (templateBranchPrefix === "") {
+    return "prefix: none";
+  }
+
+  return `prefix: ${templateBranchPrefix}`;
 }
 
 function formatFooterHint(pairs: [key: string, desc: string][]): string {
@@ -372,9 +392,12 @@ function runWizardScreen(
                 `${template.config.hooks.length} hook${template.config.hooks.length !== 1 ? "s" : ""}`,
               );
             }
-            if (template.config.branchPrefix) {
-              meta.push(`prefix: ${template.config.branchPrefix}`);
-            }
+            meta.push(
+              formatBranchPrefixSummary(
+                template.config.branchPrefix,
+                config.branchPrefix,
+              ),
+            );
             if (meta.length > 0) {
               lines.push("");
               for (const m of meta) {
@@ -430,7 +453,10 @@ function runWizardScreen(
 
             const branchDisplay = buildBranchName(
               trimmed,
-              state.templateBranchPrefix ?? config.branchPrefix,
+              resolveBranchPrefix(
+                config.branchPrefix,
+                state.templateBranchPrefix,
+              ),
             );
 
             lines.push(

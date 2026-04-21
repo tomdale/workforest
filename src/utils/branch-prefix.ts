@@ -21,6 +21,17 @@ export function buildBranchName(
   return normalizedPrefix ? `${normalizedPrefix}${featureName}` : featureName;
 }
 
+export function resolveBranchPrefix(
+  workspaceBranchPrefix: string | undefined,
+  templateBranchPrefix: string | undefined,
+): string | undefined {
+  if (templateBranchPrefix !== undefined) {
+    return normalizeBranchPrefix(templateBranchPrefix);
+  }
+
+  return normalizeBranchPrefix(workspaceBranchPrefix);
+}
+
 export function inferBranchPrefix(
   featureBranch: string | undefined,
   featureName: string,

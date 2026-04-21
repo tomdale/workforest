@@ -31,6 +31,18 @@ Or use npx without installing:
 npx workforest new ...
 ```
 
+To have `wf new` and `wf fork` drop you straight into the new workspace, `wf cd`
+jump into an existing workspace, `wf clean` jump to the deleted workspace's
+parent when you ran it from inside that workspace, and zsh complete workspace
+names for `wf cd` / `wf clean`,
+install the shell hook once in your shell rc:
+
+```bash
+eval "$(wf init zsh)"
+```
+
+`wf init` currently supports `zsh` and `bash`.
+
 ## Quick Start
 
 ```bash
@@ -40,6 +52,9 @@ wf new vercel/front vercel/api -d "fixing the auth bug"
 
 # Add another repo to the current workspace later
 wf add vercel/docs
+
+# Jump back to an existing workspace by name
+wf cd fix-auth-bug
 
 # Or save frequently used groups as templates
 wf template new full-stack org/frontend org/api
@@ -178,7 +193,8 @@ Templates are stored as JSONC files in
   // Optional description shown in template list
   "description": "Full stack development",
 
-  // Optional branch prefix
+  // Optional template override for the global branch prefix
+  // Use "" to disable the global prefix for this template
   "branchPrefix": "feature/",
 
   // Optional hooks run after automatic initializers
@@ -313,8 +329,8 @@ Global settings live in `~/.config/workforest/config.json`:
 
 - **defaultDir**: Where workspaces are created
 - **dirPrefix**: Prefix for workspace directory names
-- **branchPrefix**: Default prefix for feature branch names (can be overridden
-  per-template)
+- **branchPrefix**: Global default prefix for feature branch names (templates
+  can override it, or set `""` to disable it for that template)
 - **vercelLink.teamByGitHubOwner**: Optional owner-to-team mappings for
   automatic Vercel repo-linking
 - **vercelLink.repoOverrides**: Optional per-repo overrides or disables for

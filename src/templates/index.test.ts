@@ -72,4 +72,26 @@ describe("templates", () => {
 
     expect(contents).toContain('"branchPrefix": "tomdale/"');
   });
+
+  it("preserves an explicit empty override when creating templates", async () => {
+    const configHome = await createTemplatesHome();
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      branchPrefix: "",
+    });
+
+    const templatePath = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "demo",
+      "template.jsonc",
+    );
+    const contents = await readFile(templatePath, "utf8");
+    const template = await loadTemplate("demo");
+
+    expect(contents).toContain('"branchPrefix": ""');
+    expect(template?.config.branchPrefix).toBe("");
+  });
 });
