@@ -10,6 +10,107 @@ import { pathExists } from "../utils/fs.ts";
 import { asGenerator, withRetryGenerator } from "../utils/retry.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 
+type WorktreeEntry = {
+  path: string;
+  prunable: boolean;
+};
+
+function parseWorktreeList(stdout: string): WorktreeEntry[] {
+  const entries: WorktreeEntry[] = [];
+  let current: WorktreeEntry | null = null;
+
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    if (line.startsWith("worktree ")) {
+      if (current) {
+        entries.push(current);
+      }
+
+      current = {
+        path: line.substring("worktree ".length).trim(),
+        prunable: false,
+      };
+      continue;
+    }
+
+    if (line.startsWith("prunable ") && current) {
+      current.prunable = true;
+    }
+  }
+
+  if (current) {
+    entries.push(current);
+  }
+
+  return entries;
+}
+
+async function listWorktrees(mirrorDir: string): Promise<WorktreeEntry[]> {
+  const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
+    cwd: mirrorDir,
+  });
+
+  return parseWorktreeList(stdout);
+}
+
+async function hasBrokenWorktreeLink(worktreePath: string): Promise<boolean> {
+  const gitPath = path.join(worktreePath, ".git");
+  if (!(await pathExists(gitPath))) {
+    return true;
+  }
+
+  let contents: string;
+  try {
+    contents = await fs.readFile(gitPath, "utf8");
+  } catch {
+    return false;
+  }
+
+  const gitdirPrefix = "gitdir:";
+  if (!contents.startsWith(gitdirPrefix)) {
+    return false;
+  }
+
+  const gitDir = contents.slice(gitdirPrefix.length).trim();
+  if (!gitDir) {
+    return true;
+  }
+
+  const resolvedGitDir = path.isAbsolute(gitDir)
+    ? gitDir
+    : path.resolve(worktreePath, gitDir);
+
+  return !(await pathExists(resolvedGitDir));
+}
+
+function isStaleWorktreeRemoveError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (
+    message.includes("is not a working tree") ||
+    (message.includes("cannot remove working tree") &&
+      message.includes(".git") &&
+      message.includes("does not exist"))
+  );
+}
+
+async function* pruneWorktreeMetadataGenerator(
+  mirrorDir: string,
+  worktreePath: string,
+): AsyncGenerator<TaskState, void, undefined> {
+  yield {
+    status: "log",
+    level: "warn",
+    message: `Stale worktree metadata for ${worktreePath}; pruning mirror metadata instead`,
+  };
+
+  await runGit(["worktree", "prune"], { cwd: mirrorDir });
+}
+
 /**
  * Generator version of ensureMirrorRepo that yields log messages.
  */
@@ -63,21 +164,11 @@ export async function* ensureMirrorRepoGenerator(
 async function* pruneStaleWorktreesIfNeededGenerator(
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
-  // Get list of worktrees
-  const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
-    cwd: mirrorDir,
-  });
+  const worktrees = await listWorktrees(mirrorDir);
 
-  const worktreePaths = stdout
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.substring("worktree ".length).trim())
-    .filter(Boolean);
-
-  // Check if any worktree paths don't exist (stale entries)
   let hasStale = false;
-  for (const worktreePath of worktreePaths) {
-    if (!(await pathExists(worktreePath))) {
+  for (const worktree of worktrees) {
+    if (worktree.prunable || !(await pathExists(worktree.path))) {
       hasStale = true;
       break;
     }
@@ -228,19 +319,10 @@ export async function* cleanupWorkspaceWorktreesGenerator(
   workspaceDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
   const normalizedWorkspaceDir = path.resolve(workspaceDir);
-  const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
-    cwd: mirrorDir,
-  });
+  const worktrees = await listWorktrees(mirrorDir);
 
-  const worktreePaths = stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.substring("worktree ".length).trim())
-    .filter(Boolean);
-
-  const targets = worktreePaths.filter((worktreePath) => {
-    const normalizedWorktree = path.resolve(worktreePath);
+  const targets = worktrees.filter((worktree) => {
+    const normalizedWorktree = path.resolve(worktree.path);
     return (
       normalizedWorktree === normalizedWorkspaceDir ||
       normalizedWorktree.startsWith(`${normalizedWorkspaceDir}${path.sep}`)
@@ -257,18 +339,32 @@ export async function* cleanupWorkspaceWorktreesGenerator(
     message: `Cleaning up ${targets.length} existing worktree(s) under ${workspaceDir}`,
   };
 
-  for (const worktreePath of targets) {
+  for (const target of targets) {
+    if (target.prunable || (await hasBrokenWorktreeLink(target.path))) {
+      yield* pruneWorktreeMetadataGenerator(mirrorDir, target.path);
+      continue;
+    }
+
     const removeGen = asGenerator(() =>
-      runGit(["worktree", "remove", "--force", worktreePath], {
+      runGit(["worktree", "remove", "--force", target.path], {
         cwd: mirrorDir,
         timeout: 30_000,
       }),
     );
 
-    yield* withRetryGenerator(removeGen, {
-      attempts: 3,
-      label: `worktree-remove:${path.basename(worktreePath)}`,
-    });
+    try {
+      yield* withRetryGenerator(removeGen, {
+        attempts: 3,
+        label: `worktree-remove:${path.basename(target.path)}`,
+      });
+    } catch (error) {
+      if (isStaleWorktreeRemoveError(error)) {
+        yield* pruneWorktreeMetadataGenerator(mirrorDir, target.path);
+        continue;
+      }
+
+      throw error;
+    }
   }
 }
 

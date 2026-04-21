@@ -1,0 +1,112 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const {
+  accessMock,
+  rmMock,
+  statMock,
+  ensureCacheDirMock,
+  cleanupWorkspaceWorktreesGeneratorMock,
+  pathExistsMock,
+  readWorkspaceMetadataMock,
+} = vi.hoisted(() => ({
+  accessMock: vi.fn(),
+  rmMock: vi.fn(),
+  statMock: vi.fn(),
+  ensureCacheDirMock: vi.fn(),
+  cleanupWorkspaceWorktreesGeneratorMock: vi.fn(),
+  pathExistsMock: vi.fn(),
+  readWorkspaceMetadataMock: vi.fn(),
+}));
+
+vi.mock("node:fs", () => ({
+  promises: {
+    access: accessMock,
+    rm: rmMock,
+    stat: statMock,
+  },
+}));
+
+vi.mock("../utils/fs.ts", () => ({
+  pathExists: pathExistsMock,
+}));
+
+vi.mock("./index.ts", () => ({
+  ensureCacheDir: ensureCacheDirMock,
+}));
+
+vi.mock("./metadata.ts", () => ({
+  getMetadataPath: vi.fn((workspaceDir: string) => `${workspaceDir}/.workforest`),
+  readWorkspaceMetadata: readWorkspaceMetadataMock,
+}));
+
+vi.mock("./repository.ts", () => ({
+  cleanupWorkspaceWorktreesGenerator: cleanupWorkspaceWorktreesGeneratorMock,
+}));
+
+import { cleanupWorkspaceGenerator } from "./cleanup.ts";
+
+async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
+  const states: T[] = [];
+  for await (const state of gen) {
+    states.push(state);
+  }
+  return states;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  statMock.mockResolvedValue({ isDirectory: () => true });
+  accessMock.mockResolvedValue(undefined);
+  rmMock.mockResolvedValue(undefined);
+  ensureCacheDirMock.mockResolvedValue("/tmp/cache");
+  pathExistsMock.mockResolvedValue(true);
+  readWorkspaceMetadataMock.mockResolvedValue({
+    workspace: {
+      version: "1",
+      created_at: "2026-04-16T00:00:00.000Z",
+      feature_name: "demo",
+    },
+    repos: [
+      {
+        name: "api",
+        remote: "git@github.com:vercel/api.git",
+        default_branch: "main",
+        has_lockfile: true,
+      },
+    ],
+  });
+});
+
+describe("cleanupWorkspaceGenerator", () => {
+  it("does not mark a repo as complete when worktree cleanup throws", async () => {
+    cleanupWorkspaceWorktreesGeneratorMock.mockImplementation(
+      async function* () {
+        throw new Error("boom");
+      },
+    );
+
+    const states = await collectStates(
+      cleanupWorkspaceGenerator("/tmp/workspace/demo"),
+    );
+
+    expect(states).toContainEqual({
+      phase: "worktree",
+      repo: "api",
+      state: {
+        status: "failed",
+        error: expect.any(Error),
+      },
+    });
+
+    expect(states).not.toContainEqual({
+      phase: "worktree-complete",
+      repo: "api",
+    });
+
+    expect(states[states.length - 1]).toEqual({
+      phase: "complete",
+      removedRepos: [],
+    });
+  });
+});

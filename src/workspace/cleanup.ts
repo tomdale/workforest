@@ -358,7 +358,11 @@ export async function* cleanupWorkspaceGenerator(
           message: "Would remove worktree from mirror (dry-run)",
         },
       };
+      yield { phase: "worktree-complete", repo: repoName };
+      removedRepos.push(repoName);
     } else {
+      let cleaned = false;
+
       try {
         for await (const state of cleanupWorkspaceWorktreesGenerator(
           mirrorDir,
@@ -366,6 +370,7 @@ export async function* cleanupWorkspaceGenerator(
         )) {
           yield { phase: "worktree", repo: repoName, state };
         }
+        cleaned = true;
       } catch (error) {
         yield {
           phase: "worktree",
@@ -376,10 +381,12 @@ export async function* cleanupWorkspaceGenerator(
           },
         };
       }
-    }
 
-    yield { phase: "worktree-complete", repo: repoName };
-    removedRepos.push(repoName);
+      if (cleaned) {
+        yield { phase: "worktree-complete", repo: repoName };
+        removedRepos.push(repoName);
+      }
+    }
   }
 
   // Remove workspace directory
