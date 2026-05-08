@@ -208,6 +208,11 @@ Templates are stored as JSONC files in
 }
 ```
 
+You can also place default files under
+`~/.config/workforest/templates/<name>/files/`. That subtree is copied into
+the new workspace before initializers and hooks run, so you can seed root files
+like `.envrc` or repo-specific files like `frontend/.env.local`.
+
 ## Automatic Initializers
 
 Workforest automatically detects project configurations and runs setup commands
@@ -368,7 +373,8 @@ wf clean [dir]                  Remove a workspace
 wf template list                List templates
 wf template new                 Create a template
 wf template edit <name>         Edit a template
-wf template show <name>         Show template details
+wf template show <name>         Jump to a template directory
+wf template info <name>         Show template details
 wf template rm <name>           Delete a template
 wf config                       Show config file location
 ```

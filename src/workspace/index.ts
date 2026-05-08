@@ -10,7 +10,11 @@ import {
 } from "../services/initializers/index.ts";
 import { hasAny } from "../services/pnpm.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
-import { applyTemplateGenerator, type HookState } from "../templates/apply.ts";
+import {
+  applyTemplateGenerator,
+  copyTemplateFiles,
+  type HookState,
+} from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
@@ -225,6 +229,10 @@ export async function* stampWorkspaceGenerator({
   // Await template (should be ready by now, was loading in parallel)
   const template = templatePromise ? await templatePromise : null;
 
+  if (template) {
+    await copyTemplateFiles(template, workspaceDir);
+  }
+
   // Phase B: Run initializers (package managers, vercel link, turbo link, etc.)
   const contexts = preparedRepos.map((r) => ({
     repoDir: r.targetDir,
@@ -437,6 +445,7 @@ export async function stampWorkspaceInteractive(
         branchName: effectiveBranchName,
         isNewWorkspace,
         disabledInitializers: template?.config.disableInitializers,
+        skipInitializers: Boolean(template),
       }),
     ]),
   );
@@ -455,6 +464,51 @@ export async function stampWorkspaceInteractive(
   } else {
     // Spinner mode: simple progress indicator
     repoResults = await runPipelinesWithSpinner(pipelines, repoNames);
+  }
+
+  if (template) {
+    await copyTemplateFiles(template, workspaceDir);
+
+    const initializerSpinner = spinner();
+    initializerSpinner.start("Running initializers...");
+
+    const contexts = repos.map((repo) => ({
+      repoDir: path.join(workspaceDir, repo.name),
+      workspaceDir,
+      repo,
+    }));
+
+    for await (const state of runInitializersGenerator({
+      contexts,
+      disabledInitializers: template.config.disableInitializers,
+    })) {
+      switch (state.phase) {
+        case "detecting":
+          initializerSpinner.message(`${state.repoName}: detecting`);
+          break;
+        case "running":
+          if (state.state.status === "running" && state.state.message) {
+            initializerSpinner.message(
+              `${state.repoName}: ${state.initializerName} - ${state.state.message}`,
+            );
+          } else if (state.state.status === "failed") {
+            promptLog.error(
+              `${state.repoName}: ${state.initializerName} failed`,
+            );
+          }
+          break;
+        case "skipped":
+          initializerSpinner.message(
+            `${state.repoName}: ${state.initializerId} skipped`,
+          );
+          break;
+        case "repo-complete":
+          initializerSpinner.message(`${state.repoName}: complete`);
+          break;
+      }
+    }
+
+    initializerSpinner.stop("Initializers complete");
   }
 
   // Hooks run after all repos complete (can reference multiple repos)

@@ -1,5 +1,7 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { runHook } from "../services/hooks.ts";
+import { pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import type { Template } from "./index.ts";
 
@@ -13,6 +15,48 @@ export type HookState =
   | { phase: "hook-start"; hookName: string }
   | { phase: "hook"; hookName: string; state: TaskState }
   | { phase: "hook-complete"; hookName: string };
+
+const TEMPLATE_FILES_DIR = "files";
+
+export async function copyTemplateFiles(
+  template: Template,
+  workspaceDir: string,
+): Promise<void> {
+  const templateFilesDir = path.join(
+    path.dirname(template.path),
+    TEMPLATE_FILES_DIR,
+  );
+
+  if (!(await pathExists(templateFilesDir))) {
+    return;
+  }
+
+  await copyDirectoryContents(templateFilesDir, workspaceDir);
+}
+
+async function copyDirectoryContents(
+  sourceDir: string,
+  targetDir: string,
+): Promise<void> {
+  await fs.mkdir(targetDir, { recursive: true });
+
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectoryContents(sourcePath, targetPath);
+      continue;
+    }
+
+    if (await pathExists(targetPath)) {
+      throw new Error(`Template file already exists in workspace: ${targetPath}`);
+    }
+
+    await fs.copyFile(sourcePath, targetPath);
+  }
+}
 
 /**
  * Generator that applies a template to a workspace.

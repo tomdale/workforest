@@ -41,6 +41,7 @@ export type RepoPipelineOptions = {
   branchName: string;
   isNewWorkspace: boolean;
   disabledInitializers?: boolean | string[];
+  skipInitializers?: boolean;
 };
 
 /**
@@ -56,6 +57,7 @@ export async function* repoPipelineGenerator({
   branchName,
   isNewWorkspace,
   disabledInitializers,
+  skipInitializers,
 }: RepoPipelineOptions): AsyncGenerator<RepoPipelineState> {
   const cacheDir = getCacheDir();
   const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
@@ -105,15 +107,25 @@ export async function* repoPipelineGenerator({
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Initializers Phase: install → linking
-  // ─────────────────────────────────────────────────────────────────────────
-
   const context = {
     repoDir: targetDir,
     workspaceDir,
     repo,
   };
+
+  if (skipInitializers) {
+    const hasLockfile = await hasAny(targetDir, [
+      "pnpm-lock.yaml",
+      "pnpm-lock.yml",
+    ]);
+
+    yield { phase: "complete", hasLockfile };
+    return;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Initializers Phase: install → linking
+  // ─────────────────────────────────────────────────────────────────────────
 
   for await (const state of runSingleRepoInitializersGenerator({
     context,

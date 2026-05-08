@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
+import { createTemplate } from "./templates/index.ts";
 import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
+const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 const ORIGINAL_CD_PATH_FILE = process.env[WORKFOREST_CD_PATH_ENV];
 const ORIGINAL_ARGV = [...process.argv];
 const ORIGINAL_EXIT_CODE = process.exitCode;
@@ -25,6 +27,12 @@ afterEach(async () => {
     delete process.env["WORKFOREST_CONFIG_DIR"];
   } else {
     process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
+  }
+
+  if (ORIGINAL_XDG_CONFIG_HOME === undefined) {
+    delete process.env["XDG_CONFIG_HOME"];
+  } else {
+    process.env["XDG_CONFIG_HOME"] = ORIGINAL_XDG_CONFIG_HOME;
   }
 
   if (ORIGINAL_CD_PATH_FILE === undefined) {
@@ -78,6 +86,31 @@ describe("cli", () => {
 
     const written = await readFile(cdPathFile, "utf8");
     expect(written).toBe(`${path.resolve(workspaceDir)}\n`);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("writes the template directory for wf template show", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const cdDir = await createTempDir("workforest-cd-");
+    const cdPathFile = path.join(cdDir, "target");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+
+    process.argv = ["node", "wf", "template", "show", "demo"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const written = await readFile(cdPathFile, "utf8");
+    expect(written).toBe(
+      `${path.resolve(xdgConfigHome, "workforest", "templates", "demo")}\n`,
+    );
     expect(process.exitCode).toBeUndefined();
   });
 });

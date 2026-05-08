@@ -30,7 +30,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|cd) ;;
+    new|fork|clean|cd|template) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?

@@ -32,7 +32,7 @@ ${chalk.bold("Commands:")}
   clean [dir]                  Remove a workspace (or run inside workspace)
   list                         List workspaces
   init [shell]                 Print shell integration for auto-cd and completion
-  template list|show|new|...   Manage templates
+  template list|show|info|...  Manage templates
   config [show|edit|init]      Manage configuration
 
 ${chalk.bold("Clean options:")}

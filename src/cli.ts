@@ -45,6 +45,7 @@ import {
   resolveBranchPrefix,
 } from "./utils/branch-prefix.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
+import { pathExists } from "./utils/fs.ts";
 import {
   type CleanupPreview,
   cleanupWorkspace,
@@ -454,6 +455,9 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
     case "show":
       await runTemplateShow(subArgv);
       break;
+    case "info":
+      await runTemplateInfo(subArgv);
+      break;
     case "new":
     case "create":
       await runTemplateNew(subArgv);
@@ -471,7 +475,7 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
       break;
     default:
       log.error(`Unknown template subcommand: ${subcommand}`);
-      log.info("Available: list, show, new, edit, delete, copy");
+      log.info("Available: list, show, info, new, edit, delete, copy");
       process.exitCode = 1;
   }
 }
@@ -499,6 +503,34 @@ async function runTemplateShow(argv: string[]): Promise<void> {
 
   if (!templateId) {
     log.error("Missing template name. Usage: workforest template show <name>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const template = await loadTemplate(templateId);
+  if (!template) {
+    log.error(`Template "${templateId}" not found.`);
+    const templates = await listTemplates();
+    if (templates.length > 0) {
+      log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const templateDir = path.dirname(template.path);
+  await writeShellCdPath(templateDir);
+
+  if (!isShellAutoCdEnabled()) {
+    log.info(`Run: cd ${templateDir}`);
+  }
+}
+
+async function runTemplateInfo(argv: string[]): Promise<void> {
+  const templateId = argv[0];
+
+  if (!templateId) {
+    log.error("Missing template name. Usage: workforest template info <name>");
     process.exitCode = 1;
     return;
   }
@@ -551,6 +583,11 @@ async function runTemplateShow(argv: string[]): Promise<void> {
         ? "disabled for this template"
         : template.config.branchPrefix;
   console.log(`\nBranch prefix: ${branchPrefixSummary}`);
+
+  const filesDir = path.join(path.dirname(template.path), "files");
+  if (await pathExists(filesDir)) {
+    console.log(`Files: ${filesDir}`);
+  }
 
   console.log(`\nLocation: ${template.path}`);
   console.log();
