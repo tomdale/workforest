@@ -1,6 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { loadWorkspaceConfigMock, runCommandGeneratorMock } = vi.hoisted(() => ({
@@ -9,9 +9,8 @@ const { loadWorkspaceConfigMock, runCommandGeneratorMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("../../config.ts", async () => {
-  const actual = await vi.importActual<typeof import("../../config.ts")>(
-    "../../config.ts",
-  );
+  const actual =
+    await vi.importActual<typeof import("../../config.ts")>("../../config.ts");
 
   return {
     ...actual,
@@ -56,7 +55,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
 describe("resolveVercelRepoLinkTarget", () => {
@@ -152,9 +153,12 @@ describe("vercelLinkInitializer.execute", () => {
     runCommandGeneratorMock.mockImplementation(
       (_command: string, _args: string[], options: { cwd?: string }) =>
         (async function* () {
-          await mkdir(path.join(options.cwd!, ".vercel"), { recursive: true });
+          if (!options.cwd) {
+            throw new Error("Expected cwd.");
+          }
+          await mkdir(path.join(options.cwd, ".vercel"), { recursive: true });
           await writeFile(
-            path.join(options.cwd!, ".vercel", "repo.json"),
+            path.join(options.cwd, ".vercel", "repo.json"),
             "{}\n",
             "utf8",
           );

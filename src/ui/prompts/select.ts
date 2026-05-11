@@ -34,6 +34,9 @@ export async function select<T>(
   options: SelectOptions<T>,
 ): Promise<T> {
   const { options: items, hotkeys, throwOnCancel } = options;
+  if (items.length === 0) {
+    throw new Error("select requires at least one option.");
+  }
 
   return new Promise((resolve, reject) => {
     const renderer = new FrameRenderer();
@@ -43,8 +46,7 @@ export async function select<T>(
       const lines: string[] = [];
       lines.push(`  ${S_STEP_ACTIVE}  ${message}`);
 
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+      for (const [i, item] of items.entries()) {
         const isSelected = i === selectedIndex;
         const radio = isSelected ? S_RADIO_ON : S_RADIO_OFF;
         const label = isSelected ? item.label : chalk.dim(item.label);
@@ -67,6 +69,7 @@ export async function select<T>(
 
     function commitDone(): void {
       const selected = items[selectedIndex];
+      if (!selected) return;
       renderer.commit([
         `  ${S_STEP_DONE}  ${message} ${chalk.dim("·")} ${selected.label}`,
       ]);
@@ -103,6 +106,7 @@ export async function select<T>(
 
       while (i < input.length) {
         const ch = input[i];
+        if (ch === undefined) break;
 
         if (ch === "\x03") {
           handleCancel();
@@ -112,7 +116,12 @@ export async function select<T>(
         if (ch === "\r" || ch === "\n") {
           commitDone();
           cleanup();
-          resolve(items[selectedIndex].value);
+          const selected = items[selectedIndex];
+          if (!selected) {
+            reject(new Error("No option selected."));
+            return;
+          }
+          resolve(selected.value);
           return;
         }
 

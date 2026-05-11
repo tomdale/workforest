@@ -226,12 +226,12 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
   }
 
   const config = value as Record<string, unknown>;
-  const dirPrefix = normalizeString(config.dirPrefix) ?? DEFAULT_DIR_PREFIX;
+  const dirPrefix = normalizeString(config["dirPrefix"]) ?? DEFAULT_DIR_PREFIX;
   const branchPrefix =
-    normalizeBranchPrefix(normalizeString(config.branchPrefix)) ?? "";
-  const defaultDir = normalizeString(config.defaultDir);
+    normalizeBranchPrefix(normalizeString(config["branchPrefix"])) ?? "";
+  const defaultDir = normalizeString(config["defaultDir"]);
   const vercelLink = normalizeVercelLinkConfig(
-    config.vercelLink,
+    config["vercelLink"],
     `${configPath}.vercelLink`,
   );
 
@@ -270,11 +270,11 @@ function normalizeVercelLinkConfig(
 
   const config = value as Record<string, unknown>;
   const teamByGitHubOwner = normalizeStringRecord(
-    config.teamByGitHubOwner,
+    config["teamByGitHubOwner"],
     `${pathLabel}.teamByGitHubOwner`,
   );
   const repoOverrides = normalizeRepoOverrides(
-    config.repoOverrides,
+    config["repoOverrides"],
     `${pathLabel}.repoOverrides`,
   );
 
@@ -338,14 +338,14 @@ function normalizeRepoOverrides(
     }
 
     const override = entry as Record<string, unknown>;
-    const team = normalizeString(override.team);
-    const disabledValue = override.disabled;
+    const team = normalizeString(override["team"]);
+    const disabledValue = override["disabled"];
     if (disabledValue !== undefined && typeof disabledValue !== "boolean") {
       throw new Error(
         `${pathLabel}.${normalizedKey}.disabled must be a boolean.`,
       );
     }
-    if (override.team !== undefined && team === undefined) {
+    if (override["team"] !== undefined && team === undefined) {
       throw new Error(`${pathLabel}.${normalizedKey}.team must be a string.`);
     }
 

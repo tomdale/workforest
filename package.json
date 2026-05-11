@@ -22,8 +22,11 @@
     "build": "tsdown",
     "bench:ghostty": "tsx benchmarks/ghostty-real.ts",
     "bench:tui": "tsx benchmarks/tui-grid.ts",
+    "check": "pnpm test && pnpm typecheck && pnpm lint",
+    "lint": "biome check .",
     "prepack": "pnpm build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@unblessed/node": "1.0.0-alpha.23",

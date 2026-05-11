@@ -44,5 +44,7 @@ export function inferBranchPrefix(
     return "";
   }
 
-  return normalizeBranchPrefix(featureBranch.slice(0, -featureName.length)) ?? "";
+  return (
+    normalizeBranchPrefix(featureBranch.slice(0, -featureName.length)) ?? ""
+  );
 }

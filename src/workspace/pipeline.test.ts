@@ -45,7 +45,7 @@ describe("runParallel", () => {
       yield "b2";
     })();
 
-    const tasks = new Map([
+    const tasks = new Map<string, AsyncGenerator<string>>([
       ["A", gen1],
       ["B", gen2],
     ]);
@@ -76,7 +76,7 @@ describe("runParallel", () => {
       yield "b3";
     })();
 
-    const tasks = new Map([
+    const tasks = new Map<string, AsyncGenerator<string>>([
       ["A", gen1],
       ["B", gen2],
     ]);

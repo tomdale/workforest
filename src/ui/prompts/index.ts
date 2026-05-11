@@ -64,12 +64,14 @@ export async function promptText(
     options.defaultValue !== undefined && options.defaultValue !== "";
 
   const result = await rawText(message, {
-    defaultValue: hasDefault ? options.defaultValue : undefined,
-    placeholder: hasDefault ? undefined : (options.placeholder ?? "(none)"),
-    validate: options.validate
-      ? (v) => options.validate?.(v) ?? undefined
-      : undefined,
-    throwOnCancel: options.throwOnCancel,
+    ...(hasDefault ? { defaultValue: options.defaultValue } : {}),
+    ...(hasDefault ? {} : { placeholder: options.placeholder ?? "(none)" }),
+    ...(options.validate
+      ? { validate: (v: string) => options.validate?.(v) ?? undefined }
+      : {}),
+    ...(options.throwOnCancel !== undefined
+      ? { throwOnCancel: options.throwOnCancel }
+      : {}),
   });
 
   return result;
@@ -83,10 +85,12 @@ export async function promptSelect<T>(
     options: options.options.map((o) => ({
       value: o.value,
       label: o.label,
-      hint: o.description,
+      ...(o.description ? { hint: o.description } : {}),
     })),
-    hotkeys: options.hotkeys,
-    throwOnCancel: options.throwOnCancel,
+    ...(options.hotkeys !== undefined ? { hotkeys: options.hotkeys } : {}),
+    ...(options.throwOnCancel !== undefined
+      ? { throwOnCancel: options.throwOnCancel }
+      : {}),
   });
 }
 
@@ -98,11 +102,15 @@ export async function promptMultiSelect<T>(
     options: options.options.map((o) => ({
       value: o.value,
       label: o.label,
-      hint: o.description,
+      ...(o.description ? { hint: o.description } : {}),
     })),
-    initialValues: options.initialValues,
-    required: options.required,
-    throwOnCancel: options.throwOnCancel,
+    ...(options.initialValues !== undefined
+      ? { initialValues: options.initialValues }
+      : {}),
+    ...(options.required !== undefined ? { required: options.required } : {}),
+    ...(options.throwOnCancel !== undefined
+      ? { throwOnCancel: options.throwOnCancel }
+      : {}),
   });
 }
 
@@ -113,7 +121,9 @@ export async function promptConfirm(
 ): Promise<boolean> {
   return rawConfirm(message, {
     initialValue: defaultYes,
-    throwOnCancel: options?.throwOnCancel,
+    ...(options?.throwOnCancel !== undefined
+      ? { throwOnCancel: options.throwOnCancel }
+      : {}),
   });
 }
 

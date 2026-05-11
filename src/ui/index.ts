@@ -30,7 +30,11 @@ function formatConfig(config: TemplateConfig): string {
 }
 
 function sortBranchPrefixOptions(
-  options: { value: "inherit" | "override" | "disable"; label: string; description: string }[],
+  options: {
+    value: "inherit" | "override" | "disable";
+    label: string;
+    description: string;
+  }[],
   selected: "inherit" | "override" | "disable",
 ) {
   const selectedOption = options.find((option) => option.value === selected);
@@ -93,10 +97,9 @@ export async function renderTemplateEditor({
     if (branchPrefixMode === "override") {
       branchPrefix = await promptText("Branch prefix override", {
         placeholder: "feature/",
-        defaultValue:
-          initialBranchMode === "override"
-            ? initialConfig.branchPrefix
-            : undefined,
+        ...(initialBranchMode === "override" && initialConfig.branchPrefix
+          ? { defaultValue: initialConfig.branchPrefix }
+          : {}),
         validate: (value) => {
           if (!value.trim()) {
             return "Branch prefix is required";

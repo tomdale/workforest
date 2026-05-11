@@ -54,8 +54,11 @@ describe("copyTemplateFiles", () => {
 
     const template = await loadTemplate("demo");
     expect(template).not.toBeNull();
+    if (!template) {
+      throw new Error("Expected template.");
+    }
 
-    await copyTemplateFiles(template!, workspaceDir);
+    await copyTemplateFiles(template, workspaceDir);
 
     expect(await readFile(path.join(workspaceDir, ".envrc"), "utf8")).toBe(
       "use workforest\n",
@@ -87,8 +90,11 @@ describe("copyTemplateFiles", () => {
 
     const template = await loadTemplate("demo");
     expect(template).not.toBeNull();
+    if (!template) {
+      throw new Error("Expected template.");
+    }
 
-    await expect(copyTemplateFiles(template!, workspaceDir)).rejects.toThrow();
+    await expect(copyTemplateFiles(template, workspaceDir)).rejects.toThrow();
     expect(await readFile(path.join(workspaceDir, ".envrc"), "utf8")).toBe(
       "existing\n",
     );

@@ -185,10 +185,7 @@ function generateTemplateJsonc(config: TemplateConfig): string {
 }
 
 function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
-  const hasBranchPrefix = Object.prototype.hasOwnProperty.call(
-    config,
-    "branchPrefix",
-  );
+  const hasBranchPrefix = Object.hasOwn(config, "branchPrefix");
   const { branchPrefix: _branchPrefix, ...rest } = config;
 
   if (!hasBranchPrefix) {

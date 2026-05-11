@@ -129,7 +129,7 @@ export async function* repoPipelineGenerator({
 
   for await (const state of runSingleRepoInitializersGenerator({
     context,
-    disabledInitializers,
+    ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
   })) {
     const pipelineState = mapInitializerStateToPipelineState(state);
     if (pipelineState) yield pipelineState;
@@ -166,7 +166,7 @@ function mapTaskStateToPipelineState(
         phase: "git",
         step,
         status: "running",
-        message: state.message,
+        ...(state.message !== undefined ? { message: state.message } : {}),
       };
     case "output":
       return {
@@ -180,7 +180,7 @@ function mapTaskStateToPipelineState(
         phase: "git",
         step,
         status: "running",
-        message: state.message,
+        ...(state.message !== undefined ? { message: state.message } : {}),
       };
     case "retrying":
       return {
@@ -232,9 +232,13 @@ function mapInitializerStateToPipelineState(
         phase: "initializer",
         name: state.initializerName,
         status: state.state.status,
-        output: state.state.status === "output" ? state.state.data : undefined,
-        message:
-          state.state.status === "running" ? state.state.message : undefined,
+        ...(state.state.status === "output"
+          ? { output: state.state.data }
+          : {}),
+        ...(state.state.status === "running" &&
+        state.state.message !== undefined
+          ? { message: state.state.message }
+          : {}),
       };
     case "skipped":
       return {

@@ -34,6 +34,9 @@ export async function multiSelect<T>(
     required = true,
     throwOnCancel,
   } = options;
+  if (items.length === 0) {
+    throw new Error("multiSelect requires at least one option.");
+  }
 
   return new Promise((resolve, reject) => {
     const renderer = new FrameRenderer();
@@ -50,8 +53,7 @@ export async function multiSelect<T>(
       const lines: string[] = [];
       lines.push(`  ${S_STEP_ACTIVE}  ${message}`);
 
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+      for (const [i, item] of items.entries()) {
         const isCursor = i === cursorIndex;
         const isChecked = checked.has(i);
         const check = isChecked ? S_CHECK_ON : S_CHECK_OFF;
@@ -105,6 +107,7 @@ export async function multiSelect<T>(
 
       while (i < input.length) {
         const ch = input[i];
+        if (ch === undefined) break;
 
         if (ch === "\x03") {
           handleCancel();

@@ -1,6 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { runGitMock } = vi.hoisted(() => ({
@@ -96,7 +96,7 @@ prunable gitdir file points to non-existent location
     const repoDir = path.join(workspaceDir, "front");
     await mkdir(repoDir, { recursive: true });
     await writeFile(
-      repoDir + "/.git",
+      `${repoDir}/.git`,
       "gitdir: /tmp/cache/front.git/worktrees/front6\n",
     );
 

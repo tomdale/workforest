@@ -109,6 +109,7 @@ export async function text(
 
       while (i < input.length) {
         const ch = input[i];
+        if (ch === undefined) break;
 
         if (ch === "\x03") {
           handleCancel();
@@ -173,7 +174,17 @@ export async function text(
 
           // Skip unknown escape sequences
           i++;
-          while (i < input.length && input[i] >= " " && input[i] <= "/") i++;
+          while (i < input.length) {
+            const escapeByte = input[i];
+            if (
+              escapeByte === undefined ||
+              escapeByte < " " ||
+              escapeByte > "/"
+            ) {
+              break;
+            }
+            i++;
+          }
           if (i < input.length) i++; // skip final byte
           continue;
         }

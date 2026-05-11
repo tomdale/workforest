@@ -50,7 +50,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("compdef _workforest_complete wf workforest");
     expect(script).toContain("__workforest_workspace_root()");
-    expect(script).toContain('local subcommand="${words[2]:-}"');
+    expect(script).toContain('local subcommand="$' + '{words[2]:-}"');
     expect(script).toContain("cd|clean)");
     expect(script).toContain("_workforest_workspace_names");
     expect(script).not.toContain("CURRENT == 3");

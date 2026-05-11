@@ -51,7 +51,9 @@ async function copyDirectoryContents(
     }
 
     if (await pathExists(targetPath)) {
-      throw new Error(`Template file already exists in workspace: ${targetPath}`);
+      throw new Error(
+        `Template file already exists in workspace: ${targetPath}`,
+      );
     }
 
     await fs.copyFile(sourcePath, targetPath);

@@ -291,8 +291,7 @@ function runWizardScreen(
 
         const maxDescWidth = contentWidth() - 8; // account for indent + radio + spacing
 
-        for (let i = 0; i < selectItems.length; i++) {
-          const item = selectItems[i];
+        for (const [i, item] of selectItems.entries()) {
           const desc = item.description
             ? truncate(item.description, maxDescWidth)
             : "";
@@ -372,6 +371,10 @@ function runWizardScreen(
 
       if (state.phase === "selectTemplate") {
         const item = selectItems[state.selectedIndex];
+        if (!item) {
+          contentBox.setContent(padToBox(lines, contentBox));
+          return;
+        }
         if (item.templateId) {
           const template = templates.find((t) => t.id === item.templateId);
           if (template) {
@@ -555,6 +558,7 @@ function runWizardScreen(
         );
       } else if (key.name === "return" || key.name === "enter") {
         const item = selectItems[state.selectedIndex];
+        if (!item) return;
 
         // "Create a template" item (no-templates case)
         if (templates.length === 0 && state.selectedIndex === 0) {

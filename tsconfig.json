@@ -26,5 +26,6 @@
 
     "moduleResolution": "nodenext"
   },
+  "include": ["src"],
   "$schema": "https://json.schemastore.org/tsconfig"
 }

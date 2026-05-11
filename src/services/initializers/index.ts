@@ -155,8 +155,9 @@ export async function* runInitializersGenerator({
       const detected = await detectInitializers(context, installInitializers);
 
       // Only one install initializer should run per repo (mutually exclusive)
-      if (detected.length > 0) {
-        const { initializer, metadata } = detected[0];
+      const detectedInstall = detected[0];
+      if (detectedInstall) {
+        const { initializer, metadata } = detectedInstall;
         const taskId = `${context.repo.name}:${initializer.id}`;
 
         // Create a wrapper generator that yields InitializerState
@@ -172,7 +173,7 @@ export async function* runInitializersGenerator({
 
     // Run install tasks in parallel
     for await (const { id, state } of runParallel(installTasks)) {
-      const [repoName, initializerId] = id.split(":");
+      const [repoName = id, initializerId = ""] = id.split(":");
       const initializer = installInitializers.find(
         (i) => i.id === initializerId,
       );
@@ -210,7 +211,7 @@ export async function* runInitializersGenerator({
 
     // Run linking tasks in parallel
     for await (const { id, state } of runParallel(linkTasks)) {
-      const [repoName, initializerId] = id.split(":");
+      const [repoName = id, initializerId = ""] = id.split(":");
       const initializer = linkingInitializers.find(
         (i) => i.id === initializerId,
       );
@@ -268,8 +269,9 @@ export async function* runSingleRepoInitializersGenerator({
   if (installInitializers.length > 0) {
     const detected = await detectInitializers(context, installInitializers);
 
-    if (detected.length > 0) {
-      const { initializer, metadata } = detected[0];
+    const detectedInstall = detected[0];
+    if (detectedInstall) {
+      const { initializer, metadata } = detectedInstall;
 
       for await (const state of initializer.execute(context, metadata)) {
         yield {

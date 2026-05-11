@@ -1,6 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadWorkspaceConfig, saveWorkspaceConfig } from "./config.ts";
 
@@ -22,7 +22,9 @@ afterEach(async () => {
     process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
   }
 
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
 describe("workspace config", () => {
