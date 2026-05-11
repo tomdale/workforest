@@ -101,6 +101,10 @@ export async function cli(): Promise<void> {
     case "fork":
       await runForkCommand(commandArgv);
       break;
+    case "worktree":
+    case "wt":
+      await runWorktreeCommand(commandArgv);
+      break;
     case "list":
     case "ls":
       await runListCommand();
@@ -384,6 +388,87 @@ async function runListCommand(): Promise<void> {
   console.log();
 }
 
+async function runWorktreeCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--dir": String,
+      "--dry-run": Boolean,
+      "-h": "--help",
+      "-n": "--dry-run",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  const [repoInput, slug, extra] = args._;
+  if (!repoInput || !slug || extra) {
+    log.error("Usage: wf worktree <repo> <slug> [--dir <path>] [--dry-run]");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!isSlug(slug)) {
+    log.error(
+      `Invalid slug "${slug}". Slugs must be lowercase words separated by hyphens.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  let repo: RepoConfig;
+  let branchName: string;
+  let targetDir: string;
+  try {
+    const repos = reposFromSlugs([repoInput]);
+    if (repos.length !== 1) {
+      throw new Error("Exactly one repository is required.");
+    }
+
+    const resolvedRepo = repos[0];
+    if (!resolvedRepo) {
+      throw new Error("Exactly one repository is required.");
+    }
+    repo = resolvedRepo;
+
+    const { config } = await loadWorkspaceConfig();
+    branchName = buildBranchName(slug, config.branchPrefix);
+    targetDir = args["--dir"]
+      ? path.resolve(expandHome(args["--dir"]))
+      : path.resolve(process.cwd(), slug);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (args["--dry-run"]) {
+    console.log("\nDry run - no changes will be made\n");
+    console.log(`Repository: ${repo.name} (${repo.remote})`);
+    console.log(`Branch: ${branchName}`);
+    console.log(`Target: ${targetDir}`);
+    console.log();
+    return;
+  }
+
+  try {
+    const { createSingleWorktree } = await import("./worktree.ts");
+    await createSingleWorktree({ repo, branchName, targetDir });
+    await writeShellCdPath(targetDir);
+    log.success(`Worktree ready: ${targetDir}`);
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${targetDir}`);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
 async function runCdCommand(argv: string[]): Promise<void> {
   const args = arg(
     {
@@ -569,8 +654,9 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
 
   let workspaceBranchPrefix: string | undefined;
   try {
-    ({ config: { branchPrefix: workspaceBranchPrefix } } =
-      await loadWorkspaceConfig());
+    ({
+      config: { branchPrefix: workspaceBranchPrefix },
+    } = await loadWorkspaceConfig());
   } catch {
     workspaceBranchPrefix = undefined;
   }

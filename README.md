@@ -31,10 +31,10 @@ Or use npx without installing:
 npx workforest new ...
 ```
 
-To have `wf new` and `wf fork` drop you straight into the new workspace, `wf cd`
-jump into an existing workspace, `wf clean` jump to the deleted workspace's
-parent when you ran it from inside that workspace, and zsh complete workspace
-names for `wf cd` / `wf clean`,
+To have `wf new`, `wf fork`, and `wf worktree` drop you straight into the new
+workspace or worktree, `wf cd` jump into an existing workspace, `wf clean` jump
+to the deleted workspace's parent when you ran it from inside that workspace,
+and zsh complete workspace names for `wf cd` / `wf clean`,
 install the shell hook once in your shell rc:
 
 ```bash
@@ -52,6 +52,9 @@ wf new vercel/front vercel/api -d "fixing the auth bug"
 
 # Add another repo to the current workspace later
 wf add vercel/docs
+
+# Create one standalone worktree without workspace metadata
+wf wt vercel/front fix-auth
 
 # Jump back to an existing workspace by name
 wf cd fix-auth-bug
@@ -131,6 +134,20 @@ wf add vercel/docs --workspace ~/Code/workspaces/fix-auth-bug
 
 The new repo is checked out onto the workspace's existing feature branch, then
 the `.workforest` metadata and VS Code workspace file are updated in place.
+
+### Single-Repo Worktrees
+
+When you only need one repo and do not want workspace metadata, templates,
+initializers, hooks, or a VS Code workspace file, create a standalone worktree:
+
+```bash
+wf worktree vercel/front fix-auth
+wf wt vercel/front fix-auth --dir ../front-fix-auth
+```
+
+The target defaults to `./<slug>`. `--dir <path>` is the exact target path. The
+branch is named from the configured `branchPrefix` plus the slug, and creation
+fails if either the target directory or computed branch already exists.
 
 ### Forking a Workspace
 
@@ -368,6 +385,8 @@ run in parallel.
 
 ```
 wf new [template|repo...]       Create a workspace
+wf worktree <repo> <slug>       Create a standalone repo worktree
+wf wt <repo> <slug>             Alias for worktree
 wf fork <name>                  Fork current workspace with new branches
 wf clean [dir]                  Remove a workspace
 wf template list                List templates

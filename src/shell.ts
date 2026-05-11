@@ -21,8 +21,7 @@ export function normalizeShellName(
 }
 
 export function renderShellInit(shell: SupportedShell): string {
-  const completionBlock =
-    shell === "zsh" ? renderZshCompletion() : "";
+  const completionBlock = shell === "zsh" ? renderZshCompletion() : "";
 
   return `# workforest shell integration for ${shell}
 __workforest_invoke() {
@@ -30,7 +29,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|cd|template) ;;
+    new|fork|clean|cd|template|worktree|wt) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
@@ -182,6 +181,8 @@ _workforest_complete() {
   local subcommand="\${words[2]:-}"
   commands=(
     'new:create a workspace'
+    'worktree:create a standalone repo worktree'
+    'wt:create a standalone repo worktree'
     'add:add repo(s) to a workspace'
     'fork:fork current workspace'
     'clean:remove a workspace'

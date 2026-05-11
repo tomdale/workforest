@@ -290,6 +290,57 @@ export async function* ensureWorkingCopyGenerator(
   });
 }
 
+async function branchExists(
+  mirrorDir: string,
+  branchName: string,
+): Promise<boolean> {
+  try {
+    await runGit(
+      ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`],
+      {
+        cwd: mirrorDir,
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Create a new worktree and branch, failing instead of reusing existing state.
+ */
+export async function* createWorkingCopyGenerator(
+  repo: RepoConfig,
+  mirrorDir: string,
+  targetDir: string,
+  branchName: string,
+): AsyncGenerator<TaskState, void, undefined> {
+  if (await pathExists(targetDir)) {
+    throw new Error(`Target directory already exists: ${targetDir}`);
+  }
+
+  if (await branchExists(mirrorDir, branchName)) {
+    throw new Error(`Branch already exists: ${branchName}`);
+  }
+
+  const defaultBranch = await detectDefaultBranch(
+    mirrorDir,
+    repo.defaultBranch,
+  );
+
+  yield {
+    status: "log",
+    level: "info",
+    message: `Creating worktree for ${repo.name} on branch "${branchName}" from origin/${defaultBranch}`,
+  };
+
+  await runGit(
+    ["worktree", "add", "-b", branchName, targetDir, `origin/${defaultBranch}`],
+    { cwd: mirrorDir },
+  );
+}
+
 /**
  * @deprecated Use ensureWorkingCopyGenerator for generator-based workflows.
  */

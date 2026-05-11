@@ -26,6 +26,8 @@ ${chalk.bold("Usage:")} wf <command> [options]
 
 ${chalk.bold("Commands:")}
   new [template|repo...]       Create a workspace
+  worktree <repo> <slug>       Create a standalone repo worktree
+  wt <repo> <slug>             Alias for worktree
   cd <name>                    Jump to a workspace in defaultDir
   add <repo...>                Add repo(s) to an existing workspace
   fork <name>                  Fork current workspace with new branches
@@ -44,6 +46,8 @@ ${chalk.bold("Clean options:")}
 ${chalk.bold("Examples:")}
   wf new my-template -d "fixing the auth bug"
   wf new vercel/front vercel/api -d "new feature"
+  wf worktree vercel/front fix-auth
+  wf wt vercel/front fix-auth --dir ../front-fix-auth
   wf new my-template --dry-run      Preview without creating
   wf cd fix-auth-bug                Jump into an existing workspace
   wf add vercel/docs               Add a repo from inside a workspace

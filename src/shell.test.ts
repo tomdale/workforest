@@ -43,7 +43,7 @@ describe("shell integration", () => {
 
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
-    expect(script).toContain("new|fork|clean|cd");
+    expect(script).toContain("new|fork|clean|cd|template|worktree|wt");
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
     expect(script).toContain("workforest() {");
