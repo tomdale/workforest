@@ -4,6 +4,7 @@ import type { WorkspaceMetadata, WorkspaceRepoMetadata } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 
 const METADATA_FILENAME = ".workforest";
+const WORKSPACE_METADATA_FILENAME = "workspace.json";
 const SCHEMA_VERSION = "1";
 
 export type WriteMetadataOptions = {
@@ -20,7 +21,7 @@ export type WriteMetadataOptions = {
 };
 
 /**
- * Write workspace metadata to the .workforest file.
+ * Write workspace metadata to .workforest/workspace.json.
  */
 export async function writeWorkspaceMetadata(
   workspaceDir: string,
@@ -53,7 +54,7 @@ export async function saveWorkspaceMetadata(
   workspaceDir: string,
   metadata: WorkspaceMetadata,
 ): Promise<void> {
-  const metadataPath = path.join(workspaceDir, METADATA_FILENAME);
+  const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
   const contents = JSON.stringify(metadata, null, 2);
   await fs.writeFile(metadataPath, `${contents}\n`, "utf8");
 }
@@ -83,7 +84,8 @@ export async function appendWorkspaceRepos(
 }
 
 /**
- * Read workspace metadata from the .workforest file.
+ * Read workspace metadata from .workforest/workspace.json or a legacy
+ * .workforest file.
  * Returns null if the file doesn't exist.
  *
  * Supports both JSON (current) and TOML (legacy) formats.
@@ -92,10 +94,9 @@ export async function appendWorkspaceRepos(
 export async function readWorkspaceMetadata(
   workspaceDir: string,
 ): Promise<WorkspaceMetadata | null> {
-  const metadataPath = path.join(workspaceDir, METADATA_FILENAME);
+  const metadataPath = await resolveReadableMetadataPath(workspaceDir);
 
-  const exists = await pathExists(metadataPath);
-  if (!exists) {
+  if (!metadataPath) {
     return null;
   }
 
@@ -126,7 +127,97 @@ export async function readWorkspaceMetadata(
  * Get the path to the metadata file for a workspace.
  */
 export function getMetadataPath(workspaceDir: string): string {
+  return path.join(
+    getWorkspaceMetadataDirPath(workspaceDir),
+    WORKSPACE_METADATA_FILENAME,
+  );
+}
+
+/**
+ * Get the path to the workspace metadata directory.
+ */
+export function getWorkspaceMetadataDirPath(workspaceDir: string): string {
   return path.join(workspaceDir, METADATA_FILENAME);
+}
+
+/**
+ * Check whether a workspace has either current or legacy metadata.
+ */
+export async function hasWorkspaceMetadata(
+  workspaceDir: string,
+): Promise<boolean> {
+  return (await resolveReadableMetadataPath(workspaceDir)) !== null;
+}
+
+/**
+ * Ensure the metadata directory exists and migrate a legacy .workforest file
+ * into .workforest/workspace.json if needed.
+ */
+export async function ensureWorkspaceMetadataDir(
+  workspaceDir: string,
+): Promise<string> {
+  const metadataDir = getWorkspaceMetadataDirPath(workspaceDir);
+
+  try {
+    const stat = await fs.stat(metadataDir);
+    if (stat.isDirectory()) {
+      return metadataDir;
+    }
+
+    if (!stat.isFile()) {
+      throw new Error(
+        `Workspace metadata path is not a file or directory: ${metadataDir}`,
+      );
+    }
+
+    const contents = await fs.readFile(metadataDir, "utf8");
+    await fs.rm(metadataDir);
+    await fs.mkdir(metadataDir, { recursive: true });
+    await fs.writeFile(
+      path.join(metadataDir, WORKSPACE_METADATA_FILENAME),
+      contents,
+      "utf8",
+    );
+    return metadataDir;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  await fs.mkdir(metadataDir, { recursive: true });
+  return metadataDir;
+}
+
+async function ensureWorkspaceMetadataFilePath(
+  workspaceDir: string,
+): Promise<string> {
+  const metadataDir = await ensureWorkspaceMetadataDir(workspaceDir);
+  return path.join(metadataDir, WORKSPACE_METADATA_FILENAME);
+}
+
+async function resolveReadableMetadataPath(
+  workspaceDir: string,
+): Promise<string | null> {
+  const metadataDir = getWorkspaceMetadataDirPath(workspaceDir);
+
+  try {
+    const stat = await fs.stat(metadataDir);
+    if (stat.isFile()) {
+      return metadataDir;
+    }
+
+    if (stat.isDirectory()) {
+      const metadataPath = path.join(metadataDir, WORKSPACE_METADATA_FILENAME);
+      return (await pathExists(metadataPath)) ? metadataPath : null;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return null;
 }
 
 /**

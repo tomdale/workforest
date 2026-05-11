@@ -133,7 +133,8 @@ wf add vercel/docs --workspace ~/Code/workspaces/fix-auth-bug
 ```
 
 The new repo is checked out onto the workspace's existing feature branch, then
-the `.workforest` metadata and VS Code workspace file are updated in place.
+the `.workforest/workspace.json` metadata and VS Code workspace file are updated
+in place.
 
 ### Single-Repo Worktrees
 
@@ -467,6 +468,13 @@ issues:
 
 To allow hooks to fail without stopping workspace creation, add
 `"continueOnError": true` to the hook.
+
+### Repo setup fails
+
+When repo setup fails during git, dependency installation, or linking, workforest
+writes detailed diagnostics to `.workforest/logs/<repo>.log` in the workspace.
+Use that log to inspect command output that may be too verbose for the terminal
+progress UI.
 
 ### Template not found
 

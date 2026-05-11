@@ -42,7 +42,7 @@ Long-running operations use async generators that yield state updates, enabling 
 - `RepoConfig`: `{ name, remote, defaultBranch }`
 - `TemplateConfig`: `{ repos, description?, hooks?, branchPrefix? }`
 - `Hook`: `{ name, run, in?, if?, continueOnError? }`
-- `WorkspaceMetadata`: Stored in `.workforest` file at workspace root
+- `WorkspaceMetadata`: Stored in `.workforest/workspace.json` at workspace root
 
 ## Code Style
 

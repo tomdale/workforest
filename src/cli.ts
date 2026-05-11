@@ -44,8 +44,8 @@ import {
   inferBranchPrefix,
   resolveBranchPrefix,
 } from "./utils/branch-prefix.ts";
-import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import { pathExists } from "./utils/fs.ts";
+import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
   cleanupWorkspace,
@@ -53,7 +53,10 @@ import {
   validateWorkspace,
 } from "./workspace/cleanup.ts";
 import { stampWorkspace } from "./workspace/index.ts";
-import { readWorkspaceMetadata } from "./workspace/metadata.ts";
+import {
+  hasWorkspaceMetadata,
+  readWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 
 export { log };
 
@@ -203,11 +206,11 @@ async function runConfigInit(): Promise<void> {
     { defaultValue: currentBranchPrefix },
   );
 
-  const newConfig = {
-    ...config,
-    defaultDir: defaultDir || undefined,
-    dirPrefix: dirPrefix || undefined,
-    branchPrefix: branchPrefix || undefined,
+  const newConfig: WorkspaceConfig = {
+    ...(config.vercelLink ? { vercelLink: config.vercelLink } : {}),
+    ...(defaultDir ? { defaultDir } : {}),
+    ...(dirPrefix ? { dirPrefix } : {}),
+    ...(branchPrefix ? { branchPrefix } : {}),
   };
 
   await saveWorkspaceConfig(configPath, newConfig);
@@ -353,11 +356,17 @@ async function runListCommand(): Promise<void> {
         workspaces.push({
           name: entry,
           path: entryPath,
-          description: metadata.workspace.description,
-          template: metadata.workspace.template_id,
-          branch: metadata.repos[0]?.feature_branch,
           created: metadata.workspace.created_at,
           repos: metadata.repos.length,
+          ...(metadata.workspace.description
+            ? { description: metadata.workspace.description }
+            : {}),
+          ...(metadata.workspace.template_id
+            ? { template: metadata.workspace.template_id }
+            : {}),
+          ...(metadata.repos[0]?.feature_branch
+            ? { branch: metadata.repos[0].feature_branch }
+            : {}),
         });
       }
     } catch {
@@ -1365,7 +1374,9 @@ async function runAddCommand(argv: string[]): Promise<void> {
       workspaceDir,
       repos,
       branchName,
-      disabledInitializers: template?.config.disableInitializers,
+      ...(template?.config.disableInitializers !== undefined
+        ? { disabledInitializers: template.config.disableInitializers }
+        : {}),
     });
 
     if (result.addedRepos.length > 0) {
@@ -1438,6 +1449,9 @@ async function runForkCommand(argv: string[]): Promise<void> {
 
   if (args._.length > 0) {
     const input = args._[0];
+    if (input === undefined) {
+      throw new Error("Expected a feature name.");
+    }
     if (isSlug(input)) {
       featureName = input;
     } else {
@@ -2030,7 +2044,7 @@ async function handleTemplateManagement(
       options: options.map((o) => ({
         value: o.value,
         label: o.label,
-        description: o.hint,
+        ...(o.hint ? { description: o.hint } : {}),
       })),
       throwOnCancel: true,
     });
@@ -2057,7 +2071,7 @@ async function handleTemplateManagement(
       break;
   }
 
-  return { action, newTemplateId: newTemplateId ?? undefined };
+  return newTemplateId ? { action, newTemplateId } : { action };
 }
 
 /**
@@ -2197,20 +2211,21 @@ function getErrorMessage(error: unknown): string {
 
 /**
  * Detect if the current working directory is inside a workforest workspace.
- * Walks up the directory tree looking for a .workforest file.
+ * Walks up the directory tree looking for .workforest metadata.
  * Returns the workspace directory path if found, null otherwise.
  */
 async function detectWorkspaceFromCwd(): Promise<string | null> {
   let dir = process.cwd();
 
   while (dir !== path.dirname(dir)) {
-    const metadataPath = path.join(dir, ".workforest");
     try {
-      await fs.stat(metadataPath);
-      return dir;
+      if (await hasWorkspaceMetadata(dir)) {
+        return dir;
+      }
     } catch {
-      // Not found, continue up
+      // Unreadable metadata, continue up
     }
+
     dir = path.dirname(dir);
   }
   return null;
@@ -2252,10 +2267,14 @@ async function findWorkspaces(rootDir: string): Promise<WorkspaceInfo[]> {
         workspaces.push({
           name: entry,
           path: entryPath,
-          description: metadata.workspace.description,
-          template: metadata.workspace.template_id,
           created: metadata.workspace.created_at,
           repoCount: metadata.repos.length,
+          ...(metadata.workspace.description
+            ? { description: metadata.workspace.description }
+            : {}),
+          ...(metadata.workspace.template_id
+            ? { template: metadata.workspace.template_id }
+            : {}),
         });
       }
     } catch {

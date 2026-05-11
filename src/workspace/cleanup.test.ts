@@ -35,7 +35,7 @@ vi.mock("./index.ts", () => ({
 }));
 
 vi.mock("./metadata.ts", () => ({
-  getMetadataPath: vi.fn((workspaceDir: string) => `${workspaceDir}/.workforest`),
+  hasWorkspaceMetadata: vi.fn(async () => true),
   readWorkspaceMetadata: readWorkspaceMetadataMock,
 }));
 
@@ -82,6 +82,7 @@ describe("cleanupWorkspaceGenerator", () => {
   it("does not mark a repo as complete when worktree cleanup throws", async () => {
     cleanupWorkspaceWorktreesGeneratorMock.mockImplementation(
       async function* () {
+        yield { status: "running", message: "Removing worktree" };
         throw new Error("boom");
       },
     );

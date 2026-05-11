@@ -6,7 +6,7 @@ import type { CleanupOptions } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";
-import { getMetadataPath, readWorkspaceMetadata } from "./metadata.ts";
+import { hasWorkspaceMetadata, readWorkspaceMetadata } from "./metadata.ts";
 import { cleanupWorkspaceWorktreesGenerator } from "./repository.ts";
 
 /**
@@ -92,7 +92,7 @@ async function isBranchMerged(
 /**
  * Validates that a directory is a workforest workspace.
  * Returns the parsed workspace file contents if valid.
- * Prefers .workforest metadata file, falls back to .code-workspace for legacy support.
+ * Prefers .workforest metadata, falls back to .code-workspace for legacy support.
  */
 export async function validateWorkspace(
   workspaceDir: string,
@@ -112,7 +112,7 @@ export async function validateWorkspace(
     throw error;
   }
 
-  // Try .workforest metadata file first (preferred)
+  // Try .workforest metadata first (preferred)
   const metadata = await readWorkspaceMetadata(resolvedDir);
   if (metadata) {
     return {
@@ -158,7 +158,7 @@ export async function previewCleanup(
   const workspaceName = path.basename(resolvedDir);
   const workspace = await validateWorkspace(resolvedDir);
 
-  const metadataExists = await pathExists(getMetadataPath(resolvedDir));
+  const metadataExists = await hasWorkspaceMetadata(resolvedDir);
   const metadata = await readWorkspaceMetadata(resolvedDir);
 
   // Check for merged remote branches if requested
@@ -203,7 +203,7 @@ export async function previewCleanup(
     workspaceDir: resolvedDir,
     repos: workspace.folders.map((f) => f.path),
     workspaceFile: `${workspaceName}.code-workspace`,
-    ...(metadataExists ? { metadataFile: ".workforest" } : {}),
+    ...(metadataExists ? { metadataFile: ".workforest/workspace.json" } : {}),
     ...(remoteBranches.length > 0 ? { remoteBranches } : {}),
   };
 }

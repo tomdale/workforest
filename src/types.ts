@@ -59,7 +59,7 @@ export type CleanupOptions = {
 };
 
 /**
- * Metadata stored in the .workforest file at workspace root.
+ * Metadata stored in .workforest/workspace.json at workspace root.
  * Used for workspace validation, cleanup, and introspection.
  */
 export type WorkspaceMetadata = {
