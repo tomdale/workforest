@@ -33,6 +33,13 @@ import {
   ensureMirrorRepoGenerator,
   ensureWorkingCopyGenerator,
 } from "./repository.ts";
+import {
+  appendRepoSetupLog,
+  getRepoSetupLogPath,
+  removeRepoSetupLog,
+  startRepoSetupLog,
+  withRepoSetupLog,
+} from "./setup-logs.ts";
 
 // ============================================================================
 // Types
@@ -229,7 +236,7 @@ export async function* stampWorkspaceGenerator({
   // Await template (should be ready by now, was loading in parallel)
   const template = templatePromise ? await templatePromise : null;
 
-  if (template) {
+  if (template && templateId) {
     await copyTemplateFiles(template, workspaceDir);
   }
 
@@ -244,7 +251,9 @@ export async function* stampWorkspaceGenerator({
 
   for await (const state of runInitializersGenerator({
     contexts,
-    disabledInitializers: template?.config.disableInitializers,
+    ...(template?.config.disableInitializers !== undefined
+      ? { disabledInitializers: template.config.disableInitializers }
+      : {}),
   })) {
     yield { phase: "initializer", state };
   }
@@ -252,7 +261,7 @@ export async function* stampWorkspaceGenerator({
   yield { phase: "initializers-complete" };
 
   // Phase C: Run template hooks
-  if (template) {
+  if (template && templateId) {
     if (template.config.hooks && template.config.hooks.length > 0) {
       yield { phase: "hooks-start", templateId };
 
@@ -439,14 +448,23 @@ export async function stampWorkspaceInteractive(
   const pipelines = new Map(
     repos.map((repo) => [
       repo.name,
-      repoPipelineGenerator({
-        repo,
-        workspaceDir,
-        branchName: effectiveBranchName,
-        isNewWorkspace,
-        disabledInitializers: template?.config.disableInitializers,
-        skipInitializers: Boolean(template),
-      }),
+      withRepoSetupLog(
+        repoPipelineGenerator({
+          repo,
+          workspaceDir,
+          branchName: effectiveBranchName,
+          isNewWorkspace,
+          skipInitializers: Boolean(template),
+          ...(template?.config.disableInitializers !== undefined
+            ? { disabledInitializers: template.config.disableInitializers }
+            : {}),
+        }),
+        {
+          workspaceDir,
+          repoName: repo.name,
+          repoDir: path.join(workspaceDir, repo.name),
+        },
+      ),
     ]),
   );
 
@@ -460,10 +478,14 @@ export async function stampWorkspaceInteractive(
     repoResults = await renderPipelinesGrid({
       pipelines,
       repoNames,
+      getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
     });
   } else {
     // Spinner mode: simple progress indicator
-    repoResults = await runPipelinesWithSpinner(pipelines, repoNames);
+    repoResults = await runPipelinesWithSpinner({
+      pipelines,
+      workspaceDir,
+    });
   }
 
   if (template) {
@@ -477,23 +499,55 @@ export async function stampWorkspaceInteractive(
       workspaceDir,
       repo,
     }));
+    const initializerLogPaths = new Map<string, string>();
+    const initializerFailures = new Set<string>();
+
+    async function getInitializerLogPath(repoName: string): Promise<string> {
+      const existing = initializerLogPaths.get(repoName);
+      if (existing) {
+        return existing;
+      }
+
+      const logPath = await startRepoSetupLog({
+        workspaceDir,
+        repoName,
+        repoDir: path.join(workspaceDir, repoName),
+      });
+      initializerLogPaths.set(repoName, logPath);
+      return logPath;
+    }
 
     for await (const state of runInitializersGenerator({
       contexts,
-      disabledInitializers: template.config.disableInitializers,
+      ...(template.config.disableInitializers !== undefined
+        ? { disabledInitializers: template.config.disableInitializers }
+        : {}),
     })) {
       switch (state.phase) {
         case "detecting":
           initializerSpinner.message(`${state.repoName}: detecting`);
           break;
         case "running":
+          await appendRepoSetupLog(
+            await getInitializerLogPath(state.repoName),
+            formatInitializerLogState(state),
+          );
           if (state.state.status === "running" && state.state.message) {
             initializerSpinner.message(
               `${state.repoName}: ${state.initializerName} - ${state.state.message}`,
             );
           } else if (state.state.status === "failed") {
+            initializerFailures.add(state.repoName);
             promptLog.error(
               `${state.repoName}: ${state.initializerName} failed`,
+            );
+            promptLog.error(
+              `${state.repoName}: setup log saved to ${await getRepoSetupLogPath(
+                {
+                  workspaceDir,
+                  repoName: state.repoName,
+                },
+              )}`,
             );
           }
           break;
@@ -505,6 +559,12 @@ export async function stampWorkspaceInteractive(
         case "repo-complete":
           initializerSpinner.message(`${state.repoName}: complete`);
           break;
+      }
+    }
+
+    for (const [repoName, logPath] of initializerLogPaths) {
+      if (!initializerFailures.has(repoName)) {
+        await removeRepoSetupLog(logPath);
       }
     }
 
@@ -602,13 +662,22 @@ export async function addReposToWorkspace({
   const pipelines = new Map(
     repos.map((repo) => [
       repo.name,
-      repoPipelineGenerator({
-        repo,
-        workspaceDir,
-        branchName,
-        isNewWorkspace: false,
-        disabledInitializers,
-      }),
+      withRepoSetupLog(
+        repoPipelineGenerator({
+          repo,
+          workspaceDir,
+          branchName,
+          isNewWorkspace: false,
+          ...(disabledInitializers !== undefined
+            ? { disabledInitializers }
+            : {}),
+        }),
+        {
+          workspaceDir,
+          repoName: repo.name,
+          repoDir: path.join(workspaceDir, repo.name),
+        },
+      ),
     ]),
   );
 
@@ -648,6 +717,12 @@ export async function addReposToWorkspace({
       case "failed":
         failures.set(id, state.error);
         log.error(`${id}: ${state.error.message}`);
+        log.error(
+          `${id}: setup log saved to ${await getRepoSetupLogPath({
+            workspaceDir,
+            repoName: id,
+          })}`,
+        );
         break;
     }
   }
@@ -688,13 +763,16 @@ export async function addReposToWorkspace({
 /**
  * Run pipelines with a simple spinner (fallback for non-grid mode).
  */
-async function runPipelinesWithSpinner(
+async function runPipelinesWithSpinner({
+  pipelines,
+  workspaceDir,
+}: {
   pipelines: Map<
     string,
     AsyncGenerator<import("./pipeline.ts").RepoPipelineState>
-  >,
-  _repoNames: string[],
-): Promise<Map<string, { hasLockfile: boolean }>> {
+  >;
+  workspaceDir: string;
+}): Promise<Map<string, { hasLockfile: boolean }>> {
   const s = spinner();
   s.start("Setting up repositories...");
 
@@ -721,12 +799,47 @@ async function runPipelinesWithSpinner(
       case "failed":
         repoPhases.set(id, "failed");
         promptLog.error(`${id}: ${state.error.message}`);
+        promptLog.error(
+          `${id}: setup log saved to ${await getRepoSetupLogPath({
+            workspaceDir,
+            repoName: id,
+          })}`,
+        );
         break;
     }
   }
 
   s.stop("Repository setup complete");
   return results;
+}
+
+function formatInitializerLogState(
+  state: Extract<InitializerState, { phase: "running" }>,
+): string {
+  const scope = `initializer:${state.initializerName}`;
+
+  switch (state.state.status) {
+    case "output":
+      return state.state.data;
+    case "running":
+      return state.state.message ? `[${scope}] ${state.state.message}\n` : "";
+    case "retrying":
+      return `[${scope}] Retry ${state.state.attempt}: ${state.state.reason}\n`;
+    case "failed":
+      return [
+        `[${scope}] failed: ${state.state.error.message}`,
+        state.state.error.stack ?? "",
+        "",
+      ].join("\n");
+    case "completed":
+      return `[${scope}] completed\n`;
+    case "skipped":
+      return `[${scope}] skipped: ${state.state.reason}\n`;
+    case "pending":
+      return `[${scope}] pending\n`;
+    case "log":
+      return `[${scope}] ${state.state.level}: ${state.state.message}\n`;
+  }
 }
 
 // ============================================================================

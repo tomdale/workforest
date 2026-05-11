@@ -10,6 +10,7 @@ setRuntime(new NodeRuntime());
 export type RenderPipelinesGridOptions = {
   pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;
   repoNames: string[];
+  getLogPath?: (repoName: string) => Promise<string>;
   environment?: GridRenderEnvironment;
 };
 
@@ -82,7 +83,7 @@ export function shouldUseGrid(): boolean {
   if (!process.stdout.isTTY) return false;
   const { columns, rows } = process.stdout;
   if ((columns ?? 80) < 60 || (rows ?? 24) < 15) return false;
-  if (process.env.CI || process.env.WORKFOREST_NO_TUI) return false;
+  if (process.env["CI"] || process.env["WORKFOREST_NO_TUI"]) return false;
   return true;
 }
 
@@ -103,6 +104,7 @@ const STATUS_ICONS = {
 export async function renderPipelinesGrid({
   pipelines,
   repoNames,
+  getLogPath,
   environment = createDefaultEnvironment(),
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
   const renderIntervalMs =
@@ -203,6 +205,9 @@ export async function renderPipelinesGrid({
         flushOutputBuffer(pane, id, outputBuffers);
         pane.setLabel(`{red-fg}${id} ${STATUS_ICONS.failed}{/red-fg}`);
         pane.appendLine(`{red-fg}Error: ${state.error.message}{/red-fg}`);
+        if (getLogPath) {
+          pane.appendLine(`{red-fg}Log: ${await getLogPath(id)}{/red-fg}`);
+        }
         break;
       }
     }

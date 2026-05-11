@@ -13,32 +13,36 @@ vi.mock("@unblessed/node", () => {
     Screen: vi.fn().mockImplementation(function (
       this: Record<string, unknown>,
     ) {
-      this.key = vi.fn();
-      this.render = vi.fn();
-      this.destroy = vi.fn();
-      this.append = vi.fn();
-      this.width = 220;
-      this.height = 50;
+      this["key"] = vi.fn();
+      this["render"] = vi.fn();
+      this["destroy"] = vi.fn();
+      this["append"] = vi.fn();
+      this["width"] = 220;
+      this["height"] = 50;
     }),
     Box: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
-      this.setContent = vi.fn();
-      this.destroy = vi.fn();
+      this["setContent"] = vi.fn();
+      this["destroy"] = vi.fn();
     }),
     ScrollableBox: vi.fn().mockImplementation(function (
       this: Record<string, unknown>,
     ) {
-      this.key = vi.fn();
-      this.setContent = vi.fn();
-      this.setScrollPerc = vi.fn();
-      this.destroy = vi.fn();
-      this.height = 20;
-      this.scroll = vi.fn();
+      this["key"] = vi.fn();
+      this["setContent"] = vi.fn();
+      this["setScrollPerc"] = vi.fn();
+      this["destroy"] = vi.fn();
+      this["height"] = 20;
+      this["scroll"] = vi.fn();
     }),
   };
 });
 
-import { NodeRuntime, setRuntime } from "@unblessed/node";
-import { Screen, ScrollableBox } from "@unblessed/node";
+import {
+  NodeRuntime,
+  Screen,
+  ScrollableBox,
+  setRuntime,
+} from "@unblessed/node";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "./grid-consumer.ts";
 
@@ -290,7 +294,7 @@ describe("renderPipelinesGrid", () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    const screen = vi.mocked(Screen).mock.instances.at(-1) as {
+    const screen = vi.mocked(Screen).mock.instances.at(-1) as unknown as {
       render: ReturnType<typeof vi.fn>;
     };
 
@@ -327,7 +331,7 @@ describe("renderPipelinesGrid", () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    const pane = vi.mocked(ScrollableBox).mock.instances.at(-1) as {
+    const pane = vi.mocked(ScrollableBox).mock.instances.at(-1) as unknown as {
       setContent: ReturnType<typeof vi.fn>;
     };
     const lastContent = pane.setContent.mock.lastCall?.[0];
