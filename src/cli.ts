@@ -37,7 +37,7 @@ import {
   promptLog,
   promptSelect,
   promptText,
-  spinner,
+  withSpinner,
 } from "./ui/prompts/index.ts";
 import {
   buildBranchName,
@@ -1154,10 +1154,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
         description = input;
         // Show spinner for AI generation in interactive mode
         if (interactive) {
-          const s = spinner();
-          s.start("Generating feature name...");
-          const generated = await generateSlugFromDescription(input);
-          s.stop("Feature name ready");
+          const generated = await withSpinner(
+            "Generating feature name...",
+            () => generateSlugFromDescription(input),
+            "Feature name ready",
+          );
           featureName = generated ?? sanitizeToSlug(input);
         } else {
           const generated = await generateSlugFromDescription(input);
@@ -1466,10 +1467,11 @@ async function runForkCommand(argv: string[]): Promise<void> {
     } else {
       description = input;
       if (interactive) {
-        const s = spinner();
-        s.start("Generating feature name...");
-        const generated = await generateSlugFromDescription(input);
-        s.stop("Feature name ready");
+        const generated = await withSpinner(
+          "Generating feature name...",
+          () => generateSlugFromDescription(input),
+          "Feature name ready",
+        );
         featureName = generated ?? sanitizeToSlug(input);
       } else {
         const generated = await generateSlugFromDescription(input);
@@ -1687,10 +1689,11 @@ async function promptForFeatureName(): Promise<FeatureNameResult | null> {
     }
 
     // It's prose - generate a slug with spinner
-    const s = spinner();
-    s.start("Generating feature name...");
-    const generated = await generateSlugFromDescription(trimmed);
-    s.stop("Feature name ready");
+    const generated = await withSpinner(
+      "Generating feature name...",
+      () => generateSlugFromDescription(trimmed),
+      "Feature name ready",
+    );
 
     const featureName = generated ?? sanitizeToSlug(trimmed);
     promptLog.info(`Using "${featureName}" as feature name`);

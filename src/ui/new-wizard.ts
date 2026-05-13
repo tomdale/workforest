@@ -250,6 +250,7 @@ function runWizardScreen(
     let spinnerInterval: ReturnType<typeof setInterval> | undefined;
     let spinnerFrame = 0;
     let skipNextEnter = false;
+    let finished = false;
 
     function cleanup() {
       if (spinnerInterval) {
@@ -260,6 +261,8 @@ function runWizardScreen(
     }
 
     function finish(result: ScreenResult) {
+      if (finished) return;
+      finished = true;
       cleanup();
       resolve(result);
     }
@@ -688,19 +691,33 @@ function runWizardScreen(
             screen.render();
           }, 80);
 
-          generateSlugFromDescription(trimmed).then((generated) => {
-            const featureName = generated ?? sanitizeToSlug(trimmed);
-            finish({
-              type: "done",
-              result: {
-                templateId: state.templateId,
-                repoSlugs: state.repoSlugs,
-                templateBranchPrefix: state.templateBranchPrefix,
-                featureName,
-                description: trimmed,
-              },
+          generateSlugFromDescription(trimmed)
+            .then((generated) => {
+              const featureName = generated ?? sanitizeToSlug(trimmed);
+              finish({
+                type: "done",
+                result: {
+                  templateId: state.templateId,
+                  repoSlugs: state.repoSlugs,
+                  templateBranchPrefix: state.templateBranchPrefix,
+                  featureName,
+                  description: trimmed,
+                },
+              });
+            })
+            .catch((error: unknown) => {
+              if (finished) return;
+              if (spinnerInterval) {
+                clearInterval(spinnerInterval);
+                spinnerInterval = undefined;
+              }
+              state.phase = "featureName";
+              state.errorMessage =
+                error instanceof Error
+                  ? error.message
+                  : "Failed to generate feature name";
+              render();
             });
-          });
           render();
           return;
         }

@@ -382,4 +382,43 @@ describe("renderPipelinesGrid", () => {
 
     expect(grid.render).toHaveBeenCalledTimes(4);
   });
+
+  it("destroys the screen when a pipeline throws", async () => {
+    const pane = {
+      setLabel: vi.fn(),
+      appendLine: vi.fn(),
+    };
+    const grid = {
+      getPane: vi.fn(() => pane),
+      render: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const screen = {
+      key: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "git", step: "mirror", status: "running" };
+      throw new Error("workspace setup failed");
+    };
+
+    await expect(
+      renderPipelinesGrid({
+        pipelines: new Map([["repo", pipeline()]]),
+        repoNames: ["repo"],
+        environment: {
+          createScreen: () => screen,
+          createGrid: () => grid,
+          renderIntervalMs: 33,
+          finalHoldMs: 0,
+        },
+      }),
+    ).rejects.toThrow("workspace setup failed");
+
+    expect(grid.destroy).toHaveBeenCalledTimes(1);
+    expect(screen.destroy).toHaveBeenCalledTimes(1);
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(grid.render).toHaveBeenCalledTimes(1);
+  });
 });

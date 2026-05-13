@@ -2,7 +2,10 @@ import chalk from "chalk";
 import { confirm as rawConfirm } from "./confirm.ts";
 import { multiSelect as rawMultiSelect } from "./multi-select.ts";
 import { select as rawSelect } from "./select.ts";
-import { spinner as rawSpinner } from "./spinner.ts";
+import {
+  spinner as rawSpinner,
+  withSpinner as rawWithSpinner,
+} from "./spinner.ts";
 import {
   barColor,
   S_BAR,
@@ -198,6 +201,7 @@ export const promptLog = {
 // ── Spinner ──
 
 export const spinner = rawSpinner;
+export const withSpinner = rawWithSpinner;
 
 // ── Helpers ──
 

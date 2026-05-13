@@ -13,6 +13,28 @@ export type Spinner = {
   message(text: string): void;
 };
 
+export async function withSpinner<T>(
+  message: string,
+  task: (spinner: Spinner) => Promise<T>,
+  successMessage?: string,
+): Promise<T> {
+  const s = spinner();
+  let stopped = false;
+
+  s.start(message);
+
+  try {
+    const result = await task(s);
+    s.stop(successMessage);
+    stopped = true;
+    return result;
+  } finally {
+    if (!stopped) {
+      s.stop();
+    }
+  }
+}
+
 export function spinner(): Spinner {
   let frameIndex = 0;
   let currentMessage = "";
@@ -57,11 +79,14 @@ export function spinner(): Spinner {
         clearInterval(interval);
         interval = null;
       }
-      erase();
-      if (msg) {
-        process.stdout.write(`  ${barColor(S_BAR)}  ${S_SUCCESS} ${msg}\n`);
+      try {
+        erase();
+        if (msg) {
+          process.stdout.write(`  ${barColor(S_BAR)}  ${S_SUCCESS} ${msg}\n`);
+        }
+      } finally {
+        process.stdout.write("\x1B[?25h"); // show cursor
       }
-      process.stdout.write("\x1B[?25h"); // show cursor
     },
 
     message(text) {

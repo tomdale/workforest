@@ -18,7 +18,7 @@ import {
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
-import { note, promptLog, spinner } from "../ui/prompts/index.ts";
+import { note, promptLog, withSpinner } from "../ui/prompts/index.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
@@ -426,23 +426,25 @@ export async function stampWorkspaceInteractive(
     }
   }
 
-  const s = spinner();
-  s.start("Setting up workspace...");
+  const { isNewWorkspace, template } = await withSpinner(
+    "Setting up workspace...",
+    async () => {
+      await ensureCacheDir();
 
-  await ensureCacheDir();
+      // Track if workspace is new (skip cleanup if so - no stale worktrees possible)
+      const isNewWorkspace = !(await pathExists(workspaceDir));
+      await ensureDir(workspaceDir);
 
-  // Track if workspace is new (skip cleanup if so - no stale worktrees possible)
-  const isNewWorkspace = !(await pathExists(workspaceDir));
-  await ensureDir(workspaceDir);
+      // Load template settings before creating repo pipelines.
+      const template = templateId ? await loadTemplate(templateId) : null;
 
-  // Start template loading early (runs in parallel with git operations)
-  const templatePromise = templateId ? loadTemplate(templateId) : null;
+      return { isNewWorkspace, template };
+    },
+    "Starting repository setup...",
+  );
 
   const effectiveBranchName = branchName ?? featureName;
   const repoNames = repos.map((r) => r.name);
-
-  // Determine template settings before creating pipelines
-  const template = templatePromise ? await templatePromise : null;
 
   // Create per-repo pipeline generators
   const pipelines = new Map(
@@ -468,8 +470,6 @@ export async function stampWorkspaceInteractive(
     ]),
   );
 
-  s.stop("Starting repository setup...");
-
   // Run all repo pipelines in parallel (git + initializers per repo)
   let repoResults: Map<string, { hasLockfile: boolean }>;
 
@@ -490,9 +490,6 @@ export async function stampWorkspaceInteractive(
 
   if (template) {
     await copyTemplateFiles(template, workspaceDir);
-
-    const initializerSpinner = spinner();
-    initializerSpinner.start("Running initializers...");
 
     const contexts = repos.map((repo) => ({
       repoDir: path.join(workspaceDir, repo.name),
@@ -517,81 +514,86 @@ export async function stampWorkspaceInteractive(
       return logPath;
     }
 
-    for await (const state of runInitializersGenerator({
-      contexts,
-      ...(template.config.disableInitializers !== undefined
-        ? { disabledInitializers: template.config.disableInitializers }
-        : {}),
-    })) {
-      switch (state.phase) {
-        case "detecting":
-          initializerSpinner.message(`${state.repoName}: detecting`);
-          break;
-        case "running":
-          await appendRepoSetupLog(
-            await getInitializerLogPath(state.repoName),
-            formatInitializerLogState(state),
-          );
-          if (state.state.status === "running" && state.state.message) {
-            initializerSpinner.message(
-              `${state.repoName}: ${state.initializerName} - ${state.state.message}`,
-            );
-          } else if (state.state.status === "failed") {
-            initializerFailures.add(state.repoName);
-            promptLog.error(
-              `${state.repoName}: ${state.initializerName} failed`,
-            );
-            promptLog.error(
-              `${state.repoName}: setup log saved to ${await getRepoSetupLogPath(
-                {
-                  workspaceDir,
-                  repoName: state.repoName,
-                },
-              )}`,
-            );
+    await withSpinner(
+      "Running initializers...",
+      async (initializerSpinner) => {
+        for await (const state of runInitializersGenerator({
+          contexts,
+          ...(template.config.disableInitializers !== undefined
+            ? { disabledInitializers: template.config.disableInitializers }
+            : {}),
+        })) {
+          switch (state.phase) {
+            case "detecting":
+              initializerSpinner.message(`${state.repoName}: detecting`);
+              break;
+            case "running":
+              await appendRepoSetupLog(
+                await getInitializerLogPath(state.repoName),
+                formatInitializerLogState(state),
+              );
+              if (state.state.status === "running" && state.state.message) {
+                initializerSpinner.message(
+                  `${state.repoName}: ${state.initializerName} - ${state.state.message}`,
+                );
+              } else if (state.state.status === "failed") {
+                initializerFailures.add(state.repoName);
+                promptLog.error(
+                  `${state.repoName}: ${state.initializerName} failed`,
+                );
+                promptLog.error(
+                  `${state.repoName}: setup log saved to ${await getRepoSetupLogPath(
+                    {
+                      workspaceDir,
+                      repoName: state.repoName,
+                    },
+                  )}`,
+                );
+              }
+              break;
+            case "skipped":
+              initializerSpinner.message(
+                `${state.repoName}: ${state.initializerId} skipped`,
+              );
+              break;
+            case "repo-complete":
+              initializerSpinner.message(`${state.repoName}: complete`);
+              break;
           }
-          break;
-        case "skipped":
-          initializerSpinner.message(
-            `${state.repoName}: ${state.initializerId} skipped`,
-          );
-          break;
-        case "repo-complete":
-          initializerSpinner.message(`${state.repoName}: complete`);
-          break;
-      }
-    }
+        }
 
-    for (const [repoName, logPath] of initializerLogPaths) {
-      if (!initializerFailures.has(repoName)) {
-        await removeRepoSetupLog(logPath);
-      }
-    }
-
-    initializerSpinner.stop("Initializers complete");
+        for (const [repoName, logPath] of initializerLogPaths) {
+          if (!initializerFailures.has(repoName)) {
+            await removeRepoSetupLog(logPath);
+          }
+        }
+      },
+      "Initializers complete",
+    );
   }
 
   // Hooks run after all repos complete (can reference multiple repos)
   if (template?.config.hooks && template.config.hooks.length > 0) {
-    const hookSpinner = spinner();
-    hookSpinner.start("Running template hooks...");
-
-    for await (const hookState of applyTemplateGenerator({
-      template,
-      workspaceDir,
-      repoDirs: repoNames,
-    })) {
-      if (hookState.phase === "hook-start") {
-        hookSpinner.message(`Hook: ${hookState.hookName}`);
-      } else if (hookState.phase === "hook") {
-        const { state: taskState } = hookState;
-        if (taskState.status === "failed") {
-          promptLog.error(`Hook failed: ${hookState.hookName}`);
+    await withSpinner(
+      "Running template hooks...",
+      async (hookSpinner) => {
+        for await (const hookState of applyTemplateGenerator({
+          template,
+          workspaceDir,
+          repoDirs: repoNames,
+        })) {
+          if (hookState.phase === "hook-start") {
+            hookSpinner.message(`Hook: ${hookState.hookName}`);
+          } else if (hookState.phase === "hook") {
+            const { state: taskState } = hookState;
+            if (taskState.status === "failed") {
+              promptLog.error(`Hook failed: ${hookState.hookName}`);
+            }
+          }
         }
-      }
-    }
-
-    hookSpinner.stop("Hooks complete");
+      },
+      "Hooks complete",
+    );
   }
 
   // Finalize
@@ -773,44 +775,46 @@ async function runPipelinesWithSpinner({
   >;
   workspaceDir: string;
 }): Promise<Map<string, { hasLockfile: boolean }>> {
-  const s = spinner();
-  s.start("Setting up repositories...");
+  return withSpinner(
+    "Setting up repositories...",
+    async (s) => {
+      const results = new Map<string, { hasLockfile: boolean }>();
+      const repoPhases = new Map<string, string>();
 
-  const results = new Map<string, { hasLockfile: boolean }>();
-  const repoPhases = new Map<string, string>();
+      for await (const { id, state } of runParallel(pipelines)) {
+        switch (state.phase) {
+          case "git":
+            repoPhases.set(id, state.step);
+            s.message(`${id}: ${state.step}`);
+            break;
 
-  for await (const { id, state } of runParallel(pipelines)) {
-    switch (state.phase) {
-      case "git":
-        repoPhases.set(id, state.step);
-        s.message(`${id}: ${state.step}`);
-        break;
+          case "initializer":
+            repoPhases.set(id, state.name);
+            s.message(`${id}: ${state.name}`);
+            break;
 
-      case "initializer":
-        repoPhases.set(id, state.name);
-        s.message(`${id}: ${state.name}`);
-        break;
+          case "complete":
+            repoPhases.set(id, "complete");
+            results.set(id, { hasLockfile: state.hasLockfile });
+            break;
 
-      case "complete":
-        repoPhases.set(id, "complete");
-        results.set(id, { hasLockfile: state.hasLockfile });
-        break;
+          case "failed":
+            repoPhases.set(id, "failed");
+            promptLog.error(`${id}: ${state.error.message}`);
+            promptLog.error(
+              `${id}: setup log saved to ${await getRepoSetupLogPath({
+                workspaceDir,
+                repoName: id,
+              })}`,
+            );
+            break;
+        }
+      }
 
-      case "failed":
-        repoPhases.set(id, "failed");
-        promptLog.error(`${id}: ${state.error.message}`);
-        promptLog.error(
-          `${id}: setup log saved to ${await getRepoSetupLogPath({
-            workspaceDir,
-            repoName: id,
-          })}`,
-        );
-        break;
-    }
-  }
-
-  s.stop("Repository setup complete");
-  return results;
+      return results;
+    },
+    "Repository setup complete",
+  );
 }
 
 function formatInitializerLogState(

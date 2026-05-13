@@ -134,6 +134,22 @@ export async function renderPipelinesGrid({
   const repoResults = new Map<string, { hasLockfile: boolean }>();
   const outputBuffers = new Map<string, string>();
   let pendingRender: Promise<void> | null = null;
+  let pendingRenderTimer: ReturnType<typeof setTimeout> | null = null;
+  let destroyed = false;
+
+  const destroyScreen = (): void => {
+    if (destroyed) return;
+    destroyed = true;
+
+    if (pendingRenderTimer) {
+      clearTimeout(pendingRenderTimer);
+      pendingRenderTimer = null;
+      pendingRender = null;
+    }
+
+    grid.destroy();
+    screen.destroy();
+  };
 
   const scheduleRender = (): void => {
     if (renderIntervalMs <= 0) {
@@ -143,7 +159,8 @@ export async function renderPipelinesGrid({
 
     if (pendingRender) return;
     pendingRender = new Promise((resolve) => {
-      setTimeout(() => {
+      pendingRenderTimer = setTimeout(() => {
+        pendingRenderTimer = null;
         pendingRender = null;
         grid.render();
         resolve();
@@ -153,87 +170,87 @@ export async function renderPipelinesGrid({
 
   // Handle keyboard events
   screen.key(["escape", "q", "C-c"], () => {
-    grid.destroy();
-    screen.destroy();
+    destroyScreen();
     process.exit(0);
   });
 
-  // Initial render
-  grid.render();
+  try {
+    // Initial render
+    grid.render();
 
-  // Consume all pipelines in parallel
-  for await (const { id, state } of runParallel(pipelines)) {
-    const paneIndex = paneMap.get(id);
-    if (paneIndex === undefined) continue;
+    // Consume all pipelines in parallel
+    for await (const { id, state } of runParallel(pipelines)) {
+      const paneIndex = paneMap.get(id);
+      if (paneIndex === undefined) continue;
 
-    const pane = grid.getPane(paneIndex);
-    if (!pane) continue;
+      const pane = grid.getPane(paneIndex);
+      if (!pane) continue;
 
-    switch (state.phase) {
-      case "git": {
-        pane.setLabel(`${id}: ${state.step} ${STATUS_ICONS.running}`);
+      switch (state.phase) {
+        case "git": {
+          pane.setLabel(`${id}: ${state.step} ${STATUS_ICONS.running}`);
 
-        if (state.output) {
-          appendOutput(pane, id, state.output, outputBuffers);
-        } else if (state.message) {
+          if (state.output) {
+            appendOutput(pane, id, state.output, outputBuffers);
+          } else if (state.message) {
+            flushOutputBuffer(pane, id, outputBuffers);
+            pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
+          }
+          break;
+        }
+
+        case "initializer": {
+          pane.setLabel(`${id}: ${state.name} ${STATUS_ICONS.running}`);
+
+          if (state.output) {
+            appendOutput(pane, id, state.output, outputBuffers);
+          } else if (state.message) {
+            flushOutputBuffer(pane, id, outputBuffers);
+            pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
+          }
+          break;
+        }
+
+        case "complete": {
           flushOutputBuffer(pane, id, outputBuffers);
-          pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
+          pane.setLabel(`{green-fg}${id} ${STATUS_ICONS.complete}{/green-fg}`);
+          repoResults.set(id, { hasLockfile: state.hasLockfile });
+          break;
         }
-        break;
-      }
 
-      case "initializer": {
-        pane.setLabel(`${id}: ${state.name} ${STATUS_ICONS.running}`);
-
-        if (state.output) {
-          appendOutput(pane, id, state.output, outputBuffers);
-        } else if (state.message) {
+        case "failed": {
           flushOutputBuffer(pane, id, outputBuffers);
-          pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
+          pane.setLabel(`{red-fg}${id} ${STATUS_ICONS.failed}{/red-fg}`);
+          pane.appendLine(`{red-fg}Error: ${state.error.message}{/red-fg}`);
+          if (getLogPath) {
+            pane.appendLine(`{red-fg}Log: ${await getLogPath(id)}{/red-fg}`);
+          }
+          break;
         }
-        break;
       }
 
-      case "complete": {
-        flushOutputBuffer(pane, id, outputBuffers);
-        pane.setLabel(`{green-fg}${id} ${STATUS_ICONS.complete}{/green-fg}`);
-        repoResults.set(id, { hasLockfile: state.hasLockfile });
-        break;
-      }
-
-      case "failed": {
-        flushOutputBuffer(pane, id, outputBuffers);
-        pane.setLabel(`{red-fg}${id} ${STATUS_ICONS.failed}{/red-fg}`);
-        pane.appendLine(`{red-fg}Error: ${state.error.message}{/red-fg}`);
-        if (getLogPath) {
-          pane.appendLine(`{red-fg}Log: ${await getLogPath(id)}{/red-fg}`);
-        }
-        break;
-      }
+      scheduleRender();
     }
 
-    scheduleRender();
+    for (const [repoId, paneIndex] of paneMap) {
+      const pane = grid.getPane(paneIndex);
+      if (!pane) continue;
+      flushOutputBuffer(pane, repoId, outputBuffers);
+    }
+
+    if (pendingRender) {
+      await pendingRender;
+    }
+
+    // Keep grid visible briefly so user can see final state
+    if (finalHoldMs > 0) {
+      await sleep(finalHoldMs);
+    }
+
+    return repoResults;
+  } finally {
+    destroyScreen();
   }
-
-  for (const [repoId, paneIndex] of paneMap) {
-    const pane = grid.getPane(paneIndex);
-    if (!pane) continue;
-    flushOutputBuffer(pane, repoId, outputBuffers);
-  }
-
-  if (pendingRender) {
-    await pendingRender;
-  }
-
-  // Keep grid visible briefly so user can see final state
-  if (finalHoldMs > 0) {
-    await sleep(finalHoldMs);
-  }
-
-  grid.destroy();
-  screen.destroy();
-
-  return repoResults;
 }
 
 /**
