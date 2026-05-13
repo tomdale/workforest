@@ -1,7 +1,14 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
@@ -11,6 +18,7 @@ import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
 const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 const ORIGINAL_CD_PATH_FILE = process.env[WORKFOREST_CD_PATH_ENV];
+const ORIGINAL_PATH = process.env["PATH"];
 const ORIGINAL_ARGV = [...process.argv];
 const ORIGINAL_EXIT_CODE = process.exitCode;
 
@@ -23,6 +31,8 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+
   if (ORIGINAL_CONFIG_DIR === undefined) {
     delete process.env["WORKFOREST_CONFIG_DIR"];
   } else {
@@ -40,6 +50,11 @@ afterEach(async () => {
   } else {
     process.env[WORKFOREST_CD_PATH_ENV] = ORIGINAL_CD_PATH_FILE;
   }
+  if (ORIGINAL_PATH === undefined) {
+    delete process.env["PATH"];
+  } else {
+    process.env["PATH"] = ORIGINAL_PATH;
+  }
 
   process.argv = [...ORIGINAL_ARGV];
   process.exitCode = ORIGINAL_EXIT_CODE;
@@ -50,6 +65,153 @@ afterEach(async () => {
 });
 
 describe("cli", () => {
+  it("parses a slug before -- and repositories after -- for wf new", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const workspaceRoot = await createTempDir("workforest-root-");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir: workspaceRoot,
+      branchPrefix: "tomdale/",
+    });
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = [
+      "node",
+      "wf",
+      "new",
+      "--dry-run",
+      "fix-auth",
+      "--",
+      "vercel/front",
+      "vercel/api",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain(
+      `Directory: ${path.join(workspaceRoot, "fix-auth")}`,
+    );
+    expect(output).toContain("Feature: fix-auth");
+    expect(output).toContain("Branch: tomdale/fix-auth");
+    expect(output).toContain("front (git@github.com:vercel/front.git)");
+    expect(output).toContain("api (git@github.com:vercel/api.git)");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("parses prose before -- and templates after -- for wf new", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const binDir = await createTempDir("workforest-bin-");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    process.env["PATH"] =
+      `${binDir}${path.delimiter}${process.env["PATH"] ?? ""}`;
+    const claudePath = path.join(binDir, "claude");
+    await writeFile(claudePath, "#!/bin/sh\nprintf 'fix-auth\\n'\n");
+    await chmod(claudePath, 0o755);
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
+    await createTemplate("site", {
+      repos: ["vercel/front"],
+      description: "Site template",
+    });
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = [
+      "node",
+      "wf",
+      "new",
+      "--dry-run",
+      "fixing",
+      "auth",
+      "--",
+      "site",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain("Description: fixing auth");
+    expect(output).toContain("Template: site");
+    expect(output).toContain("front (git@github.com:vercel/front.git)");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("rejects wf new without both sides of the -- delimiter", async () => {
+    const errors: string[] = [];
+    const logs: string[] = [];
+
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "new", "--", "site"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain(
+      'Missing name or description before "--"',
+    );
+    expect(logs.join("\n")).toContain(
+      "Usage: wf new <name-or-description> -- <template|repo...>",
+    );
+
+    errors.length = 0;
+    logs.length = 0;
+    process.argv = ["node", "wf", "new", "fix-auth", "--"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain(
+      'Missing template or repositories after "--"',
+    );
+    expect(logs.join("\n")).toContain(
+      "Usage: wf new <name-or-description> -- <template|repo...>",
+    );
+  });
+
+  it("rejects the old wf new -d syntax", async () => {
+    const errors: string[] = [];
+    const logs: string[] = [];
+
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "new", "site", "-d", "fix auth"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain("unknown or unexpected option: -d");
+    expect(logs.join("\n")).toContain(
+      "Usage: wf new <name-or-description> -- <template|repo...>",
+    );
+  });
+
   it("writes the configured workspace path for wf cd", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");

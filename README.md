@@ -48,7 +48,7 @@ eval "$(wf init zsh)"
 ```bash
 # Create a workspace with the frontend and backend repos
 # on new branches named after the feature.
-wf new vercel/front vercel/api -d "fixing the auth bug"
+wf new fixing the auth bug -- vercel/front vercel/api
 
 # Add another repo to the current workspace later
 wf add vercel/docs
@@ -61,7 +61,7 @@ wf cd fix-auth-bug
 
 # Or save frequently used groups as templates
 wf template new full-stack org/frontend org/api
-wf new full-stack -d "implementing user avatars"
+wf new implementing user avatars -- full-stack
 ```
 
 ### Interactive Wizard
@@ -111,7 +111,7 @@ When a feature spans your frontend and API, create a workspace that includes
 both:
 
 ```bash
-wf new frontend backend -d "add dark mode support"
+wf new add dark mode support -- frontend backend
 ```
 
 Both repos get a `dark-mode-support` branch, ready for coordinated development.
@@ -174,7 +174,7 @@ Check out someone's PR across multiple repos without switching branches in your
 main workspace:
 
 ```bash
-wf new site -d "reviewing alices pr"
+wf new reviewing alices pr -- site
 cd reviewing-alices-pr/frontend
 gh pr checkout 123
 ```
@@ -385,7 +385,7 @@ run in parallel.
 ## Commands
 
 ```
-wf new [template|repo...]       Create a workspace
+wf new <work> -- <template|repo...> Create a workspace
 wf worktree <repo> <slug>       Create a standalone repo worktree
 wf wt <repo> <slug>             Alias for worktree
 wf fork <name>                  Fork current workspace with new branches

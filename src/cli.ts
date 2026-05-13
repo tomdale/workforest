@@ -1054,18 +1054,39 @@ async function runCleanCommand(argv: string[]): Promise<void> {
   }
 }
 
+function logNewUsage(): void {
+  log.info("Usage: wf new <name-or-description> -- <template|repo...>");
+  log.info("Example: wf new fixing auth bug -- my-template");
+  log.info("Example: wf new testing feature -- vercel/next.js vercel/turbo");
+}
+
 async function runNewCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--description": String,
-      "--dry-run": Boolean,
-      "-h": "--help",
-      "-d": "--description",
-      "-n": "--dry-run",
-    },
-    { argv },
-  );
+  const delimiterIndex = argv.indexOf("--");
+  const beforeDelimiter =
+    delimiterIndex === -1 ? argv : argv.slice(0, delimiterIndex);
+  const afterDelimiter =
+    delimiterIndex === -1 ? [] : argv.slice(delimiterIndex + 1);
+  let args: {
+    _: string[];
+    "--help"?: boolean;
+    "--dry-run"?: boolean;
+  };
+  try {
+    args = arg(
+      {
+        "--help": Boolean,
+        "--dry-run": Boolean,
+        "-h": "--help",
+        "-n": "--dry-run",
+      },
+      { argv: beforeDelimiter },
+    );
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    logNewUsage();
+    process.exitCode = 1;
+    return;
+  }
 
   if (args["--help"]) {
     console.log(await help());
@@ -1073,7 +1094,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   }
 
   const interactive = isInteractive();
-  let selections = args._;
+  let selections = afterDelimiter;
   let featureName: string | undefined;
   let description: string | undefined;
   let templateBranchPrefix: string | undefined;
@@ -1089,40 +1110,81 @@ async function runNewCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  // Prompt for template/repos if not provided
-  if (selections.length === 0) {
-    if (!interactive) {
-      log.error("No template or repositories specified.");
-      log.info('Usage: wf new <template|repo...> -d "description"');
-      log.info('Example: wf new my-template -d "fixing auth bug"');
-      log.info(
-        'Example: wf new vercel/next.js vercel/turbo -d "testing feature"',
-      );
+  if (delimiterIndex === -1) {
+    if (args._.length === 0) {
+      if (!interactive) {
+        log.error("Missing name/description and repositories.");
+        logNewUsage();
+        process.exitCode = 1;
+        return;
+      }
+
+      const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
+      if (shouldUseGrid()) {
+        const { runNewWizard } = await import("./ui/new-wizard.ts");
+        const templates = await listTemplates();
+        const wizardResult = await runNewWizard({
+          config,
+          templates,
+          handleTemplateManagement,
+        });
+        selections = wizardResult.templateId
+          ? [wizardResult.templateId]
+          : wizardResult.repoSlugs;
+        featureName = wizardResult.featureName;
+        description = wizardResult.description;
+        templateBranchPrefix = wizardResult.templateBranchPrefix;
+      } else {
+        // Fallback: existing sequential prompts
+        intro("Create a new workspace");
+        const selected = await promptForTemplateOrRepos();
+        if (!selected) return;
+        selections = selected;
+      }
+    } else {
+      log.error('Missing "--" delimiter before repositories.');
+      logNewUsage();
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    const workText = args._.join(" ").trim();
+    if (!workText) {
+      log.error('Missing name or description before "--".');
+      logNewUsage();
       process.exitCode = 1;
       return;
     }
 
-    const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
-    if (shouldUseGrid()) {
-      const { runNewWizard } = await import("./ui/new-wizard.ts");
-      const templates = await listTemplates();
-      const wizardResult = await runNewWizard({
-        config,
-        templates,
-        handleTemplateManagement,
-      });
-      selections = wizardResult.templateId
-        ? [wizardResult.templateId]
-        : wizardResult.repoSlugs;
-      featureName = wizardResult.featureName;
-      description = wizardResult.description;
-      templateBranchPrefix = wizardResult.templateBranchPrefix;
+    if (!interactive) {
+      if (selections.length === 0) {
+        log.error('Missing template or repositories after "--".');
+        logNewUsage();
+        process.exitCode = 1;
+        return;
+      }
+    } else if (selections.length === 0) {
+      log.error('Missing template or repositories after "--".');
+      logNewUsage();
+      process.exitCode = 1;
+      return;
+    }
+
+    if (isSlug(workText)) {
+      featureName = workText;
     } else {
-      // Fallback: existing sequential prompts
-      intro("Create a new workspace");
-      const selected = await promptForTemplateOrRepos();
-      if (!selected) return;
-      selections = selected;
+      description = workText;
+      if (interactive) {
+        const generated = await withSpinner(
+          "Generating feature name...",
+          () => generateSlugFromDescription(workText),
+          "Feature name ready",
+        );
+        featureName = generated ?? sanitizeToSlug(workText);
+      } else {
+        const generated = await generateSlugFromDescription(workText);
+        featureName = generated ?? sanitizeToSlug(workText);
+      }
     }
   }
 
@@ -1144,43 +1206,19 @@ async function runNewCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  // Get feature name (skip if wizard already provided it)
+  // Get feature name (skip if delimiter or wizard already provided it)
   if (!featureName) {
-    if (args["--description"]) {
-      const input = args["--description"];
-      if (isSlug(input)) {
-        featureName = input;
-      } else {
-        description = input;
-        // Show spinner for AI generation in interactive mode
-        if (interactive) {
-          const generated = await withSpinner(
-            "Generating feature name...",
-            () => generateSlugFromDescription(input),
-            "Feature name ready",
-          );
-          featureName = generated ?? sanitizeToSlug(input);
-        } else {
-          const generated = await generateSlugFromDescription(input);
-          featureName = generated ?? sanitizeToSlug(input);
-        }
-      }
-    } else {
-      if (!interactive) {
-        log.error(
-          "Missing --description argument (required in non-interactive mode).",
-        );
-        log.info('Usage: wf new <template|repo...> -d "description"');
-        log.info('Example: wf new my-template -d "fixing auth bug"');
-        process.exitCode = 1;
-        return;
-      }
-
-      const result = await promptForFeatureName();
-      if (!result) return;
-      featureName = result.featureName;
-      description = result.description;
+    if (!interactive) {
+      log.error("Missing name or description.");
+      logNewUsage();
+      process.exitCode = 1;
+      return;
     }
+
+    const result = await promptForFeatureName();
+    if (!result) return;
+    featureName = result.featureName;
+    description = result.description;
   }
 
   // Build paths

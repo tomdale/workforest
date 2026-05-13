@@ -15,7 +15,7 @@ pnpm biome check .      # Lint and format check
 pnpm biome check --write .  # Auto-fix lint/format issues
 
 # Run CLI during development
-node bin/workforest.js new <template|org/repo...>
+node bin/workforest.js new <name-or-description> -- <template|org/repo...>
 node bin/workforest.js template list
 ```
 

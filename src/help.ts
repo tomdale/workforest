@@ -25,7 +25,7 @@ export async function help(): Promise<string> {
 ${chalk.bold("Usage:")} wf <command> [options]
 
 ${chalk.bold("Commands:")}
-  new [template|repo...]       Create a workspace
+  new <work> -- <template|repo...> Create a workspace
   worktree <repo> <slug>       Create a standalone repo worktree
   wt <repo> <slug>             Alias for worktree
   cd <name>                    Jump to a workspace in defaultDir
@@ -44,11 +44,11 @@ ${chalk.bold("Clean options:")}
   --keep-mirrors               Keep cached git mirrors (default: true)
 
 ${chalk.bold("Examples:")}
-  wf new my-template -d "fixing the auth bug"
-  wf new vercel/front vercel/api -d "new feature"
+  wf new fixing the auth bug -- my-template
+  wf new new feature -- vercel/front vercel/api
   wf worktree vercel/front fix-auth
   wf wt vercel/front fix-auth --dir ../front-fix-auth
-  wf new my-template --dry-run      Preview without creating
+  wf new --dry-run fixing auth -- my-template
   wf cd fix-auth-bug                Jump into an existing workspace
   wf add vercel/docs               Add a repo from inside a workspace
   wf add vercel/docs -w ./my-ws    Add a repo to a specific workspace
