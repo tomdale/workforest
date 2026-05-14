@@ -21,6 +21,7 @@ const ORIGINAL_CD_PATH_FILE = process.env[WORKFOREST_CD_PATH_ENV];
 const ORIGINAL_PATH = process.env["PATH"];
 const ORIGINAL_ARGV = [...process.argv];
 const ORIGINAL_EXIT_CODE = process.exitCode;
+const ORIGINAL_STDIN_IS_TTY = process.stdin.isTTY;
 
 const tempDirs: string[] = [];
 
@@ -58,6 +59,10 @@ afterEach(async () => {
 
   process.argv = [...ORIGINAL_ARGV];
   process.exitCode = ORIGINAL_EXIT_CODE;
+  Object.defineProperty(process.stdin, "isTTY", {
+    configurable: true,
+    value: ORIGINAL_STDIN_IS_TTY,
+  });
 
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
@@ -249,6 +254,68 @@ describe("cli", () => {
     const written = await readFile(cdPathFile, "utf8");
     expect(written).toBe(`${path.resolve(workspaceDir)}\n`);
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("prints help for wf find --help", async () => {
+    const logs: string[] = [];
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "find", "--help"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("find");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("requires an interactive terminal for wf find", async () => {
+    const errors: string[] = [];
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: false,
+    });
+
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "find"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      "wf find requires an interactive terminal",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("reports missing defaultDir for wf find", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const writes: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    process.argv = ["node", "wf", "find"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(writes.join("")).toContain("No defaultDir configured");
+    expect(process.exitCode).toBe(1);
   });
 
   it("writes the template directory for wf template show", async () => {

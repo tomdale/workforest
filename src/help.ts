@@ -29,6 +29,7 @@ ${chalk.bold("Commands:")}
   worktree <repo> <slug>       Create a standalone repo worktree
   wt <repo> <slug>             Alias for worktree
   cd <name>                    Jump to a workspace in defaultDir
+  find                         Fuzzy-find and jump to a workspace
   add <repo...>                Add repo(s) to an existing workspace
   fork <name>                  Fork current workspace with new branches
   clean [dir]                  Remove a workspace (or run inside workspace)
@@ -50,6 +51,7 @@ ${chalk.bold("Examples:")}
   wf wt vercel/front fix-auth --dir ../front-fix-auth
   wf new --dry-run fixing auth -- my-template
   wf cd fix-auth-bug                Jump into an existing workspace
+  wf find                           Fuzzy-find a workspace to open
   wf add vercel/docs               Add a repo from inside a workspace
   wf add vercel/docs -w ./my-ws    Add a repo to a specific workspace
   wf fork new-approach              Fork workspace with new branch names

@@ -34,6 +34,7 @@ import {
   note,
   outro,
   promptConfirm,
+  promptFuzzySelect,
   promptLog,
   promptSelect,
   promptText,
@@ -85,6 +86,9 @@ export async function cli(): Promise<void> {
       break;
     case "cd":
       await runCdCommand(commandArgv);
+      break;
+    case "find":
+      await runFindCommand(commandArgv);
       break;
     case "add":
       await runAddCommand(commandArgv);
@@ -525,6 +529,55 @@ async function runCdCommand(argv: string[]): Promise<void> {
       } else {
         log.info(message);
       }
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runFindCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "-h": "--help",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(await help());
+    return;
+  }
+
+  if (args._.length > 0) {
+    log.error("Usage: wf find");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!isInteractive()) {
+    log.error("wf find requires an interactive terminal");
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const workspaceDir = await selectWorkspaceFuzzy("Find workspace");
+    if (workspaceDir === undefined) {
+      process.exitCode = 1;
+      return;
+    }
+
+    if (workspaceDir === null) {
+      cancel("Cancelled");
+      return;
+    }
+
+    await writeShellCdPath(workspaceDir);
+
+    if (!isShellAutoCdEnabled()) {
+      promptLog.info(`Run: cd ${workspaceDir}`);
     }
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -2392,6 +2445,43 @@ async function selectWorkspaceInteractive(
 
   try {
     const selection = await promptSelect(prompt, {
+      options: workspaces.map((ws) => ({
+        value: ws.path,
+        label: ws.name,
+        description: `${ws.repoCount} repo${ws.repoCount !== 1 ? "s" : ""}${ws.template ? ` (${ws.template})` : ""}`,
+      })),
+      throwOnCancel: true,
+    });
+
+    return selection;
+  } catch (e) {
+    if (e instanceof CancelError) return null;
+    throw e;
+  }
+}
+
+async function selectWorkspaceFuzzy(
+  prompt = "Find workspace",
+): Promise<string | null | undefined> {
+  const { config } = await loadWorkspaceConfig();
+
+  if (!config.defaultDir) {
+    promptLog.error(
+      "No defaultDir configured. Specify workspace path or run: wf config init",
+    );
+    return undefined;
+  }
+
+  const workspaceRoot = path.resolve(expandHome(config.defaultDir));
+  const workspaces = await findWorkspaces(workspaceRoot);
+
+  if (workspaces.length === 0) {
+    promptLog.info(`No workspaces found in ${workspaceRoot}`);
+    return undefined;
+  }
+
+  try {
+    const selection = await promptFuzzySelect(prompt, {
       options: workspaces.map((ws) => ({
         value: ws.path,
         label: ws.name,

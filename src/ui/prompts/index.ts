@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { confirm as rawConfirm } from "./confirm.ts";
+import { fuzzySelect as rawFuzzySelect } from "./fuzzy-select.ts";
 import { multiSelect as rawMultiSelect } from "./multi-select.ts";
 import { select as rawSelect } from "./select.ts";
 import {
@@ -42,6 +43,11 @@ export type PromptSelectOption<T> = {
 export type PromptSelectOptions<T> = {
   options: PromptSelectOption<T>[];
   hotkeys?: { key: string; value: T; hint: string }[];
+  throwOnCancel?: boolean;
+};
+
+export type PromptFuzzySelectOptions<T> = {
+  options: PromptSelectOption<T>[];
   throwOnCancel?: boolean;
 };
 
@@ -91,6 +97,22 @@ export async function promptSelect<T>(
       ...(o.description ? { hint: o.description } : {}),
     })),
     ...(options.hotkeys !== undefined ? { hotkeys: options.hotkeys } : {}),
+    ...(options.throwOnCancel !== undefined
+      ? { throwOnCancel: options.throwOnCancel }
+      : {}),
+  });
+}
+
+export async function promptFuzzySelect<T>(
+  message: string,
+  options: PromptFuzzySelectOptions<T>,
+): Promise<T> {
+  return rawFuzzySelect(message, {
+    options: options.options.map((o) => ({
+      value: o.value,
+      label: o.label,
+      ...(o.description ? { hint: o.description } : {}),
+    })),
     ...(options.throwOnCancel !== undefined
       ? { throwOnCancel: options.throwOnCancel }
       : {}),
