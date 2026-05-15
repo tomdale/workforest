@@ -399,7 +399,6 @@ export async function* cleanupWorkspaceWorktreesGenerator(
     const removeGen = asGenerator(() =>
       runGit(["worktree", "remove", "--force", target.path], {
         cwd: mirrorDir,
-        timeout: 30_000,
       }),
     );
 

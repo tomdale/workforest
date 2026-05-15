@@ -135,6 +135,42 @@ branch refs/heads/test
       cwd: "/tmp/cache/front.git",
     });
   });
+
+  it("removes worktrees without a timeout", async () => {
+    const workspaceDir = await createTempDir("workforest-cleanup-");
+    const repoDir = path.join(workspaceDir, "api");
+    const adminDir = path.join(workspaceDir, "api-admin");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(adminDir, { recursive: true });
+    await writeFile(
+      `${repoDir}/.git`,
+      `gitdir: ${adminDir}
+`,
+    );
+
+    runGitMock
+      .mockResolvedValueOnce({
+        stdout: `worktree /tmp/cache/api.git
+bare
+
+worktree ${repoDir}
+HEAD abc123
+branch refs/heads/test
+`,
+        stderr: "",
+      })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    await collectStates(
+      cleanupWorkspaceWorktreesGenerator("/tmp/cache/api.git", workspaceDir),
+    );
+
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      2,
+      ["worktree", "remove", "--force", repoDir],
+      { cwd: "/tmp/cache/api.git" },
+    );
+  });
 });
 
 describe("ensureMirrorRepoGenerator", () => {
