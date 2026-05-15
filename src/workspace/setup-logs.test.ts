@@ -75,6 +75,38 @@ describe("repo setup logs", () => {
     expect(log).toContain("pnpm install exited with code 1");
   });
 
+  it("writes high-volume setup output and retains failure logs", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const output = "installing package\n".repeat(10_000);
+
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "initializer",
+        name: "pnpm install",
+        status: "output",
+        output,
+      };
+      yield { phase: "failed", error: new Error("setup failed") };
+    };
+
+    await collect(
+      withRepoSetupLog(pipeline(), {
+        workspaceDir,
+        repoName: "front",
+        repoDir: path.join(workspaceDir, "front"),
+      }),
+    );
+
+    const logPath = await getRepoSetupLogPath({
+      workspaceDir,
+      repoName: "front",
+    });
+    const log = await readFile(logPath, "utf8");
+
+    expect(log).toContain(output);
+    expect(log).toContain("setup failed");
+  });
+
   it("removes the per-repo log when setup succeeds", async () => {
     const workspaceDir = await createWorkspaceDir();
 

@@ -1,4 +1,5 @@
 import { getNodeVersionPrefix } from "../../utils/node-version.ts";
+import { TailBuffer } from "../../utils/tail-buffer.ts";
 import { runCommandGenerator } from "../../utils/task-generator.ts";
 import {
   canSkipInstall,
@@ -13,6 +14,7 @@ import type {
 } from "./types.ts";
 
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
+const INSTALL_OUTPUT_TAIL_CHARS = 16_384;
 
 /**
  * Detect if this is a pnpm project.
@@ -67,7 +69,7 @@ async function* execute(context: InitializerContext) {
   // Collect output from the fast install to check for errors
   let failed = false;
   let lastError: Error | undefined;
-  let collectedOutput = "";
+  const collectedOutput = new TailBuffer(INSTALL_OUTPUT_TAIL_CHARS);
 
   // Try fast path first: frozen-lockfile + prefer-offline
   let command: string;
@@ -94,7 +96,7 @@ async function* execute(context: InitializerContext) {
       lastError = state.error;
       // Don't yield failure yet - check if it's recoverable
     } else if (state.status === "output") {
-      collectedOutput += state.data;
+      collectedOutput.append(state.data);
       yield state;
     } else {
       yield state;
@@ -105,7 +107,7 @@ async function* execute(context: InitializerContext) {
   if (
     failed &&
     lastError &&
-    isFrozenLockfileError(lastError, collectedOutput)
+    isFrozenLockfileError(lastError, collectedOutput.toString())
   ) {
     yield {
       status: "retrying" as const,

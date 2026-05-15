@@ -7,6 +7,7 @@ import { runCommand } from "../utils/exec.ts";
 import { pathExists } from "../utils/fs.ts";
 import { getNodeVersionPrefix } from "../utils/node-version.ts";
 import { withRetry } from "../utils/retry.ts";
+import { TailBuffer } from "../utils/tail-buffer.ts";
 import {
   runCommandGenerator,
   type TaskGenerator,
@@ -14,6 +15,7 @@ import {
 
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
 const LOCKFILE_HASH_FILE = ".pnpm-lockfile-hash";
+const INSTALL_OUTPUT_TAIL_CHARS = 16_384;
 
 /**
  * Generator-based dependency installation with frozen-lockfile optimization.
@@ -42,7 +44,7 @@ export async function* installDependencies(
   // Collect output from the fast install to check for errors
   let failed = false;
   let lastError: Error | undefined;
-  let collectedOutput = "";
+  const collectedOutput = new TailBuffer(INSTALL_OUTPUT_TAIL_CHARS);
 
   // Try fast path first: frozen-lockfile + prefer-offline
   let command: string;
@@ -69,7 +71,7 @@ export async function* installDependencies(
       lastError = state.error;
       // Don't yield failure yet - check if it's recoverable
     } else if (state.status === "output") {
-      collectedOutput += state.data;
+      collectedOutput.append(state.data);
       yield state;
     } else {
       yield state;
@@ -80,7 +82,7 @@ export async function* installDependencies(
   if (
     failed &&
     lastError &&
-    isFrozenLockfileError(lastError, collectedOutput)
+    isFrozenLockfileError(lastError, collectedOutput.toString())
   ) {
     yield { status: "retrying", reason: "Lockfile out of sync", attempt: 1 };
 

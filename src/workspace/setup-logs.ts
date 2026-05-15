@@ -1,4 +1,5 @@
-import { promises as fs } from "node:fs";
+import { once } from "node:events";
+import { createWriteStream, promises as fs, type WriteStream } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { ensureWorkspaceMetadataDir } from "./metadata.ts";
@@ -54,6 +55,37 @@ export async function appendRepoSetupLog(
   await fs.appendFile(logPath, contents, "utf8");
 }
 
+class RepoSetupLogWriter {
+  #stream: WriteStream;
+
+  constructor(logPath: string) {
+    this.#stream = createWriteStream(logPath, {
+      flags: "a",
+      encoding: "utf8",
+    });
+  }
+
+  async write(contents: string): Promise<void> {
+    if (contents.length === 0) {
+      return;
+    }
+
+    if (!this.#stream.write(contents, "utf8")) {
+      await once(this.#stream, "drain");
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.#stream.closed) {
+      return;
+    }
+
+    const finished = once(this.#stream, "finish");
+    this.#stream.end();
+    await finished;
+  }
+}
+
 export async function removeRepoSetupLog(logPath: string): Promise<void> {
   await fs.rm(logPath, { force: true });
 }
@@ -102,11 +134,12 @@ export async function* withRepoSetupLog(
   options: RepoSetupLogOptions,
 ): AsyncGenerator<RepoPipelineState> {
   const logPath = await startRepoSetupLog(options);
+  const logWriter = new RepoSetupLogWriter(logPath);
   let shouldKeepLog = false;
 
   try {
     for await (const state of pipeline) {
-      await appendRepoSetupLog(logPath, formatState(state));
+      await logWriter.write(formatState(state));
 
       if (state.phase === "failed") {
         shouldKeepLog = true;
@@ -118,12 +151,12 @@ export async function* withRepoSetupLog(
     shouldKeepLog = true;
     const setupError =
       error instanceof Error ? error : new Error(String(error));
-    await appendRepoSetupLog(
-      logPath,
+    await logWriter.write(
       [`[thrown] ${setupError.message}`, setupError.stack ?? "", ""].join("\n"),
     );
     yield { phase: "failed", error: setupError, step: "repo pipeline" };
   } finally {
+    await logWriter.close();
     if (!shouldKeepLog) {
       await removeRepoSetupLog(logPath);
     }
