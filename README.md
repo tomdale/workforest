@@ -31,11 +31,11 @@ Or use npx without installing:
 npx workforest new ...
 ```
 
-To have `wf new`, `wf fork`, and `wf worktree` drop you straight into the new
-workspace or worktree, `wf cd` jump into an existing workspace, `wf clean` jump
-to the deleted workspace's parent when you ran it from inside that workspace,
-and zsh complete workspace names for `wf cd` / `wf clean`,
-install the shell hook once in your shell rc:
+To have `wf new`, `wf fork`, and single-target `wf worktree` commands drop you
+straight into the new workspace or worktree, `wf cd` jump into an existing
+workspace, `wf clean` jump to the deleted workspace's parent when you ran it
+from inside that workspace, and zsh complete workspace names for `wf cd` /
+`wf clean`, install the shell hook once in your shell rc:
 
 ```bash
 eval "$(wf init zsh)"
@@ -53,8 +53,12 @@ wf new fixing the auth bug -- vercel/front vercel/api
 # Add another repo to the current workspace later
 wf add vercel/docs
 
-# Create one standalone worktree without workspace metadata
-wf wt vercel/front fix-auth
+# Create temporary sibling worktrees for parallel agents from inside a repo
+wf wt fix-tests upgrade-dependencies
+
+# List and remove temporary worktrees after merging their branches
+wf wt list
+wf wt rm fix-tests
 
 # Jump back to an existing workspace by name
 wf cd fix-auth-bug
@@ -136,10 +140,53 @@ The new repo is checked out onto the workspace's existing feature branch, then
 the `.workforest/workspace.json` metadata and VS Code workspace file are updated
 in place.
 
-### Single-Repo Worktrees
+### Temporary Worktrees For Parallel Agents
 
-When you only need one repo and do not want workspace metadata, templates,
-initializers, hooks, or a VS Code workspace file, create a standalone worktree:
+When you are inside a workspace repo and want to hand independent tasks to
+parallel agents, create temporary sibling worktrees:
+
+```bash
+cd ~/Code/workspaces/my-feature/omniagent
+wf worktree fix-tests upgrade-dependencies
+```
+
+This creates directories like:
+
+- `~/Code/workspaces/my-feature/omniagent-fix-tests`
+- `~/Code/workspaces/my-feature/omniagent-upgrade-dependencies`
+
+Each temporary worktree starts from the primary repo's committed `HEAD`, gets a
+nested branch such as `tomdale/my-feature/fix-tests`, and runs the same built-in
+repo initializers used during workspace setup, such as dependency installation
+and Vercel/Turbo linking. Template files and hooks are not rerun, and the VS
+Code workspace file is left unchanged.
+
+After reviewing and merging a temporary branch into the primary repo, remove it:
+
+```bash
+wf worktree rm fix-tests
+```
+
+Removal refuses dirty or unmerged worktrees unless you pass `--force`, then
+removes the worktree, deletes the local temporary branch, and updates
+Workforest metadata. To inspect temporary worktrees:
+
+```bash
+wf worktree list
+```
+
+From a workspace root, pass the parent repo explicitly:
+
+```bash
+wf worktree --repo omniagent fix-tests
+wf worktree rm --repo omniagent fix-tests
+```
+
+### Standalone Single-Repo Worktrees
+
+When you only need one repo outside a workspace and do not want workspace
+metadata, templates, initializers, hooks, or a VS Code workspace file, create a
+standalone worktree:
 
 ```bash
 wf worktree vercel/front fix-auth
@@ -386,8 +433,11 @@ run in parallel.
 
 ```
 wf new <work> -- <template|repo...> Create a workspace
+wf worktree <slug...>           Create temporary worktree(s) in a workspace repo
+wf worktree list                List temporary worktrees
+wf worktree rm <slug...>        Remove temporary worktrees
 wf worktree <repo> <slug>       Create a standalone repo worktree
-wf wt <repo> <slug>             Alias for worktree
+wf wt                           Alias for worktree
 wf fork <name>                  Fork current workspace with new branches
 wf clean [dir]                  Remove a workspace
 wf template list                List templates

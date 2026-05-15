@@ -181,8 +181,8 @@ _workforest_complete() {
   local subcommand="\${words[2]:-}"
   commands=(
     'new:create a workspace'
-    'worktree:create a standalone repo worktree'
-    'wt:create a standalone repo worktree'
+    'worktree:create or manage repo worktrees'
+    'wt:create or manage repo worktrees'
     'add:add repo(s) to a workspace'
     'fork:fork current workspace'
     'clean:remove a workspace'

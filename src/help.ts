@@ -26,8 +26,9 @@ ${chalk.bold("Usage:")} wf <command> [options]
 
 ${chalk.bold("Commands:")}
   new <work> -- <template|repo...> Create a workspace
-  worktree <repo> <slug>       Create a standalone repo worktree
-  wt <repo> <slug>             Alias for worktree
+  worktree <slug...>           Create temporary worktree(s) in a workspace repo
+  worktree list|rm             List or remove temporary worktrees
+  wt                           Alias for worktree
   cd <name>                    Jump to a workspace in defaultDir
   find                         Fuzzy-find and jump to a workspace
   add <repo...>                Add repo(s) to an existing workspace
@@ -47,6 +48,9 @@ ${chalk.bold("Clean options:")}
 ${chalk.bold("Examples:")}
   wf new fixing the auth bug -- my-template
   wf new new feature -- vercel/front vercel/api
+  wf worktree fix-tests upgrade-deps
+  wf worktree list
+  wf worktree rm fix-tests
   wf worktree vercel/front fix-auth
   wf wt vercel/front fix-auth --dir ../front-fix-auth
   wf new --dry-run fixing auth -- my-template

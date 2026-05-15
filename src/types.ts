@@ -71,6 +71,7 @@ export type WorkspaceMetadata = {
     template_id?: string;
   };
   repos: WorkspaceRepoMetadata[];
+  temporary_worktrees?: TemporaryWorktreeMetadata[];
 };
 
 export type WorkspaceRepoMetadata = {
@@ -79,4 +80,16 @@ export type WorkspaceRepoMetadata = {
   default_branch: string;
   has_lockfile: boolean;
   feature_branch?: string;
+};
+
+export type TemporaryWorktreeMetadata = {
+  slug: string;
+  parent_repo: string;
+  path: string;
+  branch: string;
+  base_branch: string;
+  base_sha: string;
+  created_at: string;
+  setup_status: "ready" | "failed";
+  setup_log?: string;
 };

@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { WorkspaceMetadata, WorkspaceRepoMetadata } from "../types.ts";
+import type {
+  TemporaryWorktreeMetadata,
+  WorkspaceMetadata,
+  WorkspaceRepoMetadata,
+} from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 
 const METADATA_FILENAME = ".workforest";
@@ -78,6 +82,67 @@ export async function appendWorkspaceRepos(
     ...metadata,
     repos: [...metadata.repos, ...repos],
   };
+
+  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
+  return nextMetadata;
+}
+
+export async function appendTemporaryWorktrees(
+  workspaceDir: string,
+  worktrees: readonly TemporaryWorktreeMetadata[],
+): Promise<WorkspaceMetadata> {
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+
+  if (!metadata) {
+    throw new Error(
+      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+    );
+  }
+
+  const nextMetadata: WorkspaceMetadata = {
+    ...metadata,
+    temporary_worktrees: [
+      ...(metadata.temporary_worktrees ?? []),
+      ...worktrees,
+    ],
+  };
+
+  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
+  return nextMetadata;
+}
+
+export async function removeTemporaryWorktrees(
+  workspaceDir: string,
+  entriesToRemove: readonly Pick<
+    TemporaryWorktreeMetadata,
+    "parent_repo" | "slug"
+  >[],
+): Promise<WorkspaceMetadata> {
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+
+  if (!metadata) {
+    throw new Error(
+      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+    );
+  }
+
+  const removeKeys = new Set(
+    entriesToRemove.map((entry) => `${entry.parent_repo}\0${entry.slug}`),
+  );
+  const temporaryWorktrees = (metadata.temporary_worktrees ?? []).filter(
+    (entry) => !removeKeys.has(`${entry.parent_repo}\0${entry.slug}`),
+  );
+
+  const nextMetadata: WorkspaceMetadata = {
+    ...metadata,
+    ...(temporaryWorktrees.length > 0
+      ? { temporary_worktrees: temporaryWorktrees }
+      : {}),
+  };
+
+  if (temporaryWorktrees.length === 0) {
+    delete nextMetadata.temporary_worktrees;
+  }
 
   await saveWorkspaceMetadata(workspaceDir, nextMetadata);
   return nextMetadata;

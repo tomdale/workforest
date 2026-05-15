@@ -25,7 +25,12 @@ import {
   listTemplates,
   loadTemplate,
 } from "./templates/index.ts";
-import type { RepoConfig, WorkspaceConfig } from "./types.ts";
+import type {
+  RepoConfig,
+  WorkspaceConfig,
+  WorkspaceMetadata,
+  WorkspaceRepoMetadata,
+} from "./types.ts";
 import {
   CancelError,
   cancel,
@@ -406,9 +411,12 @@ async function runWorktreeCommand(argv: string[]): Promise<void> {
     {
       "--help": Boolean,
       "--dir": String,
+      "--repo": String,
       "--dry-run": Boolean,
+      "--force": Boolean,
       "-h": "--help",
       "-n": "--dry-run",
+      "-f": "--force",
     },
     { argv },
   );
@@ -418,6 +426,33 @@ async function runWorktreeCommand(argv: string[]): Promise<void> {
     return;
   }
 
+  const subcommand = args._[0];
+  if (subcommand === "list") {
+    await runTemporaryWorktreeList(args);
+    return;
+  }
+
+  if (subcommand === "rm") {
+    await runTemporaryWorktreeRemove(args);
+    return;
+  }
+
+  if (subcommand && !isRepoSlug(subcommand)) {
+    const workspaceDir = await detectWorkspaceFromCwd();
+    if (workspaceDir) {
+      await runTemporaryWorktreeCreate(args, workspaceDir);
+      return;
+    }
+  }
+
+  await runStandaloneWorktreeCreate(args);
+}
+
+async function runStandaloneWorktreeCreate(args: {
+  _: string[];
+  "--dir"?: string;
+  "--dry-run"?: boolean;
+}): Promise<void> {
   const [repoInput, slug, extra] = args._;
   if (!repoInput || !slug || extra) {
     log.error("Usage: wf worktree <repo> <slug> [--dir <path>] [--dry-run]");
@@ -475,6 +510,253 @@ async function runWorktreeCommand(argv: string[]): Promise<void> {
     log.success(`Worktree ready: ${targetDir}`);
     if (!isShellAutoCdEnabled()) {
       log.info(`Run: cd ${targetDir}`);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runTemporaryWorktreeCreate(
+  args: {
+    _: string[];
+    "--dir"?: string;
+    "--repo"?: string;
+    "--dry-run"?: boolean;
+    "--force"?: boolean;
+  },
+  workspaceDir: string,
+): Promise<void> {
+  if (args["--dir"]) {
+    log.error("--dir is only supported for standalone worktrees.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const slugs = args._;
+  if (slugs.length === 0) {
+    log.error("Usage: wf worktree <slug...> [--repo <repo>] [--dry-run]");
+    process.exitCode = 1;
+    return;
+  }
+
+  let metadata: WorkspaceMetadata | null;
+  try {
+    metadata = await readWorkspaceMetadata(workspaceDir);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!metadata) {
+    log.error(`Could not read workspace metadata from ${workspaceDir}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let parentRepo: WorkspaceRepoMetadata;
+  try {
+    parentRepo = resolveWorkspaceRepoForWorktreeCommand({
+      workspaceDir,
+      metadata,
+      repoName: args["--repo"],
+      cwd: process.cwd(),
+      allowTemporaryWorktree: false,
+    });
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  const template = metadata.workspace.template_id
+    ? await loadTemplate(metadata.workspace.template_id)
+    : null;
+
+  try {
+    const { createTemporaryWorktrees } = await import(
+      "./workspace/temporary-worktrees.ts"
+    );
+    const result = await createTemporaryWorktrees({
+      workspaceDir,
+      parentRepo,
+      slugs,
+      dryRun: args["--dry-run"] ?? false,
+      force: args["--force"] ?? false,
+      ...(template?.config.disableInitializers !== undefined
+        ? { disabledInitializers: template.config.disableInitializers }
+        : {}),
+    });
+
+    if (args["--dry-run"]) {
+      console.log("\nDry run - no changes will be made\n");
+      for (const worktree of result.created) {
+        console.log(`Slug: ${worktree.slug}`);
+        console.log(`Repository: ${worktree.parentRepo}`);
+        console.log(`Branch: ${worktree.branch}`);
+        console.log(`Target: ${worktree.path}`);
+        console.log();
+      }
+      return;
+    }
+
+    for (const worktree of result.created) {
+      const setup =
+        worktree.setupStatus === "ready"
+          ? "ready"
+          : `setup failed${worktree.setupLog ? ` (log: ${worktree.setupLog})` : ""}`;
+      log.success(`${worktree.slug}: ${worktree.path} (${setup})`);
+    }
+
+    for (const failure of result.failures) {
+      log.error(`${failure.slug}: ${failure.error.message}`);
+    }
+
+    if (result.created.length === 1 && result.failures.length === 0) {
+      const target = result.created[0]?.path;
+      if (target) {
+        await writeShellCdPath(target);
+        if (!isShellAutoCdEnabled()) {
+          log.info(`Run: cd ${target}`);
+        }
+      }
+    }
+
+    if (
+      result.failures.length > 0 ||
+      result.created.some((w) => w.setupStatus === "failed")
+    ) {
+      process.exitCode = 1;
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runTemporaryWorktreeList(args: {
+  _: string[];
+  "--repo"?: string;
+}): Promise<void> {
+  const extra = args._.slice(1);
+  if (extra.length > 0) {
+    log.error("Usage: wf worktree list [--repo <repo>]");
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    log.error("Not inside a workspace.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (!metadata) {
+    log.error(`Could not read workspace metadata from ${workspaceDir}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let parentRepoName: string | undefined;
+  try {
+    parentRepoName =
+      args["--repo"] ??
+      resolveWorkspaceRepoNameFromCwd({
+        workspaceDir,
+        metadata,
+        cwd: process.cwd(),
+        allowTemporaryWorktree: true,
+      });
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  const { listTemporaryWorktrees } = await import(
+    "./workspace/temporary-worktrees.ts"
+  );
+  const entries = await listTemporaryWorktrees(workspaceDir, parentRepoName);
+
+  if (entries.length === 0) {
+    log.info("No temporary worktrees found.");
+    return;
+  }
+
+  console.log("\nTemporary worktrees\n");
+  for (const entry of entries) {
+    const merged =
+      entry.merged === null ? "unknown" : entry.merged ? "yes" : "no";
+    console.log(`  ${entry.slug}`);
+    console.log(`    repo:   ${entry.parent_repo}`);
+    console.log(`    branch: ${entry.branch}`);
+    console.log(`    status: ${entry.state}, merged: ${merged}`);
+    console.log(`    path:   ${entry.absolutePath}`);
+  }
+  console.log();
+}
+
+async function runTemporaryWorktreeRemove(args: {
+  _: string[];
+  "--repo"?: string;
+  "--dry-run"?: boolean;
+  "--force"?: boolean;
+}): Promise<void> {
+  const slugs = args._.slice(1);
+  if (slugs.length === 0) {
+    log.error("Usage: wf worktree rm <slug...> [--repo <repo>] [--dry-run]");
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    log.error("Not inside a workspace.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (!metadata) {
+    log.error(`Could not read workspace metadata from ${workspaceDir}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let parentRepoName: string | undefined;
+  try {
+    parentRepoName =
+      args["--repo"] ??
+      resolveWorkspaceRepoNameFromCwd({
+        workspaceDir,
+        metadata,
+        cwd: process.cwd(),
+        allowTemporaryWorktree: true,
+      });
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const { removeTemporaryWorktrees } = await import(
+      "./workspace/temporary-worktrees.ts"
+    );
+    const result = await removeTemporaryWorktrees({
+      workspaceDir,
+      slugs,
+      dryRun: args["--dry-run"] ?? false,
+      force: args["--force"] ?? false,
+      ...(parentRepoName ? { parentRepoName } : {}),
+    });
+
+    for (const entry of result.removed) {
+      const action = args["--dry-run"] ? "Would remove" : "Removed";
+      log.success(`${action} ${entry.parent_repo}-${entry.slug}`);
     }
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -1051,6 +1333,9 @@ async function runCleanCommand(argv: string[]): Promise<void> {
   } else {
     log.info(`Workspace: ${preview.workspaceDir}`);
     log.info(`Repositories: ${preview.repos.join(", ")}`);
+    if (preview.temporaryWorktrees?.length) {
+      log.info(`Temporary worktrees: ${preview.temporaryWorktrees.join(", ")}`);
+    }
     if (isInsideWorkspace) {
       log.warn("You are inside the workspace being deleted");
     }
@@ -2328,6 +2613,94 @@ async function detectWorkspaceFromCwd(): Promise<string | null> {
   return null;
 }
 
+function resolveWorkspaceRepoForWorktreeCommand({
+  workspaceDir,
+  metadata,
+  repoName,
+  cwd,
+  allowTemporaryWorktree,
+}: {
+  workspaceDir: string;
+  metadata: WorkspaceMetadata;
+  repoName: string | undefined;
+  cwd: string;
+  allowTemporaryWorktree: boolean;
+}): WorkspaceRepoMetadata {
+  if (repoName) {
+    const repo = metadata.repos.find(
+      (candidate) => candidate.name === repoName,
+    );
+    if (!repo) {
+      throw new Error(`Workspace does not contain repository "${repoName}".`);
+    }
+    return repo;
+  }
+
+  const resolvedRepoName = resolveWorkspaceRepoNameFromCwd({
+    workspaceDir,
+    metadata,
+    cwd,
+    allowTemporaryWorktree,
+  });
+
+  if (!resolvedRepoName) {
+    throw new Error(
+      "Run this command from inside a workspace repo, or pass --repo <repoName>.",
+    );
+  }
+
+  const repo = metadata.repos.find(
+    (candidate) => candidate.name === resolvedRepoName,
+  );
+  if (!repo) {
+    throw new Error(
+      `Workspace does not contain repository "${resolvedRepoName}".`,
+    );
+  }
+  return repo;
+}
+
+function resolveWorkspaceRepoNameFromCwd({
+  workspaceDir,
+  metadata,
+  cwd,
+  allowTemporaryWorktree,
+}: {
+  workspaceDir: string;
+  metadata: WorkspaceMetadata;
+  cwd: string;
+  allowTemporaryWorktree: boolean;
+}): string | undefined {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedCwd = path.resolve(cwd);
+
+  for (const repo of metadata.repos) {
+    const repoDir = path.join(resolvedWorkspaceDir, repo.name);
+    if (isPathInsideOrEqual(resolvedCwd, repoDir)) {
+      return repo.name;
+    }
+  }
+
+  if (allowTemporaryWorktree) {
+    for (const entry of metadata.temporary_worktrees ?? []) {
+      const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+      if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
+        return entry.parent_repo;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function isPathInsideOrEqual(child: string, parent: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
 /**
  * Workspace information for listing and selection.
  */
@@ -2508,6 +2881,10 @@ function showCleanupPreview(preview: CleanupPreview): void {
     `Directory: ${preview.workspaceDir}`,
     `Repositories: ${preview.repos.join(", ")}`,
   ];
+
+  if (preview.temporaryWorktrees && preview.temporaryWorktrees.length > 0) {
+    lines.push(`Temporary worktrees: ${preview.temporaryWorktrees.join(", ")}`);
+  }
 
   if (preview.remoteBranches && preview.remoteBranches.length > 0) {
     lines.push("");

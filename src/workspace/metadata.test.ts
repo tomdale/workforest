@@ -10,9 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  appendTemporaryWorktrees,
   appendWorkspaceRepos,
   getMetadataPath,
   readWorkspaceMetadata,
+  removeTemporaryWorktrees,
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 
@@ -180,5 +182,96 @@ describe("workspace metadata", () => {
     await mkdir(path.join(workspaceDir, ".workforest"));
 
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toBeNull();
+  });
+
+  it("tracks temporary worktrees separately from workspace repos", async () => {
+    const workspaceDir = await createWorkspaceDir();
+
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "fix-auth-bug",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    await appendTemporaryWorktrees(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "front-fix-tests",
+        branch: "tomdale/fix-auth-bug/fix-tests",
+        base_branch: "tomdale/fix-auth-bug",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+
+    await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          default_branch: "main",
+          has_lockfile: true,
+        },
+      ],
+      temporary_worktrees: [
+        {
+          slug: "fix-tests",
+          parent_repo: "front",
+          path: "front-fix-tests",
+        },
+      ],
+    });
+  });
+
+  it("removes temporary worktrees without changing repos", async () => {
+    const workspaceDir = await createWorkspaceDir();
+
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "fix-auth-bug",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    await appendTemporaryWorktrees(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "front-fix-tests",
+        branch: "tomdale/fix-auth-bug/fix-tests",
+        base_branch: "tomdale/fix-auth-bug",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+
+    await removeTemporaryWorktrees(workspaceDir, [
+      { parent_repo: "front", slug: "fix-tests" },
+    ]);
+
+    await expect(readWorkspaceMetadata(workspaceDir)).resolves.toEqual({
+      workspace: expect.any(Object),
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          default_branch: "main",
+          has_lockfile: true,
+        },
+      ],
+    });
   });
 });

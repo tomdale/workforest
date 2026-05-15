@@ -43,7 +43,7 @@ vi.mock("./repository.ts", () => ({
   cleanupWorkspaceWorktreesGenerator: cleanupWorkspaceWorktreesGeneratorMock,
 }));
 
-import { cleanupWorkspaceGenerator } from "./cleanup.ts";
+import { cleanupWorkspaceGenerator, previewCleanup } from "./cleanup.ts";
 
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const states: T[] = [];
@@ -73,6 +73,18 @@ beforeEach(() => {
         remote: "git@github.com:vercel/api.git",
         default_branch: "main",
         has_lockfile: true,
+      },
+    ],
+    temporary_worktrees: [
+      {
+        slug: "fix-tests",
+        parent_repo: "api",
+        path: "api-fix-tests",
+        branch: "tomdale/demo/fix-tests",
+        base_branch: "tomdale/demo",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
       },
     ],
   });
@@ -108,6 +120,14 @@ describe("cleanupWorkspaceGenerator", () => {
     expect(states[states.length - 1]).toEqual({
       phase: "complete",
       removedRepos: [],
+    });
+  });
+
+  it("includes temporary worktrees in cleanup previews", async () => {
+    await expect(previewCleanup("/tmp/workspace/demo")).resolves.toMatchObject({
+      workspaceDir: "/tmp/workspace/demo",
+      repos: ["api"],
+      temporaryWorktrees: ["api-fix-tests"],
     });
   });
 });

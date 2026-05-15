@@ -5,8 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 
-const { createSingleWorktreeMock } = vi.hoisted(() => ({
+const {
+  createSingleWorktreeMock,
+  createTemporaryWorktreesMock,
+  listTemporaryWorktreesMock,
+  removeTemporaryWorktreesMock,
+} = vi.hoisted(() => ({
   createSingleWorktreeMock: vi.fn(),
+  createTemporaryWorktreesMock: vi.fn(),
+  listTemporaryWorktreesMock: vi.fn(),
+  removeTemporaryWorktreesMock: vi.fn(),
 }));
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -27,6 +35,11 @@ async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
   vi.doMock("./worktree.ts", () => ({
     createSingleWorktree: createSingleWorktreeMock,
   }));
+  vi.doMock("./workspace/temporary-worktrees.ts", () => ({
+    createTemporaryWorktrees: createTemporaryWorktreesMock,
+    listTemporaryWorktrees: listTemporaryWorktreesMock,
+    removeTemporaryWorktrees: removeTemporaryWorktreesMock,
+  }));
 
   return import("./cli.ts");
 }
@@ -35,7 +48,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.resetModules();
   vi.unmock("./worktree.ts");
+  vi.unmock("./workspace/temporary-worktrees.ts");
   createSingleWorktreeMock.mockReset();
+  createTemporaryWorktreesMock.mockReset();
+  listTemporaryWorktreesMock.mockReset();
+  removeTemporaryWorktreesMock.mockReset();
 
   if (ORIGINAL_CONFIG_DIR === undefined) {
     delete process.env["WORKFOREST_CONFIG_DIR"];
@@ -219,5 +236,198 @@ describe("wf worktree", () => {
     const written = await readFile(cdPathFile, "utf8");
     expect(written).toBe(`${path.resolve(targetDir)}\n`);
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("creates workspace-scoped temporary worktrees from inside a repo", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const repoDir = path.join(workspaceDir, "front");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(repoDir, { recursive: true });
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    process.chdir(repoDir);
+    const resolvedWorkspaceDir = path.dirname(process.cwd());
+
+    createTemporaryWorktreesMock.mockResolvedValueOnce({
+      created: [
+        {
+          slug: "fix-tests",
+          parentRepo: "front",
+          path: path.join(workspaceDir, "front-fix-tests"),
+          branch: "tomdale/my-feature/fix-tests",
+          setupStatus: "ready",
+        },
+      ],
+      failures: [],
+    });
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "fix-tests"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(createTemporaryWorktreesMock).toHaveBeenCalledWith({
+      workspaceDir: resolvedWorkspaceDir,
+      parentRepo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        default_branch: "main",
+        has_lockfile: true,
+      },
+      slugs: ["fix-tests"],
+      dryRun: false,
+      force: false,
+    });
+    expect(createSingleWorktreeMock).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toContain("front-fix-tests");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("requires --repo when creating from the workspace root", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const errors: string[] = [];
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    process.chdir(workspaceDir);
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "fix-tests"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain("pass --repo");
+    expect(createTemporaryWorktreesMock).not.toHaveBeenCalled();
+  });
+
+  it("lists temporary worktrees scoped to the current repo", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const repoDir = path.join(workspaceDir, "front");
+    const logs: string[] = [];
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await mkdir(repoDir, { recursive: true });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    process.chdir(repoDir);
+    const resolvedWorkspaceDir = path.dirname(process.cwd());
+    listTemporaryWorktreesMock.mockResolvedValueOnce([
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "front-fix-tests",
+        absolutePath: path.join(workspaceDir, "front-fix-tests"),
+        branch: "tomdale/my-feature/fix-tests",
+        base_branch: "tomdale/my-feature",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+        state: "ready",
+        merged: false,
+      },
+    ]);
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "list"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(listTemporaryWorktreesMock).toHaveBeenCalledWith(
+      resolvedWorkspaceDir,
+      "front",
+    );
+    expect(logs.join("\n")).toContain("fix-tests");
+  });
+
+  it("removes temporary worktrees with an explicit slug", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const repoDir = path.join(workspaceDir, "front");
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await mkdir(repoDir, { recursive: true });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    process.chdir(repoDir);
+    const resolvedWorkspaceDir = path.dirname(process.cwd());
+    removeTemporaryWorktreesMock.mockResolvedValueOnce({
+      removed: [
+        {
+          slug: "fix-tests",
+          parent_repo: "front",
+          path: "front-fix-tests",
+          branch: "tomdale/my-feature/fix-tests",
+          base_branch: "tomdale/my-feature",
+          base_sha: "abc123",
+          created_at: "2026-05-15T00:00:00.000Z",
+          setup_status: "ready",
+        },
+      ],
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "rm", "fix-tests"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(removeTemporaryWorktreesMock).toHaveBeenCalledWith({
+      workspaceDir: resolvedWorkspaceDir,
+      slugs: ["fix-tests"],
+      parentRepoName: "front",
+      dryRun: false,
+      force: false,
+    });
   });
 });
