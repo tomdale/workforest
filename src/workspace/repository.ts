@@ -452,17 +452,85 @@ async function* updatePristineRepoGenerator(
       label: `update-pristine:${repo.name}`,
     });
   } catch (error_) {
-    yield {
-      status: "log",
-      level: "warn",
-      message: `Unable to update pristine repo for ${repo.name}. Using the last cached snapshot.`,
-    };
-    yield {
-      status: "log",
-      level: "warn",
-      message: String(error_),
-    };
+    if (
+      yield* repairCaseConflictingRemoteRefGenerator(
+        mirrorDir,
+        repo.name,
+        error_,
+      )
+    ) {
+      try {
+        yield* withRetryGenerator(fetchGen, {
+          attempts: 3,
+          label: `update-pristine:${repo.name}`,
+        });
+        return;
+      } catch (retryError) {
+        yield* warnPristineUpdateFailedGenerator(repo.name, retryError);
+        return;
+      }
+    }
+
+    yield* warnPristineUpdateFailedGenerator(repo.name, error_);
   }
+}
+
+function getCannotLockRef(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/cannot lock ref '([^']+)'/);
+  return match?.[1] ?? null;
+}
+
+async function* repairCaseConflictingRemoteRefGenerator(
+  mirrorDir: string,
+  repoName: string,
+  error: unknown,
+): AsyncGenerator<TaskState, boolean, undefined> {
+  const lockedRef = getCannotLockRef(error);
+  if (!lockedRef?.startsWith("refs/remotes/")) {
+    return false;
+  }
+
+  const { stdout } = await runGit(
+    ["for-each-ref", "--format=%(refname)", "refs/remotes"],
+    { cwd: mirrorDir },
+  );
+  const caseConflictingRefs = stdout
+    .trim()
+    .split("\n")
+    .filter((ref) => ref.toLowerCase() === lockedRef.toLowerCase());
+
+  if (caseConflictingRefs.length <= 1) {
+    return false;
+  }
+
+  yield {
+    status: "log",
+    level: "warn",
+    message: `Repairing case-conflicting cached refs for ${repoName}: ${caseConflictingRefs.join(", ")}`,
+  };
+
+  for (const ref of caseConflictingRefs) {
+    await runGit(["update-ref", "-d", ref], { cwd: mirrorDir });
+  }
+
+  return true;
+}
+
+async function* warnPristineUpdateFailedGenerator(
+  repoName: string,
+  error: unknown,
+): AsyncGenerator<TaskState, void, undefined> {
+  yield {
+    status: "log",
+    level: "warn",
+    message: `Unable to update pristine repo for ${repoName}. Using the last cached snapshot.`,
+  };
+  yield {
+    status: "log",
+    level: "warn",
+    message: String(error),
+  };
 }
 
 export type MirrorWithWorktrees = {

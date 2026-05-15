@@ -16,6 +16,7 @@ vi.mock("../services/git.ts", () => ({
 import {
   cleanupWorkspaceWorktreesGenerator,
   createWorkingCopyGenerator,
+  ensureMirrorRepoGenerator,
 } from "./repository.ts";
 
 const tempDirs: string[] = [];
@@ -133,6 +134,72 @@ branch refs/heads/test
     expect(runGitMock).toHaveBeenNthCalledWith(2, ["worktree", "prune"], {
       cwd: "/tmp/cache/front.git",
     });
+  });
+});
+
+describe("ensureMirrorRepoGenerator", () => {
+  it("repairs case-conflicting stale remote refs when pruning the mirror fails", async () => {
+    const mirrorDir = await createTempDir("workforest-front.git-");
+    const lockError = new Error(
+      "git fetch exited with code 1\nerror: could not delete references: cannot lock ref 'refs/remotes/origin/test-branch': Unable to create '/tmp/front.git/refs/remotes/origin/test-branch.lock': File exists.",
+    );
+
+    runGitMock
+      .mockRejectedValueOnce(lockError)
+      .mockRejectedValueOnce(lockError)
+      .mockRejectedValueOnce(lockError)
+      .mockResolvedValueOnce({
+        stdout:
+          "refs/remotes/origin/Test-Branch\nrefs/remotes/origin/test-branch\n",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: `worktree ${mirrorDir}
+bare
+`,
+        stderr: "",
+      });
+
+    const states = await collectStates(
+      ensureMirrorRepoGenerator(
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+        },
+        mirrorDir,
+      ),
+    );
+
+    expect(states).toContainEqual({
+      status: "log",
+      level: "warn",
+      message:
+        "Repairing case-conflicting cached refs for front: refs/remotes/origin/Test-Branch, refs/remotes/origin/test-branch",
+    });
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      4,
+      ["for-each-ref", "--format=%(refname)", "refs/remotes"],
+      { cwd: mirrorDir },
+    );
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      5,
+      ["update-ref", "-d", "refs/remotes/origin/Test-Branch"],
+      { cwd: mirrorDir },
+    );
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      6,
+      ["update-ref", "-d", "refs/remotes/origin/test-branch"],
+      { cwd: mirrorDir },
+    );
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      7,
+      ["fetch", "origin", "--prune", "--no-tags"],
+      { cwd: mirrorDir },
+    );
   });
 });
 
