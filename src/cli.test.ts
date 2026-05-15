@@ -88,6 +88,8 @@ describe("cli", () => {
     expect(output.indexOf("Start here (for AI agents):")).toBeLessThan(
       output.indexOf("Commands:"),
     );
+    expect(output).not.toContain("Skills ship with the CLI");
+    expect(output).not.toContain("skills get parallel-worktrees");
     expect(output).toContain("wf find");
     expect(output).toContain('eval "$(wf init zsh)"');
     expect(process.exitCode).toBeUndefined();

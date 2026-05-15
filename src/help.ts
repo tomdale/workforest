@@ -27,15 +27,6 @@ ${chalk.bold("Usage:")} wf <command> [options]
 ${chalk.bold("Start here (for AI agents):")}
   wf skills get core --full
 
-  Skills ship with the CLI and match the installed Workforest version. Use
-  them for workspace workflows, temporary worktrees, setup, and cleanup.
-
-  skills list                      List available skills
-  skills get core                  Core usage guide
-  skills get core --full           Include full command reference
-  skills get parallel-worktrees --full
-  skills get setup-and-configuration --full
-
 ${chalk.bold("Commands:")}
   new <work> -- <template|repo...> Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
