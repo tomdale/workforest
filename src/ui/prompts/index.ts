@@ -1,4 +1,10 @@
 import chalk from "chalk";
+import {
+  cancel as terminalCancel,
+  intro as terminalIntro,
+  note as terminalNote,
+  outro as terminalOutro,
+} from "../../terminal/inline-widgets.ts";
 import { confirm as rawConfirm } from "./confirm.ts";
 import { fuzzySelect as rawFuzzySelect } from "./fuzzy-select.ts";
 import { multiSelect as rawMultiSelect } from "./multi-select.ts";
@@ -10,15 +16,12 @@ import {
 import {
   barColor,
   S_BAR,
-  S_BAR_END,
-  S_BAR_H,
-  S_BAR_START,
   S_ERROR,
   S_INFO,
-  S_STEP_CANCEL,
   S_SUCCESS,
   S_WARNING,
 } from "./symbols.ts";
+import { terminalSymbols } from "./terminal-symbols.ts";
 import { text as rawText } from "./text.ts";
 
 export type { PromptBaseOptions } from "./types.ts";
@@ -133,6 +136,7 @@ export async function promptMultiSelect<T>(
       ? { initialValues: options.initialValues }
       : {}),
     ...(options.required !== undefined ? { required: options.required } : {}),
+    ...(options.allowAll !== undefined ? { allowAll: options.allowAll } : {}),
     ...(options.throwOnCancel !== undefined
       ? { throwOnCancel: options.throwOnCancel }
       : {}),
@@ -155,46 +159,19 @@ export async function promptConfirm(
 // ── Output functions ──
 
 export function intro(title: string): void {
-  process.stdout.write(`  ${barColor(S_BAR_START)}  ${title}\n`);
+  terminalIntro(title, terminalSymbols());
 }
 
 export function outro(message: string): void {
-  process.stdout.write(`  ${barColor(S_BAR_END)}  ${message}\n`);
+  terminalOutro(message, terminalSymbols());
 }
 
 export function cancel(message = "Cancelled"): void {
-  process.stdout.write(`  ${S_STEP_CANCEL}  ${chalk.red(message)}\n`);
+  terminalCancel(message, terminalSymbols());
 }
 
 export function note(content: string, title?: string): void {
-  const lines = content.split("\n");
-  const maxLen = Math.max(
-    title ? title.length : 0,
-    ...lines.map((l) => stripAnsi(l).length),
-  );
-  const pad = maxLen + 2;
-
-  if (title) {
-    const rule = S_BAR_H.repeat(Math.max(0, pad - title.length - 1));
-    process.stdout.write(
-      `  ${barColor(S_BAR_START)}  ${title} ${barColor(rule)}\n`,
-    );
-  } else {
-    process.stdout.write(
-      `  ${barColor(S_BAR_START)}${barColor(S_BAR_H.repeat(pad + 1))}\n`,
-    );
-  }
-
-  process.stdout.write(`  ${barColor(S_BAR)}\n`);
-
-  for (const line of lines) {
-    process.stdout.write(`  ${barColor(S_BAR)}  ${line}\n`);
-  }
-
-  process.stdout.write(`  ${barColor(S_BAR)}\n`);
-  process.stdout.write(
-    `  ${barColor(S_BAR_END)}${barColor(S_BAR_H.repeat(pad + 1))}\n`,
-  );
+  terminalNote(content, title, terminalSymbols());
 }
 
 // ── Log functions ──
@@ -226,8 +203,3 @@ export const spinner = rawSpinner;
 export const withSpinner = rawWithSpinner;
 
 // ── Helpers ──
-
-function stripAnsi(str: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes requires matching control chars
-  return str.replace(/\x1B\[[0-9;]*m/g, "");
-}
