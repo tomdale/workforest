@@ -14,6 +14,9 @@ vi.mock("@unblessed/node", () => {
       this: Record<string, unknown>,
     ) {
       this["key"] = vi.fn();
+      this["once"] = vi.fn((_event: string, handler: () => void) => {
+        handler();
+      });
       this["render"] = vi.fn();
       this["destroy"] = vi.fn();
       this["append"] = vi.fn();
@@ -125,6 +128,11 @@ describe("shouldUseGrid", () => {
   it("returns true at exactly the minimum terminal size (60×15)", () => {
     stubTTY(true, 60, 15);
     expect(shouldUseGrid()).toBe(true);
+  });
+
+  it("returns false when repo count exceeds grid capacity", () => {
+    stubTTY(true, 220, 50);
+    expect(shouldUseGrid(10)).toBe(false);
   });
 });
 
@@ -336,7 +344,9 @@ describe("renderPipelinesGrid", () => {
     };
     const lastContent = pane.setContent.mock.lastCall?.[0];
 
-    expect(lastContent).toBe("Receiving objects 100%\nDone");
+    expect(lastContent?.split("\n").slice(0, 2).join("\n")).toBe(
+      "Receiving objects 100%\nDone",
+    );
   });
 
   it("supports eager render mode for benchmark environments", async () => {
@@ -351,6 +361,9 @@ describe("renderPipelinesGrid", () => {
     };
     const screen = {
       key: vi.fn(),
+      once: vi.fn((_event: string, handler: () => void) => {
+        handler();
+      }),
       destroy: vi.fn(),
     };
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
@@ -380,7 +393,66 @@ describe("renderPipelinesGrid", () => {
       },
     });
 
-    expect(grid.render).toHaveBeenCalledTimes(4);
+    expect(grid.render).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps the grid open with a completion message until acknowledgement", async () => {
+    const pane = {
+      setLabel: vi.fn(),
+      appendLine: vi.fn(),
+    };
+    const grid = {
+      getPane: vi.fn(() => pane),
+      render: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const screen = {
+      key: vi.fn(),
+      once: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const statusLine = {
+      setContent: vi.fn(),
+      destroy: vi.fn(),
+    };
+    let acknowledge!: () => void;
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "complete", hasLockfile: true };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+      environment: {
+        createScreen: () => screen,
+        createGrid: () => grid,
+        createStatusLine: () => statusLine,
+        waitForCompletionAck: () =>
+          new Promise((resolve) => {
+            acknowledge = resolve;
+          }),
+        renderIntervalMs: 0,
+        finalHoldMs: 0,
+      },
+    });
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(statusLine.setContent).toHaveBeenCalledWith(
+      expect.stringContaining("Press any key to continue"),
+    );
+    expect(grid.destroy).not.toHaveBeenCalled();
+    expect(screen.destroy).not.toHaveBeenCalled();
+
+    acknowledge();
+
+    await expect(promise).resolves.toEqual(
+      new Map([["repo", { hasLockfile: true }]]),
+    );
+    expect(statusLine.destroy).toHaveBeenCalledTimes(1);
+    expect(grid.destroy).toHaveBeenCalledTimes(1);
+    expect(screen.destroy).toHaveBeenCalledTimes(1);
   });
 
   it("destroys the screen when a pipeline throws", async () => {
@@ -395,6 +467,7 @@ describe("renderPipelinesGrid", () => {
     };
     const screen = {
       key: vi.fn(),
+      once: vi.fn(),
       destroy: vi.fn(),
     };
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
@@ -420,5 +493,32 @@ describe("renderPipelinesGrid", () => {
 
     await vi.runOnlyPendingTimersAsync();
     expect(grid.render).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects instead of silently dropping repos beyond grid capacity", async () => {
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "complete", hasLockfile: true };
+    };
+    const repoNames = Array.from({ length: 10 }, (_, i) => `repo-${i}`);
+
+    await expect(
+      renderPipelinesGrid({
+        pipelines: new Map(repoNames.map((name) => [name, pipeline()])),
+        repoNames,
+        environment: {
+          createScreen: () => ({
+            key: vi.fn(),
+            once: vi.fn(),
+            destroy: vi.fn(),
+          }),
+          createGrid: () => ({
+            getPane: vi.fn(),
+            render: vi.fn(),
+            destroy: vi.fn(),
+          }),
+          finalHoldMs: 0,
+        },
+      }),
+    ).rejects.toThrow("Grid can render 9 repositories");
   });
 });

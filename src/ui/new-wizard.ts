@@ -495,7 +495,7 @@ function runWizardScreen(
         if (templates.length > 0) {
           pairs.push(["t", "templates"]);
         }
-        pairs.push(["esc", "quit"]);
+        pairs.push(["q", "quit"]);
         hint = formatFooterHint(pairs);
       } else if (state.phase === "reposInput") {
         hint = formatFooterHint([
@@ -508,7 +508,7 @@ function runWizardScreen(
           ["esc", "back"],
         ]);
       } else if (state.phase === "generating") {
-        hint = formatFooterHint([["\u2303c", "cancel"]]);
+        hint = formatFooterHint([["q", "quit"]]);
       }
 
       footerBox.setContent(hint);
@@ -544,7 +544,6 @@ function runWizardScreen(
       renderContent();
       renderPreview();
       renderFooter();
-      screen.alloc();
       screen.render();
     }
 
@@ -593,7 +592,11 @@ function runWizardScreen(
       } else if (_ch === "t" && templates.length > 0) {
         finish({ type: "templateManagement" });
         return;
-      } else if (key.name === "escape" || (key.ctrl && _ch === "c")) {
+      } else if (
+        key.name === "escape" ||
+        _ch === "q" ||
+        (key.ctrl && _ch === "c")
+      ) {
         finish({ type: "cancel" });
         return;
       }
@@ -776,7 +779,7 @@ function runWizardScreen(
         ) {
           handleTextKey(ch, key);
         } else if (state.phase === "generating") {
-          if (key.ctrl && ch === "c") {
+          if (key.name === "escape" || ch === "q" || (key.ctrl && ch === "c")) {
             finish({ type: "cancel" });
           }
         }

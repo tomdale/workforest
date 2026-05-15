@@ -1,11 +1,17 @@
-import { NodeRuntime, Screen, setRuntime } from "@unblessed/node";
+import {
+  CommandStreamAdapter,
+  escapeBlessedTags,
+} from "../terminal/command-stream-adapter.ts";
+import {
+  createFullscreenScreen,
+  createFullscreenStatusLine,
+  type FullscreenScreen,
+  type FullscreenStatusLine,
+  waitForFullscreenKey,
+} from "../terminal/fullscreen-surface.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
-
-// @unblessed/core requires a runtime to be registered before any Screen is created.
-// NodeRuntime provides the Node.js-specific implementations (fs, process, tty, etc.).
-setRuntime(new NodeRuntime());
 
 export type RenderPipelinesGridOptions = {
   pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;
@@ -15,11 +21,15 @@ export type RenderPipelinesGridOptions = {
     repoName: string,
     state: Extract<RepoPipelineState, { phase: "failed" }>,
   ) => void | Promise<void>;
+  onBeforeCompletionPrompt?: (
+    repoResults: Map<string, { hasLockfile: boolean }>,
+  ) => void | Promise<void>;
   environment?: GridRenderEnvironment;
 };
 
 const DEFAULT_RENDER_INTERVAL_MS = 33;
 const DEFAULT_FINAL_HOLD_MS = 500;
+const MAX_GRID_REPOS = 9;
 
 export interface GridPaneLike {
   setLabel(label: string): void;
@@ -37,6 +47,12 @@ export interface GridScreenLike {
     keys: string[],
     handler: (_ch?: string, _key?: { name?: string }) => void,
   ): void;
+  once?(event: "keypress", handler: () => void): void;
+  destroy(): void;
+}
+
+export interface GridStatusLineLike {
+  setContent(content: string): void;
   destroy(): void;
 }
 
@@ -47,29 +63,34 @@ export interface GridRenderEnvironment {
     rows: number;
     cols: number;
   }): GridLayoutLike;
+  createStatusLine?: (options: {
+    screen: GridScreenLike;
+  }) => GridStatusLineLike;
+  waitForCompletionAck?: (screen: GridScreenLike) => Promise<void>;
   renderIntervalMs?: number;
   finalHoldMs?: number;
 }
 
 function createDefaultEnvironment(): GridRenderEnvironment {
   return {
-    createScreen: () =>
-      new Screen({
-        smartCSR: true,
-        fullUnicode: true,
-        title: "workforest",
-      }),
+    createScreen: () => createFullscreenScreen(),
     createGrid: ({ screen, rows, cols }) =>
       new GridLayout({
-        screen: screen as Screen,
+        screen: screen as FullscreenScreen,
         rows,
         cols,
         top: 0,
         left: 0,
         width: "100%",
-        height: "100%",
+        height: "100%-1",
         borderColor: "cyan",
       }),
+    createStatusLine: ({ screen }) =>
+      createFullscreenStatusLine(
+        screen as FullscreenScreen,
+      ) as FullscreenStatusLine,
+    waitForCompletionAck: (screen) =>
+      waitForFullscreenKey(screen as FullscreenScreen),
     renderIntervalMs: DEFAULT_RENDER_INTERVAL_MS,
     finalHoldMs: DEFAULT_FINAL_HOLD_MS,
   };
@@ -83,7 +104,8 @@ function createDefaultEnvironment(): GridRenderEnvironment {
  * - CI environments
  * - When WORKFOREST_NO_TUI is set
  */
-export function shouldUseGrid(): boolean {
+export function shouldUseGrid(repoCount?: number): boolean {
+  if (repoCount !== undefined && repoCount > MAX_GRID_REPOS) return false;
   if (!process.stdout.isTTY) return false;
   const { columns, rows } = process.stdout;
   if ((columns ?? 80) < 60 || (rows ?? 24) < 15) return false;
@@ -110,14 +132,21 @@ export async function renderPipelinesGrid({
   repoNames,
   getLogPath,
   onFailure,
+  onBeforeCompletionPrompt,
   environment = createDefaultEnvironment(),
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
   const renderIntervalMs =
     environment.renderIntervalMs ?? DEFAULT_RENDER_INTERVAL_MS;
   const finalHoldMs = environment.finalHoldMs ?? DEFAULT_FINAL_HOLD_MS;
-  const screen = environment.createScreen();
-
   const { rows, cols } = calculateGridDimensions(repoNames.length);
+  if (repoNames.length > rows * cols) {
+    throw new Error(
+      `Grid can render ${rows * cols} repositories, received ${repoNames.length}.`,
+    );
+  }
+
+  const screen = environment.createScreen();
+  const statusLine = environment.createStatusLine?.({ screen });
 
   const grid = environment.createGrid({
     screen,
@@ -131,16 +160,17 @@ export async function renderPipelinesGrid({
     paneMap.set(name, i);
     const pane = grid.getPane(i);
     if (pane) {
-      pane.setLabel(`${name} ${STATUS_ICONS.pending}`);
+      pane.setLabel(`${escapeBlessedTags(name)} ${STATUS_ICONS.pending}`);
     }
   });
 
   // Track repo states for return value
   const repoResults = new Map<string, { hasLockfile: boolean }>();
-  const outputBuffers = new Map<string, string>();
+  const outputAdapters = new Map<string, CommandStreamAdapter>();
   let pendingRender: Promise<void> | null = null;
   let pendingRenderTimer: ReturnType<typeof setTimeout> | null = null;
   let destroyed = false;
+  let awaitingCompletionAck = false;
 
   const destroyScreen = (): void => {
     if (destroyed) return;
@@ -153,6 +183,7 @@ export async function renderPipelinesGrid({
     }
 
     grid.destroy();
+    statusLine?.destroy();
     screen.destroy();
   };
 
@@ -175,6 +206,7 @@ export async function renderPipelinesGrid({
 
   // Handle keyboard events
   screen.key(["escape", "q", "C-c"], () => {
+    if (awaitingCompletionAck) return;
     destroyScreen();
     process.exit(0);
   });
@@ -193,45 +225,64 @@ export async function renderPipelinesGrid({
 
       switch (state.phase) {
         case "git": {
-          pane.setLabel(`${id}: ${state.step} ${STATUS_ICONS.running}`);
+          pane.setLabel(
+            `${escapeBlessedTags(id)}: ${state.step} ${STATUS_ICONS.running}`,
+          );
 
           if (state.output) {
-            appendOutput(pane, id, state.output, outputBuffers);
+            appendOutput(pane, id, state.output, outputAdapters);
           } else if (state.message) {
-            flushOutputBuffer(pane, id, outputBuffers);
-            pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
+            flushOutputBuffer(pane, id, outputAdapters);
+            pane.appendLine(
+              `{gray-fg}${escapeBlessedTags(state.message)}{/gray-fg}`,
+            );
           }
           break;
         }
 
         case "initializer": {
-          pane.setLabel(`${id}: ${state.name} ${STATUS_ICONS.running}`);
+          pane.setLabel(
+            `${escapeBlessedTags(id)}: ${escapeBlessedTags(state.name)} ${STATUS_ICONS.running}`,
+          );
 
           if (state.output) {
-            appendOutput(pane, id, state.output, outputBuffers);
+            appendOutput(pane, id, state.output, outputAdapters);
           } else if (state.message) {
-            flushOutputBuffer(pane, id, outputBuffers);
-            pane.appendLine(`{gray-fg}${state.message}{/gray-fg}`);
+            flushOutputBuffer(pane, id, outputAdapters);
+            pane.appendLine(
+              `{gray-fg}${escapeBlessedTags(state.message)}{/gray-fg}`,
+            );
           }
           break;
         }
 
         case "complete": {
-          flushOutputBuffer(pane, id, outputBuffers);
-          pane.setLabel(`{green-fg}${id} ${STATUS_ICONS.complete}{/green-fg}`);
+          flushOutputBuffer(pane, id, outputAdapters);
+          pane.setLabel(
+            `{green-fg}${escapeBlessedTags(id)} ${STATUS_ICONS.complete}{/green-fg}`,
+          );
           repoResults.set(id, { hasLockfile: state.hasLockfile });
           break;
         }
 
         case "failed": {
-          flushOutputBuffer(pane, id, outputBuffers);
-          pane.setLabel(`{red-fg}${id} ${STATUS_ICONS.failed}{/red-fg}`);
+          flushOutputBuffer(pane, id, outputAdapters);
+          pane.setLabel(
+            `{red-fg}${escapeBlessedTags(id)} ${STATUS_ICONS.failed}{/red-fg}`,
+          );
           if (state.step) {
-            pane.appendLine(`{red-fg}Step: ${state.step}{/red-fg}`);
+            pane.appendLine(
+              `{red-fg}Step: ${escapeBlessedTags(state.step)}{/red-fg}`,
+            );
           }
-          pane.appendLine(`{red-fg}Error: ${state.error.message}{/red-fg}`);
+          pane.appendLine(
+            `{red-fg}Error: ${escapeBlessedTags(state.error.message)}{/red-fg}`,
+          );
           if (getLogPath) {
-            pane.appendLine(`{red-fg}Log: ${await getLogPath(id)}{/red-fg}`);
+            const logPath = await getLogPath(id);
+            pane.appendLine(
+              `{red-fg}Log: ${escapeBlessedTags(logPath)}{/red-fg}`,
+            );
           }
           await onFailure?.(id, state);
           break;
@@ -244,15 +295,38 @@ export async function renderPipelinesGrid({
     for (const [repoId, paneIndex] of paneMap) {
       const pane = grid.getPane(paneIndex);
       if (!pane) continue;
-      flushOutputBuffer(pane, repoId, outputBuffers);
+      flushOutputBuffer(pane, repoId, outputAdapters);
     }
 
     if (pendingRender) {
       await pendingRender;
     }
 
-    // Keep grid visible briefly so user can see final state
-    if (finalHoldMs > 0) {
+    if (onBeforeCompletionPrompt) {
+      statusLine?.setContent("{gray-fg}Finalizing workspace...{/gray-fg}");
+      grid.render();
+      await onBeforeCompletionPrompt(repoResults);
+    }
+
+    const completionMessage = getCompletionMessage(
+      repoResults.size,
+      repoNames.length,
+    );
+    appendCompletionPromptToPanes({
+      grid,
+      paneMap,
+      message: completionMessage.pane,
+    });
+    statusLine?.setContent(completionMessage.statusLine);
+    grid.render();
+
+    if (environment.waitForCompletionAck) {
+      awaitingCompletionAck = true;
+      await environment.waitForCompletionAck(screen);
+      awaitingCompletionAck = false;
+    } else if (finalHoldMs > 0) {
+      // Compatibility for benchmark/test environments without an acknowledgement
+      // hook.
       await sleep(finalHoldMs);
     }
 
@@ -269,49 +343,72 @@ function appendOutput(
   pane: { appendLine: (line: string) => void },
   repoId: string,
   output: string,
-  buffers: Map<string, string>,
+  adapters: Map<string, CommandStreamAdapter>,
 ): void {
-  const buffered = `${buffers.get(repoId) ?? ""}${stripAnsi(output)}`;
-  let currentLine = "";
-
-  for (const char of buffered) {
-    if (char === "\r") {
-      currentLine = "";
-      continue;
-    }
-
-    if (char === "\n") {
-      pane.appendLine(currentLine);
-      currentLine = "";
-      continue;
-    }
-
-    currentLine += char;
+  const adapter = getAdapter(adapters, repoId);
+  for (const line of adapter.push("stdout", output)) {
+    pane.appendLine(line.line);
   }
-
-  buffers.set(repoId, currentLine);
 }
 
 function flushOutputBuffer(
   pane: { appendLine: (line: string) => void },
   repoId: string,
-  buffers: Map<string, string>,
+  adapters: Map<string, CommandStreamAdapter>,
 ): void {
-  const pending = buffers.get(repoId);
-  if (!pending) return;
-
-  pane.appendLine(pending);
-  buffers.delete(repoId);
+  const adapter = adapters.get(repoId);
+  if (!adapter) return;
+  for (const line of adapter.flush()) {
+    pane.appendLine(line.line);
+  }
+  adapters.delete(repoId);
 }
 
-/**
- * Strip ANSI escape codes from a string.
- */
-function stripAnsi(str: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape code detection requires control characters
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
+function getAdapter(
+  adapters: Map<string, CommandStreamAdapter>,
+  repoId: string,
+): CommandStreamAdapter {
+  let adapter = adapters.get(repoId);
+  if (!adapter) {
+    adapter = new CommandStreamAdapter();
+    adapters.set(repoId, adapter);
+  }
+  return adapter;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getCompletionMessage(
+  completedCount: number,
+  totalCount: number,
+): { pane: string; statusLine: string } {
+  const failedCount = totalCount - completedCount;
+  const summary =
+    failedCount > 0
+      ? `{yellow-fg}${completedCount}/${totalCount} repositories complete, ${failedCount} failed{/yellow-fg}`
+      : `{green-fg}${totalCount}/${totalCount} repositories complete{/green-fg}`;
+
+  return {
+    pane: `${summary}\n{gray-fg}Press any key to continue{/gray-fg}`,
+    statusLine: `${summary}  {gray-fg}Press any key to continue{/gray-fg}`,
+  };
+}
+
+function appendCompletionPromptToPanes({
+  grid,
+  paneMap,
+  message,
+}: {
+  grid: GridLayoutLike;
+  paneMap: Map<string, number>;
+  message: string;
+}): void {
+  for (const paneIndex of paneMap.values()) {
+    const pane = grid.getPane(paneIndex);
+    if (!pane) continue;
+    pane.appendLine("");
+    pane.appendLine(message);
+  }
 }
