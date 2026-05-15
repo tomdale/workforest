@@ -88,8 +88,8 @@ describe("cli", () => {
     expect(output.indexOf("Start here (for AI agents):")).toBeLessThan(
       output.indexOf("Commands:"),
     );
-    expect(output).not.toContain("wf find");
-    expect(output).not.toContain('eval "$(wf init zsh)"');
+    expect(output).toContain("wf find");
+    expect(output).toContain('eval "$(wf init zsh)"');
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -293,7 +293,7 @@ describe("cli", () => {
 
     const output = logs.join("\n");
     expect(output).toContain("Start here (for AI agents):");
-    expect(output).not.toContain("Fuzzy-find");
+    expect(output).toContain("Fuzzy-find");
     expect(process.exitCode).toBeUndefined();
   });
 

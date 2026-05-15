@@ -41,11 +41,14 @@ ${chalk.bold("Commands:")}
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|rm             List or remove temporary worktrees
   wt                           Alias for worktree
+  cd <name>                    Jump to a workspace in defaultDir
+  find                         Fuzzy-find and jump to a workspace
   add <repo...>                Add repo(s) to an existing workspace
   fork <name>                  Fork current workspace with new branches
   clean [dir]                  Remove a workspace (or run inside workspace)
   list                         List workspaces
   skills list|get|path         List and retrieve bundled agent skills
+  init [shell]                 Print shell integration for auto-cd and completion
   template list|show|info|...  Manage templates
   config [show|edit|init]      Manage configuration
 
@@ -63,9 +66,12 @@ ${chalk.bold("Examples:")}
   wf worktree next.js "fix-auth"
   wf wt next.js "fix-auth" --dir ../next.js-fix-auth
   wf new --dry-run "fixing auth" -- my-template
+  wf cd fix-auth-bug                Jump into an existing workspace
+  wf find                           Fuzzy-find a workspace to open
   wf add vercel/swr                Add a repo from inside a workspace
   wf add vercel/swr -w ./my-ws     Add a repo to a specific workspace
   wf fork "new approach"            Fork workspace with new branch names
+  eval "$(wf init zsh)"            Auto-cd + zsh completion for workspace commands
   wf list                           Show all workspaces
   wf clean                          Clean current workspace (self-destruct)
   wf clean ./my-workspace -r        Clean and delete merged remote branches
