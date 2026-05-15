@@ -26,6 +26,7 @@ import { runParallel } from "../utils/task-generator.ts";
 import {
   appendWorkspaceRepos,
   readWorkspaceMetadata,
+  updateWorkspaceRepo,
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 import { repoPipelineGenerator } from "./pipeline.ts";
@@ -35,11 +36,8 @@ import {
   ensureWorkingCopyGenerator,
 } from "./repository.ts";
 import {
-  appendRepoSetupLog,
   getRepoSetupLogPath,
   readRepoSetupLogExcerpt,
-  removeRepoSetupLog,
-  startRepoSetupLog,
   withRepoSetupLog,
 } from "./setup-logs.ts";
 
@@ -139,10 +137,20 @@ export async function* stampWorkspaceGenerator({
 
   yield { phase: "init", message: "Setting up cache directory" };
   const cacheDir = await ensureCacheDir();
+  const effectiveBranchName = branchName ?? featureName;
 
   // Track if workspace is new (skip cleanup if so - no stale worktrees possible)
   const isNewWorkspace = !(await pathExists(workspaceDir));
   await ensureDir(workspaceDir);
+
+  await writeInitialWorkspaceMetadata({
+    workspaceDir,
+    featureName,
+    branchName: effectiveBranchName,
+    repos,
+    ...(description !== undefined ? { description } : {}),
+    ...(templateId !== undefined ? { templateId } : {}),
+  });
 
   yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
 
@@ -152,7 +160,6 @@ export async function* stampWorkspaceGenerator({
   // Phase A: Unified parallel git operations per repo
   // Each repo runs: mirror → cleanup (if needed) → worktree → lockfile check
   // This overlaps I/O better than sequential phases
-  const effectiveBranchName = branchName ?? featureName;
   const preparedRepos: PreparedRepo[] = [];
 
   // Build repo info map
@@ -236,6 +243,12 @@ export async function* stampWorkspaceGenerator({
         preparedRepos.push({
           repo: info.repo,
           targetDir: info.targetDir,
+          hasLockfile: state.hasLockfile,
+        });
+        await updatePreparedWorkspaceRepoMetadata({
+          workspaceDir,
+          branchName: effectiveBranchName,
+          repo: info.repo,
           hasLockfile: state.hasLockfile,
         });
       }
@@ -458,8 +471,28 @@ export async function stampWorkspaceInteractive(
   );
 
   const effectiveBranchName = branchName ?? featureName;
+  await writeInitialWorkspaceMetadata({
+    workspaceDir,
+    featureName,
+    branchName: effectiveBranchName,
+    repos,
+    ...(description !== undefined ? { description } : {}),
+    ...(templateId !== undefined ? { templateId } : {}),
+  });
+
   const repoNames = repos.map((r) => r.name);
   const repoFailures = new Map<string, RepoSetupFailureSummary>();
+  const preparedRepoMetadata = new Map<
+    string,
+    { repo: RepoConfig; hasLockfile: boolean }
+  >();
+  const templateBarrier =
+    template !== null
+      ? createTemplateCopyBarrier({
+          repoCount: repos.length,
+          copyTemplateFiles: () => copyTemplateFiles(template, workspaceDir),
+        })
+      : null;
 
   async function recordRepoFailure(
     repoName: string,
@@ -476,40 +509,124 @@ export async function stampWorkspaceInteractive(
     );
   }
 
+  async function beforeInitializers({
+    repo,
+    repoDir,
+  }: {
+    repo: RepoConfig;
+    repoDir: string;
+  }): Promise<void> {
+    const hasLockfile = await hasAny(repoDir, [
+      "pnpm-lock.yaml",
+      "pnpm-lock.yml",
+    ]);
+
+    await updatePreparedWorkspaceRepoMetadata({
+      workspaceDir,
+      branchName: effectiveBranchName,
+      repo,
+      hasLockfile,
+    });
+    preparedRepoMetadata.set(repo.name, { repo, hasLockfile });
+
+    await templateBarrier?.waitForTemplateFiles();
+  }
+
   // Create per-repo pipeline generators
   const pipelines = new Map(
     repos.map((repo) => [
       repo.name,
-      withRepoSetupLog(
-        repoPipelineGenerator({
-          repo,
-          workspaceDir,
-          branchName: effectiveBranchName,
-          isNewWorkspace,
-          skipInitializers: Boolean(template),
-          ...(template?.config.disableInitializers !== undefined
-            ? { disabledInitializers: template.config.disableInitializers }
-            : {}),
-        }),
-        {
-          workspaceDir,
-          repoName: repo.name,
-          repoDir: path.join(workspaceDir, repo.name),
-        },
+      reportPipelineFailureToTemplateBarrier(
+        withRepoSetupLog(
+          repoPipelineGenerator({
+            repo,
+            workspaceDir,
+            branchName: effectiveBranchName,
+            isNewWorkspace,
+            beforeInitializers,
+            ...(template?.config.disableInitializers !== undefined
+              ? { disabledInitializers: template.config.disableInitializers }
+              : {}),
+          }),
+          {
+            workspaceDir,
+            repoName: repo.name,
+            repoDir: path.join(workspaceDir, repo.name),
+          },
+        ),
+        templateBarrier,
       ),
     ]),
   );
 
   // Run all repo pipelines in parallel (git + initializers per repo)
   let repoResults: Map<string, { hasLockfile: boolean }>;
+  const useGrid = shouldUseGrid(repos.length) && repos.length > 1;
 
-  if (shouldUseGrid() && repos.length > 1) {
+  async function finalizeWorkspace(
+    results: Map<string, { hasLockfile: boolean }>,
+  ): Promise<void> {
+    const completedRepos = repos.filter((repo) => results.has(repo.name));
+    const completedRepoNames = completedRepos.map((repo) => repo.name);
+
+    for (const repo of completedRepos) {
+      const hasLockfile = results.get(repo.name)?.hasLockfile ?? false;
+      await updatePreparedWorkspaceRepoMetadata({
+        workspaceDir,
+        branchName: effectiveBranchName,
+        repo,
+        hasLockfile,
+      });
+      preparedRepoMetadata.set(repo.name, { repo, hasLockfile });
+    }
+
+    // Hooks run after all repos complete (can reference multiple repos).
+    if (template?.config.hooks && template.config.hooks.length > 0) {
+      for await (const hookState of applyTemplateGenerator({
+        template,
+        workspaceDir,
+        repoDirs: completedRepoNames,
+      })) {
+        if (hookState.phase === "hook") {
+          const { state: taskState } = hookState;
+          if (taskState.status === "failed") {
+            promptLog.error(`Hook failed: ${hookState.hookName}`);
+          }
+        }
+      }
+    }
+
+    const reposWithWorktrees = repos.filter((repo) =>
+      preparedRepoMetadata.has(repo.name),
+    );
+    const preparedRepos = repos.map((repo) => ({
+      name: repo.name,
+      remote: repo.remote,
+      defaultBranch: repo.defaultBranch,
+      hasLockfile: preparedRepoMetadata.get(repo.name)?.hasLockfile ?? false,
+    }));
+
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName,
+      branchName: effectiveBranchName,
+      repos: preparedRepos,
+      ...(description && { description }),
+      ...(templateId && { templateId }),
+    });
+
+    await writeVSCodeWorkspaceFile(workspaceDir, reposWithWorktrees, {
+      logOutput: !useGrid,
+    });
+  }
+
+  if (useGrid) {
     // Grid mode: visual concurrent output
     repoResults = await renderPipelinesGrid({
       pipelines,
       repoNames,
       getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
       onFailure: recordRepoFailure,
+      onBeforeCompletionPrompt: finalizeWorkspace,
     });
   } else {
     // Spinner mode: simple progress indicator
@@ -517,140 +634,12 @@ export async function stampWorkspaceInteractive(
       pipelines,
       onFailure: recordRepoFailure,
     });
-  }
-
-  const completedRepos = repos.filter((repo) => repoResults.has(repo.name));
-  const completedRepoNames = completedRepos.map((repo) => repo.name);
-
-  if (template) {
-    await copyTemplateFiles(template, workspaceDir);
-
-    const contexts = completedRepos.map((repo) => ({
-      repoDir: path.join(workspaceDir, repo.name),
-      workspaceDir,
-      repo,
-    }));
-    const initializerLogPaths = new Map<string, string>();
-    const initializerFailures = new Set<string>();
-
-    async function getInitializerLogPath(repoName: string): Promise<string> {
-      const existing = initializerLogPaths.get(repoName);
-      if (existing) {
-        return existing;
-      }
-
-      const logPath = await startRepoSetupLog({
-        workspaceDir,
-        repoName,
-        repoDir: path.join(workspaceDir, repoName),
-      });
-      initializerLogPaths.set(repoName, logPath);
-      return logPath;
-    }
-
     await withSpinner(
-      "Running initializers...",
-      async (initializerSpinner) => {
-        for await (const state of runInitializersGenerator({
-          contexts,
-          ...(template.config.disableInitializers !== undefined
-            ? { disabledInitializers: template.config.disableInitializers }
-            : {}),
-        })) {
-          switch (state.phase) {
-            case "detecting":
-              initializerSpinner.message(`${state.repoName}: detecting`);
-              break;
-            case "running":
-              await appendRepoSetupLog(
-                await getInitializerLogPath(state.repoName),
-                formatInitializerLogState(state),
-              );
-              if (state.state.status === "running" && state.state.message) {
-                initializerSpinner.message(
-                  `${state.repoName}: ${state.initializerName} - ${state.state.message}`,
-                );
-              } else if (state.state.status === "failed") {
-                initializerFailures.add(state.repoName);
-                await recordRepoFailure(state.repoName, {
-                  error: state.state.error,
-                  step: `initializer:${state.initializerName}`,
-                });
-                promptLog.error(
-                  `${state.repoName}: ${state.initializerName} failed`,
-                );
-                promptLog.error(
-                  `${state.repoName}: setup log saved to ${await getRepoSetupLogPath(
-                    {
-                      workspaceDir,
-                      repoName: state.repoName,
-                    },
-                  )}`,
-                );
-              }
-              break;
-            case "skipped":
-              initializerSpinner.message(
-                `${state.repoName}: ${state.initializerId} skipped`,
-              );
-              break;
-            case "repo-complete":
-              initializerSpinner.message(`${state.repoName}: complete`);
-              break;
-          }
-        }
-
-        for (const [repoName, logPath] of initializerLogPaths) {
-          if (!initializerFailures.has(repoName)) {
-            await removeRepoSetupLog(logPath);
-          }
-        }
-      },
-      "Initializers complete",
+      "Finalizing workspace...",
+      () => finalizeWorkspace(repoResults),
+      "Workspace finalized",
     );
   }
-
-  // Hooks run after all repos complete (can reference multiple repos)
-  if (template?.config.hooks && template.config.hooks.length > 0) {
-    await withSpinner(
-      "Running template hooks...",
-      async (hookSpinner) => {
-        for await (const hookState of applyTemplateGenerator({
-          template,
-          workspaceDir,
-          repoDirs: completedRepoNames,
-        })) {
-          if (hookState.phase === "hook-start") {
-            hookSpinner.message(`Hook: ${hookState.hookName}`);
-          } else if (hookState.phase === "hook") {
-            const { state: taskState } = hookState;
-            if (taskState.status === "failed") {
-              promptLog.error(`Hook failed: ${hookState.hookName}`);
-            }
-          }
-        }
-      },
-      "Hooks complete",
-    );
-  }
-
-  // Finalize
-  const preparedRepos = completedRepos.map((repo) => ({
-    name: repo.name,
-    remote: repo.remote,
-    defaultBranch: repo.defaultBranch,
-    hasLockfile: repoResults.get(repo.name)?.hasLockfile ?? false,
-  }));
-
-  await writeWorkspaceMetadata(workspaceDir, {
-    featureName,
-    branchName: effectiveBranchName,
-    repos: preparedRepos,
-    ...(description && { description }),
-    ...(templateId && { templateId }),
-  });
-
-  await writeVSCodeWorkspaceFile(workspaceDir, completedRepos);
 
   note(getNextSteps(workspaceDir).join("\n"), "Next steps");
 
@@ -859,6 +848,85 @@ async function runPipelinesWithSpinner({
   );
 }
 
+type TemplateCopyBarrier = {
+  waitForTemplateFiles(): Promise<void>;
+  markRepoFailed(): void;
+};
+
+function createTemplateCopyBarrier({
+  repoCount,
+  copyTemplateFiles,
+}: {
+  repoCount: number;
+  copyTemplateFiles: () => Promise<void>;
+}): TemplateCopyBarrier {
+  let readyCount = 0;
+  let failedCount = 0;
+  let copyPromise: Promise<void> | null = null;
+  const waiters: {
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }[] = [];
+
+  const releaseWaiters = (promise: Promise<void>): void => {
+    void promise.then(
+      () => {
+        for (const waiter of waiters.splice(0)) {
+          waiter.resolve();
+        }
+      },
+      (error: unknown) => {
+        for (const waiter of waiters.splice(0)) {
+          waiter.reject(error);
+        }
+      },
+    );
+  };
+
+  const maybeCopyTemplate = (): void => {
+    if (copyPromise || readyCount + failedCount < repoCount) return;
+    copyPromise = copyTemplateFiles();
+    releaseWaiters(copyPromise);
+  };
+
+  return {
+    async waitForTemplateFiles(): Promise<void> {
+      readyCount += 1;
+      maybeCopyTemplate();
+
+      if (copyPromise) {
+        await copyPromise;
+        return;
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        waiters.push({ resolve, reject });
+      });
+    },
+
+    markRepoFailed(): void {
+      failedCount += 1;
+      maybeCopyTemplate();
+    },
+  };
+}
+
+async function* reportPipelineFailureToTemplateBarrier(
+  pipeline: AsyncGenerator<import("./pipeline.ts").RepoPipelineState>,
+  barrier: TemplateCopyBarrier | null,
+): AsyncGenerator<import("./pipeline.ts").RepoPipelineState> {
+  let markedFailed = false;
+
+  for await (const state of pipeline) {
+    if (state.phase === "failed" && !markedFailed) {
+      markedFailed = true;
+      barrier?.markRepoFailed();
+    }
+
+    yield state;
+  }
+}
+
 async function createRepoSetupFailureSummary({
   workspaceDir,
   repoName,
@@ -934,35 +1002,6 @@ function truncateForDisplay(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars - 15)}... [truncated]`;
 }
 
-function formatInitializerLogState(
-  state: Extract<InitializerState, { phase: "running" }>,
-): string {
-  const scope = `initializer:${state.initializerName}`;
-
-  switch (state.state.status) {
-    case "output":
-      return state.state.data;
-    case "running":
-      return state.state.message ? `[${scope}] ${state.state.message}\n` : "";
-    case "retrying":
-      return `[${scope}] Retry ${state.state.attempt}: ${state.state.reason}\n`;
-    case "failed":
-      return [
-        `[${scope}] failed: ${state.state.error.message}`,
-        state.state.error.stack ?? "",
-        "",
-      ].join("\n");
-    case "completed":
-      return `[${scope}] completed\n`;
-    case "skipped":
-      return `[${scope}] skipped: ${state.state.reason}\n`;
-    case "pending":
-      return `[${scope}] pending\n`;
-    case "log":
-      return `[${scope}] ${state.state.level}: ${state.state.message}\n`;
-  }
-}
-
 // ============================================================================
 // Helper functions
 // ============================================================================
@@ -971,6 +1010,50 @@ export async function ensureCacheDir(): Promise<string> {
   const cacheRoot = getCacheDir();
   await ensureDir(cacheRoot);
   return cacheRoot;
+}
+
+export async function writeInitialWorkspaceMetadata({
+  workspaceDir,
+  featureName,
+  description,
+  templateId,
+  branchName,
+  repos,
+}: Omit<StampWorkspaceOptions, "branchName"> & {
+  branchName: string;
+}): Promise<void> {
+  await writeWorkspaceMetadata(workspaceDir, {
+    featureName,
+    branchName,
+    repos: repos.map((repo) => ({
+      name: repo.name,
+      remote: repo.remote,
+      defaultBranch: repo.defaultBranch,
+      hasLockfile: false,
+    })),
+    ...(description && { description }),
+    ...(templateId && { templateId }),
+  });
+}
+
+async function updatePreparedWorkspaceRepoMetadata({
+  workspaceDir,
+  branchName,
+  repo,
+  hasLockfile,
+}: {
+  workspaceDir: string;
+  branchName: string;
+  repo: RepoConfig;
+  hasLockfile: boolean;
+}): Promise<void> {
+  await updateWorkspaceRepo(workspaceDir, {
+    name: repo.name,
+    remote: repo.remote,
+    default_branch: repo.defaultBranch,
+    feature_branch: branchName,
+    has_lockfile: hasLockfile,
+  });
 }
 
 function getNextSteps(workspaceDir: string): string[] {
@@ -987,6 +1070,7 @@ function getNextSteps(workspaceDir: string): string[] {
 async function writeVSCodeWorkspaceFile(
   workspaceDir: string,
   repos: readonly RepoConfig[],
+  { logOutput = true }: { logOutput?: boolean } = {},
 ): Promise<void> {
   const workspaceName = path.basename(workspaceDir) || "workforest";
   const workspaceFile = path.join(
@@ -1022,7 +1106,9 @@ async function writeVSCodeWorkspaceFile(
   );
 
   await fs.writeFile(workspaceFile, `${contents}\n`, "utf8");
-  log.info(`VS Code workspace saved to ${workspaceFile}`);
+  if (logOutput) {
+    log.info(`VS Code workspace saved to ${workspaceFile}`);
+  }
 }
 
 const LARGE_REPO_THRESHOLD_MB = 500;

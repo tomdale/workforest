@@ -42,6 +42,11 @@ export type RepoPipelineOptions = {
   isNewWorkspace: boolean;
   disabledInitializers?: boolean | string[];
   skipInitializers?: boolean;
+  beforeInitializers?: (context: {
+    repo: RepoConfig;
+    repoDir: string;
+    workspaceDir: string;
+  }) => Promise<void>;
 };
 
 /**
@@ -58,6 +63,7 @@ export async function* repoPipelineGenerator({
   isNewWorkspace,
   disabledInitializers,
   skipInitializers,
+  beforeInitializers,
 }: RepoPipelineOptions): AsyncGenerator<RepoPipelineState> {
   const cacheDir = getCacheDir();
   const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
@@ -117,6 +123,11 @@ export async function* repoPipelineGenerator({
       workspaceDir,
       repo,
     };
+
+    if (beforeInitializers) {
+      currentStep = "initializer:preflight";
+      await beforeInitializers(context);
+    }
 
     if (skipInitializers) {
       currentStep = "detect lockfile";

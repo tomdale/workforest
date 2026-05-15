@@ -87,6 +87,37 @@ export async function appendWorkspaceRepos(
   return nextMetadata;
 }
 
+export async function updateWorkspaceRepo(
+  workspaceDir: string,
+  repo: WorkspaceRepoMetadata,
+): Promise<WorkspaceMetadata> {
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+
+  if (!metadata) {
+    throw new Error(
+      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+    );
+  }
+
+  const existingIndex = metadata.repos.findIndex(
+    (entry) => entry.name === repo.name,
+  );
+  const repos =
+    existingIndex === -1
+      ? [...metadata.repos, repo]
+      : metadata.repos.map((entry, index) =>
+          index === existingIndex ? repo : entry,
+        );
+
+  const nextMetadata: WorkspaceMetadata = {
+    ...metadata,
+    repos,
+  };
+
+  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
+  return nextMetadata;
+}
+
 export async function appendTemporaryWorktrees(
   workspaceDir: string,
   worktrees: readonly TemporaryWorktreeMetadata[],
