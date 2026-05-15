@@ -11,6 +11,10 @@ export type RenderPipelinesGridOptions = {
   pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;
   repoNames: string[];
   getLogPath?: (repoName: string) => Promise<string>;
+  onFailure?: (
+    repoName: string,
+    state: Extract<RepoPipelineState, { phase: "failed" }>,
+  ) => void | Promise<void>;
   environment?: GridRenderEnvironment;
 };
 
@@ -105,6 +109,7 @@ export async function renderPipelinesGrid({
   pipelines,
   repoNames,
   getLogPath,
+  onFailure,
   environment = createDefaultEnvironment(),
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
   const renderIntervalMs =
@@ -221,10 +226,14 @@ export async function renderPipelinesGrid({
         case "failed": {
           flushOutputBuffer(pane, id, outputBuffers);
           pane.setLabel(`{red-fg}${id} ${STATUS_ICONS.failed}{/red-fg}`);
+          if (state.step) {
+            pane.appendLine(`{red-fg}Step: ${state.step}{/red-fg}`);
+          }
           pane.appendLine(`{red-fg}Error: ${state.error.message}{/red-fg}`);
           if (getLogPath) {
             pane.appendLine(`{red-fg}Log: ${await getLogPath(id)}{/red-fg}`);
           }
+          await onFailure?.(id, state);
           break;
         }
       }

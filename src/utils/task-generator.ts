@@ -19,6 +19,10 @@ export type RunCommandOptions = {
   cwd?: string;
 };
 
+type CommandExit =
+  | { type: "close"; code: number | null }
+  | { type: "error"; error: Error };
+
 /**
  * Generator that spawns a command and yields state updates as it runs.
  * Yields output chunks as they arrive from stdout/stderr.
@@ -56,9 +60,9 @@ export async function* runCommandGenerator(
   });
 
   // Poll for new output chunks while process is running
-  const exitPromise = new Promise<number | null>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
+  const exitPromise = new Promise<CommandExit>((resolve) => {
+    child.on("error", (error) => resolve({ type: "error", error }));
+    child.on("close", (code) => resolve({ type: "close", code }));
   });
 
   // Helper to drain chunks from an array
@@ -79,31 +83,56 @@ export async function* runCommandGenerator(
     yield* drainChunks(stderrChunks);
 
     // Check if process has exited
-    const exitCode = await Promise.race([
+    const exit = await Promise.race([
       exitPromise,
       new Promise<"pending">((resolve) =>
         setTimeout(() => resolve("pending"), 50),
       ),
     ]);
 
-    if (exitCode !== "pending") {
+    if (exit !== "pending") {
       // Drain any remaining chunks
       yield* drainChunks(stdoutChunks);
       yield* drainChunks(stderrChunks);
 
-      if (exitCode === 0) {
+      if (exit.type === "error") {
+        yield {
+          status: "failed",
+          error: formatCommandStartError(command, args, exit.error),
+        };
+      } else if (exit.code === 0) {
         yield { status: "completed" };
       } else {
         yield {
           status: "failed",
           error: new Error(
-            `${command} ${args.join(" ")} exited with code ${exitCode}. ${stderrTail}`,
+            `${command} ${args.join(" ")} exited with code ${exit.code}. ${stderrTail}`,
           ),
         };
       }
       return;
     }
   }
+}
+
+function formatCommandStartError(
+  command: string,
+  args: string[],
+  error: Error,
+): Error {
+  const commandLine = `${command} ${args.join(" ")}`.trim();
+  const code = (error as NodeJS.ErrnoException).code;
+
+  if (code === "ENOENT") {
+    return new Error(
+      `${commandLine} failed to start: command not found (${command}). Install ${command} or ensure it is available on PATH.`,
+      { cause: error },
+    );
+  }
+
+  return new Error(`${commandLine} failed to start: ${error.message}`, {
+    cause: error,
+  });
 }
 
 /**

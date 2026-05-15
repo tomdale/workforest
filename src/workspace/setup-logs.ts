@@ -1,7 +1,10 @@
 import { promises as fs } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { ensureWorkspaceMetadataDir } from "./metadata.ts";
 import type { RepoPipelineState } from "./pipeline.ts";
+
+export const DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS = 1200;
 
 export type RepoSetupLogOptions = {
   workspaceDir: string;
@@ -55,6 +58,45 @@ export async function removeRepoSetupLog(logPath: string): Promise<void> {
   await fs.rm(logPath, { force: true });
 }
 
+export async function readRepoSetupLogExcerpt({
+  workspaceDir,
+  repoName,
+  maxChars = DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS,
+}: Pick<RepoSetupLogOptions, "workspaceDir" | "repoName"> & {
+  maxChars?: number;
+}): Promise<string | null> {
+  const logPath = await getRepoSetupLogPath({ workspaceDir, repoName });
+
+  let handle: FileHandle | undefined;
+  try {
+    const stat = await fs.stat(logPath);
+    const bytesToRead = Math.min(stat.size, maxChars);
+    const buffer = Buffer.alloc(bytesToRead);
+    handle = await fs.open(logPath, "r");
+
+    await handle.read(buffer, 0, bytesToRead, stat.size - bytesToRead);
+
+    const excerpt = buffer.toString("utf8").trim();
+    if (!excerpt) {
+      return null;
+    }
+
+    if (stat.size > bytesToRead) {
+      return `[log truncated to last ${maxChars} characters]\n${excerpt}`;
+    }
+
+    return excerpt;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
 export async function* withRepoSetupLog(
   pipeline: AsyncGenerator<RepoPipelineState>,
   options: RepoSetupLogOptions,
@@ -80,7 +122,7 @@ export async function* withRepoSetupLog(
       logPath,
       [`[thrown] ${setupError.message}`, setupError.stack ?? "", ""].join("\n"),
     );
-    throw error;
+    yield { phase: "failed", error: setupError, step: "repo pipeline" };
   } finally {
     if (!shouldKeepLog) {
       await removeRepoSetupLog(logPath);
@@ -102,7 +144,7 @@ function formatState(state: RepoPipelineState): string {
       return `[complete] hasLockfile=${String(state.hasLockfile)}\n`;
     case "failed":
       return [
-        `[failed] ${state.error.message}`,
+        `[failed${state.step ? `:${state.step}` : ""}] ${state.error.message}`,
         state.error.stack ? `${state.error.stack}\n` : "",
       ].join("\n");
   }

@@ -106,6 +106,43 @@ describe("repo setup logs", () => {
     });
   });
 
+  it("converts thrown setup errors into failed states and keeps the log", async () => {
+    const workspaceDir = await createWorkspaceDir();
+
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "running",
+        message: "Creating worktree",
+      };
+      throw new Error("spawn turbo ENOENT");
+    };
+
+    const states = await collect(
+      withRepoSetupLog(pipeline(), {
+        workspaceDir,
+        repoName: "front",
+        repoDir: path.join(workspaceDir, "front"),
+      }),
+    );
+
+    const failedState = states.find((state) => state.phase === "failed");
+    expect(failedState).toMatchObject({
+      phase: "failed",
+      step: "repo pipeline",
+    });
+
+    const logPath = await getRepoSetupLogPath({
+      workspaceDir,
+      repoName: "front",
+    });
+    const log = await readFile(logPath, "utf8");
+
+    expect(log).toContain("Creating worktree");
+    expect(log).toContain("[thrown] spawn turbo ENOENT");
+  });
+
   it("sanitizes repo names before using them as log filenames", async () => {
     const workspaceDir = await createWorkspaceDir();
 

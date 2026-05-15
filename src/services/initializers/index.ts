@@ -64,6 +64,10 @@ export const builtInInitializers: InitializerDefinition[] = [
   turboLinkInitializer,
 ].sort((a, b) => a.priority - b.priority);
 
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export type RunInitializersOptions = {
   contexts: InitializerContext[];
   disabledInitializers?: boolean | string[];
@@ -152,7 +156,19 @@ export async function* runInitializersGenerator({
     for (const context of contexts) {
       yield { phase: "detecting", repoName: context.repo.name };
 
-      const detected = await detectInitializers(context, installInitializers);
+      let detected: Awaited<ReturnType<typeof detectInitializers>>;
+      try {
+        detected = await detectInitializers(context, installInitializers);
+      } catch (error) {
+        yield {
+          phase: "running",
+          repoName: context.repo.name,
+          initializerId: "detection",
+          initializerName: "Initializer detection",
+          state: { status: "failed", error: toError(error) },
+        };
+        continue;
+      }
 
       // Only one install initializer should run per repo (mutually exclusive)
       const detectedInstall = detected[0];
@@ -162,8 +178,12 @@ export async function* runInitializersGenerator({
 
         // Create a wrapper generator that yields InitializerState
         async function* wrapWithMeta(): AsyncGenerator<TaskState> {
-          for await (const state of initializer.execute(context, metadata)) {
-            yield state;
+          try {
+            for await (const state of initializer.execute(context, metadata)) {
+              yield state;
+            }
+          } catch (error) {
+            yield { status: "failed", error: toError(error) };
           }
         }
 
@@ -194,14 +214,30 @@ export async function* runInitializersGenerator({
 
     // Detect and queue linking tasks for each repo
     for (const context of contexts) {
-      const detected = await detectInitializers(context, linkingInitializers);
+      let detected: Awaited<ReturnType<typeof detectInitializers>>;
+      try {
+        detected = await detectInitializers(context, linkingInitializers);
+      } catch (error) {
+        yield {
+          phase: "running",
+          repoName: context.repo.name,
+          initializerId: "detection",
+          initializerName: "Initializer detection",
+          state: { status: "failed", error: toError(error) },
+        };
+        continue;
+      }
 
       for (const { initializer, metadata } of detected) {
         const taskId = `${context.repo.name}:${initializer.id}`;
 
         async function* wrapWithMeta(): AsyncGenerator<TaskState> {
-          for await (const state of initializer.execute(context, metadata)) {
-            yield state;
+          try {
+            for await (const state of initializer.execute(context, metadata)) {
+              yield state;
+            }
+          } catch (error) {
+            yield { status: "failed", error: toError(error) };
           }
         }
 
@@ -267,35 +303,77 @@ export async function* runSingleRepoInitializersGenerator({
 
   // Phase 1: Run install initializer (only one per repo - mutually exclusive)
   if (installInitializers.length > 0) {
-    const detected = await detectInitializers(context, installInitializers);
+    let detected: Awaited<ReturnType<typeof detectInitializers>>;
+    try {
+      detected = await detectInitializers(context, installInitializers);
+    } catch (error) {
+      yield {
+        phase: "running",
+        initializerId: "detection",
+        initializerName: "Initializer detection",
+        state: { status: "failed", error: toError(error) },
+      };
+      return;
+    }
 
     const detectedInstall = detected[0];
     if (detectedInstall) {
       const { initializer, metadata } = detectedInstall;
 
-      for await (const state of initializer.execute(context, metadata)) {
+      try {
+        for await (const state of initializer.execute(context, metadata)) {
+          yield {
+            phase: "running",
+            initializerId: initializer.id,
+            initializerName: initializer.name,
+            state,
+          };
+        }
+      } catch (error) {
         yield {
           phase: "running",
           initializerId: initializer.id,
           initializerName: initializer.name,
-          state,
+          state: { status: "failed", error: toError(error) },
         };
+        return;
       }
     }
   }
 
   // Phase 2: Run linking initializers (can have multiple)
   if (linkingInitializers.length > 0) {
-    const detected = await detectInitializers(context, linkingInitializers);
+    let detected: Awaited<ReturnType<typeof detectInitializers>>;
+    try {
+      detected = await detectInitializers(context, linkingInitializers);
+    } catch (error) {
+      yield {
+        phase: "running",
+        initializerId: "detection",
+        initializerName: "Initializer detection",
+        state: { status: "failed", error: toError(error) },
+      };
+      return;
+    }
 
     for (const { initializer, metadata } of detected) {
-      for await (const state of initializer.execute(context, metadata)) {
+      try {
+        for await (const state of initializer.execute(context, metadata)) {
+          yield {
+            phase: "running",
+            initializerId: initializer.id,
+            initializerName: initializer.name,
+            state,
+          };
+        }
+      } catch (error) {
         yield {
           phase: "running",
           initializerId: initializer.id,
           initializerName: initializer.name,
-          state,
+          state: { status: "failed", error: toError(error) },
         };
+        return;
       }
     }
   }

@@ -1336,8 +1336,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
   };
 
   if (interactive) {
-    const { stampWorkspaceInteractive } = await import("./workspace/index.ts");
-    await stampWorkspaceInteractive(options);
+    const { printRepoSetupFailures, stampWorkspaceInteractive } = await import(
+      "./workspace/index.ts"
+    );
+    const result = await stampWorkspaceInteractive(options);
+    printRepoSetupFailures(result.setupFailures);
     await writeShellCdPath(workspaceDir);
     outro("Happy shipping!");
   } else {

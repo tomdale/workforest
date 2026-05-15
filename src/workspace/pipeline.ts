@@ -33,7 +33,7 @@ export type RepoPipelineState =
       message?: string;
     }
   | { phase: "complete"; hasLockfile: boolean }
-  | { phase: "failed"; error: Error };
+  | { phase: "failed"; error: Error; step?: string };
 
 export type RepoPipelineOptions = {
   repo: RepoConfig;
@@ -62,95 +62,120 @@ export async function* repoPipelineGenerator({
   const cacheDir = getCacheDir();
   const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
   const targetDir = path.join(workspaceDir, repo.name);
+  let currentStep = "starting setup";
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Git Phase: mirror → cleanup → worktree
-  // ─────────────────────────────────────────────────────────────────────────
+  try {
+    // ─────────────────────────────────────────────────────────────────────────
+    // Git Phase: mirror → cleanup → worktree
+    // ─────────────────────────────────────────────────────────────────────────
 
-  // Step 1: Mirror (fetch or clone)
-  for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
-    const pipelineState = mapTaskStateToPipelineState(state, "mirror");
-    if (pipelineState) yield pipelineState;
-    if (state.status === "failed") {
-      yield { phase: "failed", error: state.error };
-      return;
-    }
-  }
-
-  // Step 2: Cleanup stale worktrees (skip for new workspaces)
-  if (!isNewWorkspace) {
-    for await (const state of cleanupWorkspaceWorktreesGenerator(
-      mirrorDir,
-      workspaceDir,
-    )) {
-      const pipelineState = mapTaskStateToPipelineState(state, "cleanup");
+    // Step 1: Mirror (fetch or clone)
+    currentStep = "git:mirror";
+    for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
+      const pipelineState = mapTaskStateToPipelineState(state, "mirror");
       if (pipelineState) yield pipelineState;
       if (state.status === "failed") {
-        yield { phase: "failed", error: state.error };
+        yield { phase: "failed", error: state.error, step: currentStep };
         return;
       }
     }
-  }
 
-  // Step 3: Create worktree
-  for await (const state of ensureWorkingCopyGenerator(
-    repo,
-    mirrorDir,
-    targetDir,
-    branchName,
-  )) {
-    const pipelineState = mapTaskStateToPipelineState(state, "worktree");
-    if (pipelineState) yield pipelineState;
-    if (state.status === "failed") {
-      yield { phase: "failed", error: state.error };
+    // Step 2: Cleanup stale worktrees (skip for new workspaces)
+    if (!isNewWorkspace) {
+      currentStep = "git:cleanup";
+      for await (const state of cleanupWorkspaceWorktreesGenerator(
+        mirrorDir,
+        workspaceDir,
+      )) {
+        const pipelineState = mapTaskStateToPipelineState(state, "cleanup");
+        if (pipelineState) yield pipelineState;
+        if (state.status === "failed") {
+          yield { phase: "failed", error: state.error, step: currentStep };
+          return;
+        }
+      }
+    }
+
+    // Step 3: Create worktree
+    currentStep = "git:worktree";
+    for await (const state of ensureWorkingCopyGenerator(
+      repo,
+      mirrorDir,
+      targetDir,
+      branchName,
+    )) {
+      const pipelineState = mapTaskStateToPipelineState(state, "worktree");
+      if (pipelineState) yield pipelineState;
+      if (state.status === "failed") {
+        yield { phase: "failed", error: state.error, step: currentStep };
+        return;
+      }
+    }
+
+    const context = {
+      repoDir: targetDir,
+      workspaceDir,
+      repo,
+    };
+
+    if (skipInitializers) {
+      currentStep = "detect lockfile";
+      const hasLockfile = await hasAny(targetDir, [
+        "pnpm-lock.yaml",
+        "pnpm-lock.yml",
+      ]);
+
+      yield { phase: "complete", hasLockfile };
       return;
     }
-  }
 
-  const context = {
-    repoDir: targetDir,
-    workspaceDir,
-    repo,
-  };
+    // ─────────────────────────────────────────────────────────────────────────
+    // Initializers Phase: install → linking
+    // ─────────────────────────────────────────────────────────────────────────
 
-  if (skipInitializers) {
+    currentStep = "initializer:detection";
+    for await (const state of runSingleRepoInitializersGenerator({
+      context,
+      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+    })) {
+      if (state.phase === "running") {
+        currentStep = `initializer:${state.initializerName}`;
+      } else if (state.phase === "detecting") {
+        currentStep = "initializer:detection";
+      }
+
+      const pipelineState = mapInitializerStateToPipelineState(state);
+      if (pipelineState) yield pipelineState;
+
+      // Check for initializer failure
+      if (state.phase === "running" && state.state.status === "failed") {
+        yield {
+          phase: "failed",
+          error: state.state.error,
+          step: currentStep,
+        };
+        return;
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Complete
+    // ─────────────────────────────────────────────────────────────────────────
+
+    currentStep = "detect lockfile";
     const hasLockfile = await hasAny(targetDir, [
       "pnpm-lock.yaml",
       "pnpm-lock.yml",
     ]);
 
     yield { phase: "complete", hasLockfile };
-    return;
+  } catch (error) {
+    yield {
+      phase: "failed",
+      error: error instanceof Error ? error : new Error(String(error)),
+      step: currentStep,
+    };
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Initializers Phase: install → linking
-  // ─────────────────────────────────────────────────────────────────────────
-
-  for await (const state of runSingleRepoInitializersGenerator({
-    context,
-    ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
-  })) {
-    const pipelineState = mapInitializerStateToPipelineState(state);
-    if (pipelineState) yield pipelineState;
-
-    // Check for initializer failure
-    if (state.phase === "running" && state.state.status === "failed") {
-      yield { phase: "failed", error: state.state.error };
-      return;
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Complete
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const hasLockfile = await hasAny(targetDir, [
-    "pnpm-lock.yaml",
-    "pnpm-lock.yml",
-  ]);
-
-  yield { phase: "complete", hasLockfile };
 }
 
 /**

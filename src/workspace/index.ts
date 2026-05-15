@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import chalk from "chalk";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
@@ -36,6 +37,7 @@ import {
 import {
   appendRepoSetupLog,
   getRepoSetupLogPath,
+  readRepoSetupLogExcerpt,
   removeRepoSetupLog,
   startRepoSetupLog,
   withRepoSetupLog,
@@ -73,6 +75,18 @@ export type AddReposResult = {
     name: string;
     error: Error;
   }[];
+};
+
+export type RepoSetupFailureSummary = {
+  repoName: string;
+  step?: string;
+  message: string;
+  logPath: string;
+  logExcerpt?: string;
+};
+
+export type StampWorkspaceResult = {
+  setupFailures: readonly RepoSetupFailureSummary[];
 };
 
 /**
@@ -400,7 +414,7 @@ export async function stampWorkspace(
  */
 export async function stampWorkspaceInteractive(
   options: StampWorkspaceOptions,
-): Promise<void> {
+): Promise<StampWorkspaceResult> {
   const {
     featureName,
     description,
@@ -445,6 +459,22 @@ export async function stampWorkspaceInteractive(
 
   const effectiveBranchName = branchName ?? featureName;
   const repoNames = repos.map((r) => r.name);
+  const repoFailures = new Map<string, RepoSetupFailureSummary>();
+
+  async function recordRepoFailure(
+    repoName: string,
+    failure: { error: Error; step?: string },
+  ): Promise<void> {
+    repoFailures.set(
+      repoName,
+      await createRepoSetupFailureSummary({
+        workspaceDir,
+        repoName,
+        error: failure.error,
+        ...(failure.step ? { step: failure.step } : {}),
+      }),
+    );
+  }
 
   // Create per-repo pipeline generators
   const pipelines = new Map(
@@ -479,19 +509,23 @@ export async function stampWorkspaceInteractive(
       pipelines,
       repoNames,
       getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
+      onFailure: recordRepoFailure,
     });
   } else {
     // Spinner mode: simple progress indicator
     repoResults = await runPipelinesWithSpinner({
       pipelines,
-      workspaceDir,
+      onFailure: recordRepoFailure,
     });
   }
+
+  const completedRepos = repos.filter((repo) => repoResults.has(repo.name));
+  const completedRepoNames = completedRepos.map((repo) => repo.name);
 
   if (template) {
     await copyTemplateFiles(template, workspaceDir);
 
-    const contexts = repos.map((repo) => ({
+    const contexts = completedRepos.map((repo) => ({
       repoDir: path.join(workspaceDir, repo.name),
       workspaceDir,
       repo,
@@ -538,6 +572,10 @@ export async function stampWorkspaceInteractive(
                 );
               } else if (state.state.status === "failed") {
                 initializerFailures.add(state.repoName);
+                await recordRepoFailure(state.repoName, {
+                  error: state.state.error,
+                  step: `initializer:${state.initializerName}`,
+                });
                 promptLog.error(
                   `${state.repoName}: ${state.initializerName} failed`,
                 );
@@ -580,7 +618,7 @@ export async function stampWorkspaceInteractive(
         for await (const hookState of applyTemplateGenerator({
           template,
           workspaceDir,
-          repoDirs: repoNames,
+          repoDirs: completedRepoNames,
         })) {
           if (hookState.phase === "hook-start") {
             hookSpinner.message(`Hook: ${hookState.hookName}`);
@@ -597,7 +635,7 @@ export async function stampWorkspaceInteractive(
   }
 
   // Finalize
-  const preparedRepos = repos.map((repo) => ({
+  const preparedRepos = completedRepos.map((repo) => ({
     name: repo.name,
     remote: repo.remote,
     defaultBranch: repo.defaultBranch,
@@ -612,9 +650,13 @@ export async function stampWorkspaceInteractive(
     ...(templateId && { templateId }),
   });
 
-  await writeVSCodeWorkspaceFile(workspaceDir, repos);
+  await writeVSCodeWorkspaceFile(workspaceDir, completedRepos);
 
   note(getNextSteps(workspaceDir).join("\n"), "Next steps");
+
+  return {
+    setupFailures: [...repoFailures.values()],
+  };
 }
 
 export async function addReposToWorkspace({
@@ -767,13 +809,19 @@ export async function addReposToWorkspace({
  */
 async function runPipelinesWithSpinner({
   pipelines,
-  workspaceDir,
+  onFailure,
 }: {
   pipelines: Map<
     string,
     AsyncGenerator<import("./pipeline.ts").RepoPipelineState>
   >;
-  workspaceDir: string;
+  onFailure?: (
+    repoName: string,
+    state: Extract<
+      import("./pipeline.ts").RepoPipelineState,
+      { phase: "failed" }
+    >,
+  ) => void | Promise<void>;
 }): Promise<Map<string, { hasLockfile: boolean }>> {
   return withSpinner(
     "Setting up repositories...",
@@ -800,13 +848,7 @@ async function runPipelinesWithSpinner({
 
           case "failed":
             repoPhases.set(id, "failed");
-            promptLog.error(`${id}: ${state.error.message}`);
-            promptLog.error(
-              `${id}: setup log saved to ${await getRepoSetupLogPath({
-                workspaceDir,
-                repoName: id,
-              })}`,
-            );
+            await onFailure?.(id, state);
             break;
         }
       }
@@ -815,6 +857,81 @@ async function runPipelinesWithSpinner({
     },
     "Repository setup complete",
   );
+}
+
+async function createRepoSetupFailureSummary({
+  workspaceDir,
+  repoName,
+  error,
+  step,
+}: {
+  workspaceDir: string;
+  repoName: string;
+  error: Error;
+  step?: string;
+}): Promise<RepoSetupFailureSummary> {
+  const logPath = await getRepoSetupLogPath({ workspaceDir, repoName });
+  let logExcerpt: string | null = null;
+
+  try {
+    logExcerpt = await readRepoSetupLogExcerpt({ workspaceDir, repoName });
+  } catch (logError) {
+    const message =
+      logError instanceof Error ? logError.message : String(logError);
+    logExcerpt = `Unable to read recent log output: ${message}`;
+  }
+
+  return {
+    repoName,
+    ...(step ? { step } : {}),
+    message: truncateForDisplay(error.message, 500),
+    logPath,
+    ...(logExcerpt ? { logExcerpt } : {}),
+  };
+}
+
+export function printRepoSetupFailures(
+  failures: readonly RepoSetupFailureSummary[],
+): void {
+  if (failures.length === 0) {
+    return;
+  }
+
+  process.stdout.write(`${chalk.red(formatRepoSetupFailures(failures))}\n`);
+}
+
+function formatRepoSetupFailures(
+  failures: readonly RepoSetupFailureSummary[],
+): string {
+  const lines = [
+    "Some repositories did not complete setup. The workspace was still created.",
+  ];
+
+  for (const failure of failures) {
+    lines.push("");
+    lines.push(failure.repoName);
+    lines.push(`Step: ${failure.step ?? "unknown"}`);
+    lines.push(`Error: ${failure.message}`);
+
+    if (failure.logExcerpt) {
+      lines.push("Recent log output:");
+      for (const line of failure.logExcerpt.split("\n")) {
+        lines.push(`  ${line}`);
+      }
+    }
+
+    lines.push(`Full log: ${failure.logPath}`);
+  }
+
+  return lines.join("\n");
+}
+
+function truncateForDisplay(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  return `${value.slice(0, maxChars - 15)}... [truncated]`;
 }
 
 function formatInitializerLogState(
