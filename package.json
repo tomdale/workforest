@@ -50,6 +50,8 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "skills",
+    "skill-data"
   ]
 }

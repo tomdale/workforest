@@ -104,6 +104,11 @@ export async function cli(): Promise<void> {
     case "config":
       await runConfigCommand(commandArgv);
       break;
+    case "skills": {
+      const { runSkillsCommand } = await import("./skills.ts");
+      await runSkillsCommand(commandArgv);
+      break;
+    }
     case "init":
       await runInitCommand(commandArgv);
       break;

@@ -24,18 +24,28 @@ export async function help(): Promise<string> {
   return `
 ${chalk.bold("Usage:")} wf <command> [options]
 
+${chalk.bold("Start here (for AI agents):")}
+  wf skills get core --full
+
+  Skills ship with the CLI and match the installed Workforest version. Use
+  them for workspace workflows, temporary worktrees, setup, and cleanup.
+
+  skills list                      List available skills
+  skills get core                  Core usage guide
+  skills get core --full           Include full command reference
+  skills get parallel-worktrees --full
+  skills get setup-and-configuration --full
+
 ${chalk.bold("Commands:")}
   new <work> -- <template|repo...> Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|rm             List or remove temporary worktrees
   wt                           Alias for worktree
-  cd <name>                    Jump to a workspace in defaultDir
-  find                         Fuzzy-find and jump to a workspace
   add <repo...>                Add repo(s) to an existing workspace
   fork <name>                  Fork current workspace with new branches
   clean [dir]                  Remove a workspace (or run inside workspace)
   list                         List workspaces
-  init [shell]                 Print shell integration for auto-cd and completion
+  skills list|get|path         List and retrieve bundled agent skills
   template list|show|info|...  Manage templates
   config [show|edit|init]      Manage configuration
 
@@ -46,25 +56,20 @@ ${chalk.bold("Clean options:")}
   --keep-mirrors               Keep cached git mirrors (default: true)
 
 ${chalk.bold("Examples:")}
-  wf new fixing the auth bug -- my-template
-  wf new new feature -- vercel/front vercel/api
-  wf worktree fix-tests upgrade-deps
+  wf new "update docs build" -- vercel/next.js vercel/turbo
+  wf worktree "fix-tests" "upgrade-deps"
   wf worktree list
-  wf worktree rm fix-tests
-  wf worktree vercel/front fix-auth
-  wf wt vercel/front fix-auth --dir ../front-fix-auth
-  wf new --dry-run fixing auth -- my-template
-  wf cd fix-auth-bug                Jump into an existing workspace
-  wf find                           Fuzzy-find a workspace to open
-  wf add vercel/docs               Add a repo from inside a workspace
-  wf add vercel/docs -w ./my-ws    Add a repo to a specific workspace
-  wf fork new-approach              Fork workspace with new branch names
-  eval "$(wf init zsh)"            Auto-cd + zsh completion for workspace commands
+  wf worktree rm "fix-tests"
+  wf worktree next.js "fix-auth"
+  wf wt next.js "fix-auth" --dir ../next.js-fix-auth
+  wf new --dry-run "fixing auth" -- my-template
+  wf add vercel/swr                Add a repo from inside a workspace
+  wf add vercel/swr -w ./my-ws     Add a repo to a specific workspace
+  wf fork "new approach"            Fork workspace with new branch names
   wf list                           Show all workspaces
   wf clean                          Clean current workspace (self-destruct)
   wf clean ./my-workspace -r        Clean and delete merged remote branches
-  wf template new my-template org/repo1 org/repo2
-  wf config init                    Interactive setup
+  wf template new "oss-docs" vercel/next.js vercel/turbo
 
 ${chalk.bold("Templates:")}
   ${templateLines.join("\n  ")}

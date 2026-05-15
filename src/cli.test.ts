@@ -70,6 +70,29 @@ afterEach(async () => {
 });
 
 describe("cli", () => {
+  it("prints agent skills guidance first in top-level help", async () => {
+    const logs: string[] = [];
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "--help"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain("Start here (for AI agents):");
+    expect(output).toContain("wf skills get core --full");
+    expect(output.indexOf("Start here (for AI agents):")).toBeLessThan(
+      output.indexOf("Commands:"),
+    );
+    expect(output).not.toContain("wf find");
+    expect(output).not.toContain('eval "$(wf init zsh)"');
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("parses a slug before -- and repositories after -- for wf new", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
@@ -256,7 +279,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("prints help for wf find --help", async () => {
+  it("prints top-level help for wf find --help", async () => {
     const logs: string[] = [];
 
     vi.spyOn(console, "log").mockImplementation((...args) => {
@@ -268,7 +291,9 @@ describe("cli", () => {
 
     await cli();
 
-    expect(logs.join("\n")).toContain("find");
+    const output = logs.join("\n");
+    expect(output).toContain("Start here (for AI agents):");
+    expect(output).not.toContain("Fuzzy-find");
     expect(process.exitCode).toBeUndefined();
   });
 

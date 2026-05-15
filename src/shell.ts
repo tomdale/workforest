@@ -29,7 +29,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|cd|find|template|worktree|wt) ;;
+    new|fork|clean|cd|find|template|worktree|wt|skills) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
@@ -184,6 +184,7 @@ _workforest_complete() {
     'worktree:create or manage repo worktrees'
     'wt:create or manage repo worktrees'
     'add:add repo(s) to a workspace'
+    'skills:list and retrieve bundled agent skills'
     'fork:fork current workspace'
     'clean:remove a workspace'
     'cd:jump to a workspace'
