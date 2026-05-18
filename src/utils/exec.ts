@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { log } from "../logger.ts";
 import type { RunCommandOptions } from "../types.ts";
+import { createSpawnEnv } from "./spawn-env.ts";
 
 /**
  * Runs a command and captures its output.
@@ -17,6 +18,7 @@ export function runCommand(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
+      env: createSpawnEnv(cwd),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -83,6 +85,7 @@ export function runCommandWithStdin(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
+      env: createSpawnEnv(cwd),
       stdio: ["pipe", "pipe", "pipe"],
     });
 

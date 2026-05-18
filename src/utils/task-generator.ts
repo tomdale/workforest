@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createSpawnEnv } from "./spawn-env.ts";
 import { TailBuffer } from "./tail-buffer.ts";
 
 /**
@@ -46,6 +47,7 @@ export async function* runCommandGenerator(
 
   const child = spawn(command, args, {
     cwd: options.cwd,
+    env: createSpawnEnv(options.cwd),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
