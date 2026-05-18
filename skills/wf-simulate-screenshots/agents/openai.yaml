@@ -1,0 +1,4 @@
+interface:
+  display_name: "WF Simulate Screenshots"
+  short_description: "Capture wf simulator UI states as PNGs"
+  default_prompt: "Use $wf-simulate-screenshots to capture the wf dev simulate new UI states as PNG screenshots."
