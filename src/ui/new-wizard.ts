@@ -29,6 +29,7 @@ export type WizardOptions = {
   config: WorkspaceConfig;
   templates: Template[];
   handleTemplateManagement: HandleTemplateManagement;
+  generateFeatureName?: (description: string) => Promise<string | null>;
 };
 
 type WizardPhase =
@@ -80,7 +81,11 @@ export async function runNewWizard(
   let { templates } = options;
 
   while (true) {
-    const result = await runWizardScreen(options.config, templates);
+    const result = await runWizardScreen(
+      options.config,
+      templates,
+      options.generateFeatureName ?? generateSlugFromDescription,
+    );
 
     if (result.type === "cancel") {
       const { CancelError } = await import("../ui/prompts/index.ts");
@@ -185,6 +190,7 @@ function formatFooterHint(pairs: [key: string, desc: string][]): string {
 function runWizardScreen(
   config: WorkspaceConfig,
   templates: Template[],
+  generateFeatureName: (description: string) => Promise<string | null>,
 ): Promise<ScreenResult> {
   return new Promise((resolve) => {
     const screen = new Screen({
@@ -694,7 +700,7 @@ function runWizardScreen(
             screen.render();
           }, 80);
 
-          generateSlugFromDescription(trimmed)
+          generateFeatureName(trimmed)
             .then((generated) => {
               const featureName = generated ?? sanitizeToSlug(trimmed);
               finish({

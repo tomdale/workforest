@@ -242,6 +242,25 @@ describe("cli", () => {
     );
   });
 
+  it("exposes development UI simulation help", async () => {
+    const logs: string[] = [];
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "dev", "simulate", "new", "--help"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain("Usage: wf dev simulate new [options]");
+    expect(output).toContain("--fail-repo <name>");
+    expect(output).toContain("--speed <speed>");
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("writes the configured workspace path for wf cd", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
