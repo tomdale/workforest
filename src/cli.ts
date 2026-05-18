@@ -60,6 +60,7 @@ import {
 } from "./workspace/cleanup.ts";
 import { stampWorkspace } from "./workspace/index.ts";
 import {
+  getMetadataPath,
   hasWorkspaceMetadata,
   readWorkspaceMetadata,
 } from "./workspace/metadata.ts";
@@ -2720,6 +2721,8 @@ type WorkspaceInfo = {
   description?: string;
   template?: string;
   created?: string;
+  modifiedAt: Date;
+  repos: string[];
   repoCount: number;
 };
 
@@ -2744,10 +2747,19 @@ async function findWorkspaces(rootDir: string): Promise<WorkspaceInfo[]> {
 
       const metadata = await readWorkspaceMetadata(entryPath);
       if (metadata) {
+        const repoNames = metadata.repos.map((repo) => repo.name);
+        const modifiedAt = await getWorkspaceModifiedAt(
+          entryPath,
+          stat.mtime,
+          repoNames,
+        );
+
         workspaces.push({
           name: entry,
           path: entryPath,
           created: metadata.workspace.created_at,
+          modifiedAt,
+          repos: repoNames,
           repoCount: metadata.repos.length,
           ...(metadata.workspace.description
             ? { description: metadata.workspace.description }
@@ -2762,7 +2774,75 @@ async function findWorkspaces(rootDir: string): Promise<WorkspaceInfo[]> {
     }
   }
 
-  return workspaces;
+  return workspaces.sort((a, b) => {
+    const modifiedComparison = b.modifiedAt.getTime() - a.modifiedAt.getTime();
+    return modifiedComparison !== 0
+      ? modifiedComparison
+      : a.name.localeCompare(b.name);
+  });
+}
+
+async function getWorkspaceModifiedAt(
+  workspaceDir: string,
+  workspaceModifiedAt: Date,
+  repoNames: readonly string[],
+): Promise<Date> {
+  let newestTime = workspaceModifiedAt.getTime();
+  const paths = [
+    getMetadataPath(workspaceDir),
+    ...repoNames.map((repoName) => path.join(workspaceDir, repoName)),
+  ];
+
+  for (const candidatePath of paths) {
+    try {
+      const stat = await fs.stat(candidatePath);
+      newestTime = Math.max(newestTime, stat.mtime.getTime());
+    } catch {
+      // Missing or unreadable metadata/repos should not hide the workspace.
+    }
+  }
+
+  return new Date(newestTime);
+}
+
+function formatWorkspacePickerDescription(workspace: WorkspaceInfo): string {
+  const details = [
+    workspace.repos.length > 0
+      ? workspace.repos.join(", ")
+      : `${workspace.repoCount} repo${workspace.repoCount !== 1 ? "s" : ""}`,
+    workspace.template ? `template: ${workspace.template}` : undefined,
+    `modified ${formatWorkspaceModifiedAt(workspace.modifiedAt)}`,
+  ].filter((detail): detail is string => Boolean(detail));
+
+  return details.join(" | ");
+}
+
+function formatWorkspaceModifiedAt(date: Date, now = new Date()): string {
+  const elapsedMs = now.getTime() - date.getTime();
+  const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+
+  if (elapsedSeconds < 60) return "just now";
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) {
+    return `${elapsedDays}d ago`;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  }).format(date);
 }
 
 async function resolveWorkspaceByName(name: string): Promise<string | null> {
@@ -2834,7 +2914,7 @@ async function selectWorkspaceInteractive(
       options: workspaces.map((ws) => ({
         value: ws.path,
         label: ws.name,
-        description: `${ws.repoCount} repo${ws.repoCount !== 1 ? "s" : ""}${ws.template ? ` (${ws.template})` : ""}`,
+        description: formatWorkspacePickerDescription(ws),
       })),
       throwOnCancel: true,
     });
@@ -2871,7 +2951,7 @@ async function selectWorkspaceFuzzy(
       options: workspaces.map((ws) => ({
         value: ws.path,
         label: ws.name,
-        description: `${ws.repoCount} repo${ws.repoCount !== 1 ? "s" : ""}${ws.template ? ` (${ws.template})` : ""}`,
+        description: formatWorkspacePickerDescription(ws),
       })),
       throwOnCancel: true,
     });
