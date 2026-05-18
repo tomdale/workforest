@@ -300,21 +300,65 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("prints top-level help for wf find --help", async () => {
+  it.each([
+    ["new", "Usage: wf new"],
+    ["worktree", "Usage: wf worktree"],
+    ["wt", "Usage: wf wt"],
+    ["cd", "Usage: wf cd"],
+    ["find", "Usage: wf find"],
+    ["add", "Usage: wf add"],
+    ["fork", "Usage: wf fork"],
+    ["clean", "Usage: wf clean"],
+    ["list", "Usage: wf list"],
+    ["init", "Usage: wf init"],
+    ["template", "Usage: wf template"],
+    ["config", "Usage: wf config"],
+    ["dev", "Usage: wf dev"],
+    ["skills", "Usage: wf skills"],
+    ["version", "Usage: wf version"],
+  ])("prints scoped help for wf %s --help", async (command, usage) => {
     const logs: string[] = [];
 
     vi.spyOn(console, "log").mockImplementation((...args) => {
       logs.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "find", "--help"];
+    process.argv = ["node", "wf", command, "--help"];
     process.exitCode = undefined;
 
     await cli();
 
     const output = logs.join("\n");
-    expect(output).toContain("Start here (for AI agents):");
-    expect(output).toContain("Fuzzy-find");
+    expect(output).toContain(usage);
+    expect(output).not.toContain("Start here (for AI agents):");
+    expect(output).not.toContain("Commands:");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.each([
+    [["worktree", "list", "--help"], "Usage: wf worktree list"],
+    [["worktree", "rm", "--help"], "Usage: wf worktree rm"],
+    [["template", "new", "--help"], "Usage: wf template new"],
+    [["template", "delete", "--help"], "Usage: wf template delete"],
+    [["config", "edit", "--help"], "Usage: wf config edit"],
+    [["skills", "get", "--help"], "Usage: wf skills get"],
+    [["dev", "simulate", "--help"], "Usage: wf dev simulate"],
+  ])("prints scoped help for wf %s", async (argv, usage) => {
+    const logs: string[] = [];
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", ...argv];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain(usage);
+    expect(output).not.toContain("Start here (for AI agents):");
+    expect(output).not.toContain("Commands:");
     expect(process.exitCode).toBeUndefined();
   });
 

@@ -1,5 +1,6 @@
 import arg from "arg";
 import { reposFromSlugs } from "./config.ts";
+import { commandHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import type { Template } from "./templates/index.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
@@ -54,13 +55,13 @@ export async function runDevCommand(argv: string[]): Promise<void> {
     subcommand === "--help" ||
     subcommand === "-h"
   ) {
-    printDevUsage();
+    console.log(commandHelp("dev"));
     return;
   }
 
   if (subcommand !== "simulate" && subcommand !== "sim") {
     log.error(`Unknown dev subcommand: ${subcommand}`);
-    printDevUsage();
+    console.log(commandHelp("dev"));
     process.exitCode = 1;
     return;
   }
@@ -72,7 +73,7 @@ async function runDevSimulateCommand(argv: string[]): Promise<void> {
   const flow = argv[0];
 
   if (flow === undefined || flow === "--help" || flow === "-h") {
-    printSimulateUsage();
+    console.log(nestedCommandHelp("dev", "simulate"));
     return;
   }
 
@@ -330,11 +331,6 @@ async function* syntheticRepoPipeline(
   await wait(200);
 
   yield { phase: "complete", hasLockfile: true };
-}
-
-function printDevUsage(): void {
-  log.info("Usage: wf dev simulate <flow> [options]");
-  log.info("Flows: new");
 }
 
 function printSimulateUsage(): void {

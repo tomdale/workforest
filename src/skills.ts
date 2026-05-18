@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { commandHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 
 const SKILL_DIR_NAMES = ["skills", "skill-data"] as const;
@@ -209,15 +210,27 @@ export async function runSkillsCommand(argv: string[]): Promise<void> {
     switch (subcommand) {
       case "--help":
       case "-h":
-        printSkillsHelp();
+        console.log(commandHelp("skills"));
         return;
       case "list":
+        if (hasHelpFlag(args.slice(1))) {
+          console.log(nestedCommandHelp("skills", "list"));
+          return;
+        }
         await runSkillsList(skillsDirs, jsonMode);
         return;
       case "get":
+        if (hasHelpFlag(args.slice(1))) {
+          console.log(nestedCommandHelp("skills", "get"));
+          return;
+        }
         await runSkillsGet(skillsDirs, args.slice(1), jsonMode);
         return;
       case "path":
+        if (hasHelpFlag(args.slice(1))) {
+          console.log(nestedCommandHelp("skills", "path"));
+          return;
+        }
         await runSkillsPath(skillsDirs, args[1], jsonMode);
         return;
       default:
@@ -424,27 +437,8 @@ function failSkillsCommand(message: string, jsonMode: boolean): void {
   process.exitCode = 1;
 }
 
-function printSkillsHelp(): void {
-  console.log(`wf skills - List and retrieve bundled skill content
-
-Usage: wf skills [subcommand] [options]
-
-Subcommands:
-  list                       List all available skills (default)
-  get <name> [name...]       Output a skill's full content
-  get --all                  Output every visible skill
-  path [name]                Print filesystem path to skill directory
-
-Options:
-  --full                     Include references and templates for get
-  --json                     Print machine-readable JSON
-
-Examples:
-  wf skills
-  wf skills get core
-  wf skills get parallel-worktrees --full
-  wf skills path core
-`);
+function hasHelpFlag(args: readonly string[]): boolean {
+  return args.includes("--help") || args.includes("-h");
 }
 
 function printJson(result: SkillsJsonResult): void {

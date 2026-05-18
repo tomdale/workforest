@@ -9,7 +9,7 @@ import {
   reposFromSlugs,
   saveWorkspaceConfig,
 } from "./config.ts";
-import { help } from "./help.ts";
+import { commandHelp, help, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import {
   isShellAutoCdEnabled,
@@ -126,14 +126,14 @@ export async function cli(): Promise<void> {
       break;
     case "worktree":
     case "wt":
-      await runWorktreeCommand(commandArgv);
+      await runWorktreeCommand(commandArgv, command);
       break;
     case "list":
     case "ls":
-      await runListCommand();
+      await runListCommand(commandArgv, command);
       break;
     case "version":
-      await runVersionCommand();
+      await runVersionCommand(commandArgv);
       break;
     default:
       log.error(`Unknown command: ${command}`);
@@ -148,15 +148,29 @@ async function runConfigCommand(argv: string[]): Promise<void> {
   switch (subcommand) {
     case "--help":
     case "-h":
-      console.log(await help());
+      console.log(commandHelp("config"));
       break;
     case "edit":
+      if (hasHelpFlag(argv.slice(1))) {
+        console.log(nestedCommandHelp("config", "edit"));
+        return;
+      }
       await runConfigEdit();
       break;
     case "init":
+      if (hasHelpFlag(argv.slice(1))) {
+        console.log(nestedCommandHelp("config", "init"));
+        return;
+      }
       await runConfigInit();
       break;
     case "show":
+      if (hasHelpFlag(argv.slice(1))) {
+        console.log(nestedCommandHelp("config", "show"));
+        return;
+      }
+      await runConfigShow();
+      break;
     case undefined:
       await runConfigShow();
       break;
@@ -177,7 +191,7 @@ async function runInitCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("init"));
     return;
   }
 
@@ -323,14 +337,56 @@ async function runConfigEdit(): Promise<void> {
   });
 }
 
-async function runVersionCommand(): Promise<void> {
+async function runVersionCommand(argv: string[] = []): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "-h": "--help",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(commandHelp("version"));
+    return;
+  }
+
+  if (args._.length > 0) {
+    log.error("Usage: wf version");
+    process.exitCode = 1;
+    return;
+  }
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = path.join(__dirname, "..", "package.json");
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
   console.log(`workforest ${packageJson.version}`);
 }
 
-async function runListCommand(): Promise<void> {
+function hasHelpFlag(argv: readonly string[]): boolean {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+async function runListCommand(argv: string[], command = "list"): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "-h": "--help",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    console.log(commandHelp(command));
+    return;
+  }
+
+  if (args._.length > 0) {
+    log.error("Usage: wf list");
+    process.exitCode = 1;
+    return;
+  }
+
   const { config } = await loadWorkspaceConfig();
 
   if (!config.defaultDir) {
@@ -417,7 +473,10 @@ async function runListCommand(): Promise<void> {
   console.log();
 }
 
-async function runWorktreeCommand(argv: string[]): Promise<void> {
+async function runWorktreeCommand(
+  argv: string[],
+  command = "worktree",
+): Promise<void> {
   const args = arg(
     {
       "--help": Boolean,
@@ -433,7 +492,10 @@ async function runWorktreeCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    const subcommandHelp = args._[0]
+      ? nestedCommandHelp("worktree", args._[0])
+      : null;
+    console.log(subcommandHelp ?? commandHelp(command));
     return;
   }
 
@@ -785,7 +847,7 @@ async function runCdCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("cd"));
     return;
   }
 
@@ -839,7 +901,7 @@ async function runFindCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("find"));
     return;
   }
 
@@ -885,32 +947,62 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
   switch (subcommand) {
     case "--help":
     case "-h":
-      console.log(await help());
+      console.log(commandHelp("template"));
       break;
     case "list":
     case "ls":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "list"));
+        return;
+      }
+      await runTemplateList();
+      break;
     case undefined:
       await runTemplateList();
       break;
     case "show":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "show"));
+        return;
+      }
       await runTemplateShow(subArgv);
       break;
     case "info":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "info"));
+        return;
+      }
       await runTemplateInfo(subArgv);
       break;
     case "new":
     case "create":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "new"));
+        return;
+      }
       await runTemplateNew(subArgv);
       break;
     case "delete":
     case "rm":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "delete"));
+        return;
+      }
       await runTemplateDelete(subArgv);
       break;
     case "edit":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "edit"));
+        return;
+      }
       await runTemplateEdit(subArgv);
       break;
     case "copy":
     case "cp":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "copy"));
+        return;
+      }
       await runTemplateCopy(subArgv);
       break;
     default:
@@ -1273,7 +1365,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("clean"));
     return;
   }
 
@@ -1438,7 +1530,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   }
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("new"));
     return;
   }
 
@@ -1660,7 +1752,7 @@ async function runAddCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("add"));
     return;
   }
 
@@ -1807,7 +1899,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
   );
 
   if (args["--help"]) {
-    console.log(await help());
+    console.log(commandHelp("fork"));
     return;
   }
 
