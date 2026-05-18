@@ -83,6 +83,7 @@ export async function confirmPrompt(
     done: () =>
       `  ${symbols.done}  ${message} ${chalk.dim("·")} ${value ? "Yes" : "No"}`,
     onKey: (event) => {
+      if (event.type === "submit") return { submit: true, value };
       if (event.type === "text") {
         if (/^y$/i.test(event.value)) return { submit: true, value: true };
         if (/^n$/i.test(event.value)) return { submit: true, value: false };
