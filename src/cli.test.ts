@@ -4,11 +4,40 @@ import {
   mkdtemp,
   readFile,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+type PromptOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+type PromptOptions = {
+  options: PromptOption[];
+};
+
+const promptSelectMock = vi.hoisted(() =>
+  vi.fn(async (_message: string, options: PromptOptions) => {
+    return options.options[0]?.value;
+  }),
+);
+
+vi.mock("./ui/prompts/index.ts", async () => {
+  const actual = await vi.importActual<typeof import("./ui/prompts/index.ts")>(
+    "./ui/prompts/index.ts",
+  );
+
+  return {
+    ...actual,
+    promptSelect: promptSelectMock,
+  };
+});
+
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
@@ -34,6 +63,7 @@ async function createTempDir(prefix: string): Promise<string> {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  promptSelectMock.mockClear();
 
   if (ORIGINAL_CONFIG_DIR === undefined) {
     delete process.env["WORKFOREST_CONFIG_DIR"];
@@ -484,6 +514,286 @@ describe("cli", () => {
       "utf8",
     );
     expect(copied).toBe("FEATURE_FLAG=1\n");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("prompts before overwriting an existing template file", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    const templateFilePath = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+      "files",
+      "front",
+      ".env.local",
+    );
+    await mkdir(path.dirname(templateFilePath), { recursive: true });
+    await writeFile(templateFilePath, "FEATURE_FLAG=0\n", "utf8");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    promptSelectMock.mockResolvedValueOnce("overwrite");
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "add-file", "front/.env.local"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promptSelectMock).toHaveBeenCalledOnce();
+    const options = promptSelectMock.mock.calls[0]?.[1].options ?? [];
+    expect(options.map((option) => option.value)).toEqual([
+      "overwrite",
+      "diff",
+      "skip",
+    ]);
+    await expect(readFile(templateFilePath, "utf8")).resolves.toBe(
+      "FEATURE_FLAG=1\n",
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("adds a workspace directory recursively to the source template files directory", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front", "config", "nested"), {
+      recursive: true,
+    });
+    await mkdir(path.join(workspaceDir, "front", "config", "empty"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(workspaceDir, "front", "config", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(workspaceDir, "front", "config", "nested", "settings.json"),
+      "{}\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "add-file", "front/config"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const templateConfigDir = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+      "files",
+      "front",
+      "config",
+    );
+    await expect(
+      readFile(path.join(templateConfigDir, ".env.local"), "utf8"),
+    ).resolves.toBe("FEATURE_FLAG=1\n");
+    await expect(
+      readFile(path.join(templateConfigDir, "nested", "settings.json"), "utf8"),
+    ).resolves.toBe("{}\n");
+    await expect(
+      stat(path.join(templateConfigDir, "empty")),
+    ).resolves.toSatisfy((entry) => entry.isDirectory());
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("shows a diff and can skip an existing file while adding a directory", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const logs: string[] = [];
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front", "config"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(workspaceDir, "front", "config", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(workspaceDir, "front", "config", "settings.json"),
+      "{}\n",
+      "utf8",
+    );
+    const templateConfigDir = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+      "files",
+      "front",
+      "config",
+    );
+    await mkdir(templateConfigDir, { recursive: true });
+    await writeFile(
+      path.join(templateConfigDir, ".env.local"),
+      "FEATURE_FLAG=0\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    promptSelectMock
+      .mockResolvedValueOnce("diff")
+      .mockResolvedValueOnce("skip");
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "add-file", "front/config"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promptSelectMock).toHaveBeenCalledTimes(2);
+    const options = promptSelectMock.mock.calls[0]?.[1].options ?? [];
+    expect(options.map((option) => option.value)).toEqual([
+      "overwrite",
+      "diff",
+      "skip",
+      "cancel",
+    ]);
+    expect(logs.join("\n")).toContain("-FEATURE_FLAG=0");
+    expect(logs.join("\n")).toContain("+FEATURE_FLAG=1");
+    await expect(
+      readFile(path.join(templateConfigDir, ".env.local"), "utf8"),
+    ).resolves.toBe("FEATURE_FLAG=0\n");
+    await expect(
+      readFile(path.join(templateConfigDir, "settings.json"), "utf8"),
+    ).resolves.toBe("{}\n");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("skips automatically before prompting when the diff is empty", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const logs: string[] = [];
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    const templateFilePath = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+      "files",
+      "front",
+      ".env.local",
+    );
+    await mkdir(path.dirname(templateFilePath), { recursive: true });
+    await writeFile(templateFilePath, "FEATURE_FLAG=1\n", "utf8");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "add-file", "front/.env.local"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promptSelectMock).not.toHaveBeenCalled();
+    expect(logs.join("\n")).not.toContain("No differences");
+    await expect(readFile(templateFilePath, "utf8")).resolves.toBe(
+      "FEATURE_FLAG=1\n",
+    );
     expect(process.exitCode).toBeUndefined();
   });
 

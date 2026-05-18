@@ -241,7 +241,7 @@ Subcommands:
   new, create <name> <repo...>
                             Create a template
   edit <name>               Edit a template interactively
-  add-file <filepath>       Add a workspace file to the source template
+  add-file <path>           Add a workspace file or directory to the source template
   copy, cp <source> <dest>  Copy a template
   delete, rm <name>         Delete a template
 
@@ -358,11 +358,12 @@ Options:
 
 Edit a template interactively.
 `,
-    "add-file": `Usage: wf template add-file <filepath>
+    "add-file": `Usage: wf template add-file <path>
 
-Add a file from the current workspace to the files/ directory of the template
-that created the workspace. The file is copied at the same path relative to the
-workspace root, so future workspaces from that template receive it there.
+Add a file or directory from the current workspace to the files/ directory of
+the template that created the workspace. The path is copied at the same path
+relative to the workspace root, so future workspaces from that template receive
+it there.
 `,
     copy: `Usage: wf template copy <source> <destination>
 

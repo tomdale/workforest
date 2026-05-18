@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -66,6 +67,15 @@ import {
 } from "./workspace/metadata.ts";
 
 export { log };
+
+type TemplateAddFileEntry = {
+  sourcePath: string;
+  targetPath: string;
+  relativePath: string;
+  type: "directory" | "file";
+};
+
+type TemplateAddFileConflictAction = "overwrite" | "diff" | "skip" | "cancel";
 
 export async function cli(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -1327,7 +1337,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
   const extra = argv.slice(1);
 
   if (!sourceInput || extra.length > 0) {
-    log.error("Usage: workforest template add-file <filepath>");
+    log.error("Usage: workforest template add-file <path>");
     process.exitCode = 1;
     return;
   }
@@ -1383,8 +1393,8 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
     return;
   }
 
-  if (!sourceStat.isFile()) {
-    log.error(`Not a file: ${sourcePath}`);
+  if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
+    log.error(`Not a file or directory: ${sourcePath}`);
     process.exitCode = 1;
     return;
   }
@@ -1395,15 +1405,229 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
     relativePath,
   );
 
-  if (await pathExists(targetPath)) {
-    log.error(`Template file already exists: ${targetPath}`);
-    process.exitCode = 1;
-    return;
+  const entries = sourceStat.isDirectory()
+    ? await collectTemplateAddFileDirectoryEntries(
+        sourcePath,
+        targetPath,
+        relativePath,
+      )
+    : [
+        {
+          sourcePath,
+          targetPath,
+          relativePath,
+          type: "file" as const,
+        },
+      ];
+  const totalFileCount = entries.filter(
+    (entry) => entry.type === "file",
+  ).length;
+  const skippedTargetPaths = new Set<string>();
+  let copiedCount = 0;
+  let skippedCount = 0;
+
+  for (const entry of entries) {
+    if (entry.type === "directory") {
+      if (await pathExists(entry.targetPath)) {
+        const targetStat = await fs.stat(entry.targetPath);
+        if (!targetStat.isDirectory()) {
+          log.error(`Template path already exists: ${entry.targetPath}`);
+          process.exitCode = 1;
+          return;
+        }
+      }
+      continue;
+    }
+
+    if (await pathExists(entry.targetPath)) {
+      const targetStat = await fs.stat(entry.targetPath);
+      if (!targetStat.isFile()) {
+        log.error(`Template path already exists: ${entry.targetPath}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const diff = await runNoIndexDiff(entry.targetPath, entry.sourcePath);
+      if (!diff) {
+        skippedTargetPaths.add(entry.targetPath);
+        continue;
+      }
+
+      const action = await resolveTemplateAddFileConflict(
+        entry,
+        totalFileCount,
+        diff,
+      );
+
+      if (action === "cancel") {
+        log.info("Cancelled.");
+        process.exitCode = 1;
+        return;
+      }
+
+      if (action === "skip") {
+        skippedTargetPaths.add(entry.targetPath);
+      }
+    }
   }
 
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.copyFile(sourcePath, targetPath);
-  log.success(`Added ${relativePath} to template "${template.id}".`);
+  for (const entry of entries) {
+    if (entry.type === "directory") {
+      await fs.mkdir(entry.targetPath, { recursive: true });
+      continue;
+    }
+
+    if (skippedTargetPaths.has(entry.targetPath)) {
+      skippedCount += 1;
+    } else {
+      await fs.mkdir(path.dirname(entry.targetPath), { recursive: true });
+      await fs.copyFile(entry.sourcePath, entry.targetPath);
+      copiedCount += 1;
+    }
+  }
+
+  const suffix =
+    skippedCount > 0 ? ` (${copiedCount} copied, ${skippedCount} skipped)` : "";
+  log.success(`Added ${relativePath} to template "${template.id}".${suffix}`);
+}
+
+async function collectTemplateAddFileDirectoryEntries(
+  sourceDir: string,
+  targetDir: string,
+  sourceRelativePath: string,
+): Promise<TemplateAddFileEntry[]> {
+  const entries: TemplateAddFileEntry[] = [
+    {
+      sourcePath: sourceDir,
+      targetPath: targetDir,
+      relativePath: sourceRelativePath,
+      type: "directory",
+    },
+  ];
+
+  async function walk(currentSourceDir: string, currentTargetDir: string) {
+    const children = await fs.readdir(currentSourceDir, {
+      withFileTypes: true,
+    });
+
+    for (const child of children) {
+      const childSourcePath = path.join(currentSourceDir, child.name);
+      const childTargetPath = path.join(currentTargetDir, child.name);
+      const childRelativePath = path.join(
+        sourceRelativePath,
+        path.relative(sourceDir, childSourcePath),
+      );
+
+      if (child.isDirectory()) {
+        entries.push({
+          sourcePath: childSourcePath,
+          targetPath: childTargetPath,
+          relativePath: childRelativePath,
+          type: "directory",
+        });
+        await walk(childSourcePath, childTargetPath);
+      } else if (child.isFile()) {
+        entries.push({
+          sourcePath: childSourcePath,
+          targetPath: childTargetPath,
+          relativePath: childRelativePath,
+          type: "file",
+        });
+      } else {
+        log.warn(`Skipping unsupported path: ${childSourcePath}`);
+      }
+    }
+  }
+
+  await walk(sourceDir, targetDir);
+  return entries;
+}
+
+async function resolveTemplateAddFileConflict(
+  entry: TemplateAddFileEntry,
+  totalFileCount: number,
+  diff: string,
+): Promise<Exclude<TemplateAddFileConflictAction, "diff">> {
+  if (!isInteractive()) {
+    log.error(`Template file already exists: ${entry.targetPath}`);
+    process.exitCode = 1;
+    return "cancel";
+  }
+
+  log.warn(`Template file already exists: ${entry.relativePath}`);
+
+  while (true) {
+    const action = await promptSelect<TemplateAddFileConflictAction>(
+      "Choose how to handle the existing template file",
+      {
+        options: [
+          {
+            label: "Overwrite",
+            value: "overwrite",
+            description: "Replace the template file with the workspace file",
+          },
+          {
+            label: "Show diff",
+            value: "diff",
+            description: "Compare the template file with the workspace file",
+          },
+          {
+            label: "Skip",
+            value: "skip",
+            description: "Leave the template file unchanged",
+          },
+          ...(totalFileCount > 1
+            ? [
+                {
+                  label: "Cancel",
+                  value: "cancel" as const,
+                  description: "Stop adding files",
+                },
+              ]
+            : []),
+        ],
+      },
+    );
+
+    if (action === "diff") {
+      showTemplateAddFileDiff(diff);
+      continue;
+    }
+
+    return action;
+  }
+}
+
+function showTemplateAddFileDiff(diff: string): void {
+  console.log(diff);
+}
+
+function runNoIndexDiff(oldPath: string, newPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["diff", "--no-index", "--", oldPath, newPath]);
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on("error", reject);
+    child.on("close", (code: number | null) => {
+      if (code === 0 || code === 1) {
+        resolve(stdout);
+      } else {
+        reject(new Error(stderr || `git diff exited with code ${code}`));
+      }
+    });
+  });
 }
 
 async function runTemplateCopy(argv: string[]): Promise<void> {
