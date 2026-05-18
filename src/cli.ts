@@ -997,6 +997,13 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
       }
       await runTemplateEdit(subArgv);
       break;
+    case "add-file":
+      if (hasHelpFlag(subArgv)) {
+        console.log(nestedCommandHelp("template", "add-file"));
+        return;
+      }
+      await runTemplateAddFile(subArgv);
+      break;
     case "copy":
     case "cp":
       if (hasHelpFlag(subArgv)) {
@@ -1007,7 +1014,9 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
       break;
     default:
       log.error(`Unknown template subcommand: ${subcommand}`);
-      log.info("Available: list, show, info, new, edit, delete, copy");
+      log.info(
+        "Available: list, show, info, new, edit, add-file, delete, copy",
+      );
       process.exitCode = 1;
   }
 }
@@ -1311,6 +1320,90 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
       log.success(`Template "${templateId}" saved.`);
     },
   });
+}
+
+async function runTemplateAddFile(argv: string[]): Promise<void> {
+  const sourceInput = argv[0];
+  const extra = argv.slice(1);
+
+  if (!sourceInput || extra.length > 0) {
+    log.error("Usage: workforest template add-file <filepath>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    log.error("Not inside a workspace.");
+    process.exitCode = 1;
+    return;
+  }
+
+  let metadata: WorkspaceMetadata | null;
+  try {
+    metadata = await readWorkspaceMetadata(workspaceDir);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!metadata?.workspace.template_id) {
+    log.error("Current workspace was not created from a template.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const template = await loadTemplate(metadata.workspace.template_id);
+  if (!template) {
+    log.error(`Template "${metadata.workspace.template_id}" not found.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const sourcePath = path.resolve(sourceInput);
+  const relativePath = path.relative(workspaceDir, sourcePath);
+
+  if (
+    relativePath === "" ||
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath)
+  ) {
+    log.error(`File must be inside the current workspace: ${sourcePath}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let sourceStat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    sourceStat = await fs.stat(sourcePath);
+  } catch {
+    log.error(`File not found: ${sourcePath}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!sourceStat.isFile()) {
+    log.error(`Not a file: ${sourcePath}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const targetPath = path.join(
+    path.dirname(template.path),
+    "files",
+    relativePath,
+  );
+
+  if (await pathExists(targetPath)) {
+    log.error(`Template file already exists: ${targetPath}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.copyFile(sourcePath, targetPath);
+  log.success(`Added ${relativePath} to template "${template.id}".`);
 }
 
 async function runTemplateCopy(argv: string[]): Promise<void> {

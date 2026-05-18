@@ -22,6 +22,7 @@ const ORIGINAL_PATH = process.env["PATH"];
 const ORIGINAL_ARGV = [...process.argv];
 const ORIGINAL_EXIT_CODE = process.exitCode;
 const ORIGINAL_STDIN_IS_TTY = process.stdin.isTTY;
+const ORIGINAL_CWD = process.cwd();
 
 const tempDirs: string[] = [];
 
@@ -59,6 +60,7 @@ afterEach(async () => {
 
   process.argv = [...ORIGINAL_ARGV];
   process.exitCode = ORIGINAL_EXIT_CODE;
+  process.chdir(ORIGINAL_CWD);
   Object.defineProperty(process.stdin, "isTTY", {
     configurable: true,
     value: ORIGINAL_STDIN_IS_TTY,
@@ -340,6 +342,7 @@ describe("cli", () => {
     [["worktree", "rm", "--help"], "Usage: wf worktree rm"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
+    [["template", "add-file", "--help"], "Usage: wf template add-file"],
     [["config", "edit", "--help"], "Usage: wf config edit"],
     [["skills", "get", "--help"], "Usage: wf skills get"],
     [["dev", "simulate", "--help"], "Usage: wf dev simulate"],
@@ -431,5 +434,113 @@ describe("cli", () => {
       `${path.resolve(xdgConfigHome, "workforest", "templates", "demo")}\n`,
     );
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("adds a workspace file to the source template files directory", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "add-file", "front/.env.local"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const copied = await readFile(
+      path.join(
+        xdgConfigHome,
+        "workforest",
+        "templates",
+        "demo",
+        "files",
+        "front",
+        ".env.local",
+      ),
+      "utf8",
+    );
+    expect(copied).toBe("FEATURE_FLAG=1\n");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("requires wf template add-file to run inside a workspace", async () => {
+    const cwd = await createTempDir("workforest-outside-");
+    const errors: string[] = [];
+
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    await writeFile(path.join(cwd, ".envrc"), "use workforest\n", "utf8");
+    process.chdir(cwd);
+    process.argv = ["node", "wf", "template", "add-file", ".envrc"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain("Not inside a workspace");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("requires wf template add-file workspaces to have a source template", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const errors: string[] = [];
+
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    await writeFile(
+      path.join(workspaceDir, ".envrc"),
+      "use workforest\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "manual-work",
+      branchName: "tomdale/manual-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "add-file", ".envrc"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      "Current workspace was not created from a template",
+    );
+    expect(process.exitCode).toBe(1);
   });
 });
