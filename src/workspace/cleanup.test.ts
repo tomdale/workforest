@@ -80,7 +80,7 @@ beforeEach(() => {
         slug: "fix-tests",
         parent_repo: "api",
         path: "api-fix-tests",
-        branch: "tomdale/demo/fix-tests",
+        branch: "tomdale/fix-tests",
         base_branch: "tomdale/demo",
         base_sha: "abc123",
         created_at: "2026-05-15T00:00:00.000Z",

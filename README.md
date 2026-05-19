@@ -156,7 +156,7 @@ This creates directories like:
 - `~/Code/workspaces/my-feature/omniagent-upgrade-dependencies`
 
 Each temporary worktree starts from the primary repo's committed `HEAD`, gets a
-nested branch such as `tomdale/my-feature/fix-tests`, and runs the same built-in
+branch such as `tomdale/fix-tests`, and runs the same built-in
 repo initializers used during workspace setup, such as dependency installation
 and Vercel/Turbo linking. Template files and hooks are not rerun, and the VS
 Code workspace file is left unchanged.

@@ -86,7 +86,7 @@ describe("temporary worktrees", () => {
         slug: "fix-tests",
         parentRepo: "front",
         path: path.join(workspaceDir, "front-fix-tests"),
-        branch: "tomdale/my-feature/fix-tests",
+        branch: "tomdale/fix-tests",
         setupStatus: "ready",
       },
     ]);
@@ -95,7 +95,7 @@ describe("temporary worktrees", () => {
         "worktree",
         "add",
         "-b",
-        "tomdale/my-feature/fix-tests",
+        "tomdale/fix-tests",
         path.join(workspaceDir, "front-fix-tests"),
         "HEAD",
       ],
@@ -108,7 +108,7 @@ describe("temporary worktrees", () => {
           slug: "fix-tests",
           parent_repo: "front",
           path: "front-fix-tests",
-          branch: "tomdale/my-feature/fix-tests",
+          branch: "tomdale/fix-tests",
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",
           setup_status: "ready",
@@ -180,7 +180,7 @@ describe("temporary worktrees", () => {
         slug: "fix-tests",
         parent_repo: "front",
         path: "front-fix-tests",
-        branch: "tomdale/my-feature/fix-tests",
+        branch: "tomdale/fix-tests",
         base_branch: "tomdale/my-feature",
         base_sha: "abc123",
         created_at: "2026-05-15T00:00:00.000Z",
@@ -222,7 +222,7 @@ describe("temporary worktrees", () => {
     );
     expect(runGitMock).toHaveBeenNthCalledWith(
       4,
-      ["branch", "-d", "tomdale/my-feature/fix-tests"],
+      ["branch", "-d", "tomdale/fix-tests"],
       { cwd: path.join(workspaceDir, "front") },
     );
     await expect(

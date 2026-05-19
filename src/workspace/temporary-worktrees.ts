@@ -442,7 +442,7 @@ async function planTemporaryWorktrees({
   for (const slug of slugs) {
     const relativePath = `${parentRepo.name}-${slug}`;
     const targetDir = path.join(workspaceDir, relativePath);
-    const branch = `${baseBranch}/${slug}`;
+    const branch = buildTemporaryBranchName(baseBranch, slug);
 
     if (
       existingEntries.some(
@@ -475,6 +475,15 @@ async function planTemporaryWorktrees({
   }
 
   return planned;
+}
+
+function buildTemporaryBranchName(baseBranch: string, slug: string): string {
+  const lastSlash = baseBranch.lastIndexOf("/");
+  if (lastSlash === -1) {
+    return slug;
+  }
+
+  return `${baseBranch.slice(0, lastSlash + 1)}${slug}`;
 }
 
 function validateRequestedSlugs(slugs: readonly string[]): void {

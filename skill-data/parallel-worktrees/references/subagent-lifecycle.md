@@ -20,11 +20,11 @@ Expected shape:
 ~/Code/workspaces/my-feature/next.js-upgrade-dependencies
 ```
 
-Branches are nested under the current primary branch:
+Branches use the current primary branch namespace:
 
 ```text
-tomdale/my-feature/fix-tests
-tomdale/my-feature/upgrade-dependencies
+tomdale/fix-tests
+tomdale/upgrade-dependencies
 ```
 
 ## 3. Delegate Carefully
