@@ -1,10 +1,10 @@
 import path from "node:path";
+import { hasAny } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import {
   runSingleRepoInitializersGenerator,
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
-import { hasAny } from "../services/pnpm.ts";
 import type { RepoConfig } from "../types.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import {

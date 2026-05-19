@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
     "module": "nodenext",
     "target": "esnext",
@@ -26,6 +26,6 @@
 
     "moduleResolution": "nodenext"
   },
-  "include": ["src"],
+  "include": ["src", "packages"],
   "$schema": "https://json.schemastore.org/tsconfig"
 }

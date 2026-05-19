@@ -1,22 +1,19 @@
-import type { TaskState } from "../../utils/task-generator.ts";
-import { runParallel } from "../../utils/task-generator.ts";
-import { npmInstallInitializer } from "./npm-install.ts";
-import { pnpmInstallInitializer } from "./pnpm-install.ts";
-import { turboLinkInitializer } from "./turbo-link.ts";
-import type {
-  InitializerContext,
-  InitializerDefinition,
-  InitializerDetection,
-} from "./types.ts";
-import { vercelLinkInitializer } from "./vercel-link.ts";
-import { yarnInstallInitializer } from "./yarn-install.ts";
+import { createRequire } from "node:module";
+import {
+  type InitializerContext,
+  type InitializerDefinition,
+  type InitializerDetection,
+  type PluginDetect,
+  runParallel,
+  type TaskState,
+} from "@wf-plugin/core";
+import * as packageManagersPlugin from "@wf-plugin/package-managers";
+import * as turboPlugin from "@wf-plugin/turbo";
+import * as vercelPlugin from "@wf-plugin/vercel";
+import { loadWorkspaceConfig } from "../../config.ts";
 
-// Re-export types
 export type { InitializerContext, InitializerDefinition, InitializerDetection };
 
-/**
- * State emitted by the initializer runner.
- */
 export type InitializerState =
   | { phase: "detecting"; repoName: string }
   | {
@@ -34,10 +31,6 @@ export type InitializerState =
     }
   | { phase: "repo-complete"; repoName: string };
 
-/**
- * State emitted by a single-repo initializer run.
- * Used for per-repo pipeline orchestration.
- */
 export type SingleRepoInitializerState =
   | { phase: "detecting" }
   | {
@@ -53,19 +46,366 @@ export type SingleRepoInitializerState =
     }
   | { phase: "complete" };
 
-/**
- * Registry of built-in initializers, sorted by priority.
- */
-export const builtInInitializers: InitializerDefinition[] = [
-  pnpmInstallInitializer,
-  yarnInstallInitializer,
-  npmInstallInitializer,
-  vercelLinkInitializer,
-  turboLinkInitializer,
-].sort((a, b) => a.priority - b.priority);
+type PluginActivationModule = Record<string, unknown> & {
+  detect?: PluginDetect;
+};
+
+type InitializerModule = Record<string, unknown> & { default?: unknown };
+
+export type PluginInitializerMetadata = {
+  id: string;
+  module?: string;
+  export?: string;
+  before?: string[];
+  after?: string[];
+  requires?: string[];
+};
+
+type PluginInitializerEntry = string | PluginInitializerMetadata;
+
+export type WorkforestPluginMetadata = {
+  id?: string;
+  initializers?: PluginInitializerEntry[];
+};
+
+export type PluginPackageManifest = {
+  name?: string;
+  workforest?: {
+    plugin?: WorkforestPluginMetadata;
+  };
+};
+
+export type PluginPackage = {
+  manifest: PluginPackageManifest;
+  module: PluginActivationModule;
+};
+
+type RegisteredInitializer = {
+  packageName: string;
+  pluginId: string;
+  metadata: Required<Pick<PluginInitializerMetadata, "id" | "module">> &
+    Omit<PluginInitializerMetadata, "id" | "module">;
+  key: string;
+};
+
+type LoadedInitializer = {
+  registryEntry: RegisteredInitializer;
+  initializer: InitializerDefinition;
+};
+
+const ACTIVE_PLUGIN_PACKAGE_NAMES = [
+  "@wf-plugin/package-managers",
+  "@wf-plugin/vercel",
+  "@wf-plugin/turbo",
+] as const;
+
+const require = createRequire(import.meta.url);
+
+const activePluginPackages: PluginPackage[] = [
+  {
+    manifest: loadPluginManifest("@wf-plugin/package-managers"),
+    module: packageManagersPlugin,
+  },
+  {
+    manifest: loadPluginManifest("@wf-plugin/vercel"),
+    module: vercelPlugin,
+  },
+  {
+    manifest: loadPluginManifest("@wf-plugin/turbo"),
+    module: turboPlugin,
+  },
+];
+
+const activeInitializerRegistry =
+  buildInitializerRegistry(activePluginPackages);
+
+export const builtInInitializerIds = activeInitializerRegistry.map(
+  (entry) => entry.metadata.id,
+);
+
+function loadPluginManifest(packageName: string): PluginPackageManifest {
+  const manifestPath = require.resolve(`${packageName}/package.json`);
+  return require(manifestPath) as PluginPackageManifest;
+}
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function initializerKey(pluginId: string, initializerId: string): string {
+  return `${pluginId}:${initializerId}`;
+}
+
+function isInitializerDefinition(
+  value: unknown,
+): value is InitializerDefinition {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<InitializerDefinition>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.execute === "function"
+  );
+}
+
+function isPluginDetect(value: unknown): value is PluginDetect {
+  return typeof value === "function";
+}
+
+export function validateAndOrderPluginInitializers(
+  packages: PluginPackage[],
+): RegisteredInitializer["metadata"][] {
+  return orderRegisteredInitializers(buildInitializerRegistry(packages)).map(
+    (entry) => entry.metadata,
+  );
+}
+
+function buildInitializerRegistry(
+  packages: PluginPackage[],
+): RegisteredInitializer[] {
+  const entries: RegisteredInitializer[] = [];
+  const seenIds = new Map<string, string>();
+
+  for (const pluginPackage of packages) {
+    const packageName = pluginPackage.manifest.name;
+    if (!packageName) {
+      throw new Error("Plugin package is missing package.json name.");
+    }
+
+    const pluginMetadata = pluginPackage.manifest.workforest?.plugin;
+    if (!pluginMetadata) {
+      throw new Error(
+        `Plugin package "${packageName}" is missing workforest.plugin metadata.`,
+      );
+    }
+
+    if (!isPluginDetect(pluginPackage.module.detect)) {
+      throw new Error(
+        `Plugin package "${packageName}" is missing detect export.`,
+      );
+    }
+
+    const pluginId = pluginMetadata.id ?? packageName;
+    const initializerMetadata = pluginMetadata.initializers ?? [];
+
+    for (const entry of initializerMetadata) {
+      const metadata = normalizeInitializerMetadata(entry);
+
+      const existingPlugin = seenIds.get(metadata.id);
+      if (existingPlugin) {
+        throw new Error(
+          `Duplicate initializer id "${metadata.id}" in "${existingPlugin}" and "${pluginId}".`,
+        );
+      }
+
+      entries.push({
+        packageName,
+        pluginId,
+        metadata,
+        key: initializerKey(pluginId, metadata.id),
+      });
+      seenIds.set(metadata.id, pluginId);
+    }
+  }
+
+  return entries;
+}
+
+function normalizeInitializerMetadata(
+  entry: PluginInitializerEntry,
+): RegisteredInitializer["metadata"] {
+  let metadata: RegisteredInitializer["metadata"];
+  if (typeof entry === "string") {
+    metadata = {
+      id: entry,
+      module: defaultInitializerModule(entry),
+    };
+  } else {
+    metadata = {
+      ...entry,
+      module: entry.module ?? defaultInitializerModule(entry.id),
+    };
+  }
+
+  if (metadata.module.startsWith("./")) {
+    metadata.module = metadata.module.slice(2);
+  }
+
+  if (
+    metadata.module.startsWith("@") ||
+    metadata.module.startsWith("/") ||
+    metadata.module.startsWith("../")
+  ) {
+    throw new Error(
+      `Initializer "${metadata.id}" module must be relative to the plugin package root.`,
+    );
+  }
+
+  return metadata;
+}
+
+function defaultInitializerModule(initializerId: string): string {
+  return `initializers/${initializerId}`;
+}
+
+function orderRegisteredInitializers(
+  entries: RegisteredInitializer[],
+): RegisteredInitializer[] {
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  const byPlugin = new Map<string, RegisteredInitializer[]>();
+
+  for (const entry of entries) {
+    const pluginEntries = byPlugin.get(entry.pluginId) ?? [];
+    pluginEntries.push(entry);
+    byPlugin.set(entry.pluginId, pluginEntries);
+  }
+
+  validateRequires(entries, byKey);
+
+  const edges = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    edges.set(entry.key, new Set());
+  }
+
+  for (const entry of entries) {
+    for (const beforeRef of entry.metadata.before ?? []) {
+      for (const target of resolveOrderingReference(
+        beforeRef,
+        entry.pluginId,
+        byKey,
+        byPlugin,
+      )) {
+        edges.get(entry.key)?.add(target.key);
+      }
+    }
+
+    for (const afterRef of entry.metadata.after ?? []) {
+      for (const target of resolveOrderingReference(
+        afterRef,
+        entry.pluginId,
+        byKey,
+        byPlugin,
+      )) {
+        edges.get(target.key)?.add(entry.key);
+      }
+    }
+  }
+
+  return topologicalSort(entries, edges);
+}
+
+function validateRequires(
+  entries: RegisteredInitializer[],
+  byKey: Map<string, RegisteredInitializer>,
+): void {
+  for (const entry of entries) {
+    for (const requiredRef of entry.metadata.requires ?? []) {
+      const required = resolveInitializerReference(
+        requiredRef,
+        entry.pluginId,
+        byKey,
+      );
+      if (!required) {
+        throw new Error(
+          `Initializer "${entry.metadata.id}" requires inactive or missing initializer "${requiredRef}".`,
+        );
+      }
+    }
+  }
+}
+
+function resolveInitializerReference(
+  reference: string,
+  sourcePluginId: string,
+  byKey: Map<string, RegisteredInitializer>,
+): RegisteredInitializer | undefined {
+  if (reference.includes(":")) {
+    const [pluginId, initializerId] = splitCrossPluginReference(reference);
+    if (!pluginId || !initializerId) {
+      return undefined;
+    }
+    return byKey.get(initializerKey(pluginId, initializerId));
+  }
+
+  return byKey.get(initializerKey(sourcePluginId, reference));
+}
+
+function resolveOrderingReference(
+  reference: string,
+  sourcePluginId: string,
+  byKey: Map<string, RegisteredInitializer>,
+  byPlugin: Map<string, RegisteredInitializer[]>,
+): RegisteredInitializer[] {
+  if (reference.startsWith("@") && !reference.includes(":")) {
+    return byPlugin.get(reference) ?? [];
+  }
+
+  const initializer = resolveInitializerReference(
+    reference,
+    sourcePluginId,
+    byKey,
+  );
+  return initializer ? [initializer] : [];
+}
+
+function splitCrossPluginReference(
+  reference: string,
+): [pluginId: string | undefined, initializerId: string | undefined] {
+  const separatorIndex = reference.lastIndexOf(":");
+  if (separatorIndex === -1) {
+    return [undefined, undefined];
+  }
+
+  return [
+    reference.slice(0, separatorIndex),
+    reference.slice(separatorIndex + 1),
+  ];
+}
+
+function topologicalSort(
+  entries: RegisteredInitializer[],
+  edges: Map<string, Set<string>>,
+): RegisteredInitializer[] {
+  const inDegree = new Map(entries.map((entry) => [entry.key, 0]));
+
+  for (const targets of edges.values()) {
+    for (const target of targets) {
+      inDegree.set(target, (inDegree.get(target) ?? 0) + 1);
+    }
+  }
+
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  const ready = entries.filter((entry) => inDegree.get(entry.key) === 0);
+  const ordered: RegisteredInitializer[] = [];
+
+  while (ready.length > 0) {
+    const entry = ready.shift();
+    if (!entry) {
+      break;
+    }
+
+    ordered.push(entry);
+
+    for (const targetKey of edges.get(entry.key) ?? []) {
+      const nextDegree = (inDegree.get(targetKey) ?? 0) - 1;
+      inDegree.set(targetKey, nextDegree);
+      if (nextDegree === 0) {
+        const target = byKey.get(targetKey);
+        if (target) {
+          ready.push(target);
+        }
+      }
+    }
+  }
+
+  if (ordered.length !== entries.length) {
+    throw new Error("Initializer ordering contains a cycle.");
+  }
+
+  return ordered;
 }
 
 export type RunInitializersOptions = {
@@ -73,198 +413,184 @@ export type RunInitializersOptions = {
   disabledInitializers?: boolean | string[];
 };
 
-/**
- * Detect which initializers should run for a given context.
- * Returns initializers paired with their detection metadata.
- */
-async function detectInitializers(
-  context: InitializerContext,
-  initializers: InitializerDefinition[],
-): Promise<
-  Array<{
-    initializer: InitializerDefinition;
-    metadata: Record<string, unknown>;
-  }>
-> {
-  const results: Array<{
-    initializer: InitializerDefinition;
-    metadata: Record<string, unknown>;
-  }> = [];
-
-  for (const initializer of initializers) {
-    const detection = await initializer.detect(context);
-    if (detection.shouldRun) {
-      results.push({
-        initializer,
-        metadata: detection.metadata ?? {},
-      });
-    }
-  }
-
-  return results;
-}
-
-/**
- * Get the list of enabled initializers based on disabledInitializers config.
- */
-function getEnabledInitializers(
+function getEnabledRegistry(
   disabledInitializers: boolean | string[] | undefined,
-): InitializerDefinition[] {
+): RegisteredInitializer[] {
   if (disabledInitializers === true) {
     return [];
   }
 
   if (Array.isArray(disabledInitializers)) {
-    return builtInInitializers.filter(
-      (init) => !disabledInitializers.includes(init.id),
+    return activeInitializerRegistry.filter(
+      (entry) => !disabledInitializers.includes(entry.metadata.id),
     );
   }
 
-  return builtInInitializers;
+  return activeInitializerRegistry;
 }
 
-/**
- * Generator that runs initializers for multiple repositories.
- * Yields state updates for progress tracking.
- *
- * Initializers are run in priority order within each repo.
- * Install initializers (priority 100-199) run first, then linking (200-299).
- */
+async function withWorkspaceConfig(
+  context: InitializerContext,
+): Promise<InitializerContext> {
+  if (context.workspaceConfig) {
+    return context;
+  }
+
+  const { config } = await loadWorkspaceConfig();
+  return { ...context, workspaceConfig: config };
+}
+
+async function activateInitializersForRepo({
+  context,
+  disabledInitializers,
+}: {
+  context: InitializerContext;
+  disabledInitializers?: boolean | string[];
+}): Promise<RegisteredInitializer[]> {
+  const enabledRegistry = getEnabledRegistry(disabledInitializers);
+  if (enabledRegistry.length === 0) {
+    return [];
+  }
+
+  const byLocalKey = new Map(
+    activeInitializerRegistry.map((entry) => [
+      initializerKey(entry.pluginId, entry.metadata.id),
+      entry,
+    ]),
+  );
+  const activeByKey = new Map<string, RegisteredInitializer>();
+
+  for (const pluginPackage of activePluginPackages) {
+    const packageName = pluginPackage.manifest.name;
+    if (!packageName) {
+      throw new Error("Plugin package is missing package.json name.");
+    }
+
+    const pluginMetadata = pluginPackage.manifest.workforest?.plugin;
+    const pluginId = pluginMetadata?.id ?? packageName;
+    const detect = pluginPackage.module.detect;
+    if (!isPluginDetect(detect)) {
+      throw new Error(
+        `Plugin package "${packageName}" is missing detect export.`,
+      );
+    }
+
+    const detection = await detect(context);
+    if (!isPluginDetection(detection)) {
+      throw new Error(
+        `Plugin package "${pluginId}" returned invalid detection.`,
+      );
+    }
+
+    if (!detection.activate) {
+      continue;
+    }
+
+    for (const initializerId of detection.initializers) {
+      const entry = byLocalKey.get(initializerKey(pluginId, initializerId));
+      if (!entry) {
+        throw new Error(
+          `Plugin package "${pluginId}" activated unknown initializer "${initializerId}".`,
+        );
+      }
+
+      if (!enabledRegistry.includes(entry)) {
+        continue;
+      }
+
+      activeByKey.set(entry.key, entry);
+    }
+  }
+
+  return orderRegisteredInitializers([...activeByKey.values()]);
+}
+
+function isPluginDetection(
+  value: unknown,
+): value is Awaited<ReturnType<PluginDetect>> {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const detection = value as { activate?: unknown; initializers?: unknown };
+  if (detection.activate === false) {
+    return true;
+  }
+
+  return (
+    detection.activate === true &&
+    Array.isArray(detection.initializers) &&
+    detection.initializers.every(
+      (initializer) => typeof initializer === "string",
+    )
+  );
+}
+
+async function loadInitializer(
+  entry: RegisteredInitializer,
+): Promise<LoadedInitializer> {
+  const module = (await import(
+    `${entry.packageName}/${entry.metadata.module}`
+  )) as InitializerModule;
+  const exported = entry.metadata.export
+    ? module[entry.metadata.export]
+    : module.default;
+
+  if (exported === undefined) {
+    throw new Error(
+      `Plugin package "${entry.pluginId}" initializer "${entry.metadata.id}" references missing export "${entry.metadata.export ?? "default"}".`,
+    );
+  }
+
+  if (!isInitializerDefinition(exported)) {
+    throw new Error(
+      `Plugin package "${entry.pluginId}" initializer "${entry.metadata.id}" export is not a valid initializer.`,
+    );
+  }
+
+  if (exported.id !== entry.metadata.id) {
+    throw new Error(
+      `Plugin package "${entry.pluginId}" metadata id "${entry.metadata.id}" does not match exported initializer id "${exported.id}".`,
+    );
+  }
+
+  return { registryEntry: entry, initializer: exported };
+}
+
 export async function* runInitializersGenerator({
   contexts,
   disabledInitializers,
 }: RunInitializersOptions): AsyncGenerator<InitializerState> {
-  const enabledInitializers = getEnabledInitializers(disabledInitializers);
-
-  if (enabledInitializers.length === 0) {
+  if (disabledInitializers === true) {
     return;
   }
 
-  // Group initializers by priority range for parallel execution
-  const installInitializers = enabledInitializers.filter(
-    (init) => init.priority >= 100 && init.priority < 200,
-  );
-  const linkingInitializers = enabledInitializers.filter(
-    (init) => init.priority >= 200 && init.priority < 300,
-  );
-
-  // Phase 1: Run install initializers in parallel across repos
-  if (installInitializers.length > 0) {
-    const installTasks = new Map<string, AsyncGenerator<TaskState>>();
-
-    // Detect and queue install tasks for each repo
-    for (const context of contexts) {
-      yield { phase: "detecting", repoName: context.repo.name };
-
-      let detected: Awaited<ReturnType<typeof detectInitializers>>;
-      try {
-        detected = await detectInitializers(context, installInitializers);
-      } catch (error) {
-        yield {
-          phase: "running",
-          repoName: context.repo.name,
-          initializerId: "detection",
-          initializerName: "Initializer detection",
-          state: { status: "failed", error: toError(error) },
-        };
-        continue;
-      }
-
-      // Only one install initializer should run per repo (mutually exclusive)
-      const detectedInstall = detected[0];
-      if (detectedInstall) {
-        const { initializer, metadata } = detectedInstall;
-        const taskId = `${context.repo.name}:${initializer.id}`;
-
-        // Create a wrapper generator that yields InitializerState
-        async function* wrapWithMeta(): AsyncGenerator<TaskState> {
-          try {
-            for await (const state of initializer.execute(context, metadata)) {
-              yield state;
-            }
-          } catch (error) {
-            yield { status: "failed", error: toError(error) };
-          }
-        }
-
-        installTasks.set(taskId, wrapWithMeta());
-      }
-    }
-
-    // Run install tasks in parallel
-    for await (const { id, state } of runParallel(installTasks)) {
-      const [repoName = id, initializerId = ""] = id.split(":");
-      const initializer = installInitializers.find(
-        (i) => i.id === initializerId,
-      );
-
-      yield {
-        phase: "running",
-        repoName,
-        initializerId,
-        initializerName: initializer?.name ?? initializerId,
-        state,
-      };
-    }
-  }
-
-  // Phase 2: Run linking initializers in parallel across repos
-  if (linkingInitializers.length > 0) {
-    const linkTasks = new Map<string, AsyncGenerator<TaskState>>();
-
-    // Detect and queue linking tasks for each repo
-    for (const context of contexts) {
-      let detected: Awaited<ReturnType<typeof detectInitializers>>;
-      try {
-        detected = await detectInitializers(context, linkingInitializers);
-      } catch (error) {
-        yield {
-          phase: "running",
-          repoName: context.repo.name,
-          initializerId: "detection",
-          initializerName: "Initializer detection",
-          state: { status: "failed", error: toError(error) },
-        };
-        continue;
-      }
-
-      for (const { initializer, metadata } of detected) {
-        const taskId = `${context.repo.name}:${initializer.id}`;
-
-        async function* wrapWithMeta(): AsyncGenerator<TaskState> {
-          try {
-            for await (const state of initializer.execute(context, metadata)) {
-              yield state;
-            }
-          } catch (error) {
-            yield { status: "failed", error: toError(error) };
-          }
-        }
-
-        linkTasks.set(taskId, wrapWithMeta());
-      }
-    }
-
-    // Run linking tasks in parallel
-    for await (const { id, state } of runParallel(linkTasks)) {
-      const [repoName = id, initializerId = ""] = id.split(":");
-      const initializer = linkingInitializers.find(
-        (i) => i.id === initializerId,
-      );
-
-      yield {
-        phase: "running",
-        repoName,
-        initializerId,
-        initializerName: initializer?.name ?? initializerId,
-        state,
-      };
-    }
-  }
-
-  // Signal completion for each repo
+  const tasks = new Map<string, AsyncGenerator<SingleRepoInitializerState>>();
   for (const context of contexts) {
-    yield { phase: "repo-complete", repoName: context.repo.name };
+    tasks.set(
+      context.repo.name,
+      runSingleRepoInitializersGenerator({
+        context,
+        ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+      }),
+    );
+  }
+
+  for await (const { id: repoName, state } of runParallel(tasks)) {
+    switch (state.phase) {
+      case "detecting":
+        yield { phase: "detecting", repoName };
+        break;
+      case "running":
+        yield { ...state, phase: "running", repoName };
+        break;
+      case "skipped":
+        yield { ...state, phase: "skipped", repoName };
+        break;
+      case "complete":
+        yield { phase: "repo-complete", repoName };
+        break;
+    }
   }
 }
 
@@ -273,110 +599,86 @@ export type RunSingleRepoInitializersOptions = {
   disabledInitializers?: boolean | string[];
 };
 
-/**
- * Generator that runs initializers for a single repository.
- * Used by the per-repo pipeline to enable cross-phase parallelism.
- *
- * Runs install initializers first (priority 100-199), then linking (200-299).
- * Within each phase, initializers run sequentially for this repo.
- */
 export async function* runSingleRepoInitializersGenerator({
   context,
   disabledInitializers,
 }: RunSingleRepoInitializersOptions): AsyncGenerator<SingleRepoInitializerState> {
-  const enabledInitializers = getEnabledInitializers(disabledInitializers);
-
-  if (enabledInitializers.length === 0) {
+  if (disabledInitializers === true) {
     yield { phase: "complete" };
     return;
   }
 
-  // Group initializers by priority range
-  const installInitializers = enabledInitializers.filter(
-    (init) => init.priority >= 100 && init.priority < 200,
-  );
-  const linkingInitializers = enabledInitializers.filter(
-    (init) => init.priority >= 200 && init.priority < 300,
-  );
+  let contextWithConfig: InitializerContext;
+  try {
+    contextWithConfig = await withWorkspaceConfig(context);
+  } catch (error) {
+    yield {
+      phase: "running",
+      initializerId: "detection",
+      initializerName: "Initializer detection",
+      state: { status: "failed", error: toError(error) },
+    };
+    return;
+  }
 
   yield { phase: "detecting" };
 
-  // Phase 1: Run install initializer (only one per repo - mutually exclusive)
-  if (installInitializers.length > 0) {
-    let detected: Awaited<ReturnType<typeof detectInitializers>>;
-    try {
-      detected = await detectInitializers(context, installInitializers);
-    } catch (error) {
-      yield {
-        phase: "running",
-        initializerId: "detection",
-        initializerName: "Initializer detection",
-        state: { status: "failed", error: toError(error) },
-      };
-      return;
-    }
-
-    const detectedInstall = detected[0];
-    if (detectedInstall) {
-      const { initializer, metadata } = detectedInstall;
-
-      try {
-        for await (const state of initializer.execute(context, metadata)) {
-          yield {
-            phase: "running",
-            initializerId: initializer.id,
-            initializerName: initializer.name,
-            state,
-          };
-        }
-      } catch (error) {
-        yield {
-          phase: "running",
-          initializerId: initializer.id,
-          initializerName: initializer.name,
-          state: { status: "failed", error: toError(error) },
-        };
-        return;
-      }
-    }
+  let activeEntries: RegisteredInitializer[];
+  try {
+    activeEntries = await activateInitializersForRepo({
+      context: contextWithConfig,
+      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+    });
+  } catch (error) {
+    yield {
+      phase: "running",
+      initializerId: "detection",
+      initializerName: "Initializer detection",
+      state: { status: "failed", error: toError(error) },
+    };
+    return;
   }
 
-  // Phase 2: Run linking initializers (can have multiple)
-  if (linkingInitializers.length > 0) {
-    let detected: Awaited<ReturnType<typeof detectInitializers>>;
-    try {
-      detected = await detectInitializers(context, linkingInitializers);
-    } catch (error) {
-      yield {
-        phase: "running",
-        initializerId: "detection",
-        initializerName: "Initializer detection",
-        state: { status: "failed", error: toError(error) },
-      };
-      return;
-    }
+  if (activeEntries.length === 0) {
+    yield { phase: "complete" };
+    return;
+  }
 
-    for (const { initializer, metadata } of detected) {
-      try {
-        for await (const state of initializer.execute(context, metadata)) {
-          yield {
-            phase: "running",
-            initializerId: initializer.id,
-            initializerName: initializer.name,
-            state,
-          };
-        }
-      } catch (error) {
+  let initializers: LoadedInitializer[];
+  try {
+    initializers = await Promise.all(activeEntries.map(loadInitializer));
+  } catch (error) {
+    yield {
+      phase: "running",
+      initializerId: "detection",
+      initializerName: "Initializer loading",
+      state: { status: "failed", error: toError(error) },
+    };
+    return;
+  }
+
+  for (const { initializer } of initializers) {
+    try {
+      for await (const state of initializer.execute(contextWithConfig, {})) {
         yield {
           phase: "running",
           initializerId: initializer.id,
           initializerName: initializer.name,
-          state: { status: "failed", error: toError(error) },
+          state,
         };
-        return;
       }
+    } catch (error) {
+      yield {
+        phase: "running",
+        initializerId: initializer.id,
+        initializerName: initializer.name,
+        state: { status: "failed", error: toError(error) },
+      };
+      return;
     }
   }
 
   yield { phase: "complete" };
 }
+
+export const activePluginPackageNames = [...ACTIVE_PLUGIN_PACKAGE_NAMES];

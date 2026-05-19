@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { hasAny } from "@wf-plugin/core";
 import chalk from "chalk";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
@@ -9,7 +10,6 @@ import {
   type InitializerState,
   runInitializersGenerator,
 } from "../services/initializers/index.ts";
-import { hasAny } from "../services/pnpm.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
 import {
   applyTemplateGenerator,

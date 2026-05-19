@@ -11,6 +11,18 @@ importers:
       '@unblessed/node':
         specifier: 1.0.0-alpha.23
         version: 1.0.0-alpha.23(omggif@1.0.10)(pngjs@7.0.0)
+      '@wf-plugin/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@wf-plugin/package-managers':
+        specifier: workspace:*
+        version: link:packages/package-managers
+      '@wf-plugin/turbo':
+        specifier: workspace:*
+        version: link:packages/turbo
+      '@wf-plugin/vercel':
+        specifier: workspace:*
+        version: link:packages/vercel
       arg:
         specifier: ^5.0.2
         version: 5.0.2
@@ -57,6 +69,34 @@ importers:
       vitest:
         specifier: ^4.0.17
         version: 4.0.17(@types/node@24.10.4)(tsx@4.21.0)
+
+  packages/core:
+    dependencies:
+      semver:
+        specifier: ^7.7.3
+        version: 7.7.3
+    devDependencies:
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+
+  packages/package-managers:
+    dependencies:
+      '@wf-plugin/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/turbo:
+    dependencies:
+      '@wf-plugin/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/vercel:
+    dependencies:
+      '@wf-plugin/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

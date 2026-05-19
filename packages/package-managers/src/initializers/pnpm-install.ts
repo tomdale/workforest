@@ -1,35 +1,19 @@
-import { getNodeVersionPrefix } from "../../utils/node-version.ts";
-import { TailBuffer } from "../../utils/tail-buffer.ts";
-import { runCommandGenerator } from "../../utils/task-generator.ts";
+import crypto from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import {
-  canSkipInstall,
-  computeLockfileHash,
-  hasAny,
-  storeLockfileHash,
-} from "../pnpm.ts";
-import type {
-  InitializerContext,
-  InitializerDefinition,
-  InitializerDetection,
-} from "./types.ts";
+  getNodeVersionPrefix,
+  pathExists,
+  runCommandGenerator,
+  TailBuffer,
+  type InitializerContext,
+  type InitializerDefinition,
+} from "@wf-plugin/core";
 
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
+const LOCKFILE_HASH_FILE = ".pnpm-lockfile-hash";
 const INSTALL_OUTPUT_TAIL_CHARS = 16_384;
 
-/**
- * Detect if this is a pnpm project.
- */
-async function detect(
-  context: InitializerContext,
-): Promise<InitializerDetection> {
-  const hasLockfile = await hasAny(context.repoDir, PNPM_LOCK_FILES);
-  return { shouldRun: hasLockfile };
-}
-
-/**
- * Check if the error is due to frozen-lockfile mismatch.
- * pnpm emits ERR_PNPM_OUTDATED_LOCKFILE when the lockfile doesn't match package.json.
- */
 function isFrozenLockfileError(error: Error, output: string): boolean {
   const combined = `${error.message} ${output}`;
   return (
@@ -39,18 +23,9 @@ function isFrozenLockfileError(error: Error, output: string): boolean {
   );
 }
 
-/**
- * Install pnpm dependencies with lockfile hash optimization.
- * Strategy:
- * 1. Check if install can be skipped (lockfile hash matches stored hash)
- * 2. Run pnpm install with --frozen-lockfile --prefer-offline
- * 3. If frozen-lockfile fails (stale lockfile), retry without it
- * 4. Store lockfile hash after successful install
- */
 async function* execute(context: InitializerContext) {
   const { repoDir } = context;
 
-  // Check if we can skip install based on lockfile hash (node_modules exists and matches)
   if (await canSkipInstall(repoDir)) {
     yield {
       status: "skipped" as const,
@@ -59,19 +34,15 @@ async function* execute(context: InitializerContext) {
     return;
   }
 
-  // Compute hash for storing after install
   const lockfileHash = await computeLockfileHash(repoDir);
-
   const versionPrefix = await getNodeVersionPrefix(repoDir);
 
   yield { status: "running" as const, message: "Installing (frozen-lockfile)" };
 
-  // Collect output from the fast install to check for errors
   let failed = false;
   let lastError: Error | undefined;
   const collectedOutput = new TailBuffer(INSTALL_OUTPUT_TAIL_CHARS);
 
-  // Try fast path first: frozen-lockfile + prefer-offline
   let command: string;
   let args: string[];
   if (versionPrefix) {
@@ -94,7 +65,6 @@ async function* execute(context: InitializerContext) {
     if (state.status === "failed") {
       failed = true;
       lastError = state.error;
-      // Don't yield failure yet - check if it's recoverable
     } else if (state.status === "output") {
       collectedOutput.append(state.data);
       yield state;
@@ -103,7 +73,6 @@ async function* execute(context: InitializerContext) {
     }
   }
 
-  // Check if this was a frozen-lockfile error (recoverable)
   if (
     failed &&
     lastError &&
@@ -115,7 +84,6 @@ async function* execute(context: InitializerContext) {
       attempt: 1,
     };
 
-    // Retry without --frozen-lockfile
     if (versionPrefix) {
       command = versionPrefix.command;
       args = [...versionPrefix.args, "pnpm", "install"];
@@ -128,7 +96,6 @@ async function* execute(context: InitializerContext) {
       cwd: repoDir,
     });
 
-    // Track fallback result
     let fallbackFailed = false;
     for await (const state of fallbackInstall) {
       if (state.status === "failed") {
@@ -137,7 +104,6 @@ async function* execute(context: InitializerContext) {
       yield state;
     }
 
-    // Store hash on successful fallback install
     if (!fallbackFailed && lockfileHash) {
       await storeLockfileHash(repoDir, lockfileHash);
     }
@@ -148,18 +114,58 @@ async function* execute(context: InitializerContext) {
       status: "failed" as const,
       error: new Error("Unknown error during install"),
     };
-  } else {
-    // Fast install succeeded - store the lockfile hash
-    if (lockfileHash) {
-      await storeLockfileHash(repoDir, lockfileHash);
-    }
+  } else if (lockfileHash) {
+    await storeLockfileHash(repoDir, lockfileHash);
   }
 }
 
-export const pnpmInstallInitializer: InitializerDefinition = {
+const pnpmInstallInitializer: InitializerDefinition = {
   id: "pnpm-install",
   name: "pnpm install",
-  priority: 100,
-  detect,
   execute,
 };
+
+export default pnpmInstallInitializer;
+
+async function computeLockfileHash(repoDir: string): Promise<string | null> {
+  for (const filename of PNPM_LOCK_FILES) {
+    const lockfilePath = path.join(repoDir, filename);
+    if (await pathExists(lockfilePath)) {
+      const content = await fs.readFile(lockfilePath);
+      return crypto.createHash("sha256").update(content).digest("hex");
+    }
+  }
+  return null;
+}
+
+async function getStoredLockfileHash(repoDir: string): Promise<string | null> {
+  const hashFilePath = path.join(repoDir, "node_modules", LOCKFILE_HASH_FILE);
+  if (await pathExists(hashFilePath)) {
+    const content = await fs.readFile(hashFilePath, "utf8");
+    return content.trim();
+  }
+  return null;
+}
+
+async function storeLockfileHash(repoDir: string, hash: string): Promise<void> {
+  const nodeModulesDir = path.join(repoDir, "node_modules");
+  if (await pathExists(nodeModulesDir)) {
+    const hashFilePath = path.join(nodeModulesDir, LOCKFILE_HASH_FILE);
+    await fs.writeFile(hashFilePath, hash, "utf8");
+  }
+}
+
+async function canSkipInstall(repoDir: string): Promise<boolean> {
+  const nodeModulesDir = path.join(repoDir, "node_modules");
+  if (!(await pathExists(nodeModulesDir))) {
+    return false;
+  }
+
+  const currentHash = await computeLockfileHash(repoDir);
+  if (!currentHash) {
+    return false;
+  }
+
+  const storedHash = await getStoredLockfileHash(repoDir);
+  return currentHash === storedHash;
+}

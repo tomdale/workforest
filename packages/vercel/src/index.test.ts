@@ -3,29 +3,24 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { loadWorkspaceConfigMock, runCommandGeneratorMock } = vi.hoisted(() => ({
-  loadWorkspaceConfigMock: vi.fn(),
+const { runCommandGeneratorMock } = vi.hoisted(() => ({
   runCommandGeneratorMock: vi.fn(),
 }));
 
-vi.mock("../../config.ts", async () => {
+vi.mock("@wf-plugin/core", async () => {
   const actual =
-    await vi.importActual<typeof import("../../config.ts")>("../../config.ts");
+    await vi.importActual<typeof import("@wf-plugin/core")>("@wf-plugin/core");
 
   return {
     ...actual,
-    loadWorkspaceConfig: loadWorkspaceConfigMock,
+    runCommandGenerator: runCommandGeneratorMock,
   };
 });
 
-vi.mock("../../utils/task-generator.ts", () => ({
-  runCommandGenerator: runCommandGeneratorMock,
-}));
-
 import {
   resolveVercelRepoLinkTarget,
-  vercelLinkInitializer,
-} from "./vercel-link.ts";
+  default as vercelLinkInitializer,
+} from "./initializers/vercel-link.ts";
 
 const tempDirs: string[] = [];
 
@@ -110,16 +105,12 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    loadWorkspaceConfigMock.mockResolvedValue({
-      path: "/tmp/config.json",
-      config: {},
-    });
-
     const states = await collectStates(
       vercelLinkInitializer.execute(
         {
           repoDir,
           workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
           repo: {
             name: "some-repo",
             remote: "git@github.com:some-owner/some-repo.git",
@@ -145,11 +136,6 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    loadWorkspaceConfigMock.mockResolvedValue({
-      path: "/tmp/config.json",
-      config: {},
-    });
-
     runCommandGeneratorMock.mockImplementation(
       (_command: string, _args: string[], options: { cwd?: string }) =>
         (async function* () {
@@ -172,6 +158,7 @@ describe("vercelLinkInitializer.execute", () => {
         {
           repoDir,
           workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
@@ -198,19 +185,6 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    loadWorkspaceConfigMock.mockResolvedValue({
-      path: "/tmp/config.json",
-      config: {
-        vercelLink: {
-          repoOverrides: {
-            "vercel/omniagent": {
-              team: "vercel",
-            },
-          },
-        },
-      },
-    });
-
     runCommandGeneratorMock.mockImplementation(() =>
       (async function* () {
         yield { status: "running" as const, message: "vercel link" };
@@ -223,6 +197,15 @@ describe("vercelLinkInitializer.execute", () => {
         {
           repoDir,
           workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {
+            vercelLink: {
+              repoOverrides: {
+                "vercel/omniagent": {
+                  team: "vercel",
+                },
+              },
+            },
+          },
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",

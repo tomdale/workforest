@@ -1,0 +1,32 @@
+{
+  "name": "@wf-plugin/package-managers",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./initializers/pnpm-install": {
+      "types": "./src/initializers/pnpm-install.ts",
+      "import": "./src/initializers/pnpm-install.ts"
+    },
+    "./initializers/yarn-install": {
+      "types": "./src/initializers/yarn-install.ts",
+      "import": "./src/initializers/yarn-install.ts"
+    },
+    "./initializers/npm-install": {
+      "types": "./src/initializers/npm-install.ts",
+      "import": "./src/initializers/npm-install.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@wf-plugin/core": "workspace:*"
+  },
+  "workforest": {
+    "plugin": {
+      "initializers": ["pnpm-install", "yarn-install", "npm-install"]
+    }
+  }
+}

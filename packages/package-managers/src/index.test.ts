@@ -2,16 +2,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskState } from "../../utils/task-generator.ts";
+import type { TaskState } from "@wf-plugin/core";
 
 const { runCommandGeneratorMock } = vi.hoisted(() => ({
   runCommandGeneratorMock: vi.fn(),
 }));
 
-vi.mock("../../utils/task-generator.ts", async () => {
-  const actual = await vi.importActual<
-    typeof import("../../utils/task-generator.ts")
-  >("../../utils/task-generator.ts");
+vi.mock("@wf-plugin/core", async () => {
+  const actual =
+    await vi.importActual<typeof import("@wf-plugin/core")>("@wf-plugin/core");
 
   return {
     ...actual,
@@ -19,7 +18,7 @@ vi.mock("../../utils/task-generator.ts", async () => {
   };
 });
 
-import { pnpmInstallInitializer } from "./pnpm-install.ts";
+import pnpmInstallInitializer from "./initializers/pnpm-install.ts";
 
 const tempDirs: string[] = [];
 

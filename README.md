@@ -281,18 +281,30 @@ like `.envrc` or repo-specific files like `frontend/.env.local`.
 ## Automatic Initializers
 
 Workforest automatically detects project configurations and runs setup commands
-during workspace creation. Initializers run in priority order before any custom
+during workspace creation. Initializers are provided by hardcoded built-in
+plugin packages for now. Workforest loads each plugin's package entry point and
+runs its exported `detect` function once per repo. That function returns either
+`{ "activate": false }` or `{ "activate": true, "initializers": ["id"] }`.
+Workforest then dynamically imports only the activated initializer modules listed
+in `workforest.plugin` metadata, orders them, and runs them before any custom
 hooks.
+
+Initializer metadata uses conventional package-root-relative module paths. A
+string entry such as `"pnpm-install"` expands to `{ "id": "pnpm-install" }`,
+and a missing `module` defaults to `initializers/<id>`.
 
 **Built-in initializers:**
 
-| Initializer      | Priority | Detects                                   |
-| ---------------- | -------- | ----------------------------------------- |
-| `pnpm-install`   | 100      | `pnpm-lock.yaml` or `pnpm-lock.yml`       |
-| `yarn-install`   | 101      | `yarn.lock` (no pnpm lockfile)            |
-| `npm-install`    | 102      | `package-lock.json` (no pnpm/yarn)        |
-| `vercel-link`    | 200      | `vercel.json` or vercel in package.json   |
-| `turbo-link`     | 201      | `turbo.json` in repo or workspace root    |
+| Plugin                        | Initializer    | Detects                                |
+| ----------------------------- | -------------- | -------------------------------------- |
+| `@wf-plugin/package-managers` | `pnpm-install` | `pnpm-lock.yaml` or `pnpm-lock.yml`    |
+| `@wf-plugin/package-managers` | `yarn-install` | `yarn.lock` (no pnpm lockfile)         |
+| `@wf-plugin/package-managers` | `npm-install`  | `package-lock.json` (no pnpm/yarn)     |
+| `@wf-plugin/vercel`           | `vercel-link`  | `vercel.json` or vercel in package.json |
+| `@wf-plugin/turbo`            | `turbo-link`   | `turbo.json` in repo or workspace root |
+
+Package-manager detection is mutually exclusive. The Vercel and Turbo plugins
+run after the package-manager plugin when detected.
 
 The `vercel-link` initializer is fail-closed. When it can resolve a Vercel
 team for a GitHub repo, it runs `vercel link --yes --repo --scope <team>` and
