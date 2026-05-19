@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   pathExists,
@@ -100,13 +101,39 @@ async function* execute(
     return;
   }
 
-  const repoConfigPath = path.join(repoDir, ".vercel", "repo.json");
-  if (!(await pathExists(repoConfigPath))) {
-    yield {
-      status: "skipped" as const,
-      reason: `No existing Vercel projects linked to GitHub repo "${target.githubSlug}" under team "${target.team}".`,
-    };
+  const envPullTargets = await getEnvPullTargets(repoDir);
+  if (envPullTargets.kind === "failed") {
+    yield { status: "failed" as const, error: envPullTargets.error };
     return;
+  }
+
+  if (envPullTargets.warning) {
+    yield {
+      status: "log" as const,
+      level: "warn" as const,
+      message: envPullTargets.warning,
+    };
+  }
+
+  for (const cwd of envPullTargets.cwd) {
+    const envPull = runCommandGenerator(
+      "vercel",
+      ["env", "pull", "--environment", "development", "--yes"],
+      { cwd },
+    );
+
+    let envPullCompleted = false;
+    for await (const state of envPull) {
+      if (state.status === "completed") {
+        envPullCompleted = true;
+        continue;
+      }
+      yield state;
+    }
+
+    if (!envPullCompleted) {
+      return;
+    }
   }
 
   yield { status: "completed" as const };
@@ -119,6 +146,73 @@ const vercelLinkInitializer: InitializerDefinition = {
 };
 
 export default vercelLinkInitializer;
+
+type EnvPullTargets =
+  | { kind: "pull"; cwd: string[]; warning?: string }
+  | { kind: "failed"; error: Error };
+
+async function getEnvPullTargets(repoDir: string): Promise<EnvPullTargets> {
+  const repoConfigPath = path.join(repoDir, ".vercel", "repo.json");
+  if (await pathExists(repoConfigPath)) {
+    return getRepoEnvPullTargets(repoDir, repoConfigPath);
+  }
+
+  const projectConfigPath = path.join(repoDir, ".vercel", "project.json");
+  if (await pathExists(projectConfigPath)) {
+    return { kind: "pull", cwd: [repoDir] };
+  }
+
+  return {
+    kind: "pull",
+    cwd: [repoDir],
+    warning:
+      "Neither .vercel/repo.json nor .vercel/project.json was found after vercel link; pulling development env at the repo root.",
+  };
+}
+
+async function getRepoEnvPullTargets(
+  repoDir: string,
+  repoConfigPath: string,
+): Promise<EnvPullTargets> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(repoConfigPath, "utf8"));
+  } catch (error) {
+    return {
+      kind: "failed",
+      error: new Error(`Failed to parse ${repoConfigPath}: ${formatError(error)}`),
+    };
+  }
+
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !Array.isArray((parsed as { projects?: unknown }).projects)
+  ) {
+    return {
+      kind: "failed",
+      error: new Error(`${repoConfigPath} must contain a projects array.`),
+    };
+  }
+
+  const projects = (parsed as { projects: unknown[] }).projects;
+  const directories = projects
+    .map((project) =>
+      typeof project === "object" && project !== null
+        ? (project as { directory?: unknown }).directory
+        : undefined,
+    )
+    .filter((directory): directory is string => typeof directory === "string");
+
+  return {
+    kind: "pull",
+    cwd: directories.map((directory) => path.join(repoDir, directory)),
+  };
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function getGitHubSlug(remote: string): string | null {
   const trimmed = remote.trim();

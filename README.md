@@ -310,7 +310,10 @@ The `vercel-link` initializer is fail-closed. When it can resolve a Vercel
 team for a GitHub repo, it runs `vercel link --yes --repo --scope <team>` and
 only succeeds if Vercel already has an existing project linked to that GitHub
 repository under the chosen team. It will not create a new Vercel project
-automatically.
+automatically. After a successful link, it runs
+`vercel env pull --environment development --yes` for each linked project
+directory from `.vercel/repo.json`, or at the repo root when the repo is linked
+through `.vercel/project.json`.
 
 **Disabling initializers:**
 

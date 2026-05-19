@@ -131,24 +131,33 @@ describe("vercelLinkInitializer.execute", () => {
     expect(runCommandGeneratorMock).not.toHaveBeenCalled();
   });
 
-  it("runs repo-link with an inferred team and succeeds when repo.json is created", async () => {
+  it("runs repo-link with an inferred team and pulls env for linked repo projects", async () => {
     const repoDir = await createRepoDir({
       "vercel.json": "{}\n",
     });
 
     runCommandGeneratorMock.mockImplementation(
-      (_command: string, _args: string[], options: { cwd?: string }) =>
+      (_command: string, args: string[], options: { cwd?: string }) =>
         (async function* () {
           if (!options.cwd) {
             throw new Error("Expected cwd.");
           }
-          await mkdir(path.join(options.cwd, ".vercel"), { recursive: true });
-          await writeFile(
-            path.join(options.cwd, ".vercel", "repo.json"),
-            "{}\n",
-            "utf8",
-          );
-          yield { status: "running" as const, message: "vercel link" };
+          if (args[0] === "link") {
+            await mkdir(path.join(options.cwd, ".vercel"), { recursive: true });
+            await writeFile(
+              path.join(options.cwd, ".vercel", "repo.json"),
+              JSON.stringify({
+                projects: [
+                  { directory: "apps/web" },
+                  { directory: "apps/docs" },
+                ],
+              }),
+              "utf8",
+            );
+            yield { status: "running" as const, message: "vercel link" };
+          } else {
+            yield { status: "running" as const, message: "vercel env pull" };
+          }
           yield { status: "completed" as const };
         })(),
     );
@@ -174,22 +183,83 @@ describe("vercelLinkInitializer.execute", () => {
       ["link", "--yes", "--repo", "--scope", "vercel"],
       { cwd: repoDir },
     );
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "vercel",
+      ["env", "pull", "--environment", "development", "--yes"],
+      { cwd: path.join(repoDir, "apps/web") },
+    );
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "vercel",
+      ["env", "pull", "--environment", "development", "--yes"],
+      { cwd: path.join(repoDir, "apps/docs") },
+    );
     expect(states).toEqual([
       { status: "running", message: "vercel link" },
+      { status: "running", message: "vercel env pull" },
+      { status: "running", message: "vercel env pull" },
       { status: "completed" },
     ]);
   });
 
-  it("skips when repo-link completes without creating repo.json", async () => {
+  it("pulls env at the repo root when project.json exists", async () => {
+    const repoDir = await createRepoDir({
+      ".vercel/project.json": "{}\n",
+      "vercel.json": "{}\n",
+    });
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          yield {
+            status: "running" as const,
+            message: args[0] === "link" ? "vercel link" : "vercel env pull",
+          };
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "vercel",
+      ["env", "pull", "--environment", "development", "--yes"],
+      { cwd: repoDir },
+    );
+    expect(states).toEqual([
+      { status: "running", message: "vercel link" },
+      { status: "running", message: "vercel env pull" },
+      { status: "completed" },
+    ]);
+  });
+
+  it("warns and pulls env at the repo root when link config files are missing", async () => {
     const repoDir = await createRepoDir({
       "vercel.json": "{}\n",
     });
 
-    runCommandGeneratorMock.mockImplementation(() =>
-      (async function* () {
-        yield { status: "running" as const, message: "vercel link" };
-        yield { status: "completed" as const };
-      })(),
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          yield {
+            status: "running" as const,
+            message: args[0] === "link" ? "vercel link" : "vercel env pull",
+          };
+          yield { status: "completed" as const };
+        })(),
     );
 
     const states = await collectStates(
@@ -219,10 +289,18 @@ describe("vercelLinkInitializer.execute", () => {
     expect(states).toEqual([
       { status: "running", message: "vercel link" },
       {
-        status: "skipped",
-        reason:
-          'No existing Vercel projects linked to GitHub repo "vercel/omniagent" under team "vercel".',
+        status: "log",
+        level: "warn",
+        message:
+          "Neither .vercel/repo.json nor .vercel/project.json was found after vercel link; pulling development env at the repo root.",
       },
+      { status: "running", message: "vercel env pull" },
+      { status: "completed" },
     ]);
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "vercel",
+      ["env", "pull", "--environment", "development", "--yes"],
+      { cwd: repoDir },
+    );
   });
 });
