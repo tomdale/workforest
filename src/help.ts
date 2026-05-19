@@ -31,6 +31,8 @@ ${chalk.bold("Commands:")}
   new <work> -- <template|repo...> Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|rm             List or remove temporary worktrees
+  review <target>              Create a disposable PR review worktree
+  review list|rm               List or remove PR review worktrees
   wt                           Alias for worktree
   cd <name>                    Jump to a workspace in defaultDir
   find                         Fuzzy-find and jump to a workspace
@@ -54,6 +56,8 @@ ${chalk.bold("Examples:")}
   wf worktree "fix-tests" "upgrade-deps"
   wf worktree list
   wf worktree rm "fix-tests"
+  wf review vercel/omniagent 123
+  wf review rm vercel/omniagent#123 --dry-run
   wf worktree next.js "fix-auth"
   wf wt next.js "fix-auth" --dir ../next.js-fix-auth
   wf new --dry-run "fixing auth" -- my-template
@@ -126,6 +130,27 @@ Options:
   -n, --dry-run    Preview without changing files
   -f, --force      Skip confirmation prompts where supported
   -h, --help       Show this help
+`,
+
+  review: `Usage: wf review <owner>/<repo> <pr-number>
+       wf review <owner>/<repo>#<pr-number>
+       wf review <github-pr-url>
+       wf review list [repo]
+       wf review rm <target> [options]
+
+Create, list, or remove disposable GitHub PR review worktrees.
+
+Options:
+  -n, --dry-run    Preview review removal without deleting
+  -f, --force      Remove dirty review worktrees
+  -h, --help       Show this help
+
+Examples:
+  wf review vercel/omniagent 123
+  wf review vercel/omniagent#123
+  wf review https://github.com/vercel/omniagent/pull/123
+  wf review list omniagent
+  wf review rm vercel/omniagent#123 --force
 `,
 
   cd: `Usage: wf cd [name]
@@ -306,6 +331,25 @@ Aliases:
 };
 
 const NESTED_COMMAND_HELP: Record<string, Record<string, string>> = {
+  review: {
+    list: `Usage: wf review list [repo]
+
+List known review worktrees and stale entries.
+
+Options:
+  -h, --help     Show this help
+`,
+    rm: `Usage: wf review rm <target> [options]
+
+Remove a disposable PR review worktree.
+
+Options:
+  -n, --dry-run  Preview without deleting
+  -f, --force    Remove even when the worktree is dirty
+  -h, --help     Show this help
+`,
+  },
+
   worktree: {
     list: `Usage: wf worktree list [options]
 
@@ -435,6 +479,10 @@ Print the skills directory path, or one skill's directory.
 
 const NESTED_ALIASES: Record<string, Record<string, string>> = {
   worktree: {
+    ls: "list",
+    remove: "rm",
+  },
+  review: {
     ls: "list",
     remove: "rm",
   },

@@ -16,6 +16,7 @@ export type VercelLinkConfig = {
 
 export type WorkspaceConfig = {
   defaultDir?: string;
+  reviewsDir?: string;
   dirPrefix?: string;
   branchPrefix?: string;
   vercelLink?: VercelLinkConfig;

@@ -93,6 +93,24 @@ describe("workspace config", () => {
     });
   });
 
+  it("loads and saves reviewsDir", async () => {
+    const configDir = await createConfigDir();
+    const configPath = path.join(configDir, "config.json");
+
+    await saveWorkspaceConfig(configPath, {
+      defaultDir: "~/Code/workspaces",
+      reviewsDir: "  ~/Code/reviews  ",
+    });
+
+    const loaded = await loadWorkspaceConfig();
+    expect(loaded.config.reviewsDir).toBe("~/Code/reviews");
+
+    const saved = JSON.parse(await readFile(configPath, "utf8")) as {
+      reviewsDir?: unknown;
+    };
+    expect(saved.reviewsDir).toBe("~/Code/reviews");
+  });
+
   it("normalizes branch prefixes when loading", async () => {
     const configDir = await createConfigDir();
     await writeFile(

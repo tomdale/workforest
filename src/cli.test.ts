@@ -123,6 +123,7 @@ describe("cli", () => {
     expect(output).not.toContain("Skills ship with the CLI");
     expect(output).not.toContain("skills get parallel-worktrees");
     expect(output).toContain("wf find");
+    expect(output).toContain("wf review");
     expect(output).toContain('eval "$(wf init zsh)"');
     expect(process.exitCode).toBeUndefined();
   });
@@ -336,6 +337,7 @@ describe("cli", () => {
     ["new", "Usage: wf new"],
     ["worktree", "Usage: wf worktree"],
     ["wt", "Usage: wf wt"],
+    ["review", "Usage: wf review"],
     ["cd", "Usage: wf cd"],
     ["find", "Usage: wf find"],
     ["add", "Usage: wf add"],
@@ -370,6 +372,8 @@ describe("cli", () => {
   it.each([
     [["worktree", "list", "--help"], "Usage: wf worktree list"],
     [["worktree", "rm", "--help"], "Usage: wf worktree rm"],
+    [["review", "list", "--help"], "Usage: wf review list"],
+    [["review", "rm", "--help"], "Usage: wf review rm"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
     [["template", "add-file", "--help"], "Usage: wf template add-file"],

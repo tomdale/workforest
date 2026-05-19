@@ -230,6 +230,7 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
   const branchPrefix =
     normalizeBranchPrefix(normalizeString(config["branchPrefix"])) ?? "";
   const defaultDir = normalizeString(config["defaultDir"]);
+  const reviewsDir = normalizeString(config["reviewsDir"]);
   const vercelLink = normalizeVercelLinkConfig(
     config["vercelLink"],
     `${configPath}.vercelLink`,
@@ -242,6 +243,10 @@ function normalizeConfig(value: unknown, configPath: string): WorkspaceConfig {
 
   if (defaultDir !== undefined) {
     result.defaultDir = defaultDir;
+  }
+
+  if (reviewsDir !== undefined) {
+    result.reviewsDir = reviewsDir;
   }
 
   if (vercelLink !== undefined) {

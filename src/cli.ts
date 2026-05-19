@@ -138,6 +138,9 @@ export async function cli(): Promise<void> {
     case "wt":
       await runWorktreeCommand(commandArgv, command);
       break;
+    case "review":
+      await runReviewCommand(commandArgv);
+      break;
     case "list":
     case "ls":
       await runListCommand(commandArgv, command);
@@ -236,6 +239,13 @@ async function runConfigInit(): Promise<void> {
     { defaultValue: currentDefaultDir || "~/Code/workspaces" },
   );
 
+  // Reviews directory
+  const currentReviewsDir = config.reviewsDir ?? "";
+  const reviewsDir = await promptText(
+    "Reviews directory (where PR review worktrees are created)",
+    { defaultValue: currentReviewsDir || deriveDefaultReviewsDir(defaultDir) },
+  );
+
   // Directory prefix
   const currentDirPrefix = config.dirPrefix ?? "";
   const dirPrefix = await promptText(
@@ -253,6 +263,7 @@ async function runConfigInit(): Promise<void> {
   const newConfig: WorkspaceConfig = {
     ...(config.vercelLink ? { vercelLink: config.vercelLink } : {}),
     ...(defaultDir ? { defaultDir } : {}),
+    ...(reviewsDir ? { reviewsDir } : {}),
     ...(dirPrefix ? { dirPrefix } : {}),
     ...(branchPrefix ? { branchPrefix } : {}),
   };
@@ -274,6 +285,15 @@ async function runConfigShow(): Promise<void> {
     console.log("  (not set - uses current directory)");
   }
   console.log("  Example: ~/Code/workspaces");
+
+  // Review directory
+  console.log("\nReviews Directory:");
+  if (config.reviewsDir) {
+    console.log(`  ${config.reviewsDir}`);
+  } else {
+    console.log("  (not set - prompts on first wf review)");
+  }
+  console.log("  Example: ~/Code/reviews");
 
   // Directory prefix
   console.log("\nDirectory Prefix:");
@@ -529,6 +549,182 @@ async function runWorktreeCommand(
   }
 
   await runStandaloneWorktreeCreate(args);
+}
+
+async function runReviewCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--dry-run": Boolean,
+      "--force": Boolean,
+      "-h": "--help",
+      "-n": "--dry-run",
+      "-f": "--force",
+    },
+    { argv },
+  );
+
+  if (args["--help"]) {
+    const subcommandHelp = args._[0]
+      ? nestedCommandHelp("review", args._[0])
+      : null;
+    console.log(subcommandHelp ?? commandHelp("review"));
+    return;
+  }
+
+  const subcommand = args._[0];
+  if (subcommand === "list" || subcommand === "ls") {
+    await runReviewList(args._.slice(1));
+    return;
+  }
+
+  if (subcommand === "rm" || subcommand === "remove") {
+    await runReviewRemove(args._.slice(1), {
+      dryRun: args["--dry-run"] ?? false,
+      force: args["--force"] ?? false,
+    });
+    return;
+  }
+
+  if (args["--dry-run"] || args["--force"]) {
+    log.error("--dry-run and --force are only supported for wf review rm.");
+    process.exitCode = 1;
+    return;
+  }
+
+  await runReviewCreate(args._);
+}
+
+async function runReviewCreate(targetArgs: string[]): Promise<void> {
+  try {
+    const { createReviewWorktree, parseReviewTarget } = await import(
+      "./review.ts"
+    );
+    const target = parseReviewTarget(targetArgs);
+    const reviewsDir = await resolveReviewsDir();
+    const metadata = await createReviewWorktree({ target, reviewsDir });
+
+    await writeShellCdPath(metadata.path);
+    log.success(`Review worktree ready: ${metadata.path}`);
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${metadata.path}`);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runReviewList(targetArgs: string[]): Promise<void> {
+  if (targetArgs.length > 1) {
+    log.error("Usage: wf review list [repo]");
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const { listReviewWorktrees } = await import("./review.ts");
+    const reviewsDir = await resolveReviewsDir();
+    const repoInput = targetArgs[0];
+    const repoParts = repoInput?.split("/");
+    const repo =
+      repoParts && repoParts.length === 2
+        ? repoParts[1]
+        : repoParts?.length === 1
+          ? repoParts[0]
+          : undefined;
+    if (repoInput && !repo) {
+      log.error(`Invalid repo name: ${repoInput}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (repo && !/^[A-Za-z0-9_.-]+$/.test(repo)) {
+      log.error(`Invalid repo name: ${repoInput}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const entries = await listReviewWorktrees(reviewsDir, repo);
+    if (entries.length === 0) {
+      log.info("No review worktrees found.");
+      return;
+    }
+
+    console.log("\nReview worktrees\n");
+    for (const entry of entries) {
+      const branch = entry.branch ? `, branch: ${entry.branch}` : "";
+      console.log(`  ${entry.owner}/${entry.repo}#${entry.prNumber}`);
+      console.log(`    status: ${entry.state}${branch}`);
+      console.log(`    path:   ${entry.path}`);
+    }
+    console.log();
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runReviewRemove(
+  targetArgs: string[],
+  options: { dryRun: boolean; force: boolean },
+): Promise<void> {
+  try {
+    const { parseReviewTarget, removeReviewWorktree } = await import(
+      "./review.ts"
+    );
+    const target = parseReviewTarget(targetArgs);
+    const reviewsDir = await resolveReviewsDir();
+    const result = await removeReviewWorktree({
+      target,
+      reviewsDir,
+      dryRun: options.dryRun,
+      force: options.force,
+    });
+    const action = result.dryRun ? "Would remove" : "Removed";
+    log.success(`${action} ${target.repo}#${target.prNumber}: ${result.path}`);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function resolveReviewsDir(): Promise<string> {
+  const { path: configPath, config } = await loadWorkspaceConfig();
+  if (config.reviewsDir) {
+    return path.resolve(expandHome(config.reviewsDir));
+  }
+
+  const defaultValue = deriveDefaultReviewsDir(config.defaultDir);
+  if (!isInteractive()) {
+    throw new Error(
+      `No reviewsDir configured. Run 'wf config init' or set reviewsDir in ${configPath}. Suggested value: ${defaultValue}`,
+    );
+  }
+
+  const reviewsDir = await promptText("Reviews directory", {
+    defaultValue,
+    validate: (input) =>
+      input.trim().length > 0 ? null : "Reviews directory is required",
+  });
+  await saveWorkspaceConfig(configPath, { ...config, reviewsDir });
+  log.success(`Saved reviewsDir to ${configPath}`);
+  return path.resolve(expandHome(reviewsDir));
+}
+
+function deriveDefaultReviewsDir(defaultDir: string | undefined): string {
+  if (!defaultDir) {
+    return "~/Code/reviews";
+  }
+
+  const expanded = expandHome(defaultDir);
+  const parent = path.dirname(expanded);
+  const derived = path.join(parent, "reviews");
+  const home = os.homedir();
+  return derived === home
+    ? "~"
+    : derived.startsWith(`${home}${path.sep}`)
+      ? `~/${path.relative(home, derived)}`
+      : derived;
 }
 
 async function runStandaloneWorktreeCreate(args: {

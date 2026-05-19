@@ -217,18 +217,33 @@ wf fork -d "trying a different strategy"
 
 ### Code Review
 
-Check out someone's PR across multiple repos without switching branches in your
+Create disposable GitHub PR review worktrees without switching branches in your
 main workspace:
 
 ```bash
-wf new reviewing alices pr -- site
-cd reviewing-alices-pr/frontend
-gh pr checkout 123
+wf review vercel/omniagent 123
+wf review vercel/omniagent#123
+wf review https://github.com/vercel/omniagent/pull/123
 ```
 
-While the PR is in the frontend repo, now coding agents have a pristine copy of
-the backend repo to reference as they help review the change, providing deeper
-context.
+Review worktrees are created under `reviewsDir/<repo>/pr-<number>`. On first
+use, `wf review` prompts for `reviewsDir` and saves it to the global config.
+The command seeds or updates the cached mirror, creates a detached worktree from
+the repo's default branch, then runs `gh pr checkout <number>` in that
+worktree.
+
+To inspect or remove review worktrees:
+
+```bash
+wf review list
+wf review list omniagent
+wf review rm vercel/omniagent#123
+wf review rm vercel/omniagent#123 --dry-run
+wf review rm vercel/omniagent#123 --force
+```
+
+Removal refuses dirty worktrees unless you pass `--force`, then removes the
+worktree and deletes the checked-out local PR branch when one is present.
 
 ## Templates
 
@@ -393,6 +408,7 @@ Global settings live in `~/.config/workforest/config.json`:
 ```jsonc
 {
   "defaultDir": "~/Code/workspaces",
+  "reviewsDir": "~/Code/reviews",
   "dirPrefix": "workspace-",
   "branchPrefix": "feature/",
   "vercelLink": {
@@ -413,6 +429,8 @@ Global settings live in `~/.config/workforest/config.json`:
 ```
 
 - **defaultDir**: Where workspaces are created
+- **reviewsDir**: Where disposable PR review worktrees are created by
+  `wf review`
 - **dirPrefix**: Prefix for workspace directory names
 - **branchPrefix**: Global default prefix for feature branch names (templates
   can override it, or set `""` to disable it for that template)
@@ -453,6 +471,9 @@ wf worktree list                List temporary worktrees
 wf worktree rm <slug...>        Remove temporary worktrees
 wf worktree <repo> <slug>       Create a standalone repo worktree
 wf wt                           Alias for worktree
+wf review <target>              Create a disposable PR review worktree
+wf review list                  List review worktrees
+wf review rm <target>           Remove a review worktree
 wf fork <name>                  Fork current workspace with new branches
 wf clean [dir]                  Remove a workspace
 wf template list                List templates
