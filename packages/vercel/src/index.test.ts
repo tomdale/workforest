@@ -18,6 +18,7 @@ vi.mock("@wf-plugin/core", async () => {
 });
 
 import {
+  MAX_CONCURRENT_ENV_PULLS,
   resolveVercelRepoLinkTarget,
   default as vercelLinkInitializer,
 } from "./initializers/vercel-link.ts";
@@ -43,6 +44,10 @@ async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
     states.push(state);
   }
   return states;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 beforeEach(() => {
@@ -199,6 +204,71 @@ describe("vercelLinkInitializer.execute", () => {
       { status: "running", message: "vercel env pull" },
       { status: "completed" },
     ]);
+  });
+
+  it("pulls linked project env files in parallel with a max concurrency cap", async () => {
+    const repoDir = await createRepoDir({
+      "vercel.json": "{}\n",
+    });
+    let activeEnvPulls = 0;
+    let maxActiveEnvPulls = 0;
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[], options: { cwd?: string }) =>
+        (async function* () {
+          if (!options.cwd) {
+            throw new Error("Expected cwd.");
+          }
+          if (args[0] === "link") {
+            await mkdir(path.join(options.cwd, ".vercel"), { recursive: true });
+            await writeFile(
+              path.join(options.cwd, ".vercel", "repo.json"),
+              JSON.stringify({
+                projects: Array.from(
+                  { length: MAX_CONCURRENT_ENV_PULLS + 2 },
+                  (_, index) => ({
+                    directory: `apps/project-${index}`,
+                  }),
+                ),
+              }),
+              "utf8",
+            );
+            yield { status: "running" as const, message: "vercel link" };
+          } else {
+            activeEnvPulls += 1;
+            maxActiveEnvPulls = Math.max(maxActiveEnvPulls, activeEnvPulls);
+            yield { status: "running" as const, message: "vercel env pull" };
+            await sleep(5);
+            activeEnvPulls -= 1;
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(
+      states.filter(
+        (state) =>
+          state.status === "running" && state.message === "vercel env pull",
+      ),
+    ).toHaveLength(MAX_CONCURRENT_ENV_PULLS + 2);
+    expect(maxActiveEnvPulls).toBe(MAX_CONCURRENT_ENV_PULLS);
+    expect(states.at(-1)).toEqual({ status: "completed" });
   });
 
   it("pulls env at the repo root when project.json exists", async () => {

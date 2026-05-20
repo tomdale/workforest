@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TaskState } from "./task-generator.ts";
-import { runCommandGenerator } from "./task-generator.ts";
+import { runCommandGenerator, runParallel } from "./task-generator.ts";
 
 async function collectStates(
   generator: AsyncGenerator<TaskState>,
@@ -10,6 +10,20 @@ async function collectStates(
     states.push(state);
   }
   return states;
+}
+
+async function collectUpdates<T>(
+  generator: AsyncGenerator<{ id: string; state: T }>,
+): Promise<Array<{ id: string; state: T }>> {
+  const states: Array<{ id: string; state: T }> = [];
+  for await (const state of generator) {
+    states.push(state);
+  }
+  return states;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 describe("runCommandGenerator", () => {
@@ -64,5 +78,35 @@ describe("runCommandGenerator", () => {
 
     expect(failedState?.error.message).not.toContain("early-marker");
     expect(failedState?.error.message).toContain("late-marker");
+  });
+});
+
+describe("runParallel", () => {
+  it("limits active generators when maxConcurrent is set", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const started: string[] = [];
+
+    const createGenerator = (id: string) =>
+      async function* () {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        started.push(id);
+        yield "running";
+        await sleep(5);
+        active -= 1;
+      };
+
+    const tasks = new Map(
+      ["a", "b", "c", "d", "e"].map((id) => [id, createGenerator(id)()]),
+    );
+
+    const states = await collectUpdates(
+      runParallel(tasks, { maxConcurrent: 2 }),
+    );
+
+    expect(states).toHaveLength(5);
+    expect(started).toEqual(["a", "b", "c", "d", "e"]);
+    expect(maxActive).toBe(2);
   });
 });

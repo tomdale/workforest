@@ -3,8 +3,10 @@ import path from "node:path";
 import {
   pathExists,
   runCommandGenerator,
+  runParallel,
   type InitializerContext,
   type InitializerDefinition,
+  type TaskGenerator,
   type WorkspaceConfig,
 } from "@wf-plugin/core";
 
@@ -12,6 +14,8 @@ export const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
   vercel: "vercel",
   "vercel-labs": "vercel-labs",
 };
+
+export const MAX_CONCURRENT_ENV_PULLS = 6;
 
 type VercelRepoLinkTarget =
   | {
@@ -115,25 +119,23 @@ async function* execute(
     };
   }
 
-  for (const cwd of envPullTargets.cwd) {
-    const envPull = runCommandGenerator(
-      "vercel",
-      ["env", "pull", "--environment", "development", "--yes"],
-      { cwd },
-    );
-
-    let envPullCompleted = false;
-    for await (const state of envPull) {
-      if (state.status === "completed") {
-        envPullCompleted = true;
-        continue;
-      }
-      yield state;
+  let envPullFailed = false;
+  for await (const { state } of runParallel(createEnvPullTasks(envPullTargets.cwd), {
+    maxConcurrent: MAX_CONCURRENT_ENV_PULLS,
+  })) {
+    if (state.status === "completed") {
+      continue;
     }
 
-    if (!envPullCompleted) {
-      return;
+    if (state.status === "failed") {
+      envPullFailed = true;
     }
+
+    yield state;
+  }
+
+  if (envPullFailed) {
+    return;
   }
 
   yield { status: "completed" as const };
@@ -146,6 +148,19 @@ const vercelLinkInitializer: InitializerDefinition = {
 };
 
 export default vercelLinkInitializer;
+
+function createEnvPullTasks(cwds: string[]): Map<string, TaskGenerator> {
+  return new Map(
+    cwds.map((cwd, index) => [
+      String(index),
+      runCommandGenerator(
+        "vercel",
+        ["env", "pull", "--environment", "development", "--yes"],
+        { cwd },
+      ),
+    ]),
+  );
+}
 
 type EnvPullTargets =
   | { kind: "pull"; cwd: string[]; warning?: string }

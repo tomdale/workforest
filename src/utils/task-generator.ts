@@ -190,12 +190,17 @@ function formatCommandStartError(
  */
 export type ParallelUpdate<T> = { id: string; state: T };
 
+export type RunParallelOptions = {
+  maxConcurrent?: number;
+};
+
 /**
  * Runs multiple generators concurrently, yielding updates as they arrive from any generator.
  * Uses Promise.race to get the next available update from any active generator.
  */
 export async function* runParallel<T>(
   tasks: Map<string, AsyncGenerator<T>>,
+  options: RunParallelOptions = {},
 ): AsyncGenerator<ParallelUpdate<T>> {
   // Track active iterators and their pending promises
   const active = new Map<
@@ -205,13 +210,22 @@ export async function* runParallel<T>(
       pendingPromise: Promise<{ id: string; result: IteratorResult<T> }> | null;
     }
   >();
+  const pending = [...tasks.entries()];
+  const maxConcurrent = normalizeMaxConcurrent(options.maxConcurrent);
 
-  // Initialize all iterators
-  for (const [id, gen] of tasks) {
-    active.set(id, {
-      iterator: gen[Symbol.asyncIterator](),
-      pendingPromise: null,
-    });
+  function startPendingTasks(): void {
+    while (pending.length > 0 && active.size < maxConcurrent) {
+      const next = pending.shift();
+      if (!next) {
+        return;
+      }
+
+      const [id, gen] = next;
+      active.set(id, {
+        iterator: gen[Symbol.asyncIterator](),
+        pendingPromise: null,
+      });
+    }
   }
 
   // Helper to get or create a pending promise for an iterator
@@ -229,6 +243,8 @@ export async function* runParallel<T>(
     }
     return entry.pendingPromise;
   }
+
+  startPendingTasks();
 
   while (active.size > 0) {
     // Create promises for all active generators
@@ -249,8 +265,21 @@ export async function* runParallel<T>(
 
     if (result.done) {
       active.delete(id);
+      startPendingTasks();
     } else {
       yield { id, state: result.value };
     }
   }
+}
+
+function normalizeMaxConcurrent(value: number | undefined): number {
+  if (value === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (!Number.isFinite(value) || value < 1) {
+    throw new RangeError("maxConcurrent must be a positive finite number.");
+  }
+
+  return Math.floor(value);
 }
