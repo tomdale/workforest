@@ -117,6 +117,48 @@ describe("temporary worktrees", () => {
     });
   });
 
+  it("uses the configured branch prefix instead of inheriting the current branch namespace", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const { createTemporaryWorktrees } = await import(
+      "./temporary-worktrees.ts"
+    );
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "h/ai-alerts-follow-up\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockRejectedValueOnce(new Error("missing branch"))
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const result = await createTemporaryWorktrees({
+      workspaceDir,
+      parentRepo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        default_branch: "main",
+        has_lockfile: true,
+      },
+      slugs: ["optional-corepack"],
+      branchPrefix: "tomdale/",
+    });
+
+    expect(result.created[0]).toMatchObject({
+      slug: "optional-corepack",
+      branch: "tomdale/optional-corepack",
+    });
+    expect(runGitMock).toHaveBeenLastCalledWith(
+      [
+        "worktree",
+        "add",
+        "-b",
+        "tomdale/optional-corepack",
+        path.join(workspaceDir, "front-optional-corepack"),
+        "HEAD",
+      ],
+      { cwd: path.join(workspaceDir, "front") },
+    );
+  });
+
   it("keeps a worktree and records a setup log when initializers fail", async () => {
     const workspaceDir = await createWorkspaceDir();
     const { createTemporaryWorktrees } = await import(

@@ -338,6 +338,8 @@ describe("cli", () => {
     ["worktree", "Usage: wf worktree"],
     ["wt", "Usage: wf wt"],
     ["review", "Usage: wf review"],
+    ["delete", "Usage: wf delete"],
+    ["workspace", "Usage: wf workspace"],
     ["cd", "Usage: wf cd"],
     ["find", "Usage: wf find"],
     ["add", "Usage: wf add"],
@@ -371,9 +373,12 @@ describe("cli", () => {
 
   it.each([
     [["worktree", "list", "--help"], "Usage: wf worktree list"],
-    [["worktree", "rm", "--help"], "Usage: wf worktree rm"],
+    [["worktree", "delete", "--help"], "Usage: wf worktree delete"],
+    [["worktree", "rm", "--help"], "Usage: wf worktree delete"],
     [["review", "list", "--help"], "Usage: wf review list"],
-    [["review", "rm", "--help"], "Usage: wf review rm"],
+    [["review", "delete", "--help"], "Usage: wf review delete"],
+    [["review", "rm", "--help"], "Usage: wf review delete"],
+    [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
     [["template", "add-file", "--help"], "Usage: wf template add-file"],

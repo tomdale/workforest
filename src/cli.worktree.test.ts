@@ -7,11 +7,13 @@ import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 
 const {
   createSingleWorktreeMock,
+  removeStandaloneWorktreeMock,
   createTemporaryWorktreesMock,
   listTemporaryWorktreesMock,
   removeTemporaryWorktreesMock,
 } = vi.hoisted(() => ({
   createSingleWorktreeMock: vi.fn(),
+  removeStandaloneWorktreeMock: vi.fn(),
   createTemporaryWorktreesMock: vi.fn(),
   listTemporaryWorktreesMock: vi.fn(),
   removeTemporaryWorktreesMock: vi.fn(),
@@ -34,6 +36,7 @@ async function createTempDir(prefix: string): Promise<string> {
 async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
   vi.doMock("./worktree.ts", () => ({
     createSingleWorktree: createSingleWorktreeMock,
+    removeStandaloneWorktree: removeStandaloneWorktreeMock,
   }));
   vi.doMock("./workspace/temporary-worktrees.ts", () => ({
     createTemporaryWorktrees: createTemporaryWorktreesMock,
@@ -50,6 +53,7 @@ afterEach(async () => {
   vi.unmock("./worktree.ts");
   vi.unmock("./workspace/temporary-worktrees.ts");
   createSingleWorktreeMock.mockReset();
+  removeStandaloneWorktreeMock.mockReset();
   createTemporaryWorktreesMock.mockReset();
   listTemporaryWorktreesMock.mockReset();
   removeTemporaryWorktreesMock.mockReset();
@@ -246,7 +250,9 @@ describe("wf worktree", () => {
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await mkdir(repoDir, { recursive: true });
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      branchPrefix: "tomdale/",
+    });
     const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
     await writeWorkspaceMetadata(workspaceDir, {
       featureName: "my-feature",
@@ -293,6 +299,7 @@ describe("wf worktree", () => {
         has_lockfile: true,
       },
       slugs: ["fix-tests"],
+      branchPrefix: "tomdale/",
       dryRun: false,
       force: false,
     });
@@ -383,7 +390,7 @@ describe("wf worktree", () => {
     expect(logs.join("\n")).toContain("fix-tests");
   });
 
-  it("removes temporary worktrees with an explicit slug", async () => {
+  it("deletes temporary worktrees with an explicit slug", async () => {
     const workspaceDir = await createTempDir("workforest-workspace-");
     const repoDir = path.join(workspaceDir, "front");
     const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
@@ -417,7 +424,7 @@ describe("wf worktree", () => {
     });
 
     const { cli } = await importCliWithWorktreeMock();
-    process.argv = ["node", "wf", "worktree", "rm", "fix-tests"];
+    process.argv = ["node", "wf", "worktree", "delete", "fix-tests"];
     process.exitCode = undefined;
 
     await cli();
@@ -426,6 +433,96 @@ describe("wf worktree", () => {
       workspaceDir: resolvedWorkspaceDir,
       slugs: ["fix-tests"],
       parentRepoName: "front",
+      dryRun: false,
+      force: false,
+    });
+  });
+
+  it("infers the current temporary worktree for bare delete", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const worktreeDir = path.join(workspaceDir, "front-fix-tests");
+    const { appendTemporaryWorktrees, writeWorkspaceMetadata } = await import(
+      "./workspace/metadata.ts"
+    );
+    await mkdir(worktreeDir, { recursive: true });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    await appendTemporaryWorktrees(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "front-fix-tests",
+        branch: "tomdale/fix-tests",
+        base_branch: "tomdale/my-feature",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+    process.chdir(worktreeDir);
+    const resolvedWorkspaceDir = path.dirname(process.cwd());
+    removeTemporaryWorktreesMock.mockResolvedValueOnce({
+      removed: [
+        {
+          slug: "fix-tests",
+          parent_repo: "front",
+          path: "front-fix-tests",
+          branch: "tomdale/fix-tests",
+          base_branch: "tomdale/my-feature",
+          base_sha: "abc123",
+          created_at: "2026-05-15T00:00:00.000Z",
+          setup_status: "ready",
+        },
+      ],
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "delete", "--force"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(removeTemporaryWorktreesMock).toHaveBeenCalledWith({
+      workspaceDir: resolvedWorkspaceDir,
+      slugs: ["fix-tests"],
+      parentRepoName: "front",
+      dryRun: false,
+      force: true,
+    });
+  });
+
+  it("deletes standalone worktrees outside a workspace", async () => {
+    const targetDir = await createTempDir("workforest-standalone-");
+    process.chdir(targetDir);
+    const resolvedTargetDir = process.cwd();
+    removeStandaloneWorktreeMock.mockResolvedValueOnce({
+      path: resolvedTargetDir,
+      dryRun: false,
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = [
+      "node",
+      "wf",
+      "worktree",
+      "delete",
+      path.basename(resolvedTargetDir),
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(removeStandaloneWorktreeMock).toHaveBeenCalledWith({
+      targetDir: resolvedTargetDir,
       dryRun: false,
       force: false,
     });

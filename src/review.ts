@@ -3,6 +3,7 @@ import path from "node:path";
 import { getCacheDir } from "./config.ts";
 import { log } from "./logger.ts";
 import { runGit } from "./services/git.ts";
+import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
 import type { RepoConfig } from "./types.ts";
 import { runCommand } from "./utils/exec.ts";
 import { ensureDir, pathExists } from "./utils/fs.ts";
@@ -100,6 +101,12 @@ export async function createReviewWorktree({
     throw error;
   }
 
+  await runReviewInitializers({
+    repo,
+    repoDir: targetDir,
+    workspaceDir: repoReviewsDir,
+  });
+
   const branch = await getCurrentBranch(targetDir);
   const metadata: ReviewMetadata = {
     ...target,
@@ -110,6 +117,44 @@ export async function createReviewWorktree({
   await writeReviewMetadata(reviewsDir, metadata);
 
   return metadata;
+}
+
+async function runReviewInitializers({
+  repo,
+  repoDir,
+  workspaceDir,
+}: {
+  repo: RepoConfig;
+  repoDir: string;
+  workspaceDir: string;
+}): Promise<void> {
+  for await (const state of runSingleRepoInitializersGenerator({
+    context: { repo, repoDir, workspaceDir },
+  })) {
+    switch (state.phase) {
+      case "detecting":
+        log.info("Detecting repo setup");
+        break;
+      case "running":
+        if (state.state.status === "log") {
+          log[state.state.level](state.state.message);
+        } else if (state.state.status === "running" && state.state.message) {
+          log.info(`${state.initializerName}: ${state.state.message}`);
+        } else if (state.state.status === "output") {
+          process.stdout.write(state.state.data);
+        } else if (state.state.status === "skipped") {
+          log.info(`${state.initializerName}: ${state.state.reason}`);
+        } else if (state.state.status === "failed") {
+          throw state.state.error;
+        }
+        break;
+      case "skipped":
+        log.info(`${state.initializerId}: ${state.reason}`);
+        break;
+      case "complete":
+        break;
+    }
+  }
 }
 
 export async function listReviewWorktrees(

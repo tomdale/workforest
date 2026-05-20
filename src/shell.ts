@@ -29,7 +29,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|cd|find|template|worktree|wt|review|skills) ;;
+    new|fork|clean|delete|workspace|cd|find|template|worktree|wt|review|skills) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
@@ -184,6 +184,8 @@ _workforest_complete() {
     'worktree:create or manage repo worktrees'
     'wt:create or manage repo worktrees'
     'review:create or manage PR review worktrees'
+    'delete:infer and delete current tracked resource'
+    'workspace:manage workspaces'
     'add:add repo(s) to a workspace'
     'skills:list and retrieve bundled agent skills'
     'fork:fork current workspace'
@@ -207,7 +209,7 @@ _workforest_complete() {
       ;;
     args)
       case "$subcommand" in
-        cd|clean)
+        cd|clean|delete|workspace)
           _workforest_workspace_names
           ;;
       esac

@@ -44,7 +44,7 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|fork|clean|cd|find|template|worktree|wt|review|skills",
+      "new|fork|clean|delete|workspace|cd|find|template|worktree|wt|review|skills",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
@@ -53,9 +53,12 @@ describe("shell integration", () => {
     expect(script).toContain("compdef _workforest_complete wf workforest");
     expect(script).toContain("__workforest_workspace_root()");
     expect(script).toContain('local subcommand="$' + '{words[2]:-}"');
-    expect(script).toContain("cd|clean)");
+    expect(script).toContain("cd|clean|delete|workspace)");
     expect(script).toContain("find:fuzzy-find a workspace");
     expect(script).toContain("review:create or manage PR review worktrees");
+    expect(script).toContain(
+      "delete:infer and delete current tracked resource",
+    );
     expect(script).toContain("skills:list and retrieve bundled agent skills");
     expect(script).toContain("_workforest_workspace_names");
     expect(script).not.toContain("CURRENT == 3");

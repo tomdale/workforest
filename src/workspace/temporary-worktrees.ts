@@ -12,6 +12,7 @@ import type {
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
 } from "../types.ts";
+import { buildBranchName } from "../utils/branch-prefix.ts";
 import { pathExists } from "../utils/fs.ts";
 import { isSlug } from "../utils/slug.ts";
 import { runParallel } from "../utils/task-generator.ts";
@@ -44,6 +45,7 @@ export type CreateTemporaryWorktreesOptions = {
   workspaceDir: string;
   parentRepo: WorkspaceRepoMetadata;
   slugs: readonly string[];
+  branchPrefix?: string;
   force?: boolean;
   dryRun?: boolean;
   disabledInitializers?: boolean | string[];
@@ -90,6 +92,7 @@ export async function createTemporaryWorktrees({
   workspaceDir,
   parentRepo,
   slugs,
+  branchPrefix,
   force = false,
   dryRun = false,
   disabledInitializers,
@@ -116,6 +119,7 @@ export async function createTemporaryWorktrees({
     slugs,
     baseBranch,
     baseSha,
+    ...(branchPrefix !== undefined ? { branchPrefix } : {}),
   });
 
   if (dryRun) {
@@ -427,6 +431,7 @@ async function planTemporaryWorktrees({
   slugs,
   baseBranch,
   baseSha,
+  branchPrefix,
 }: {
   workspaceDir: string;
   metadata: WorkspaceMetadata;
@@ -434,6 +439,7 @@ async function planTemporaryWorktrees({
   slugs: readonly string[];
   baseBranch: string;
   baseSha: string;
+  branchPrefix?: string;
 }): Promise<TemporaryWorktreeMetadata[]> {
   const existingEntries = metadata.temporary_worktrees ?? [];
   const parentRepoDir = path.join(workspaceDir, parentRepo.name);
@@ -442,7 +448,7 @@ async function planTemporaryWorktrees({
   for (const slug of slugs) {
     const relativePath = `${parentRepo.name}-${slug}`;
     const targetDir = path.join(workspaceDir, relativePath);
-    const branch = buildTemporaryBranchName(baseBranch, slug);
+    const branch = buildTemporaryBranchName(baseBranch, slug, branchPrefix);
 
     if (
       existingEntries.some(
@@ -477,7 +483,15 @@ async function planTemporaryWorktrees({
   return planned;
 }
 
-function buildTemporaryBranchName(baseBranch: string, slug: string): string {
+function buildTemporaryBranchName(
+  baseBranch: string,
+  slug: string,
+  branchPrefix: string | undefined,
+): string {
+  if (branchPrefix) {
+    return buildBranchName(slug, branchPrefix);
+  }
+
   const lastSlash = baseBranch.lastIndexOf("/");
   if (lastSlash === -1) {
     return slug;

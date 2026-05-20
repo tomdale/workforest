@@ -3,12 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { runGitMock, runCommandMock, ensureMirrorRepoGeneratorMock } =
-  vi.hoisted(() => ({
-    runGitMock: vi.fn(),
-    runCommandMock: vi.fn(),
-    ensureMirrorRepoGeneratorMock: vi.fn(),
-  }));
+const {
+  runGitMock,
+  runCommandMock,
+  ensureMirrorRepoGeneratorMock,
+  runSingleRepoInitializersGeneratorMock,
+} = vi.hoisted(() => ({
+  runGitMock: vi.fn(),
+  runCommandMock: vi.fn(),
+  ensureMirrorRepoGeneratorMock: vi.fn(),
+  runSingleRepoInitializersGeneratorMock: vi.fn(),
+}));
 
 const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const tempDirs: string[] = [];
@@ -29,6 +34,9 @@ async function importReviewWithMocks(): Promise<typeof import("./review.ts")> {
   vi.doMock("./workspace/repository.ts", () => ({
     ensureMirrorRepoGenerator: ensureMirrorRepoGeneratorMock,
   }));
+  vi.doMock("./services/initializers/index.ts", () => ({
+    runSingleRepoInitializersGenerator: runSingleRepoInitializersGeneratorMock,
+  }));
 
   return import("./review.ts");
 }
@@ -39,9 +47,11 @@ afterEach(async () => {
   vi.unmock("./services/git.ts");
   vi.unmock("./utils/exec.ts");
   vi.unmock("./workspace/repository.ts");
+  vi.unmock("./services/initializers/index.ts");
   runGitMock.mockReset();
   runCommandMock.mockReset();
   ensureMirrorRepoGeneratorMock.mockReset();
+  runSingleRepoInitializersGeneratorMock.mockReset();
 
   if (ORIGINAL_CACHE_DIR === undefined) {
     delete process.env["WORKFOREST_CACHE_DIR"];
@@ -105,6 +115,11 @@ describe("review worktrees", () => {
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
     ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersGeneratorMock.mockImplementation(
+      async function* () {
+        yield { phase: "complete" };
+      },
+    );
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
@@ -131,6 +146,17 @@ describe("review worktrees", () => {
       ["pr", "checkout", "123"],
       expect.objectContaining({ cwd: targetDir }),
     );
+    expect(runSingleRepoInitializersGeneratorMock).toHaveBeenCalledWith({
+      context: {
+        repo: {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+        },
+        repoDir: targetDir,
+        workspaceDir: path.join(reviewsDir, "omniagent"),
+      },
+    });
     expect(result.path).toBe(targetDir);
     expect(result.branch).toBe("pull/123");
 
@@ -156,6 +182,11 @@ describe("review worktrees", () => {
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
     ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersGeneratorMock.mockImplementation(
+      async function* () {
+        yield { phase: "complete" };
+      },
+    );
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };

@@ -30,15 +30,17 @@ ${chalk.bold("Start here (for AI agents):")}
 ${chalk.bold("Commands:")}
   new <work> -- <template|repo...> Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
-  worktree list|rm             List or remove temporary worktrees
+  worktree list|delete         List or delete temporary worktrees
   review <target>              Create a disposable PR review worktree
-  review list|rm               List or remove PR review worktrees
+  review list|delete           List or delete PR review worktrees
+  delete                       Infer and delete current tracked resource
+  workspace delete [dir]       Delete a workspace
   wt                           Alias for worktree
   cd <name>                    Jump to a workspace in defaultDir
   find                         Fuzzy-find and jump to a workspace
   add <repo...>                Add repo(s) to an existing workspace
   fork <name>                  Fork current workspace with new branches
-  clean [dir]                  Remove a workspace (or run inside workspace)
+  clean [dir]                  Alias for workspace delete
   list                         List workspaces
   skills list|get|path         List and retrieve bundled agent skills
   init [shell]                 Print shell integration for auto-cd and completion
@@ -55,9 +57,9 @@ ${chalk.bold("Examples:")}
   wf new "update docs build" -- vercel/next.js vercel/turbo
   wf worktree "fix-tests" "upgrade-deps"
   wf worktree list
-  wf worktree rm "fix-tests"
+  wf worktree delete "fix-tests"
   wf review vercel/omniagent 123
-  wf review rm vercel/omniagent#123 --dry-run
+  wf review delete vercel/omniagent#123 --dry-run
   wf worktree next.js "fix-auth"
   wf wt next.js "fix-auth" --dir ../next.js-fix-auth
   wf new --dry-run "fixing auth" -- my-template
@@ -68,8 +70,9 @@ ${chalk.bold("Examples:")}
   wf fork "new approach"            Fork workspace with new branch names
   eval "$(wf init zsh)"            Auto-cd + zsh completion for workspace commands
   wf list                           Show all workspaces
-  wf clean                          Clean current workspace (self-destruct)
-  wf clean ./my-workspace -r        Clean and delete merged remote branches
+  wf delete                         Infer and delete the current resource
+  wf workspace delete               Delete current workspace (self-destruct)
+  wf workspace delete ./my-workspace -r
   wf template new "oss-docs" vercel/next.js vercel/turbo
 
 ${chalk.bold("Templates:")}
@@ -98,10 +101,12 @@ Examples:
   worktree: `Usage: wf worktree <repo> <slug> [options]
        wf worktree <slug...> [options]
        wf worktree list [options]
-       wf worktree rm <slug...> [options]
+       wf worktree delete [slug...] [options]
 
-Create, list, or remove worktrees. Inside a workforest workspace, slug-only
-creation makes temporary worktrees tracked in workspace metadata.
+Create, list, or delete worktrees. Inside a workforest workspace, slug-only
+creation makes temporary worktrees tracked in workspace metadata. Outside a
+workspace, slug-only creation uses the current git repo's origin remote when
+available.
 
 Options:
   --dir <path>     Target path for standalone worktree creation
@@ -114,13 +119,13 @@ Examples:
   wf worktree next.js fix-auth --dir ../next.js-fix-auth
   wf worktree fix-tests
   wf worktree list --repo front
-  wf worktree rm fix-tests --dry-run
+  wf worktree delete fix-tests --dry-run
 `,
 
   wt: `Usage: wf wt <repo> <slug> [options]
        wf wt <slug...> [options]
        wf wt list [options]
-       wf wt rm <slug...> [options]
+       wf wt delete [slug...] [options]
 
 Alias for wf worktree.
 
@@ -136,7 +141,7 @@ Options:
        wf review <owner>/<repo>#<pr-number>
        wf review <github-pr-url>
        wf review list [repo]
-       wf review rm <target> [options]
+       wf review delete <target> [options]
 
 Create, list, or remove disposable GitHub PR review worktrees.
 
@@ -150,7 +155,25 @@ Examples:
   wf review vercel/omniagent#123
   wf review https://github.com/vercel/omniagent/pull/123
   wf review list omniagent
-  wf review rm vercel/omniagent#123 --force
+  wf review delete vercel/omniagent#123 --force
+`,
+
+  delete: `Usage: wf delete [options] [workspace-dir]
+
+Infer and delete the current tracked resource.
+
+From inside a temporary worktree, deletes that temporary worktree.
+From inside a review worktree, deletes that review worktree.
+From inside a standalone worktree, deletes that worktree.
+From inside a workspace, deletes that workspace.
+With a path argument, deletes that workspace path.
+
+Options:
+  -r, --delete-remote-branches  Delete merged remote branches for workspaces
+  -f, --force                   Skip confirmation prompts
+  -n, --dry-run                 Preview without deleting
+  --keep-mirrors                Keep cached git mirrors for workspaces
+  -h, --help                    Show this help
 `,
 
   cd: `Usage: wf cd [name]
@@ -203,10 +226,20 @@ Examples:
   wf fork --description "try a different cache strategy"
 `,
 
+  workspace: `Usage: wf workspace delete [options] [dir]
+
+Manage workspaces.
+
+Subcommands:
+  delete, rm [dir]  Delete a workspace
+
+Options:
+  -h, --help        Show this help
+`,
+
   clean: `Usage: wf clean [options] [dir]
 
-Remove a workspace. If run inside a workspace with no dir, cleans the current
-workspace.
+Alias for wf workspace delete.
 
 Options:
   -r, --delete-remote-branches  Delete merged remote branches
@@ -216,9 +249,9 @@ Options:
   -h, --help                    Show this help
 
 Examples:
-  wf clean
-  wf clean ./my-workspace --dry-run
-  wf clean ./my-workspace -r
+  wf workspace delete
+  wf workspace delete ./my-workspace --dry-run
+  wf workspace delete ./my-workspace -r
 `,
 
   list: `Usage: wf list
@@ -339,9 +372,9 @@ List known review worktrees and stale entries.
 Options:
   -h, --help     Show this help
 `,
-    rm: `Usage: wf review rm <target> [options]
+    delete: `Usage: wf review delete <target> [options]
 
-Remove a disposable PR review worktree.
+Delete a disposable PR review worktree.
 
 Options:
   -n, --dry-run  Preview without deleting
@@ -359,15 +392,32 @@ Options:
   --repo <repo>  Limit results to one workspace repo
   -h, --help     Show this help
 `,
-    rm: `Usage: wf worktree rm <slug...> [options]
+    delete: `Usage: wf worktree delete [slug...] [options]
 
-Remove temporary worktrees tracked by the current workspace.
+Delete temporary worktrees tracked by the current workspace, or standalone
+worktrees outside a workspace.
+When run inside a temporary worktree, the slug defaults to the current worktree.
 
 Options:
   --repo <repo>  Remove worktrees for one workspace repo
   -n, --dry-run  Preview without deleting
   -f, --force    Skip confirmation prompts
   -h, --help     Show this help
+`,
+  },
+
+  workspace: {
+    delete: `Usage: wf workspace delete [options] [dir]
+
+Delete a workspace. If run inside a workspace with no dir, deletes the current
+workspace.
+
+Options:
+  -r, --delete-remote-branches  Delete merged remote branches
+  -f, --force                   Skip confirmation prompts
+  -n, --dry-run                 Preview without deleting
+  --keep-mirrors                Keep cached git mirrors
+  -h, --help                    Show this help
 `,
   },
 
@@ -480,11 +530,17 @@ Print the skills directory path, or one skill's directory.
 const NESTED_ALIASES: Record<string, Record<string, string>> = {
   worktree: {
     ls: "list",
-    remove: "rm",
+    rm: "delete",
+    remove: "delete",
   },
   review: {
     ls: "list",
-    remove: "rm",
+    rm: "delete",
+    remove: "delete",
+  },
+  workspace: {
+    rm: "delete",
+    remove: "delete",
   },
   template: {
     ls: "list",
