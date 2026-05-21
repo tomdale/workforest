@@ -6,6 +6,7 @@ import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 
 const {
+  ensureReviewWorkspaceMock,
   createReviewWorktreeMock,
   listReviewWorktreesMock,
   removeReviewWorktreeMock,
@@ -13,6 +14,7 @@ const {
   promptConfirmMock,
   isInteractiveMock,
 } = vi.hoisted(() => ({
+  ensureReviewWorkspaceMock: vi.fn(),
   createReviewWorktreeMock: vi.fn(),
   listReviewWorktreesMock: vi.fn(),
   removeReviewWorktreeMock: vi.fn(),
@@ -41,6 +43,7 @@ async function importCliWithReviewMock(): Promise<typeof import("./cli.ts")> {
     return {
       ...actual,
       createReviewWorktree: createReviewWorktreeMock,
+      ensureReviewWorkspace: ensureReviewWorkspaceMock,
       listReviewWorktrees: listReviewWorktreesMock,
       removeReviewWorktree: removeReviewWorktreeMock,
     };
@@ -65,6 +68,7 @@ afterEach(async () => {
   vi.resetModules();
   vi.unmock("./review.ts");
   vi.unmock("./ui/prompts/index.ts");
+  ensureReviewWorkspaceMock.mockReset();
   createReviewWorktreeMock.mockReset();
   listReviewWorktreesMock.mockReset();
   removeReviewWorktreeMock.mockReset();
@@ -94,6 +98,45 @@ afterEach(async () => {
 });
 
 describe("wf review", () => {
+  it("creates a repo review workspace and writes the shell cd target when no PR is specified", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const cdDir = await createTempDir("workforest-cd-");
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const repoDir = path.join(workspaceDir, "omniagent");
+    const cdPathFile = path.join(cdDir, "target");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    ensureReviewWorkspaceMock.mockResolvedValue({
+      owner: "vercel",
+      repo: "omniagent",
+      path: workspaceDir,
+      repoDir,
+    });
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "vercel/omniagent"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent" },
+    });
+    expect(createReviewWorktreeMock).not.toHaveBeenCalled();
+    await mkdir(workspaceDir, { recursive: true });
+    await expect(readFile(cdPathFile, "utf8")).resolves.toBe(
+      `${path.resolve(workspaceDir)}\n`,
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("creates a review worktree and writes the shell cd target", async () => {
     const configDir = await createTempDir("workforest-config-");
     const reviewsDir = await createTempDir("workforest-reviews-");
@@ -129,6 +172,178 @@ describe("wf review", () => {
     await expect(readFile(cdPathFile, "utf8")).resolves.toBe(
       `${path.resolve(targetDir)}\n`,
     );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("infers the repo for numeric review targets inside a review workspace", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const targetDir = path.join(workspaceDir, "pr-123");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    process.chdir(workspaceDir);
+    createReviewWorktreeMock.mockResolvedValue({
+      owner: "vercel",
+      repo: "omniagent",
+      prNumber: 123,
+      path: targetDir,
+      created_at: new Date().toISOString(),
+    });
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "#123"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(createReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.each([
+    "omniagent",
+    "pr-123",
+    "fix-tests",
+  ])("infers numeric review targets from %s inside a review workspace", async (childDirName) => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const cwd = path.join(workspaceDir, childDirName);
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(cwd, { recursive: true });
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    const {
+      appendTemporaryWorktrees,
+      upsertReviewWorktree,
+      writeWorkspaceMetadata,
+    } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    await upsertReviewWorktree(workspaceDir, {
+      pr_number: 123,
+      path: "pr-123",
+      branch: "pull/123",
+      created_at: "2026-05-15T00:00:00.000Z",
+    });
+    await appendTemporaryWorktrees(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "omniagent",
+        path: "fix-tests",
+        branch: "tomdale/fix-tests",
+        base_branch: "pull/123",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+    process.chdir(cwd);
+    createReviewWorktreeMock.mockResolvedValue({
+      owner: "vercel",
+      repo: "omniagent",
+      prNumber: 456,
+      path: path.join(workspaceDir, "pr-456"),
+      created_at: new Date().toISOString(),
+    });
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "456"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(createReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 456 },
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("uses an explicitly qualified PR target over the current review workspace", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    process.chdir(workspaceDir);
+    createReviewWorktreeMock.mockResolvedValue({
+      owner: "other",
+      repo: "repo",
+      prNumber: 456,
+      path: path.join(reviewsDir, "repo", "pr-456"),
+      created_at: new Date().toISOString(),
+    });
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { cli } = await importCliWithReviewMock();
+    process.argv = [
+      "node",
+      "wf",
+      "review",
+      "https://github.com/other/repo/pull/456",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(createReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "other", repo: "repo", prNumber: 456 },
+    });
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -240,6 +455,49 @@ describe("wf review", () => {
       "vercel/omniagent#123",
       "-n",
     ];
+    process.exitCode = undefined;
+    await cli();
+
+    expect(removeReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      dryRun: true,
+      force: false,
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("infers the repo for numeric review deletion inside a review workspace", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    process.chdir(workspaceDir);
+    removeReviewWorktreeMock.mockResolvedValue({
+      path: path.join(workspaceDir, "pr-123"),
+      dryRun: true,
+    });
+
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "rm", "#123", "-n"];
     process.exitCode = undefined;
     await cli();
 

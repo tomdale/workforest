@@ -7,15 +7,22 @@ import { runSingleRepoInitializersGenerator } from "./services/initializers/inde
 import type { RepoConfig } from "./types.ts";
 import { runCommand } from "./utils/exec.ts";
 import { ensureDir, pathExists } from "./utils/fs.ts";
+import {
+  readWorkspaceMetadata,
+  removeReviewWorktreeMetadata,
+  saveWorkspaceMetadata,
+  upsertReviewWorktree,
+  writeWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 import { ensureMirrorRepoGenerator } from "./workspace/repository.ts";
-
-const REVIEW_METADATA_DIR = ".workforest-reviews";
 
 export type ReviewTarget = {
   owner: string;
   repo: string;
   prNumber: number;
 };
+
+export type ReviewRepoTarget = Pick<ReviewTarget, "owner" | "repo">;
 
 export type ReviewMetadata = ReviewTarget & {
   path: string;
@@ -30,6 +37,21 @@ export type ReviewListEntry = ReviewMetadata & {
 export type CreateReviewWorktreeOptions = {
   target: ReviewTarget;
   reviewsDir: string;
+};
+
+export type EnsureReviewWorkspaceOptions = {
+  target: ReviewRepoTarget;
+  reviewsDir: string;
+};
+
+export type ReviewWorkspace = ReviewRepoTarget & {
+  path: string;
+  repoDir: string;
+};
+
+export type ReviewTargetContext = {
+  owner: string;
+  repo: string;
 };
 
 export type RemoveReviewWorktreeOptions = {
@@ -59,6 +81,34 @@ export function parseReviewTarget(args: readonly string[]): ReviewTarget {
   throw new Error("Expected a GitHub PR URL or <owner>/<repo> <pr-number>.");
 }
 
+export function resolveReviewTarget(
+  args: readonly string[],
+  context?: ReviewTargetContext,
+): ReviewTarget {
+  try {
+    return parseReviewTarget(args);
+  } catch (error) {
+    if (args.length === 1 && context) {
+      return {
+        ...context,
+        prNumber: parsePrNumber(args[0] ?? ""),
+      };
+    }
+
+    throw error;
+  }
+}
+
+export function parseReviewRepoTarget(
+  args: readonly string[],
+): ReviewRepoTarget {
+  if (args.length !== 1) {
+    throw new Error("Expected <owner>/<repo>.");
+  }
+
+  return parseRepoSlug(args[0] ?? "");
+}
+
 export async function createReviewWorktree({
   target,
   reviewsDir,
@@ -66,19 +116,15 @@ export async function createReviewWorktree({
   const repo = targetToRepoConfig(target);
   const cacheDir = getCacheDir();
   const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
-  const repoReviewsDir = getRepoReviewsDir(reviewsDir, target.repo);
+  const workspace = await ensureReviewWorkspace({
+    target,
+    reviewsDir,
+  });
+  const repoReviewsDir = workspace.path;
   const targetDir = getReviewWorktreePath(reviewsDir, target);
 
   if (await pathExists(targetDir)) {
     throw new Error(`Review worktree already exists: ${targetDir}`);
-  }
-
-  await ensureDir(repoReviewsDir);
-
-  for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
-    if (state.status === "log") {
-      log[state.level](state.message);
-    }
   }
 
   const defaultBranch = await detectDefaultBranch(
@@ -87,7 +133,9 @@ export async function createReviewWorktree({
   );
   await runGit(
     ["worktree", "add", "--detach", targetDir, `origin/${defaultBranch}`],
-    { cwd: mirrorDir },
+    {
+      cwd: mirrorDir,
+    },
   );
 
   try {
@@ -114,9 +162,95 @@ export async function createReviewWorktree({
     ...(branch ? { branch } : {}),
     created_at: new Date().toISOString(),
   };
-  await writeReviewMetadata(reviewsDir, metadata);
+  await upsertReviewWorktree(repoReviewsDir, {
+    pr_number: target.prNumber,
+    path: path.relative(repoReviewsDir, targetDir),
+    ...(branch ? { branch } : {}),
+    created_at: metadata.created_at,
+  });
 
   return metadata;
+}
+
+export async function ensureReviewWorkspace({
+  target,
+  reviewsDir,
+}: EnsureReviewWorkspaceOptions): Promise<ReviewWorkspace> {
+  const repo = targetToRepoConfig(target);
+  const cacheDir = getCacheDir();
+  const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
+  const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
+  const repoDir = path.join(workspaceDir, target.repo);
+
+  await ensureDir(workspaceDir);
+
+  for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
+    if (state.status === "log") {
+      log[state.level](state.message);
+    }
+  }
+
+  if (!(await pathExists(repoDir))) {
+    const defaultBranch = await detectDefaultBranch(
+      mirrorDir,
+      repo.defaultBranch,
+    );
+    await runGit(
+      ["worktree", "add", "--detach", repoDir, `origin/${defaultBranch}`],
+      { cwd: mirrorDir },
+    );
+
+    await runReviewInitializers({
+      repo,
+      repoDir,
+      workspaceDir,
+    });
+  }
+
+  const existingMetadata = await readWorkspaceMetadata(workspaceDir);
+  const repoMetadata = {
+    name: repo.name,
+    remote: repo.remote,
+    defaultBranch: repo.defaultBranch,
+    hasLockfile: false,
+  };
+  if (!existingMetadata) {
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: target.repo,
+      type: "review",
+      review: target,
+      repos: [repoMetadata],
+    });
+  } else if (
+    existingMetadata.workspace.type !== "review" ||
+    existingMetadata.workspace.review?.owner !== target.owner ||
+    existingMetadata.workspace.review?.repo !== target.repo ||
+    existingMetadata.repos.length !== 1 ||
+    existingMetadata.repos[0]?.name !== repo.name
+  ) {
+    await saveWorkspaceMetadata(workspaceDir, {
+      ...existingMetadata,
+      workspace: {
+        ...existingMetadata.workspace,
+        type: "review",
+        review: target,
+      },
+      repos: [
+        {
+          name: repo.name,
+          remote: repo.remote,
+          default_branch: repo.defaultBranch,
+          has_lockfile: false,
+        },
+      ],
+    });
+  }
+
+  return {
+    ...target,
+    path: workspaceDir,
+    repoDir,
+  };
 }
 
 async function runReviewInitializers({
@@ -174,25 +308,22 @@ export async function listReviewWorktrees(
 
   const entries: ReviewListEntry[] = [];
   for (const repoName of repoDirs) {
-    const metadataDir = path.join(
-      resolvedReviewsDir,
-      repoName,
-      REVIEW_METADATA_DIR,
-    );
-    if (!(await pathExists(metadataDir))) {
+    const workspaceDir = path.join(resolvedReviewsDir, repoName);
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+    if (!metadata?.workspace.review) {
       continue;
     }
 
-    const files = await fs.readdir(metadataDir);
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      const metadataPath = path.join(metadataDir, file);
-      const metadata = JSON.parse(
-        await fs.readFile(metadataPath, "utf8"),
-      ) as ReviewMetadata;
+    for (const worktree of metadata.review_worktrees ?? []) {
+      const absolutePath = path.join(workspaceDir, worktree.path);
       entries.push({
-        ...metadata,
-        state: (await pathExists(metadata.path)) ? "ready" : "stale",
+        owner: metadata.workspace.review.owner,
+        repo: metadata.workspace.review.repo,
+        prNumber: worktree.pr_number,
+        path: absolutePath,
+        ...(worktree.branch ? { branch: worktree.branch } : {}),
+        created_at: worktree.created_at,
+        state: (await pathExists(absolutePath)) ? "ready" : "stale",
       });
     }
   }
@@ -210,7 +341,8 @@ export async function removeReviewWorktree({
   force = false,
 }: RemoveReviewWorktreeOptions): Promise<RemoveReviewWorktreeResult> {
   const targetDir = getReviewWorktreePath(reviewsDir, target);
-  const metadata = await readReviewMetadata(reviewsDir, target);
+  const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
+  const metadata = await readReviewWorktreeMetadata(workspaceDir, target);
   const branch =
     metadata?.branch ?? (await getCurrentBranchIfExists(targetDir));
   const exists = await pathExists(targetDir);
@@ -248,7 +380,9 @@ export async function removeReviewWorktree({
     await deleteBranchIfPossible(mirrorDir, branch, force);
   }
 
-  await deleteReviewMetadata(reviewsDir, target);
+  if (await readWorkspaceMetadata(workspaceDir)) {
+    await removeReviewWorktreeMetadata(workspaceDir, target.prNumber);
+  }
 
   return {
     path: targetDir,
@@ -331,7 +465,7 @@ function parsePrNumber(input: string): number {
   return Number(normalized);
 }
 
-function targetToRepoConfig(target: ReviewTarget): RepoConfig {
+function targetToRepoConfig(target: ReviewRepoTarget): RepoConfig {
   return {
     name: target.repo,
     remote: `git@github.com:${target.owner}/${target.repo}.git`,
@@ -422,38 +556,24 @@ function getReviewWorktreePath(
   );
 }
 
-function getReviewMetadataPath(
-  reviewsDir: string,
-  target: ReviewTarget,
-): string {
-  return path.join(
-    getRepoReviewsDir(reviewsDir, target.repo),
-    REVIEW_METADATA_DIR,
-    `pr-${target.prNumber}.json`,
-  );
-}
-
-async function writeReviewMetadata(
-  reviewsDir: string,
-  metadata: ReviewMetadata,
-): Promise<void> {
-  const metadataPath = getReviewMetadataPath(reviewsDir, metadata);
-  await ensureDir(path.dirname(metadataPath));
-  await fs.writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
-}
-
-async function readReviewMetadata(
-  reviewsDir: string,
+async function readReviewWorktreeMetadata(
+  workspaceDir: string,
   target: ReviewTarget,
 ): Promise<ReviewMetadata | null> {
-  const metadataPath = getReviewMetadataPath(reviewsDir, target);
-  if (!(await pathExists(metadataPath))) return null;
-  return JSON.parse(await fs.readFile(metadataPath, "utf8")) as ReviewMetadata;
-}
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (!metadata?.workspace.review) return null;
 
-async function deleteReviewMetadata(
-  reviewsDir: string,
-  target: ReviewTarget,
-): Promise<void> {
-  await fs.rm(getReviewMetadataPath(reviewsDir, target), { force: true });
+  const worktree = (metadata.review_worktrees ?? []).find(
+    (entry) => entry.pr_number === target.prNumber,
+  );
+  if (!worktree) return null;
+
+  return {
+    owner: metadata.workspace.review.owner,
+    repo: metadata.workspace.review.repo,
+    prNumber: worktree.pr_number,
+    path: path.join(workspaceDir, worktree.path),
+    ...(worktree.branch ? { branch: worktree.branch } : {}),
+    created_at: worktree.created_at,
+  };
 }

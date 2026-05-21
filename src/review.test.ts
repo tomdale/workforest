@@ -107,7 +107,103 @@ describe("parseReviewTarget", () => {
   });
 });
 
+describe("parseReviewRepoTarget", () => {
+  it("parses a repository slug", async () => {
+    const { parseReviewRepoTarget } = await import("./review.ts");
+    expect(parseReviewRepoTarget(["vercel/omniagent"])).toEqual({
+      owner: "vercel",
+      repo: "omniagent",
+    });
+  });
+
+  it.each([
+    [[]],
+    [["vercel/omniagent", "123"]],
+    [["vercel/omniagent#123"]],
+  ])("rejects invalid repo target %j", async (args) => {
+    const { parseReviewRepoTarget } = await import("./review.ts");
+    expect(() => parseReviewRepoTarget(args)).toThrow();
+  });
+});
+
+describe("resolveReviewTarget", () => {
+  it.each([
+    [["123"]],
+    [["#123"]],
+  ])("infers the repo for numeric target %j", async (args) => {
+    const { resolveReviewTarget } = await import("./review.ts");
+    expect(
+      resolveReviewTarget(args, { owner: "vercel", repo: "omniagent" }),
+    ).toEqual({ owner: "vercel", repo: "omniagent", prNumber: 123 });
+  });
+
+  it("rejects numeric-only targets without a review workspace context", async () => {
+    const { resolveReviewTarget } = await import("./review.ts");
+    expect(() => resolveReviewTarget(["123"])).toThrow();
+  });
+});
+
 describe("review worktrees", () => {
+  it("creates a repo review workspace when no pull request is specified", async () => {
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
+
+    ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersGeneratorMock.mockImplementation(
+      async function* () {
+        yield { phase: "complete" };
+      },
+    );
+    runGitMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === "symbolic-ref")
+        return { stdout: "refs/heads/main\n", stderr: "" };
+      if (args[0] === "for-each-ref")
+        return { stdout: "refs/remotes/origin/main\n", stderr: "" };
+      return { stdout: "", stderr: "" };
+    });
+
+    const { ensureReviewWorkspace } = await importReviewWithMocks();
+    const result = await ensureReviewWorkspace({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent" },
+    });
+
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const repoDir = path.join(workspaceDir, "omniagent");
+    expect(runGitMock).toHaveBeenCalledWith(
+      ["worktree", "add", "--detach", repoDir, "origin/main"],
+      { cwd: path.join(cacheDir, "omniagent.git") },
+    );
+    expect(runSingleRepoInitializersGeneratorMock).toHaveBeenCalledWith({
+      context: {
+        repo: {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+        },
+        repoDir,
+        workspaceDir,
+      },
+    });
+    expect(result.path).toBe(workspaceDir);
+    expect(result.repoDir).toBe(repoDir);
+
+    const metadata = JSON.parse(
+      await readFile(
+        path.join(workspaceDir, ".workforest", "workspace.json"),
+        "utf8",
+      ),
+    ) as {
+      workspace: { type?: string; review?: { owner: string; repo: string } };
+    };
+    expect(metadata.workspace).toMatchObject({
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+    });
+  });
+
   it("creates a detached worktree and checks out the pull request", async () => {
     const reviewsDir = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
@@ -160,8 +256,24 @@ describe("review worktrees", () => {
     expect(result.path).toBe(targetDir);
     expect(result.branch).toBe("pull/123");
 
-    const metadata = JSON.parse(
+    const workspaceMetadata = JSON.parse(
       await readFile(
+        path.join(reviewsDir, "omniagent", ".workforest", "workspace.json"),
+        "utf8",
+      ),
+    ) as {
+      workspace: { type: string; review: { owner: string; repo: string } };
+      review_worktrees: { pr_number: number; path: string }[];
+    };
+    expect(workspaceMetadata.workspace).toMatchObject({
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+    });
+    expect(workspaceMetadata.review_worktrees).toMatchObject([
+      { pr_number: 123, path: "pr-123" },
+    ]);
+    await expect(
+      readFile(
         path.join(
           reviewsDir,
           "omniagent",
@@ -170,9 +282,7 @@ describe("review worktrees", () => {
         ),
         "utf8",
       ),
-    ) as { prNumber: number; path: string };
-    expect(metadata.prNumber).toBe(123);
-    expect(metadata.path).toBe(targetDir);
+    ).rejects.toThrow();
   });
 
   it("removes the created worktree if gh checkout fails", async () => {

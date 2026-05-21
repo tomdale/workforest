@@ -44,6 +44,7 @@ export type TemporaryWorktreeFailure = {
 export type CreateTemporaryWorktreesOptions = {
   workspaceDir: string;
   parentRepo: WorkspaceRepoMetadata;
+  sourceRepoDir?: string;
   slugs: readonly string[];
   branchPrefix?: string;
   force?: boolean;
@@ -91,6 +92,7 @@ export function workspaceRepoToRepoConfig(
 export async function createTemporaryWorktrees({
   workspaceDir,
   parentRepo,
+  sourceRepoDir,
   slugs,
   branchPrefix,
   force = false,
@@ -99,14 +101,17 @@ export async function createTemporaryWorktrees({
 }: CreateTemporaryWorktreesOptions): Promise<CreateTemporaryWorktreesResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const repoDir = path.join(resolvedWorkspaceDir, parentRepo.name);
+  const resolvedSourceRepoDir = sourceRepoDir
+    ? path.resolve(sourceRepoDir)
+    : repoDir;
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
 
   validateRequestedSlugs(slugs);
 
-  const baseBranch = await getCurrentBranch(repoDir);
-  const baseSha = await getCurrentSha(repoDir);
+  const baseBranch = await getCurrentBranch(resolvedSourceRepoDir);
+  const baseSha = await getCurrentSha(resolvedSourceRepoDir);
 
-  if (!dryRun && !force && (await isGitDirty(repoDir))) {
+  if (!dryRun && !force && (await isGitDirty(resolvedSourceRepoDir))) {
     throw new Error(
       `Primary repo "${parentRepo.name}" has uncommitted changes. Commit or stash them before creating subagent worktrees, or pass --force.`,
     );
@@ -141,7 +146,7 @@ export async function createTemporaryWorktrees({
       entry.slug,
       createAndSetupTemporaryWorktree({
         workspaceDir: resolvedWorkspaceDir,
-        parentRepoDir: repoDir,
+        parentRepoDir: resolvedSourceRepoDir,
         repo: repoConfig,
         entry,
         ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
@@ -443,20 +448,17 @@ async function planTemporaryWorktrees({
 }): Promise<TemporaryWorktreeMetadata[]> {
   const existingEntries = metadata.temporary_worktrees ?? [];
   const parentRepoDir = path.join(workspaceDir, parentRepo.name);
+  const existingSlugs = new Set(existingEntries.map((entry) => entry.slug));
   const planned: TemporaryWorktreeMetadata[] = [];
 
   for (const slug of slugs) {
-    const relativePath = `${parentRepo.name}-${slug}`;
+    const relativePath = slug;
     const targetDir = path.join(workspaceDir, relativePath);
     const branch = buildTemporaryBranchName(baseBranch, slug, branchPrefix);
 
-    if (
-      existingEntries.some(
-        (entry) => entry.parent_repo === parentRepo.name && entry.slug === slug,
-      )
-    ) {
+    if (existingSlugs.has(slug)) {
       throw new Error(
-        `Temporary worktree "${slug}" is already tracked for ${parentRepo.name}.`,
+        `Temporary worktree "${slug}" is already tracked in this workspace.`,
       );
     }
 

@@ -31,7 +31,7 @@ ${chalk.bold("Commands:")}
   new <work> -- <template|repo...> Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|delete         List or delete temporary worktrees
-  review <target>              Create a disposable PR review worktree
+  review <target>              Create a review workspace or PR worktree
   review list|delete           List or delete PR review worktrees
   delete                       Infer and delete current tracked resource
   workspace delete [dir]       Delete a workspace
@@ -137,13 +137,16 @@ Options:
   -h, --help       Show this help
 `,
 
-  review: `Usage: wf review <owner>/<repo> <pr-number>
+  review: `Usage: wf review <owner>/<repo>
+       wf review <pr-number>
+       wf review <owner>/<repo> <pr-number>
        wf review <owner>/<repo>#<pr-number>
        wf review <github-pr-url>
        wf review list [repo]
        wf review delete <target> [options]
 
-Create, list, or remove disposable GitHub PR review worktrees.
+Create, list, or remove GitHub review workspaces and PR worktrees. Numeric-only
+PR targets infer the repo from the current review workspace.
 
 Options:
   -n, --dry-run    Preview review removal without deleting
@@ -151,6 +154,8 @@ Options:
   -h, --help       Show this help
 
 Examples:
+  wf review vercel/omniagent
+  wf review 123
   wf review vercel/omniagent 123
   wf review vercel/omniagent#123
   wf review https://github.com/vercel/omniagent/pull/123
@@ -374,7 +379,7 @@ Options:
 `,
     delete: `Usage: wf review delete <target> [options]
 
-Delete a disposable PR review worktree.
+Delete a PR review worktree.
 
 Options:
   -n, --dry-run  Preview without deleting

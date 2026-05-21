@@ -152,8 +152,8 @@ wf worktree fix-tests upgrade-dependencies
 
 This creates directories like:
 
-- `~/Code/workspaces/my-feature/omniagent-fix-tests`
-- `~/Code/workspaces/my-feature/omniagent-upgrade-dependencies`
+- `~/Code/workspaces/my-feature/fix-tests`
+- `~/Code/workspaces/my-feature/upgrade-dependencies`
 
 Each temporary worktree starts from the primary repo's committed `HEAD`, gets a
 branch such as `tomdale/fix-tests`, and runs the same built-in
@@ -221,16 +221,22 @@ Create disposable GitHub PR review worktrees without switching branches in your
 main workspace:
 
 ```bash
+wf review vercel/omniagent
 wf review vercel/omniagent 123
+wf review 123 # inside a review workspace
 wf review vercel/omniagent#123
 wf review https://github.com/vercel/omniagent/pull/123
 ```
 
-Review worktrees are created under `reviewsDir/<repo>/pr-<number>`. On first
-use, `wf review` prompts for `reviewsDir` and saves it to the global config.
-The command seeds or updates the cached mirror, creates a detached worktree from
-the repo's default branch, then runs `gh pr checkout <number>` in that
-worktree.
+Running `wf review <owner>/<repo>` creates or reuses a repo review workspace at
+`reviewsDir/<repo>` and a default-branch checkout at `reviewsDir/<repo>/<repo>`,
+then changes your shell to the workspace. PR review worktrees are created under
+`reviewsDir/<repo>/pr-<number>`. On first use, `wf review` prompts for
+`reviewsDir` and saves it to the global config. For PR targets, the command
+seeds or updates the cached mirror, creates a detached worktree from the repo's
+default branch, then runs `gh pr checkout <number>` in that worktree.
+Inside a review workspace, `wf review 123` and `wf review #123` infer the
+current review repository.
 
 To inspect or remove review worktrees:
 
@@ -471,7 +477,7 @@ wf worktree list                List temporary worktrees
 wf worktree rm <slug...>        Remove temporary worktrees
 wf worktree <repo> <slug>       Create a standalone repo worktree
 wf wt                           Alias for worktree
-wf review <target>              Create a disposable PR review worktree
+wf review <target>              Create a review workspace or PR worktree
 wf review list                  List review worktrees
 wf review rm <target>           Remove a review worktree
 wf fork <name>                  Fork current workspace with new branches

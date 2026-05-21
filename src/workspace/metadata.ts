@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
+  ReviewWorktreeMetadata,
   TemporaryWorktreeMetadata,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
@@ -15,6 +16,11 @@ export type WriteMetadataOptions = {
   featureName: string;
   description?: string;
   templateId?: string;
+  type?: "review";
+  review?: {
+    owner: string;
+    repo: string;
+  };
   branchName?: string;
   repos: readonly {
     name: string;
@@ -38,6 +44,8 @@ export async function writeWorkspaceMetadata(
       feature_name: options.featureName,
       ...(options.description ? { description: options.description } : {}),
       ...(options.templateId ? { template_id: options.templateId } : {}),
+      ...(options.type ? { type: options.type } : {}),
+      ...(options.review ? { review: options.review } : {}),
     },
     repos: options.repos.map((repo) => ({
       name: repo.name,
@@ -49,6 +57,67 @@ export async function writeWorkspaceMetadata(
   };
 
   await saveWorkspaceMetadata(workspaceDir, metadata);
+}
+
+export async function upsertReviewWorktree(
+  workspaceDir: string,
+  worktree: ReviewWorktreeMetadata,
+): Promise<WorkspaceMetadata> {
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+
+  if (!metadata) {
+    throw new Error(
+      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+    );
+  }
+
+  const existing = metadata.review_worktrees ?? [];
+  const nextReviewWorktrees = existing.some(
+    (entry) => entry.pr_number === worktree.pr_number,
+  )
+    ? existing.map((entry) =>
+        entry.pr_number === worktree.pr_number ? worktree : entry,
+      )
+    : [...existing, worktree];
+
+  const nextMetadata: WorkspaceMetadata = {
+    ...metadata,
+    review_worktrees: nextReviewWorktrees,
+  };
+
+  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
+  return nextMetadata;
+}
+
+export async function removeReviewWorktreeMetadata(
+  workspaceDir: string,
+  prNumber: number,
+): Promise<WorkspaceMetadata> {
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+
+  if (!metadata) {
+    throw new Error(
+      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+    );
+  }
+
+  const reviewWorktrees = (metadata.review_worktrees ?? []).filter(
+    (entry) => entry.pr_number !== prNumber,
+  );
+
+  const nextMetadata: WorkspaceMetadata = {
+    ...metadata,
+    ...(reviewWorktrees.length > 0
+      ? { review_worktrees: reviewWorktrees }
+      : {}),
+  };
+
+  if (reviewWorktrees.length === 0) {
+    delete nextMetadata.review_worktrees;
+  }
+
+  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
+  return nextMetadata;
 }
 
 /**

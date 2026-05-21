@@ -615,10 +615,39 @@ async function runReviewCommand(argv: string[]): Promise<void> {
 
 async function runReviewCreate(targetArgs: string[]): Promise<void> {
   try {
-    const { createReviewWorktree, parseReviewTarget } = await import(
-      "./review.ts"
-    );
-    const target = parseReviewTarget(targetArgs);
+    const {
+      createReviewWorktree,
+      ensureReviewWorkspace,
+      parseReviewRepoTarget,
+      resolveReviewTarget,
+    } = await import("./review.ts");
+    if (targetArgs.length === 1) {
+      let repoTarget: ReturnType<typeof parseReviewRepoTarget> | undefined;
+      try {
+        repoTarget = parseReviewRepoTarget(targetArgs);
+      } catch {
+        // Fall through to PR target parsing so compact targets and URLs keep
+        // their existing behavior and error messages.
+      }
+
+      if (repoTarget) {
+        const reviewsDir = await resolveReviewsDir();
+        const workspace = await ensureReviewWorkspace({
+          target: repoTarget,
+          reviewsDir,
+        });
+
+        await writeShellCdPath(workspace.path);
+        log.success(`Review workspace ready: ${workspace.path}`);
+        if (!isShellAutoCdEnabled()) {
+          log.info(`Run: cd ${workspace.path}`);
+        }
+        return;
+      }
+    }
+
+    const context = await resolveCurrentReviewWorkspaceContext();
+    const target = resolveReviewTarget(targetArgs, context ?? undefined);
     const reviewsDir = await resolveReviewsDir();
     const metadata = await createReviewWorktree({ target, reviewsDir });
 
@@ -687,10 +716,11 @@ async function runReviewRemove(
   options: { dryRun: boolean; force: boolean },
 ): Promise<void> {
   try {
-    const { parseReviewTarget, removeReviewWorktree } = await import(
+    const { removeReviewWorktree, resolveReviewTarget } = await import(
       "./review.ts"
     );
-    const target = parseReviewTarget(targetArgs);
+    const context = await resolveCurrentReviewWorkspaceContext();
+    const target = resolveReviewTarget(targetArgs, context ?? undefined);
     const reviewsDir = await resolveReviewsDir();
     const result = await removeReviewWorktree({
       target,
@@ -704,6 +734,21 @@ async function runReviewRemove(
     log.error(getErrorMessage(error));
     process.exitCode = 1;
   }
+}
+
+async function resolveCurrentReviewWorkspaceContext(): Promise<{
+  owner: string;
+  repo: string;
+} | null> {
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) return null;
+
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (metadata?.workspace.type !== "review" || !metadata.workspace.review) {
+    return null;
+  }
+
+  return metadata.workspace.review;
 }
 
 async function resolveReviewsDir(): Promise<string> {
@@ -904,7 +949,7 @@ async function runTemporaryWorktreeCreate(
       metadata,
       repoName: args["--repo"],
       cwd: process.cwd(),
-      allowTemporaryWorktree: false,
+      allowTemporaryWorktree: true,
     });
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -925,9 +970,16 @@ async function runTemporaryWorktreeCreate(
     const { createTemporaryWorktrees } = await import(
       "./workspace/temporary-worktrees.ts"
     );
+    const sourceRepoDir = resolveWorktreeSourceDirFromCwd({
+      workspaceDir,
+      metadata,
+      parentRepoName: parentRepo.name,
+      cwd: process.cwd(),
+    });
     const result = await createTemporaryWorktrees({
       workspaceDir,
       parentRepo,
+      ...(sourceRepoDir ? { sourceRepoDir } : {}),
       slugs,
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun: args["--dry-run"] ?? false,
@@ -1118,7 +1170,7 @@ async function runTemporaryWorktreeRemove(args: {
 
     for (const entry of result.removed) {
       const action = args["--dry-run"] ? "Would remove" : "Removed";
-      log.success(`${action} ${entry.parent_repo}-${entry.slug}`);
+      log.success(`${action} ${entry.slug}`);
     }
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -2177,7 +2229,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
       const confirmed = await confirmInferredDelete({
         dryRun,
         force,
-        description: `temporary worktree "${currentTemporaryWorktree.parent_repo}-${currentTemporaryWorktree.slug}"`,
+        description: `temporary worktree "${currentTemporaryWorktree.slug}"`,
         targetPath: worktreeDir,
       });
       if (!confirmed) return;
@@ -3615,12 +3667,54 @@ function resolveWorkspaceRepoNameFromCwd({
     }
   }
 
+  if (
+    metadata.workspace.type === "review" &&
+    metadata.repos.length === 1 &&
+    isPathInsideOrEqual(resolvedCwd, resolvedWorkspaceDir)
+  ) {
+    return metadata.repos[0]?.name;
+  }
+
   if (allowTemporaryWorktree) {
     for (const entry of metadata.temporary_worktrees ?? []) {
       const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
       if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
         return entry.parent_repo;
       }
+    }
+  }
+
+  return undefined;
+}
+
+function resolveWorktreeSourceDirFromCwd({
+  workspaceDir,
+  metadata,
+  parentRepoName,
+  cwd,
+}: {
+  workspaceDir: string;
+  metadata: WorkspaceMetadata;
+  parentRepoName: string;
+  cwd: string;
+}): string | undefined {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedCwd = path.resolve(cwd);
+
+  for (const entry of metadata.review_worktrees ?? []) {
+    const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+    if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
+      return worktreeDir;
+    }
+  }
+
+  for (const entry of metadata.temporary_worktrees ?? []) {
+    const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+    if (
+      entry.parent_repo === parentRepoName &&
+      isPathInsideOrEqual(resolvedCwd, worktreeDir)
+    ) {
+      return worktreeDir;
     }
   }
 

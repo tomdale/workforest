@@ -85,7 +85,7 @@ describe("temporary worktrees", () => {
       {
         slug: "fix-tests",
         parentRepo: "front",
-        path: path.join(workspaceDir, "front-fix-tests"),
+        path: path.join(workspaceDir, "fix-tests"),
         branch: "tomdale/fix-tests",
         setupStatus: "ready",
       },
@@ -96,7 +96,7 @@ describe("temporary worktrees", () => {
         "add",
         "-b",
         "tomdale/fix-tests",
-        path.join(workspaceDir, "front-fix-tests"),
+        path.join(workspaceDir, "fix-tests"),
         "HEAD",
       ],
       { cwd: path.join(workspaceDir, "front") },
@@ -107,7 +107,7 @@ describe("temporary worktrees", () => {
         {
           slug: "fix-tests",
           parent_repo: "front",
-          path: "front-fix-tests",
+          path: "fix-tests",
           branch: "tomdale/fix-tests",
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",
@@ -152,11 +152,48 @@ describe("temporary worktrees", () => {
         "add",
         "-b",
         "tomdale/optional-corepack",
-        path.join(workspaceDir, "front-optional-corepack"),
+        path.join(workspaceDir, "optional-corepack"),
         "HEAD",
       ],
       { cwd: path.join(workspaceDir, "front") },
     );
+  });
+
+  it("rejects duplicate slugs anywhere in the workspace", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    await appendTemporaryWorktrees(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "docs",
+        path: "fix-tests",
+        branch: "tomdale/fix-tests",
+        base_branch: "main",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+    const { createTemporaryWorktrees } = await import(
+      "./temporary-worktrees.ts"
+    );
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "def456\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    await expect(
+      createTemporaryWorktrees({
+        workspaceDir,
+        parentRepo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          default_branch: "main",
+          has_lockfile: true,
+        },
+        slugs: ["fix-tests"],
+      }),
+    ).rejects.toThrow("already tracked in this workspace");
   });
 
   it("keeps a worktree and records a setup log when initializers fail", async () => {
@@ -215,13 +252,13 @@ describe("temporary worktrees", () => {
 
   it("removes merged clean worktrees and deletes their local branches", async () => {
     const workspaceDir = await createWorkspaceDir();
-    const targetDir = path.join(workspaceDir, "front-fix-tests");
+    const targetDir = path.join(workspaceDir, "fix-tests");
     await mkdir(targetDir);
     await appendTemporaryWorktrees(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "front-fix-tests",
+        path: "fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/my-feature",
         base_sha: "abc123",

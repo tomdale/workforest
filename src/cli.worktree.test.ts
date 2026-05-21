@@ -273,7 +273,7 @@ describe("wf worktree", () => {
         {
           slug: "fix-tests",
           parentRepo: "front",
-          path: path.join(workspaceDir, "front-fix-tests"),
+          path: path.join(workspaceDir, "fix-tests"),
           branch: "tomdale/fix-tests",
           setupStatus: "ready",
         },
@@ -304,7 +304,7 @@ describe("wf worktree", () => {
       force: false,
     });
     expect(createSingleWorktreeMock).not.toHaveBeenCalled();
-    expect(logs.join("\n")).toContain("front-fix-tests");
+    expect(logs.join("\n")).toContain("fix-tests");
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -339,6 +339,138 @@ describe("wf worktree", () => {
     expect(createTemporaryWorktreesMock).not.toHaveBeenCalled();
   });
 
+  it("creates review temporary worktrees from the review workspace root", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const workspaceDir = await createTempDir("workforest-review-");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      branchPrefix: "tomdale/",
+    });
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    process.chdir(workspaceDir);
+    const resolvedWorkspaceDir = process.cwd();
+
+    createTemporaryWorktreesMock.mockResolvedValueOnce({
+      created: [
+        {
+          slug: "fix-tests",
+          parentRepo: "omniagent",
+          path: path.join(workspaceDir, "fix-tests"),
+          branch: "tomdale/fix-tests",
+          setupStatus: "ready",
+        },
+      ],
+      failures: [],
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "fix-tests"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(createTemporaryWorktreesMock).toHaveBeenCalledWith({
+      workspaceDir: resolvedWorkspaceDir,
+      parentRepo: {
+        name: "omniagent",
+        remote: "git@github.com:vercel/omniagent.git",
+        default_branch: "main",
+        has_lockfile: false,
+      },
+      slugs: ["fix-tests"],
+      branchPrefix: "tomdale/",
+      dryRun: false,
+      force: false,
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("branches review temporary worktrees from the current PR checkout", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const workspaceDir = await createTempDir("workforest-review-");
+    const prDir = path.join(workspaceDir, "pr-123");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(prDir, { recursive: true });
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      branchPrefix: "tomdale/",
+    });
+    const { upsertReviewWorktree, writeWorkspaceMetadata } = await import(
+      "./workspace/metadata.ts"
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    await upsertReviewWorktree(workspaceDir, {
+      pr_number: 123,
+      path: "pr-123",
+      branch: "pull/123",
+      created_at: "2026-05-15T00:00:00.000Z",
+    });
+    process.chdir(prDir);
+    const resolvedPrDir = process.cwd();
+    const resolvedWorkspaceDir = path.dirname(resolvedPrDir);
+
+    createTemporaryWorktreesMock.mockResolvedValueOnce({
+      created: [
+        {
+          slug: "fix-tests",
+          parentRepo: "omniagent",
+          path: path.join(workspaceDir, "fix-tests"),
+          branch: "tomdale/fix-tests",
+          setupStatus: "ready",
+        },
+      ],
+      failures: [],
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "fix-tests"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(createTemporaryWorktreesMock).toHaveBeenCalledWith({
+      workspaceDir: resolvedWorkspaceDir,
+      parentRepo: {
+        name: "omniagent",
+        remote: "git@github.com:vercel/omniagent.git",
+        default_branch: "main",
+        has_lockfile: false,
+      },
+      sourceRepoDir: resolvedPrDir,
+      slugs: ["fix-tests"],
+      branchPrefix: "tomdale/",
+      dryRun: false,
+      force: false,
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("lists temporary worktrees scoped to the current repo", async () => {
     const workspaceDir = await createTempDir("workforest-workspace-");
     const repoDir = path.join(workspaceDir, "front");
@@ -362,8 +494,8 @@ describe("wf worktree", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "front-fix-tests",
-        absolutePath: path.join(workspaceDir, "front-fix-tests"),
+        path: "fix-tests",
+        absolutePath: path.join(workspaceDir, "fix-tests"),
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/my-feature",
         base_sha: "abc123",
@@ -413,7 +545,7 @@ describe("wf worktree", () => {
         {
           slug: "fix-tests",
           parent_repo: "front",
-          path: "front-fix-tests",
+          path: "fix-tests",
           branch: "tomdale/fix-tests",
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",
@@ -440,7 +572,7 @@ describe("wf worktree", () => {
 
   it("infers the current temporary worktree for bare delete", async () => {
     const workspaceDir = await createTempDir("workforest-workspace-");
-    const worktreeDir = path.join(workspaceDir, "front-fix-tests");
+    const worktreeDir = path.join(workspaceDir, "fix-tests");
     const { appendTemporaryWorktrees, writeWorkspaceMetadata } = await import(
       "./workspace/metadata.ts"
     );
@@ -460,7 +592,7 @@ describe("wf worktree", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "front-fix-tests",
+        path: "fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/my-feature",
         base_sha: "abc123",
@@ -475,7 +607,7 @@ describe("wf worktree", () => {
         {
           slug: "fix-tests",
           parent_repo: "front",
-          path: "front-fix-tests",
+          path: "fix-tests",
           branch: "tomdale/fix-tests",
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",

@@ -70,9 +70,15 @@ export type WorkspaceMetadata = {
     feature_name: string;
     description?: string;
     template_id?: string;
+    type?: "review";
+    review?: {
+      owner: string;
+      repo: string;
+    };
   };
   repos: WorkspaceRepoMetadata[];
   temporary_worktrees?: TemporaryWorktreeMetadata[];
+  review_worktrees?: ReviewWorktreeMetadata[];
 };
 
 export type WorkspaceRepoMetadata = {
@@ -93,4 +99,11 @@ export type TemporaryWorktreeMetadata = {
   created_at: string;
   setup_status: "ready" | "failed";
   setup_log?: string;
+};
+
+export type ReviewWorktreeMetadata = {
+  pr_number: number;
+  path: string;
+  branch?: string;
+  created_at: string;
 };

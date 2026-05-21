@@ -203,7 +203,7 @@ describe("workspace metadata", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "front-fix-tests",
+        path: "fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/fix-auth-bug",
         base_sha: "abc123",
@@ -225,7 +225,7 @@ describe("workspace metadata", () => {
         {
           slug: "fix-tests",
           parent_repo: "front",
-          path: "front-fix-tests",
+          path: "fix-tests",
         },
       ],
     });
@@ -249,7 +249,7 @@ describe("workspace metadata", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "front-fix-tests",
+        path: "fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/fix-auth-bug",
         base_sha: "abc123",
