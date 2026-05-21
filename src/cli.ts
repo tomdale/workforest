@@ -713,7 +713,7 @@ async function runReviewList(targetArgs: string[]): Promise<void> {
 
 async function runReviewRemove(
   targetArgs: string[],
-  options: { dryRun: boolean; force: boolean },
+  options: { dryRun: boolean; force: boolean; skipConfirmation?: boolean },
 ): Promise<void> {
   try {
     const { removeReviewWorktree, resolveReviewTarget } = await import(
@@ -722,6 +722,21 @@ async function runReviewRemove(
     const context = await resolveCurrentReviewWorkspaceContext();
     const target = resolveReviewTarget(targetArgs, context ?? undefined);
     const reviewsDir = await resolveReviewsDir();
+    const targetDir = path.join(
+      reviewsDir,
+      target.repo,
+      `pr-${target.prNumber}`,
+    );
+    if (!options.skipConfirmation) {
+      const confirmed = await confirmDelete({
+        dryRun: options.dryRun,
+        force: options.force,
+        description: `review worktree "${target.owner}/${target.repo}#${target.prNumber}"`,
+        targetPath: targetDir,
+      });
+      if (!confirmed) return;
+    }
+
     const result = await removeReviewWorktree({
       target,
       reviewsDir,
@@ -879,6 +894,7 @@ async function runStandaloneWorktreeRemove(args: {
   _: string[];
   "--dry-run"?: boolean;
   "--force"?: boolean;
+  skipConfirmation?: boolean;
 }): Promise<void> {
   const targetArg = args._[1];
   const targetDir =
@@ -888,6 +904,16 @@ async function runStandaloneWorktreeRemove(args: {
 
   try {
     const { removeStandaloneWorktree } = await import("./worktree.ts");
+    if (!args.skipConfirmation) {
+      const confirmed = await confirmDelete({
+        dryRun: args["--dry-run"] ?? false,
+        force: args["--force"] ?? false,
+        description: "standalone worktree",
+        targetPath: targetDir,
+      });
+      if (!confirmed) return;
+    }
+
     const result = await removeStandaloneWorktree({
       targetDir,
       dryRun: args["--dry-run"] ?? false,
@@ -1104,6 +1130,7 @@ async function runTemporaryWorktreeRemove(args: {
   "--repo"?: string;
   "--dry-run"?: boolean;
   "--force"?: boolean;
+  skipConfirmation?: boolean;
 }): Promise<void> {
   let slugs = args._.slice(1);
 
@@ -1160,6 +1187,19 @@ async function runTemporaryWorktreeRemove(args: {
     const { removeTemporaryWorktrees } = await import(
       "./workspace/temporary-worktrees.ts"
     );
+    if (!args.skipConfirmation) {
+      const confirmed = await confirmDelete({
+        dryRun: args["--dry-run"] ?? false,
+        force: args["--force"] ?? false,
+        description:
+          slugs.length === 1
+            ? `temporary worktree "${slugs[0]}"`
+            : `${slugs.length} temporary worktrees`,
+        targetPath: workspaceDir,
+      });
+      if (!confirmed) return;
+    }
+
     const result = await removeTemporaryWorktrees({
       workspaceDir,
       slugs,
@@ -2094,27 +2134,28 @@ async function runCleanCommand(argv: string[]): Promise<void> {
 
   // Confirm unless --force or --dry-run
   if (!force && !dryRun) {
-    if (!interactive) {
-      log.error("Cannot confirm in non-interactive mode. Use --force.");
-      process.exitCode = 1;
-      return;
-    }
+    const confirmed = await confirmDelete({
+      dryRun,
+      force,
+      description: "workspace",
+      targetPath: preview.workspaceDir,
+    });
+    if (!confirmed) return;
+  }
 
-    const confirmed = await promptConfirm(
-      "This will delete the workspace directory. Continue?",
-      false,
-    );
-    if (!confirmed) {
-      cancel("Cancelled");
-      return;
-    }
+  if (!force && !dryRun && preview.remoteBranches?.length) {
+    const branchCount = preview.remoteBranches.length;
+    const branchList = preview.remoteBranches
+      .map((b) => `${b.repo}: ${b.branch}`)
+      .join(", ");
 
-    // If -r flag not set, prompt only if there are eligible merged branches
-    if (!deleteRemoteBranches && preview.remoteBranches?.length) {
-      const branchCount = preview.remoteBranches.length;
-      const branchList = preview.remoteBranches
-        .map((b) => `${b.repo}: ${b.branch}`)
-        .join(", ");
+    if (deleteRemoteBranches) {
+      deleteRemoteBranches = await confirmDelete({
+        dryRun,
+        force,
+        description: `${branchCount} merged remote branch${branchCount !== 1 ? "es" : ""} (${branchList})`,
+      });
+    } else {
       deleteRemoteBranches = await promptConfirm(
         `Delete ${branchCount} merged remote branch${branchCount !== 1 ? "es" : ""} (${branchList})?`,
         false,
@@ -2226,7 +2267,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
         workspaceDir,
         currentTemporaryWorktree.path,
       );
-      const confirmed = await confirmInferredDelete({
+      const confirmed = await confirmDelete({
         dryRun,
         force,
         description: `temporary worktree "${currentTemporaryWorktree.slug}"`,
@@ -2238,6 +2279,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
         _: ["delete"],
         "--dry-run": dryRun,
         "--force": force,
+        skipConfirmation: true,
       });
       return;
     }
@@ -2251,7 +2293,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
     : null;
 
   if (exactReview) {
-    const confirmed = await confirmInferredDelete({
+    const confirmed = await confirmDelete({
       dryRun,
       force,
       description: `review worktree "${exactReview.owner}/${exactReview.repo}#${exactReview.prNumber}"`,
@@ -2264,13 +2306,14 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
       {
         dryRun,
         force,
+        skipConfirmation: true,
       },
     );
     return;
   }
 
   if (standaloneWorktree) {
-    const confirmed = await confirmInferredDelete({
+    const confirmed = await confirmDelete({
       dryRun,
       force,
       description: "standalone worktree",
@@ -2282,13 +2325,14 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
       _: ["delete", standaloneWorktree.path],
       "--dry-run": dryRun,
       "--force": force,
+      skipConfirmation: true,
     });
     return;
   }
 
   const currentReview = await resolveReviewWorktreeFromCwd(cwd);
   if (currentReview) {
-    const confirmed = await confirmInferredDelete({
+    const confirmed = await confirmDelete({
       dryRun,
       force,
       description: `review worktree "${currentReview.owner}/${currentReview.repo}#${currentReview.prNumber}"`,
@@ -2303,6 +2347,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
       {
         dryRun,
         force,
+        skipConfirmation: true,
       },
     );
     return;
@@ -2319,7 +2364,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
   process.exitCode = 1;
 }
 
-async function confirmInferredDelete({
+async function confirmDelete({
   dryRun,
   force,
   description,
@@ -2328,7 +2373,7 @@ async function confirmInferredDelete({
   dryRun: boolean;
   force: boolean;
   description: string;
-  targetPath: string;
+  targetPath?: string;
 }): Promise<boolean> {
   if (dryRun || force) {
     return true;
@@ -2340,7 +2385,8 @@ async function confirmInferredDelete({
     return false;
   }
 
-  return promptConfirm(`Delete ${description} at ${targetPath}?`, false);
+  const suffix = targetPath ? ` at ${targetPath}` : "";
+  return promptConfirm(`Delete ${description}${suffix}?`, false);
 }
 
 async function resolveReviewWorktreeFromCwd(

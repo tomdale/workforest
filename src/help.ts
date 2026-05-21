@@ -150,7 +150,7 @@ PR targets infer the repo from the current review workspace.
 
 Options:
   -n, --dry-run    Preview review removal without deleting
-  -f, --force      Remove dirty review worktrees
+  -f, --force      Skip prompts and remove dirty review worktrees
   -h, --help       Show this help
 
 Examples:
@@ -383,7 +383,7 @@ Delete a PR review worktree.
 
 Options:
   -n, --dry-run  Preview without deleting
-  -f, --force    Remove even when the worktree is dirty
+  -f, --force    Skip prompts and remove dirty worktrees
   -h, --help     Show this help
 `,
   },

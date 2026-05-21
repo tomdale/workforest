@@ -26,6 +26,7 @@ const promptSelectMock = vi.hoisted(() =>
     return options.options[0]?.value;
   }),
 );
+const promptConfirmMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./ui/prompts/index.ts", async () => {
   const actual = await vi.importActual<typeof import("./ui/prompts/index.ts")>(
@@ -34,6 +35,7 @@ vi.mock("./ui/prompts/index.ts", async () => {
 
   return {
     ...actual,
+    promptConfirm: promptConfirmMock,
     promptSelect: promptSelectMock,
   };
 });
@@ -63,6 +65,7 @@ async function createTempDir(prefix: string): Promise<string> {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  promptConfirmMock.mockReset();
   promptSelectMock.mockClear();
 
   if (ORIGINAL_CONFIG_DIR === undefined) {
@@ -401,6 +404,39 @@ describe("cli", () => {
     expect(output).toContain(usage);
     expect(output).not.toContain("Start here (for AI agents):");
     expect(output).not.toContain("Commands:");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("does not delete a workspace when confirmation is declined", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    promptConfirmMock.mockResolvedValue(false);
+
+    process.argv = ["node", "wf", "workspace", "delete", workspaceDir];
+    process.exitCode = undefined;
+
+    await cli();
+
+    await expect(stat(workspaceDir)).resolves.toBeTruthy();
+    expect(promptConfirmMock).toHaveBeenCalledWith(
+      `Delete workspace at ${path.resolve(workspaceDir)}?`,
+      false,
+    );
     expect(process.exitCode).toBeUndefined();
   });
 

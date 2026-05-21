@@ -510,6 +510,113 @@ describe("wf review", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("prompts before deleting an explicit review worktree", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const targetDir = path.join(reviewsDir, "omniagent", "pr-123");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    isInteractiveMock.mockReturnValue(true);
+    promptConfirmMock.mockResolvedValue(true);
+    removeReviewWorktreeMock.mockResolvedValue({
+      path: targetDir,
+      dryRun: false,
+    });
+
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "delete", "vercel/omniagent#123"];
+    process.exitCode = undefined;
+    await cli();
+
+    expect(promptConfirmMock).toHaveBeenCalledWith(
+      `Delete review worktree "vercel/omniagent#123" at ${targetDir}?`,
+      false,
+    );
+    expect(removeReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      dryRun: false,
+      force: false,
+    });
+  });
+
+  it("does not delete an explicit review worktree when confirmation is declined", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    isInteractiveMock.mockReturnValue(true);
+    promptConfirmMock.mockResolvedValue(false);
+
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "delete", "vercel/omniagent#123"];
+    process.exitCode = undefined;
+    await cli();
+
+    expect(removeReviewWorktreeMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("requires --force for explicit review deletion in non-interactive mode", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    isInteractiveMock.mockReturnValue(false);
+
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "delete", "vercel/omniagent#123"];
+    process.exitCode = undefined;
+    await cli();
+
+    expect(removeReviewWorktreeMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("skips review deletion prompts with --force", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const targetDir = path.join(reviewsDir, "omniagent", "pr-123");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    removeReviewWorktreeMock.mockResolvedValue({
+      path: targetDir,
+      dryRun: false,
+    });
+
+    const { cli } = await importCliWithReviewMock();
+    process.argv = [
+      "node",
+      "wf",
+      "review",
+      "delete",
+      "vercel/omniagent#123",
+      "--force",
+    ];
+    process.exitCode = undefined;
+    await cli();
+
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(removeReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      dryRun: false,
+      force: true,
+    });
+  });
+
   it("infers the current review worktree for bare delete and prompts", async () => {
     const configDir = await createTempDir("workforest-config-");
     const reviewsDir = await createTempDir("workforest-reviews-");
