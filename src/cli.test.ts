@@ -562,6 +562,384 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("adds workspace files to an explicit template", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("source", {
+      repos: ["vercel/front"],
+    });
+    await createTemplate("target", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "source",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "--template",
+      "target",
+      "front/.env.local",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    await expect(
+      readFile(
+        path.join(
+          xdgConfigHome,
+          "workforest",
+          "templates",
+          "target",
+          "files",
+          "front",
+          ".env.local",
+        ),
+        "utf8",
+      ),
+    ).resolves.toBe("FEATURE_FLAG=1\n");
+    await expect(
+      readFile(
+        path.join(
+          xdgConfigHome,
+          "workforest",
+          "templates",
+          "source",
+          "files",
+          "front",
+          ".env.local",
+        ),
+        "utf8",
+      ),
+    ).rejects.toThrow();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("adds workspace files to a positional template", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("source", {
+      repos: ["vercel/front"],
+    });
+    await createTemplate("target", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "source",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "target",
+      "front/.env.local",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    await expect(
+      readFile(
+        path.join(
+          xdgConfigHome,
+          "workforest",
+          "templates",
+          "target",
+          "files",
+          "front",
+          ".env.local",
+        ),
+        "utf8",
+      ),
+    ).resolves.toBe("FEATURE_FLAG=1\n");
+    await expect(
+      readFile(
+        path.join(
+          xdgConfigHome,
+          "workforest",
+          "templates",
+          "source",
+          "files",
+          "front",
+          ".env.local",
+        ),
+        "utf8",
+      ),
+    ).rejects.toThrow();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("rejects an ambiguous positional template that also exists as a workspace path", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const errors: string[] = [];
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    await createTemplate("front", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "front",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "front",
+      "front/.env.local",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain('Ambiguous add-file argument "front"');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects a first workspace argument that is neither a template nor an existing path", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const errors: string[] = [];
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    await createTemplate("source", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "source",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "missing",
+      "front/.env.local",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      'Could not resolve add-file argument "missing"',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("adds files to an explicit template outside a workspace", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const cwd = await createTempDir("workforest-outside-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(cwd, "front"), { recursive: true });
+    await writeFile(path.join(cwd, ".envrc"), "use workforest\n", "utf8");
+    await writeFile(
+      path.join(cwd, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+
+    process.chdir(cwd);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "-t",
+      "demo",
+      ".envrc",
+      "front/.env.local",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const templateFilesDir = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+      "files",
+    );
+    await expect(
+      readFile(path.join(templateFilesDir, ".envrc"), "utf8"),
+    ).resolves.toBe("use workforest\n");
+    await expect(
+      readFile(path.join(templateFilesDir, "front", ".env.local"), "utf8"),
+    ).resolves.toBe("FEATURE_FLAG=1\n");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("adds files to a positional template outside a workspace", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const cwd = await createTempDir("workforest-outside-");
+
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await mkdir(path.join(cwd, "front"), { recursive: true });
+    await writeFile(
+      path.join(cwd, "front", ".env.local"),
+      "FEATURE_FLAG=1\n",
+      "utf8",
+    );
+
+    process.chdir(cwd);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "demo",
+      "front/.env.local",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    await expect(
+      readFile(
+        path.join(
+          xdgConfigHome,
+          "workforest",
+          "templates",
+          "demo",
+          "files",
+          "front",
+          ".env.local",
+        ),
+        "utf8",
+      ),
+    ).resolves.toBe("FEATURE_FLAG=1\n");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("rejects an unknown positional template outside a workspace", async () => {
+    const cwd = await createTempDir("workforest-outside-");
+    const errors: string[] = [];
+
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    await writeFile(path.join(cwd, ".envrc"), "use workforest\n", "utf8");
+
+    process.chdir(cwd);
+    process.argv = [
+      "node",
+      "wf",
+      "template",
+      "add-file",
+      "missing-template",
+      ".envrc",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      'Template "missing-template" not found',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it("prompts before overwriting an existing template file", async () => {
     const xdgConfigHome = await createTempDir("workforest-xdg-");
     const workspaceDir = await createTempDir("workforest-workspace-");
@@ -842,7 +1220,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("requires wf template add-file to run inside a workspace", async () => {
+  it("requires wf template add-file outside a workspace to include a path", async () => {
     const cwd = await createTempDir("workforest-outside-");
     const errors: string[] = [];
 
@@ -857,7 +1235,9 @@ describe("cli", () => {
 
     await cli();
 
-    expect(errors.join("\n")).toContain("Not inside a workspace");
+    expect(errors.join("\n")).toContain(
+      "Usage: workforest template add-file <template> <path...>",
+    );
     expect(process.exitCode).toBe(1);
   });
 

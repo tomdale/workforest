@@ -1704,92 +1704,129 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
 }
 
 async function runTemplateAddFile(argv: string[]): Promise<void> {
-  const sourceInput = argv[0];
-  const extra = argv.slice(1);
+  const args = arg(
+    {
+      "--template": String,
+      "-t": "--template",
+    },
+    { argv },
+  );
 
-  if (!sourceInput || extra.length > 0) {
-    log.error("Usage: workforest template add-file <path>");
+  let sourceInputs = args._;
+  if (sourceInputs.length === 0) {
+    log.error(
+      "Usage: workforest template add-file [--template <name>] <path...>",
+    );
     process.exitCode = 1;
     return;
   }
 
   const workspaceDir = await detectWorkspaceFromCwd();
-  if (!workspaceDir) {
-    log.error("Not inside a workspace.");
-    process.exitCode = 1;
-    return;
+  let templateId = args["--template"];
+  let resolvedTemplate: Awaited<ReturnType<typeof loadTemplate>> | null = null;
+  if (!workspaceDir && !templateId) {
+    templateId = sourceInputs[0];
+    sourceInputs = sourceInputs.slice(1);
+    if (!templateId || sourceInputs.length === 0) {
+      log.error("Usage: workforest template add-file <template> <path...>");
+      process.exitCode = 1;
+      return;
+    }
   }
 
-  let metadata: WorkspaceMetadata | null;
-  try {
-    metadata = await readWorkspaceMetadata(workspaceDir);
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+  const sourceRoot = workspaceDir ?? process.cwd();
+
+  if (!templateId) {
+    if (!workspaceDir) {
+      log.error("Not inside a workspace.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const firstInput = sourceInputs[0];
+    if (!firstInput) {
+      log.error(
+        "Usage: workforest template add-file [--template <name>] <path...>",
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    const candidateTemplate = await loadTemplate(firstInput);
+    const candidatePath = path.resolve(firstInput);
+    const candidateExists = await pathExists(candidatePath);
+
+    if (candidateTemplate && candidateExists) {
+      log.error(
+        `Ambiguous add-file argument "${firstInput}": it matches both a template and an existing file or directory.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    if (candidateTemplate) {
+      templateId = firstInput;
+      resolvedTemplate = candidateTemplate;
+      sourceInputs = sourceInputs.slice(1);
+      if (sourceInputs.length === 0) {
+        log.error("Usage: workforest template add-file <template> <path...>");
+        process.exitCode = 1;
+        return;
+      }
+    } else if (!candidateExists) {
+      log.error(
+        `Could not resolve add-file argument "${firstInput}" as either a template or an existing file or directory.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
   }
 
-  if (!metadata?.workspace.template_id) {
-    log.error("Current workspace was not created from a template.");
-    process.exitCode = 1;
-    return;
+  if (!templateId) {
+    if (!workspaceDir) {
+      log.error("Not inside a workspace.");
+      process.exitCode = 1;
+      return;
+    }
+
+    let metadata: WorkspaceMetadata | null;
+    try {
+      metadata = await readWorkspaceMetadata(workspaceDir);
+    } catch (error) {
+      log.error(getErrorMessage(error));
+      process.exitCode = 1;
+      return;
+    }
+
+    if (!metadata?.workspace.template_id) {
+      log.error("Current workspace was not created from a template.");
+      process.exitCode = 1;
+      return;
+    }
+
+    templateId = metadata.workspace.template_id;
   }
 
-  const template = await loadTemplate(metadata.workspace.template_id);
+  const template = resolvedTemplate ?? (await loadTemplate(templateId));
   if (!template) {
-    log.error(`Template "${metadata.workspace.template_id}" not found.`);
+    log.error(`Template "${templateId}" not found.`);
     process.exitCode = 1;
     return;
   }
 
-  const sourcePath = path.resolve(sourceInput);
-  const relativePath = path.relative(workspaceDir, sourcePath);
-
-  if (
-    relativePath === "" ||
-    relativePath.startsWith("..") ||
-    path.isAbsolute(relativePath)
-  ) {
-    log.error(`File must be inside the current workspace: ${sourcePath}`);
-    process.exitCode = 1;
-    return;
+  const entries: TemplateAddFileEntry[] = [];
+  for (const sourceInput of sourceInputs) {
+    const resolved = await resolveTemplateAddFileEntries({
+      sourceInput,
+      sourceRoot,
+      templatePath: template.path,
+    });
+    if (!resolved) {
+      return;
+    }
+    entries.push(...resolved);
   }
 
-  let sourceStat: Awaited<ReturnType<typeof fs.stat>>;
-  try {
-    sourceStat = await fs.stat(sourcePath);
-  } catch {
-    log.error(`File not found: ${sourcePath}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
-    log.error(`Not a file or directory: ${sourcePath}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const targetPath = path.join(
-    path.dirname(template.path),
-    "files",
-    relativePath,
-  );
-
-  const entries = sourceStat.isDirectory()
-    ? await collectTemplateAddFileDirectoryEntries(
-        sourcePath,
-        targetPath,
-        relativePath,
-      )
-    : [
-        {
-          sourcePath,
-          targetPath,
-          relativePath,
-          type: "file" as const,
-        },
-      ];
   const totalFileCount = entries.filter(
     (entry) => entry.type === "file",
   ).length;
@@ -1859,7 +1896,70 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
 
   const suffix =
     skippedCount > 0 ? ` (${copiedCount} copied, ${skippedCount} skipped)` : "";
-  log.success(`Added ${relativePath} to template "${template.id}".${suffix}`);
+  const sourceSummary =
+    sourceInputs.length === 1
+      ? entries[0]?.relativePath
+      : `${sourceInputs.length} paths`;
+  log.success(`Added ${sourceSummary} to template "${template.id}".${suffix}`);
+}
+
+async function resolveTemplateAddFileEntries({
+  sourceInput,
+  sourceRoot,
+  templatePath,
+}: {
+  sourceInput: string;
+  sourceRoot: string;
+  templatePath: string;
+}): Promise<TemplateAddFileEntry[] | null> {
+  const sourcePath = path.resolve(sourceInput);
+  const relativePath = path.relative(sourceRoot, sourcePath);
+
+  if (
+    relativePath === "" ||
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath)
+  ) {
+    log.error(`File must be inside ${sourceRoot}: ${sourcePath}`);
+    process.exitCode = 1;
+    return null;
+  }
+
+  let sourceStat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    sourceStat = await fs.stat(sourcePath);
+  } catch {
+    log.error(`File not found: ${sourcePath}`);
+    process.exitCode = 1;
+    return null;
+  }
+
+  if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
+    log.error(`Not a file or directory: ${sourcePath}`);
+    process.exitCode = 1;
+    return null;
+  }
+
+  const targetPath = path.join(
+    path.dirname(templatePath),
+    "files",
+    relativePath,
+  );
+
+  return sourceStat.isDirectory()
+    ? collectTemplateAddFileDirectoryEntries(
+        sourcePath,
+        targetPath,
+        relativePath,
+      )
+    : [
+        {
+          sourcePath,
+          targetPath,
+          relativePath,
+          type: "file" as const,
+        },
+      ];
 }
 
 async function collectTemplateAddFileDirectoryEntries(
