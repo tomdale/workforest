@@ -297,6 +297,43 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("exposes development confetti simulation help", async () => {
+    const logs: string[] = [];
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "dev", "simulate", "confetti", "--help"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain("Usage: wf dev simulate confetti [options]");
+    expect(output).toContain("--workspace <path>");
+    expect(output).toContain("--repos <names>");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("lists confetti in development simulation help", async () => {
+    const logs: string[] = [];
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "dev", "simulate", "--help"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain("Usage: wf dev simulate <flow> [options]");
+    expect(output).toContain("confetti");
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("writes the configured workspace path for wf cd", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");

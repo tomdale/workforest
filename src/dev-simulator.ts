@@ -3,8 +3,16 @@ import { reposFromSlugs } from "./config.ts";
 import { commandHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import type { Template } from "./templates/index.ts";
+import {
+  createFullscreenScreen,
+  waitForFullscreenKey,
+} from "./terminal/fullscreen-surface.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
-import { renderPipelinesGrid, shouldUseGrid } from "./ui/grid-consumer.ts";
+import {
+  createDefaultCompletionModal,
+  renderPipelinesGrid,
+  shouldUseGrid,
+} from "./ui/grid-consumer.ts";
 import { note, outro, withSpinner } from "./ui/prompts/index.ts";
 import { buildBranchName } from "./utils/branch-prefix.ts";
 import type { RepoPipelineState } from "./workspace/pipeline.ts";
@@ -12,6 +20,12 @@ import type { RepoPipelineState } from "./workspace/pipeline.ts";
 type DevNewOptions = {
   failRepo?: string;
   speed: "fast" | "normal" | "slow";
+  workspacePath?: string;
+};
+
+type DevConfettiOptions = {
+  workspacePath: string;
+  worktreeNames: string[];
 };
 
 const SYNTHETIC_CONFIG: WorkspaceConfig = {
@@ -77,6 +91,11 @@ async function runDevSimulateCommand(argv: string[]): Promise<void> {
     return;
   }
 
+  if (flow === "confetti") {
+    await runDevConfettiSimulation(argv.slice(1));
+    return;
+  }
+
   if (flow !== "new") {
     log.error(`Unknown dev simulation flow: ${flow}`);
     printSimulateUsage();
@@ -85,6 +104,74 @@ async function runDevSimulateCommand(argv: string[]): Promise<void> {
   }
 
   await runDevNewSimulation(argv.slice(1));
+}
+
+async function runDevConfettiSimulation(argv: string[]): Promise<void> {
+  let args: {
+    _: string[];
+    "--help"?: boolean;
+    "--workspace"?: string;
+    "--repos"?: string;
+  };
+
+  try {
+    args = arg(
+      {
+        "--help": Boolean,
+        "--workspace": String,
+        "--repos": String,
+        "-h": "--help",
+      },
+      { argv },
+    );
+  } catch (error) {
+    log.error(error instanceof Error ? error.message : String(error));
+    printConfettiSimulationUsage();
+    process.exitCode = 1;
+    return;
+  }
+
+  if (args["--help"]) {
+    printConfettiSimulationUsage();
+    return;
+  }
+
+  if (!process.stdout.isTTY) {
+    log.error("Dev UI simulation requires an interactive TTY.");
+    process.exitCode = 1;
+    return;
+  }
+
+  await renderSyntheticConfetti({
+    workspacePath:
+      args["--workspace"] ?? "~/Code/workspaces/synthetic-confetti",
+    worktreeNames: parseConfettiRepos(args["--repos"]),
+  });
+  outro("Simulation complete");
+}
+
+async function renderSyntheticConfetti({
+  workspacePath,
+  worktreeNames,
+}: DevConfettiOptions): Promise<void> {
+  const screen = createFullscreenScreen();
+  const modal = createDefaultCompletionModal({
+    screen,
+    workspacePath,
+    worktreeNames,
+    completedCount: worktreeNames.length,
+    totalCount: worktreeNames.length,
+    setupWarnings: [],
+    repoErrors: [],
+  });
+
+  try {
+    screen.render();
+    await waitForFullscreenKey(screen);
+  } finally {
+    modal.destroy();
+    screen.destroy();
+  }
 }
 
 async function runDevNewSimulation(argv: string[]): Promise<void> {
@@ -178,6 +265,7 @@ async function runDevNewSimulation(argv: string[]): Promise<void> {
 
   await renderSyntheticRepoSetup(repos, {
     speed,
+    workspacePath: `~/Code/workspaces/${wizardResult.featureName}`,
     ...(args["--fail-repo"] ? { failRepo: args["--fail-repo"] } : {}),
   });
 
@@ -213,6 +301,9 @@ async function renderSyntheticRepoSetup(
     await renderPipelinesGrid({
       pipelines,
       repoNames: repos.map((repo) => repo.name),
+      ...(options.workspacePath
+        ? { workspacePath: options.workspacePath }
+        : {}),
       onBeforeCompletionPrompt: async () => {
         await sleep(durationFor(options.speed, 350));
       },
@@ -334,7 +425,10 @@ async function* syntheticRepoPipeline(
 }
 
 function printSimulateUsage(): void {
-  log.info("Usage: wf dev simulate new [options]");
+  log.info("Usage: wf dev simulate <flow> [options]");
+  log.info("Flows:");
+  log.info("  new       Run the synthetic wf new UI simulation");
+  log.info("  confetti  Show the completion confetti modal");
 }
 
 function printNewSimulationUsage(): void {
@@ -342,6 +436,21 @@ function printNewSimulationUsage(): void {
   log.info("Options:");
   log.info("  --fail-repo <name>  Mark one synthetic repo setup as failed");
   log.info("  --speed <speed>     fast, normal, or slow (default: normal)");
+}
+
+function printConfettiSimulationUsage(): void {
+  log.info("Usage: wf dev simulate confetti [options]");
+  log.info("Options:");
+  log.info("  --workspace <path>  Workspace path to show in the modal");
+  log.info("  --repos <names>     Comma-separated worktree names");
+}
+
+function parseConfettiRepos(value: string | undefined): string[] {
+  const names = (value ?? "api,front,agents,vertex")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return names.length > 0 ? names : ["api", "front", "agents", "vertex"];
 }
 
 function parseSpeed(value: string | undefined): DevNewOptions["speed"] | null {

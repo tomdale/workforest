@@ -332,6 +332,7 @@ Development helpers for exercising workforest UI flows.
 
 Flows:
   new       Run the synthetic wf new UI simulation
+  confetti  Show the completion confetti modal
 
 Options:
   -h, --help  Show this help
@@ -510,12 +511,13 @@ Open the config file in $EDITOR.
   },
 
   dev: {
-    simulate: `Usage: wf dev simulate new [options]
+    simulate: `Usage: wf dev simulate <flow> [options]
 
 Run synthetic development UI simulations.
 
 Flows:
   new       Run the synthetic wf new UI simulation
+  confetti  Show the completion confetti modal
 `,
   },
 
