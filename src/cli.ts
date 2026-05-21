@@ -78,6 +78,7 @@ type TemplateAddFileEntry = {
 };
 
 type TemplateAddFileConflictAction = "overwrite" | "diff" | "skip" | "cancel";
+type DeleteWorkspaceWorktreeAction = "worktree" | "workspace" | "cancel";
 
 export async function cli(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -2413,6 +2414,49 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
   }
 
   if (standaloneWorktree) {
+    if (workspaceDir) {
+      if (!isInteractive()) {
+        log.error(
+          "Could not infer what to delete. Run wf worktree delete or wf workspace delete explicitly.",
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      const action = await promptSelect<DeleteWorkspaceWorktreeAction>(
+        "Delete what?",
+        {
+          options: [
+            {
+              label: "Worktree",
+              description: standaloneWorktree.path,
+              value: "worktree",
+            },
+            {
+              label: "Workspace",
+              description: workspaceDir,
+              value: "workspace",
+            },
+            { label: "Cancel", value: "cancel" },
+          ],
+        },
+      );
+
+      if (action === "cancel") return;
+      if (action === "workspace") {
+        await runCleanCommand(argv);
+        return;
+      }
+
+      await runStandaloneWorktreeRemove({
+        _: ["delete", standaloneWorktree.path],
+        "--dry-run": dryRun,
+        "--force": force,
+        skipConfirmation: true,
+      });
+      return;
+    }
+
     const confirmed = await confirmDelete({
       dryRun,
       force,

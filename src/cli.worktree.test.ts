@@ -7,19 +7,23 @@ import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 
 const {
   createSingleWorktreeMock,
+  resolveStandaloneWorktreeMock,
   removeStandaloneWorktreeMock,
   createTemporaryWorktreesMock,
   listTemporaryWorktreesMock,
   removeTemporaryWorktreesMock,
   promptConfirmMock,
+  promptSelectMock,
   isInteractiveMock,
 } = vi.hoisted(() => ({
   createSingleWorktreeMock: vi.fn(),
+  resolveStandaloneWorktreeMock: vi.fn(),
   removeStandaloneWorktreeMock: vi.fn(),
   createTemporaryWorktreesMock: vi.fn(),
   listTemporaryWorktreesMock: vi.fn(),
   removeTemporaryWorktreesMock: vi.fn(),
   promptConfirmMock: vi.fn(),
+  promptSelectMock: vi.fn(),
   isInteractiveMock: vi.fn(),
 }));
 
@@ -40,6 +44,7 @@ async function createTempDir(prefix: string): Promise<string> {
 async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
   vi.doMock("./worktree.ts", () => ({
     createSingleWorktree: createSingleWorktreeMock,
+    resolveStandaloneWorktree: resolveStandaloneWorktreeMock,
     removeStandaloneWorktree: removeStandaloneWorktreeMock,
   }));
   vi.doMock("./workspace/temporary-worktrees.ts", () => ({
@@ -55,6 +60,7 @@ async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
       ...actual,
       isInteractive: isInteractiveMock,
       promptConfirm: promptConfirmMock,
+      promptSelect: promptSelectMock,
     };
   });
 
@@ -68,11 +74,13 @@ afterEach(async () => {
   vi.unmock("./workspace/temporary-worktrees.ts");
   vi.unmock("./ui/prompts/index.ts");
   createSingleWorktreeMock.mockReset();
+  resolveStandaloneWorktreeMock.mockReset();
   removeStandaloneWorktreeMock.mockReset();
   createTemporaryWorktreesMock.mockReset();
   listTemporaryWorktreesMock.mockReset();
   removeTemporaryWorktreesMock.mockReset();
   promptConfirmMock.mockReset();
+  promptSelectMock.mockReset();
   isInteractiveMock.mockReset();
 
   if (ORIGINAL_CONFIG_DIR === undefined) {
@@ -685,6 +693,65 @@ describe("wf worktree", () => {
     );
     expect(removeStandaloneWorktreeMock).toHaveBeenCalledWith({
       targetDir: resolvedTargetDir,
+      dryRun: false,
+      force: false,
+    });
+  });
+
+  it("prompts before deleting a standalone worktree inside a workspace", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const repoDir = path.join(workspaceDir, "front");
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await mkdir(repoDir, { recursive: true });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    process.chdir(repoDir);
+    const resolvedRepoDir = process.cwd();
+    const resolvedWorkspaceDir = path.dirname(resolvedRepoDir);
+    isInteractiveMock.mockReturnValue(true);
+    resolveStandaloneWorktreeMock.mockResolvedValue({
+      path: resolvedRepoDir,
+      branch: "refs/heads/tomdale/front-work",
+    });
+    promptSelectMock.mockResolvedValue("worktree");
+    removeStandaloneWorktreeMock.mockResolvedValueOnce({
+      path: resolvedRepoDir,
+      dryRun: false,
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "delete"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promptSelectMock).toHaveBeenCalledWith("Delete what?", {
+      options: [
+        {
+          label: "Worktree",
+          description: resolvedRepoDir,
+          value: "worktree",
+        },
+        {
+          label: "Workspace",
+          description: resolvedWorkspaceDir,
+          value: "workspace",
+        },
+        { label: "Cancel", value: "cancel" },
+      ],
+    });
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(removeStandaloneWorktreeMock).toHaveBeenCalledWith({
+      targetDir: resolvedRepoDir,
       dryRun: false,
       force: false,
     });
