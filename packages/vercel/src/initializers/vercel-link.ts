@@ -120,7 +120,7 @@ async function* execute(
   }
 
   let envPullFailed = false;
-  for await (const { state } of runParallel(createEnvPullTasks(envPullTargets.cwd), {
+  for await (const { state } of runParallel(createEnvPullTasks(repoDir, envPullTargets.cwd), {
     maxConcurrent: MAX_CONCURRENT_ENV_PULLS,
   })) {
     if (state.status === "completed") {
@@ -149,17 +149,52 @@ const vercelLinkInitializer: InitializerDefinition = {
 
 export default vercelLinkInitializer;
 
-function createEnvPullTasks(cwds: string[]): Map<string, TaskGenerator> {
+function createEnvPullTasks(
+  repoDir: string,
+  cwds: string[],
+): Map<string, TaskGenerator> {
   return new Map(
     cwds.map((cwd, index) => [
       String(index),
-      runCommandGenerator(
-        "vercel",
-        ["env", "pull", "--environment", "development", "--yes"],
-        { cwd },
+      withEnvPullCwdLabel(
+        runCommandGenerator(
+          "vercel",
+          ["env", "pull", "--environment", "development", "--yes"],
+          { cwd },
+        ),
+        repoDir,
+        cwd,
       ),
     ]),
   );
+}
+
+async function* withEnvPullCwdLabel(
+  task: TaskGenerator,
+  repoDir: string,
+  cwd: string,
+): TaskGenerator {
+  const resolvedRepoDir = path.resolve(repoDir);
+  const resolvedCwd = path.resolve(cwd);
+  const relativeCwd = path.relative(resolvedRepoDir, resolvedCwd);
+  const cwdLabel =
+    relativeCwd === ""
+      ? undefined
+      : !relativeCwd.startsWith("..") && !path.isAbsolute(relativeCwd)
+        ? relativeCwd
+        : resolvedCwd;
+
+  for await (const state of task) {
+    if (state.status === "running" && state.message && cwdLabel) {
+      yield {
+        ...state,
+        message: `${state.message} (cwd: ${cwdLabel})`,
+      };
+      continue;
+    }
+
+    yield state;
+  }
 }
 
 type EnvPullTargets =

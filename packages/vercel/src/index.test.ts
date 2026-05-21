@@ -200,8 +200,8 @@ describe("vercelLinkInitializer.execute", () => {
     );
     expect(states).toEqual([
       { status: "running", message: "vercel link" },
-      { status: "running", message: "vercel env pull" },
-      { status: "running", message: "vercel env pull" },
+      { status: "running", message: "vercel env pull (cwd: apps/web)" },
+      { status: "running", message: "vercel env pull (cwd: apps/docs)" },
       { status: "completed" },
     ]);
   });
@@ -264,7 +264,8 @@ describe("vercelLinkInitializer.execute", () => {
     expect(
       states.filter(
         (state) =>
-          state.status === "running" && state.message === "vercel env pull",
+          state.status === "running" &&
+          state.message?.startsWith("vercel env pull (cwd: apps/project-"),
       ),
     ).toHaveLength(MAX_CONCURRENT_ENV_PULLS + 2);
     expect(maxActiveEnvPulls).toBe(MAX_CONCURRENT_ENV_PULLS);
