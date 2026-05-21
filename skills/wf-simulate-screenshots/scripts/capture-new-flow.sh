@@ -53,7 +53,7 @@ Enter
 @capture:09-setup-grid-running.png
 @sleep:1600
 @capture:10-setup-grid-progress.png
-@wait:Press any key to continue
+@wait:Press any key for next steps
 @capture:11-setup-complete-prompt.png
 Space
 @sleep:1000

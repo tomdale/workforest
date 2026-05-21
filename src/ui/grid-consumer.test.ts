@@ -41,6 +41,7 @@ vi.mock("@unblessed/node", () => {
 });
 
 import {
+  Box,
   NodeRuntime,
   Screen,
   ScrollableBox,
@@ -141,6 +142,7 @@ describe("shouldUseGrid", () => {
 describe("renderPipelinesGrid", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -396,7 +398,7 @@ describe("renderPipelinesGrid", () => {
     expect(grid.render).toHaveBeenCalledTimes(5);
   });
 
-  it("keeps the grid open with a completion message until acknowledgement", async () => {
+  it("keeps the grid open with a completion modal until acknowledgement", async () => {
     const pane = {
       setLabel: vi.fn(),
       appendLine: vi.fn(),
@@ -415,6 +417,10 @@ describe("renderPipelinesGrid", () => {
       setContent: vi.fn(),
       destroy: vi.fn(),
     };
+    const modal = {
+      destroy: vi.fn(),
+    };
+    const createCompletionModal = vi.fn(() => modal);
     let acknowledge!: () => void;
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
       yield { phase: "complete", hasLockfile: true };
@@ -427,6 +433,7 @@ describe("renderPipelinesGrid", () => {
         createScreen: () => screen,
         createGrid: () => grid,
         createStatusLine: () => statusLine,
+        createCompletionModal,
         waitForCompletionAck: () =>
           new Promise((resolve) => {
             acknowledge = resolve;
@@ -439,8 +446,19 @@ describe("renderPipelinesGrid", () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    expect(statusLine.setContent).toHaveBeenCalledWith(
-      expect.stringContaining("Press any key to continue"),
+    expect(createCompletionModal).toHaveBeenCalledWith({
+      screen,
+      worktreeNames: ["repo"],
+      completedCount: 1,
+      totalCount: 1,
+      setupWarnings: [],
+      repoErrors: [],
+    });
+    expect(pane.appendLine).not.toHaveBeenCalledWith(
+      expect.stringContaining("Press any key"),
+    );
+    expect(statusLine.setContent).not.toHaveBeenCalledWith(
+      expect.stringContaining("Press any key"),
     );
     expect(grid.destroy).not.toHaveBeenCalled();
     expect(screen.destroy).not.toHaveBeenCalled();
@@ -450,9 +468,155 @@ describe("renderPipelinesGrid", () => {
     await expect(promise).resolves.toEqual(
       new Map([["repo", { hasLockfile: true }]]),
     );
+    expect(modal.destroy).toHaveBeenCalledTimes(1);
     expect(statusLine.destroy).toHaveBeenCalledTimes(1);
     expect(grid.destroy).toHaveBeenCalledTimes(1);
     expect(screen.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the default success completion modal content", async () => {
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "complete", hasLockfile: true };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+      workspacePath: "/tmp/workspace",
+    });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    const modalCall = vi
+      .mocked(Box)
+      .mock.calls.find((call) =>
+        String(call[0]?.content).includes("/tmp/workspace"),
+      );
+
+    expect(modalCall?.[0]).toEqual(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          "{cyan-fg}•{/cyan-fg} {bold}repo{/bold}",
+        ),
+        width: 50,
+      }),
+    );
+    expect(vi.mocked(Box).mock.calls).toContainEqual([
+      expect.objectContaining({
+        content: "Workspace Created",
+      }),
+    ]);
+    expect(String(modalCall?.[0]?.content)).toContain(
+      "{bold}{cyan-fg}press any key{/cyan-fg}{/bold}",
+    );
+    expect(String(modalCall?.[0]?.content)).not.toContain("Workspace stamped");
+    expect(String(modalCall?.[0]?.content)).not.toContain("created");
+  });
+
+  it("animates the default success completion modal until acknowledgement", async () => {
+    let acknowledge!: () => void;
+    vi.mocked(Screen).mockImplementationOnce(function (this: unknown) {
+      const screen = this as Record<string, unknown>;
+      screen["key"] = vi.fn();
+      screen["once"] = vi.fn((_event: string, handler: () => void) => {
+        acknowledge = handler;
+      });
+      screen["render"] = vi.fn();
+      screen["destroy"] = vi.fn();
+      screen["append"] = vi.fn();
+      screen["width"] = 120;
+      screen["height"] = 40;
+    });
+
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "complete", hasLockfile: true };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+    });
+
+    await vi.advanceTimersByTimeAsync(40);
+    await Promise.resolve();
+
+    const modalIndex = vi
+      .mocked(Box)
+      .mock.calls.findIndex((call) =>
+        String(call[0]?.content).includes("{bold}repo{/bold}"),
+      );
+    const modal = vi.mocked(Box).mock.instances[modalIndex] as unknown as {
+      setContent: ReturnType<typeof vi.fn>;
+    };
+
+    await vi.advanceTimersByTimeAsync(360);
+
+    const renderedFrames = modal.setContent.mock.calls.map(([content]) =>
+      String(content),
+    );
+    expect(new Set(renderedFrames).size).toBeGreaterThan(1);
+
+    acknowledge();
+    await expect(promise).resolves.toEqual(
+      new Map([["repo", { hasLockfile: true }]]),
+    );
+  });
+
+  it("renders initializer failures as setup warnings in the completion modal", async () => {
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "failed",
+        step: "initializer:pnpm install",
+        error: new Error("install failed"),
+      };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+    });
+    await vi.runAllTimersAsync();
+    const results = await promise;
+
+    const modalCall = vi
+      .mocked(Box)
+      .mock.calls.find((call) =>
+        String(call[0]?.content).includes("Setup warnings"),
+      );
+
+    expect(results.has("repo")).toBe(false);
+    expect(String(modalCall?.[0]?.content)).not.toContain("Workspace stamped");
+    expect(String(modalCall?.[0]?.content)).toContain(
+      "initializer:pnpm install",
+    );
+    expect(String(modalCall?.[0]?.content)).toContain("install failed");
+  });
+
+  it("renders git and worktree failures as repo errors in the completion modal", async () => {
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "failed",
+        step: "git:worktree",
+        error: new Error("worktree failed"),
+      };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+    });
+    await vi.runAllTimersAsync();
+    const results = await promise;
+
+    const modalCall = vi
+      .mocked(Box)
+      .mock.calls.find((call) =>
+        String(call[0]?.content).includes("Repository setup needs attention"),
+      );
+
+    expect(results.has("repo")).toBe(false);
+    expect(String(modalCall?.[0]?.content)).toContain("git:worktree");
+    expect(String(modalCall?.[0]?.content)).toContain("worktree failed");
   });
 
   it("destroys the screen when a pipeline throws", async () => {

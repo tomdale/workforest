@@ -624,6 +624,7 @@ export async function stampWorkspaceInteractive(
     repoResults = await renderPipelinesGrid({
       pipelines,
       repoNames,
+      workspacePath: workspaceDir,
       getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
       onFailure: recordRepoFailure,
       onBeforeCompletionPrompt: finalizeWorkspace,
