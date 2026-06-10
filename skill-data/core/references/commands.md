@@ -3,7 +3,7 @@
 ## Workspace Commands
 
 ```sh
-wf new <work> -- <template|repo...>  # create a workspace
+wf new <template|repo...> -- <work>  # create a workspace
 wf list                              # list known workspaces
 wf add <repo...>                     # add repos to the current workspace
 wf fork <name>                       # fork current workspace with new branches

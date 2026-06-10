@@ -29,7 +29,7 @@ Start here (for AI agents):
   wf skills get core --full
 
 Commands:
-  new <work> -- <template|repo...>  Create a workspace
+  new <template|repo...> -- <work>  Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|delete         List or delete temporary worktrees
   review <target>              Create a review workspace or PR worktree
@@ -56,7 +56,7 @@ Clean options:
   --keep-mirrors               Keep cached git mirrors (default: true)
 
 Examples:
-  wf new "update docs build" -- vercel/next.js vercel/turbo
+  wf new vercel/next.js vercel/turbo -- "update docs build"
   wf worktree "fix-tests" "upgrade-deps"
   wf worktree list
   wf worktree delete "fix-tests"
@@ -64,7 +64,7 @@ Examples:
   wf review delete vercel/omniagent#123 --dry-run
   wf worktree next.js "fix-auth"
   wf wt next.js "fix-auth" --dir ../next.js-fix-auth
-  wf new --dry-run "fixing auth" -- my-template
+  wf new --dry-run my-template -- "fixing auth"
   wf cd fix-auth-bug                Jump into an existing workspace
   wf find                           Fuzzy-find a workspace to open
   wf add vercel/swr                Add a repo from inside a workspace
@@ -87,7 +87,7 @@ Templates:  ${templatesDir}
 }
 
 const COMMAND_HELP: Record<string, string> = {
-  new: `Usage: wf new [options] <name-or-description> -- <template|repo...>
+  new: `Usage: wf new [options] <template|repo...> -- <name-or-description>
 
 Create a workspace from one or more repositories or templates.
 
@@ -96,8 +96,8 @@ Options:
   -h, --help       Show this help
 
 Examples:
-  wf new "update docs build" -- vercel/next.js vercel/turbo
-  wf new --dry-run "fixing auth" -- my-template
+  wf new vercel/next.js vercel/turbo -- "update docs build"
+  wf new --dry-run my-template -- "fixing auth"
   wf new
 `,
 

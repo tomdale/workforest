@@ -14,7 +14,7 @@ for each repo.
 Use these commands for the usual workspace lifecycle:
 
 ```sh
-wf new "update docs build" -- vercel/next.js vercel/turbo # create a workspace
+wf new vercel/next.js vercel/turbo -- "update docs build" # create a workspace
 wf list                                            # list workspaces
 wf add vercel/swr                                  # add repo from inside a workspace
 wf fork "new approach"                             # try another approach
@@ -38,7 +38,7 @@ Agent workflow:
 
 ```sh
 # Create a named workspace with both repos on matching feature branches.
-wf new "update docs build" -- vercel/next.js vercel/turbo
+wf new vercel/next.js vercel/turbo -- "update docs build"
 
 cd ~/Code/workspaces/update-docs-build
 

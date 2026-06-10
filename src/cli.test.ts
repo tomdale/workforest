@@ -226,7 +226,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("parses a slug before -- and repositories after -- for wf new", async () => {
+  it("parses repositories before -- and a slug after -- for wf new", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
     const logs: string[] = [];
@@ -246,10 +246,10 @@ describe("cli", () => {
       "wf",
       "new",
       "--dry-run",
-      "fix-auth",
-      "--",
       "vercel/front",
       "vercel/api",
+      "--",
+      "fix-auth",
     ];
     process.exitCode = undefined;
 
@@ -268,7 +268,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("parses prose before -- and templates after -- for wf new", async () => {
+  it("parses templates before -- and prose after -- for wf new", async () => {
     const configDir = await createTempDir("workforest-config-");
     const xdgConfigHome = await createTempDir("workforest-xdg-");
     const binDir = await createTempDir("workforest-bin-");
@@ -296,10 +296,10 @@ describe("cli", () => {
       "wf",
       "new",
       "--dry-run",
+      "site",
+      "--",
       "fixing",
       "auth",
-      "--",
-      "site",
     ];
     process.exitCode = undefined;
 
@@ -324,32 +324,32 @@ describe("cli", () => {
       logs.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "new", "--", "site"];
+    process.argv = ["node", "wf", "new", "--", "fix-auth"];
     process.exitCode = undefined;
 
     await cli();
 
     expect(process.exitCode).toBe(1);
     expect(errors.join("\n")).toContain(
-      'Missing name or description before "--"',
+      'Missing template or repositories before "--"',
     );
     expect(logs.join("\n")).toContain(
-      "Usage: wf new <name-or-description> -- <template|repo...>",
+      "Usage: wf new <template|repo...> -- <name-or-description>",
     );
 
     errors.length = 0;
     logs.length = 0;
-    process.argv = ["node", "wf", "new", "fix-auth", "--"];
+    process.argv = ["node", "wf", "new", "site", "--"];
     process.exitCode = undefined;
 
     await cli();
 
     expect(process.exitCode).toBe(1);
     expect(errors.join("\n")).toContain(
-      'Missing template or repositories after "--"',
+      'Missing name or description after "--"',
     );
     expect(logs.join("\n")).toContain(
-      "Usage: wf new <name-or-description> -- <template|repo...>",
+      "Usage: wf new <template|repo...> -- <name-or-description>",
     );
   });
 
@@ -372,7 +372,7 @@ describe("cli", () => {
     expect(process.exitCode).toBe(1);
     expect(errors.join("\n")).toContain("unknown or unexpected option: -d");
     expect(logs.join("\n")).toContain(
-      "Usage: wf new <name-or-description> -- <template|repo...>",
+      "Usage: wf new <template|repo...> -- <name-or-description>",
     );
   });
 

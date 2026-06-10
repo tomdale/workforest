@@ -2821,9 +2821,9 @@ async function resolveStandaloneWorktreeFromCwd(
 }
 
 function logNewUsage(): void {
-  log.info("Usage: wf new <name-or-description> -- <template|repo...>");
-  log.info("Example: wf new fixing auth bug -- my-template");
-  log.info("Example: wf new testing feature -- vercel/next.js vercel/turbo");
+  log.info("Usage: wf new <template|repo...> -- <name-or-description>");
+  log.info("Example: wf new my-template -- fixing auth bug");
+  log.info("Example: wf new vercel/next.js vercel/turbo -- testing feature");
 }
 
 async function runNewCommand(argv: string[]): Promise<void> {
@@ -2860,7 +2860,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   }
 
   const interactive = isInteractive();
-  let selections = afterDelimiter;
+  let selections = args._;
   let featureName: string | undefined;
   let description: string | undefined;
   let templateBranchPrefix: string | undefined;
@@ -2917,29 +2917,22 @@ async function runNewCommand(argv: string[]): Promise<void> {
         selections = selected;
       }
     } else {
-      log.error('Missing "--" delimiter before repositories.');
+      log.error('Missing "--" delimiter before name or description.');
       logNewUsage();
       process.exitCode = 1;
       return;
     }
   } else {
-    const workText = args._.join(" ").trim();
+    const workText = afterDelimiter.join(" ").trim();
     if (!workText) {
-      log.error('Missing name or description before "--".');
+      log.error('Missing name or description after "--".');
       logNewUsage();
       process.exitCode = 1;
       return;
     }
 
-    if (!interactive) {
-      if (selections.length === 0) {
-        log.error('Missing template or repositories after "--".');
-        logNewUsage();
-        process.exitCode = 1;
-        return;
-      }
-    } else if (selections.length === 0) {
-      log.error('Missing template or repositories after "--".');
+    if (selections.length === 0) {
+      log.error('Missing template or repositories before "--".');
       logNewUsage();
       process.exitCode = 1;
       return;
