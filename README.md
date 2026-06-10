@@ -50,6 +50,9 @@ eval "$(wf init zsh)"
 # on new branches named after the feature.
 wf new vercel/front vercel/api -- fixing the auth bug
 
+# Monitor dependency installation and other background setup
+wf status
+
 # Add another repo to the current workspace later
 wf add vercel/docs
 
@@ -238,6 +241,12 @@ default branch, then runs `gh pr checkout <number>` in that worktree.
 Inside a review workspace, `wf review 123` and `wf review #123` infer the
 current review repository.
 
+Anywhere a command accepts a repository specifier, a unique repository name
+already present in the cache may be used instead of repeating its owner. For
+example, after caching `vercel/omniagent`, `wf add omniagent`,
+`wf worktree omniagent fix-auth`, and `wf review omniagent` infer `vercel`.
+When the same name is cached under multiple owners, use the full `owner/repo`.
+
 To inspect or remove review worktrees:
 
 ```bash
@@ -272,7 +281,7 @@ Templates are stored as JSONC files in
 
 ```jsonc
 {
-  // Repositories to clone (GitHub shorthand or full git URLs)
+  // Repositories to clone (cached name, GitHub shorthand, or full git URL)
   "repos": [
     "my-org/frontend", // GitHub shorthand
     "my-org/api",
@@ -305,13 +314,24 @@ like `.envrc` or repo-specific files like `frontend/.env.local`.
 ## Automatic Initializers
 
 Workforest automatically detects project configurations and runs setup commands
-during workspace creation. Initializers are provided by hardcoded built-in
-plugin packages for now. Workforest loads each plugin's package entry point and
-runs its exported `detect` function once per repo. That function returns either
-`{ "activate": false }` or `{ "activate": true, "initializers": ["id"] }`.
-Workforest then dynamically imports only the activated initializer modules listed
-in `workforest.plugin` metadata, orders them, and runs them before any custom
-hooks.
+in detached background workers after each repository worktree is created.
+`wf new` returns as soon as all worktrees are available; dependency installation,
+linking, and template hooks continue without keeping the terminal command alive.
+Run `wf status` from anywhere inside the workspace to watch the live panes.
+
+Initializers are provided by hardcoded built-in plugin packages for now.
+Workforest loads each plugin's package entry point and runs its exported `detect`
+function once per repo. That function returns either `{ "activate": false }` or
+`{ "activate": true, "initializers": ["id"] }`. Workforest then dynamically
+imports only the activated initializer modules listed in `workforest.plugin`
+metadata, orders them, and runs them before any custom hooks.
+
+Failed or cancelled repository initialization can be controlled independently:
+
+```bash
+wf status cancel front
+wf status retry front
+```
 
 Initializer metadata uses conventional package-root-relative module paths. A
 string entry such as `"pnpm-install"` expands to `{ "id": "pnpm-install" }`,
@@ -472,13 +492,17 @@ This dramatically reduces initial clone time and disk usage for large repos.
 creates [worktrees](https://git-scm.com/docs/git-worktree) from the cached
 mirror. Worktree creation is nearly instant since no data transfer is needed.
 
-**Parallel installation**: Hooks such as dependency installation (pnpm install)
-run in parallel.
+**Background parallel installation**: Repository initializers such as dependency
+installation run concurrently in detached workers. Workspace-level template
+hooks run after every repository initializer reaches a terminal state.
 
 ## Commands
 
 ```
 wf new <template|repo...> -- <work> Create a workspace
+wf status                       Monitor background repository initialization
+wf status cancel [repo...]      Cancel queued or running initialization
+wf status retry [repo...]       Retry failed or cancelled initialization
 wf worktree <slug...>           Create temporary worktree(s) in a workspace repo
 wf worktree list                List temporary worktrees
 wf worktree rm <slug...>        Remove temporary worktrees
@@ -577,8 +601,8 @@ content. Either:
 
 ### Hooks fail
 
-If a hook command fails, workforest will stop and report the error. Common
-issues:
+If a hook command fails, `wf status` reports the error while leaving the
+workspace and its worktrees available. Common issues:
 
 - **Command not found**: Ensure the command is installed and in your PATH
 - **File not found**: Check that the `if` condition file path is correct
@@ -589,10 +613,10 @@ To allow hooks to fail without stopping workspace creation, add
 
 ### Repo setup fails
 
-When repo setup fails during git, dependency installation, or linking, workforest
-writes detailed diagnostics to `.workforest/logs/<repo>.log` in the workspace.
-Use that log to inspect command output that may be too verbose for the terminal
-progress UI.
+When repo setup fails during git, dependency installation, or linking, run
+`wf status` to inspect the failed step and recent output. Workforest also writes
+detailed diagnostics to `.workforest/logs/<repo>.log` in the workspace. Retry
+the failed repository with `wf status retry <repo>`.
 
 ### Template not found
 

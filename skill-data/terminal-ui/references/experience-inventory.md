@@ -26,6 +26,7 @@ Status values:
 | --- | --- | --- | --- |
 | New workspace wizard | `wf new` without selections | `src/ui/new-wizard.ts` | Canonical |
 | Parallel repository setup grid | `wf new`, `wf add`, `wf fork`, temporary worktree setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
+| Background initialization status grid | `wf status` inside a workspace | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
 | Template browser and manager | `wf templates` | `src/ui/template-manager.ts` | Canonical |
 | Cached repository browser and manager | `wf repositories` | `src/ui/repository-manager.ts` | Canonical |

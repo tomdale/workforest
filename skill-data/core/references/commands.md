@@ -4,11 +4,18 @@
 
 ```sh
 wf new <template|repo...> -- <work>  # create a workspace
+wf status                            # monitor background repo initialization
+wf status cancel [repo...]           # cancel queued/running initialization
+wf status retry [repo...]            # retry failed/cancelled initialization
 wf list                              # list known workspaces
 wf add <repo...>                     # add repos to the current workspace
 wf fork <name>                       # fork current workspace with new branches
 wf clean [dir]                       # remove a workspace
 ```
+
+`wf new` returns once repository worktrees are ready. Initializers and template
+hooks continue in detached background workers and can be inspected from anywhere
+inside the workspace with `wf status`.
 
 ## Worktree Commands
 
@@ -44,6 +51,9 @@ wf repository repair [repo...]         # prune metadata and verify objects
 wf repository delete <repo...>         # delete selected mirrors
 wf repository clean                    # delete mirrors without active worktrees
 ```
+
+Repository specifiers accept `owner/repo`, git URLs, or unique repository names
+already present in the cache. Bare names fail when multiple cached owners match.
 
 Read `references/repository-cache.md` for the jobs, safety rules, and automation
 contracts behind these commands.

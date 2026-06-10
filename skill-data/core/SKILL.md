@@ -15,6 +15,7 @@ Use these commands for the usual workspace lifecycle:
 
 ```sh
 wf new vercel/next.js vercel/turbo -- "update docs build" # create a workspace
+wf status                                          # monitor background setup
 wf list                                            # list workspaces
 wf add vercel/swr                                  # add repo from inside a workspace
 wf fork "new approach"                             # try another approach
@@ -44,6 +45,7 @@ wf new vercel/next.js vercel/turbo -- "update docs build"
 cd ~/Code/workspaces/update-docs-build
 
 # Inspect what Workforest created.
+wf status
 wf list
 ls
 
