@@ -32,6 +32,8 @@ const runTemplateManagerMock = vi.hoisted(() =>
   vi.fn(async () => ({ type: "quit" as const })),
 );
 const shouldUseTemplateManagerMock = vi.hoisted(() => vi.fn(() => true));
+const runNewWizardMock = vi.hoisted(() => vi.fn());
+const shouldUseGridMock = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock("./ui/prompts/index.ts", async () => {
   const actual = await vi.importActual<typeof import("./ui/prompts/index.ts")>(
@@ -51,10 +53,26 @@ vi.mock("./ui/template-manager.ts", () => ({
   shouldUseTemplateManager: shouldUseTemplateManagerMock,
 }));
 
+vi.mock("./ui/new-wizard.ts", () => ({
+  runNewWizard: runNewWizardMock,
+}));
+
+vi.mock("./ui/grid-consumer.ts", async () => {
+  const actual = await vi.importActual<typeof import("./ui/grid-consumer.ts")>(
+    "./ui/grid-consumer.ts",
+  );
+
+  return {
+    ...actual,
+    shouldUseGrid: shouldUseGridMock,
+  };
+});
+
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 import { createTemplate } from "./templates/index.ts";
+import { CancelError } from "./ui/prompts/index.ts";
 import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -83,6 +101,9 @@ afterEach(async () => {
   runTemplateManagerMock.mockResolvedValue({ type: "quit" });
   shouldUseTemplateManagerMock.mockReset();
   shouldUseTemplateManagerMock.mockReturnValue(true);
+  runNewWizardMock.mockReset();
+  shouldUseGridMock.mockReset();
+  shouldUseGridMock.mockReturnValue(false);
 
   if (ORIGINAL_CONFIG_DIR === undefined) {
     delete process.env["WORKFOREST_CONFIG_DIR"];
@@ -121,6 +142,33 @@ afterEach(async () => {
 });
 
 describe("cli", () => {
+  it("exits cleanly when the fullscreen new wizard is cancelled", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const output: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    shouldUseGridMock.mockReturnValue(true);
+    runNewWizardMock.mockRejectedValue(new CancelError());
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output.push(String(chunk));
+      return true;
+    });
+
+    process.argv = ["node", "wf", "new"];
+    process.exitCode = undefined;
+
+    await expect(cli()).resolves.toBeUndefined();
+
+    expect(runNewWizardMock).toHaveBeenCalledOnce();
+    expect(output.join("")).toContain("Cancelled");
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("previews and confirms configuration before saving", async () => {
     const configDir = await createTempDir("workforest-config-");
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;

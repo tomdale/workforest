@@ -2889,11 +2889,20 @@ async function runNewCommand(argv: string[]): Promise<void> {
       if (shouldUseGrid()) {
         const { runNewWizard } = await import("./ui/new-wizard.ts");
         const templates = await listTemplates();
-        const wizardResult = await runNewWizard({
-          config,
-          templates,
-          handleTemplateManagement,
-        });
+        let wizardResult: Awaited<ReturnType<typeof runNewWizard>>;
+        try {
+          wizardResult = await runNewWizard({
+            config,
+            templates,
+            handleTemplateManagement,
+          });
+        } catch (error) {
+          if (error instanceof CancelError) {
+            cancel("Cancelled");
+            return;
+          }
+          throw error;
+        }
         selections = wizardResult.templateId
           ? [wizardResult.templateId]
           : wizardResult.repoSlugs;
