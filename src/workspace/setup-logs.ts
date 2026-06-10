@@ -173,8 +173,12 @@ function formatState(state: RepoPipelineState): string {
       return formatTaskLikeState(`git:${state.step}`, state);
     case "initializer":
       return formatTaskLikeState(`initializer:${state.name}`, state);
+    case "worktree-ready":
+      return `[worktree-ready] hasLockfile=${String(state.hasLockfile)}\n`;
     case "complete":
       return `[complete] hasLockfile=${String(state.hasLockfile)}\n`;
+    case "cancelled":
+      return `[cancelled] ${state.message ?? "Initialization cancelled"}\n`;
     case "failed":
       return [
         `[failed${state.step ? `:${state.step}` : ""}] ${state.error.message}`,

@@ -30,6 +30,7 @@ Start here (for AI agents):
 
 Commands:
   new <template|repo...> -- <work>  Create a workspace
+  status                       Monitor background repository initialization
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|delete         List or delete temporary worktrees
   review <target>              Create a review workspace or PR worktree
@@ -59,6 +60,8 @@ Clean options:
 
 Examples:
   wf new vercel/next.js vercel/turbo -- "update docs build"
+  wf status
+  wf status retry front
   wf worktree "fix-tests" "upgrade-deps"
   wf worktree list
   wf worktree delete "fix-tests"
@@ -106,6 +109,26 @@ Examples:
   wf new vercel/next.js vercel/turbo -- "update docs build"
   wf new --dry-run my-template -- "fixing auth"
   wf new
+`,
+
+  status: `Usage: wf status [options]
+       wf status cancel [repo...]
+       wf status retry [repo...]
+
+Show repository initialization progress for the current workspace. In an
+interactive terminal, opens a live pane for each repository. Without repository
+arguments, cancel and retry apply to every eligible repository.
+
+Options:
+  -w, --workspace <dir>  Inspect a workspace outside the current directory
+  --json                  Print machine-readable status
+  -h, --help              Show this help
+
+Examples:
+  wf status
+  wf status --json
+  wf status cancel front
+  wf status retry front
 `,
 
   worktree: `Usage: wf worktree <repo> <slug> [options]
@@ -449,6 +472,19 @@ Aliases:
 };
 
 const NESTED_COMMAND_HELP: Record<string, Record<string, string>> = {
+  status: {
+    cancel: `Usage: wf status cancel [repo...]
+
+Cancel selected background repository initializers. With no repositories,
+cancels every initializer that is currently queued or running.
+`,
+    retry: `Usage: wf status retry [repo...]
+
+Retry selected failed or cancelled repository initializers. With no
+repositories, retries every eligible initializer.
+`,
+  },
+
   review: {
     list: `Usage: wf review list [repo]
 

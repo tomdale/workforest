@@ -474,6 +474,71 @@ describe("renderPipelinesGrid", () => {
     expect(screen.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("shows completion at worktree readiness and returns while initialization continues", async () => {
+    const pane = {
+      setLabel: vi.fn(),
+      appendLine: vi.fn(),
+    };
+    const grid = {
+      getPane: vi.fn(() => pane),
+      render: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const screen = {
+      key: vi.fn(),
+      once: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const modal = { destroy: vi.fn() };
+    let acknowledge!: () => void;
+    let monitorClosed = false;
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      try {
+        yield { phase: "worktree-ready", hasLockfile: true };
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        yield {
+          phase: "initializer",
+          name: "pnpm install",
+          status: "running",
+        };
+      } finally {
+        monitorClosed = true;
+      }
+    };
+    const onBeforeCompletionPrompt = vi.fn();
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+      completeOnWorktreesReady: true,
+      backgroundInitialization: true,
+      onBeforeCompletionPrompt,
+      environment: {
+        createScreen: () => screen,
+        createGrid: () => grid,
+        createCompletionModal: vi.fn(() => modal),
+        waitForCompletionAck: () =>
+          new Promise((resolve) => {
+            acknowledge = resolve;
+          }),
+        renderIntervalMs: 0,
+        finalHoldMs: 0,
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onBeforeCompletionPrompt).toHaveBeenCalledWith(
+      new Map([["repo", { hasLockfile: true }]]),
+    );
+
+    acknowledge();
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(promise).resolves.toEqual(
+      new Map([["repo", { hasLockfile: true }]]),
+    );
+    expect(monitorClosed).toBe(true);
+  });
+
   it("renders the default success completion modal content", async () => {
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
       yield { phase: "complete", hasLockfile: true };

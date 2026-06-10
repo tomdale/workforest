@@ -32,6 +32,8 @@ export type RenderPipelinesGridOptions = {
   onBeforeCompletionPrompt?: (
     repoResults: Map<string, { hasLockfile: boolean }>,
   ) => void | Promise<void>;
+  completeOnWorktreesReady?: boolean;
+  backgroundInitialization?: boolean;
   environment?: GridRenderEnvironment;
 };
 
@@ -101,6 +103,7 @@ export type GridCompletionModalOptions = {
   totalCount: number;
   setupWarnings: GridCompletionFailure[];
   repoErrors: GridCompletionFailure[];
+  backgroundInitialization?: boolean;
 };
 
 export interface GridRenderEnvironment {
@@ -185,6 +188,8 @@ export async function renderPipelinesGrid({
   getLogPath,
   onFailure,
   onBeforeCompletionPrompt,
+  completeOnWorktreesReady = false,
+  backgroundInitialization = false,
   environment = createDefaultEnvironment(),
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
   const renderIntervalMs =
@@ -218,6 +223,8 @@ export async function renderPipelinesGrid({
 
   // Track repo states for return value
   const repoResults = new Map<string, { hasLockfile: boolean }>();
+  const worktreeResults = new Map<string, { hasLockfile: boolean }>();
+  const worktreeSettled = new Set<string>();
   const outputAdapters = new Map<string, CommandStreamAdapter>();
   const setupWarnings: GridCompletionFailure[] = [];
   const repoErrors: GridCompletionFailure[] = [];
@@ -226,6 +233,8 @@ export async function renderPipelinesGrid({
   let destroyed = false;
   let awaitingCompletionAck = false;
   let completionModal: GridCompletionModalLike | null = null;
+  let completionAckPromise: Promise<void> | null = null;
+  let completionShown = false;
 
   const destroyScreen = (): void => {
     if (destroyed) return;
@@ -271,8 +280,86 @@ export async function renderPipelinesGrid({
     // Initial render
     grid.render();
 
-    // Consume all pipelines in parallel
-    for await (const { id, state } of runParallel(pipelines)) {
+    const renderCompletion = (): void => {
+      completionModal?.destroy();
+      completionModal =
+        environment.createCompletionModal?.({
+          screen,
+          ...(workspacePath ? { workspacePath } : {}),
+          worktreeNames: repoNames.filter(
+            (repoName) =>
+              !repoErrors.some((failure) => failure.repoName === repoName),
+          ),
+          completedCount: completeOnWorktreesReady
+            ? worktreeResults.size
+            : repoResults.size,
+          totalCount: repoNames.length,
+          setupWarnings,
+          repoErrors,
+          ...(backgroundInitialization ? { backgroundInitialization } : {}),
+        }) ?? null;
+      grid.render();
+    };
+
+    const showCompletion = async (): Promise<void> => {
+      if (completionShown) return;
+      completionShown = true;
+
+      if (pendingRender) {
+        await pendingRender;
+      }
+
+      if (onBeforeCompletionPrompt) {
+        statusLine?.setContent("{gray-fg}Finalizing workspace...{/gray-fg}");
+        grid.render();
+        await onBeforeCompletionPrompt(
+          completeOnWorktreesReady ? worktreeResults : repoResults,
+        );
+      }
+
+      statusLine?.setContent(
+        backgroundInitialization
+          ? "{gray-fg}Initialization continues in the background{/gray-fg}"
+          : "",
+      );
+      renderCompletion();
+
+      if (environment.waitForCompletionAck) {
+        awaitingCompletionAck = true;
+        completionAckPromise = environment
+          .waitForCompletionAck(screen)
+          .finally(() => {
+            awaitingCompletionAck = false;
+          });
+      }
+    };
+
+    const updates = runParallel(pipelines)[Symbol.asyncIterator]();
+    let nextUpdate = updates.next();
+
+    while (true) {
+      const ackPromise = completionAckPromise as Promise<void> | null;
+      const next = ackPromise
+        ? await Promise.race([
+            nextUpdate.then((result) => ({ type: "update" as const, result })),
+            ackPromise.then(() => ({ type: "ack" as const })),
+          ])
+        : {
+            type: "update" as const,
+            result: await nextUpdate,
+          };
+
+      if (next.type === "ack") {
+        await updates.return?.(undefined);
+        return completeOnWorktreesReady ? worktreeResults : repoResults;
+      }
+
+      if (next.result.done) {
+        break;
+      }
+
+      const { id, state } = next.result.value;
+      nextUpdate = updates.next();
       const paneIndex = paneMap.get(id);
       if (paneIndex === undefined) continue;
 
@@ -312,12 +399,42 @@ export async function renderPipelinesGrid({
           break;
         }
 
+        case "worktree-ready": {
+          flushOutputBuffer(pane, id, outputAdapters);
+          pane.setLabel(
+            `${escapeBlessedTags(id)}: initializing ${STATUS_ICONS.running}`,
+          );
+          pane.appendLine(
+            "{gray-fg}Worktree ready; initialization moved to background{/gray-fg}",
+          );
+          worktreeResults.set(id, { hasLockfile: state.hasLockfile });
+          worktreeSettled.add(id);
+          break;
+        }
+
         case "complete": {
           flushOutputBuffer(pane, id, outputAdapters);
           pane.setLabel(
             `{green-fg}${escapeBlessedTags(id)} ${STATUS_ICONS.complete}{/green-fg}`,
           );
           repoResults.set(id, { hasLockfile: state.hasLockfile });
+          break;
+        }
+
+        case "cancelled": {
+          flushOutputBuffer(pane, id, outputAdapters);
+          pane.setLabel(
+            `{yellow-fg}${escapeBlessedTags(id)} cancelled{/yellow-fg}`,
+          );
+          pane.appendLine(
+            `{yellow-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/yellow-fg}`,
+          );
+          setupWarnings.push({
+            repoName: id,
+            step: "initializer",
+            message: state.message ?? "Initialization cancelled",
+          });
+          if (completionModal) renderCompletion();
           break;
         }
 
@@ -344,12 +461,24 @@ export async function renderPipelinesGrid({
             setupWarnings,
             repoErrors,
           });
+          if (!state.step?.startsWith("initializer:")) {
+            worktreeSettled.add(id);
+          }
           await onFailure?.(id, state);
+          if (completionModal) renderCompletion();
           break;
         }
       }
 
       scheduleRender();
+
+      if (
+        completeOnWorktreesReady &&
+        worktreeSettled.size === repoNames.length &&
+        !completionShown
+      ) {
+        await showCompletion();
+      }
     }
 
     for (const [repoId, paneIndex] of paneMap) {
@@ -358,43 +487,17 @@ export async function renderPipelinesGrid({
       flushOutputBuffer(pane, repoId, outputAdapters);
     }
 
-    if (pendingRender) {
-      await pendingRender;
-    }
+    await showCompletion();
 
-    if (onBeforeCompletionPrompt) {
-      statusLine?.setContent("{gray-fg}Finalizing workspace...{/gray-fg}");
-      grid.render();
-      await onBeforeCompletionPrompt(repoResults);
-    }
-
-    statusLine?.setContent("");
-    completionModal =
-      environment.createCompletionModal?.({
-        screen,
-        ...(workspacePath ? { workspacePath } : {}),
-        worktreeNames: repoNames.filter(
-          (repoName) =>
-            !repoErrors.some((failure) => failure.repoName === repoName),
-        ),
-        completedCount: repoResults.size,
-        totalCount: repoNames.length,
-        setupWarnings,
-        repoErrors,
-      }) ?? null;
-    grid.render();
-
-    if (environment.waitForCompletionAck) {
-      awaitingCompletionAck = true;
-      await environment.waitForCompletionAck(screen);
-      awaitingCompletionAck = false;
+    if (completionAckPromise) {
+      await completionAckPromise;
     } else if (finalHoldMs > 0) {
       // Compatibility for benchmark/test environments without an acknowledgement
       // hook.
       await sleep(finalHoldMs);
     }
 
-    return repoResults;
+    return completeOnWorktreesReady ? worktreeResults : repoResults;
   } finally {
     destroyScreen();
   }
@@ -452,6 +555,7 @@ export function createDefaultCompletionModal({
   totalCount,
   setupWarnings,
   repoErrors,
+  backgroundInitialization = false,
 }: GridCompletionModalOptions): GridCompletionModalLike {
   const hasRepoErrors = repoErrors.length > 0;
   const hasSetupWarnings = setupWarnings.length > 0;
@@ -460,6 +564,7 @@ export function createDefaultCompletionModal({
   const maxTextWidth = getCompletionModalMaxTextWidth({
     worktreeNames,
     setupWarnings,
+    backgroundInitialization,
     ...(workspacePath ? { workspacePath } : {}),
   });
   const width = Math.min(
@@ -473,6 +578,7 @@ export function createDefaultCompletionModal({
     worktreeNames,
     setupWarnings,
     repoErrors,
+    backgroundInitialization,
     contentWidth,
     ...(workspacePath ? { workspacePath } : {}),
   });
@@ -537,6 +643,7 @@ export function createDefaultCompletionModal({
         worktreeNames,
         setupWarnings,
         repoErrors,
+        backgroundInitialization,
         contentWidth,
         starRows,
         ...(workspacePath ? { workspacePath } : {}),
@@ -576,6 +683,7 @@ function getCompletionModalContent({
   worktreeNames,
   setupWarnings,
   repoErrors,
+  backgroundInitialization = false,
   contentWidth = 68,
   starRows,
 }: Omit<GridCompletionModalOptions, "screen"> & {
@@ -603,6 +711,13 @@ function getCompletionModalContent({
   const infoLines = [
     "",
     ...workspaceLines,
+    ...(backgroundInitialization
+      ? [
+          "",
+          "{gray-fg}Initialization continues in the background.{/gray-fg}",
+          "{gray-fg}Run wf status from the workspace to check progress.{/gray-fg}",
+        ]
+      : []),
     ...(setupWarnings.length > 0
       ? ["", ...formatCompletionFailures(setupWarnings, "Setup warnings")]
       : []),
@@ -621,10 +736,12 @@ function getCompletionModalMaxTextWidth({
   workspacePath,
   worktreeNames,
   setupWarnings,
+  backgroundInitialization = false,
 }: {
   workspacePath?: string;
   worktreeNames: string[];
   setupWarnings: GridCompletionFailure[];
+  backgroundInitialization?: boolean;
 }): number {
   const visibleLines = [
     ...formatWorkspaceSummary({
@@ -634,6 +751,12 @@ function getCompletionModalMaxTextWidth({
     }),
     ...(setupWarnings.length > 0
       ? formatCompletionFailures(setupWarnings, "Setup warnings")
+      : []),
+    ...(backgroundInitialization
+      ? [
+          "Initialization continues in the background.",
+          "Run wf status from the workspace to check progress.",
+        ]
       : []),
     "press any key",
   ].map(stripBlessedTags);

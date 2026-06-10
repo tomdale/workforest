@@ -181,6 +181,7 @@ _workforest_complete() {
   local subcommand="\${words[2]:-}"
   commands=(
     'new:create a workspace'
+    'status:monitor background repository initialization'
     'worktree:create or manage repo worktrees'
     'wt:create or manage repo worktrees'
     'review:create or manage PR review worktrees'
@@ -212,6 +213,9 @@ _workforest_complete() {
       case "$subcommand" in
         cd|clean|delete|workspace)
           _workforest_workspace_names
+          ;;
+        status)
+          _values 'status action' cancel retry
           ;;
       esac
       ;;

@@ -114,6 +114,9 @@ export async function cli(): Promise<void> {
     case "new":
       await runNewCommand(commandArgv);
       break;
+    case "status":
+      await runStatusCommand(commandArgv);
+      break;
     case "cd":
       await runCdCommand(commandArgv);
       break;
@@ -183,11 +186,224 @@ export async function cli(): Promise<void> {
     case "version":
       await runVersionCommand(commandArgv);
       break;
+    case "_initialize-repo":
+      await runInitializeRepoWorkerCommand(commandArgv);
+      break;
     default:
       log.error(`Unknown command: ${command}`);
       console.log(await help());
       process.exitCode = 1;
   }
+}
+
+async function runInitializeRepoWorkerCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--workspace": String,
+      "--repo": String,
+      "--run-id": String,
+    },
+    { argv },
+  );
+  const workspaceDir = args["--workspace"];
+  const repoName = args["--repo"];
+  const runId = args["--run-id"];
+  if (!workspaceDir || !repoName || !runId) {
+    process.exitCode = 2;
+    return;
+  }
+
+  const { runRepoInitializationWorker } = await import(
+    "./workspace/initialization.ts"
+  );
+  try {
+    await runRepoInitializationWorker({ workspaceDir, repoName, runId });
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runStatusCommand(argv: string[]): Promise<void> {
+  const args = arg(
+    {
+      "--help": Boolean,
+      "--json": Boolean,
+      "--workspace": String,
+      "-h": "--help",
+      "-w": "--workspace",
+    },
+    { argv },
+  );
+  if (args["--help"]) {
+    const subcommandHelp = args._[0]
+      ? nestedCommandHelp("status", args._[0])
+      : null;
+    console.log(subcommandHelp ?? commandHelp("status"));
+    return;
+  }
+
+  const workspaceDir = args["--workspace"]
+    ? path.resolve(expandHome(args["--workspace"]))
+    : await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    log.error("Run wf status from inside a workforest workspace.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const {
+    cancelRepoInitializations,
+    finalizeWorkspaceInitialization,
+    readRepoInitializationStates,
+    readWorkspaceInitializationState,
+    retryRepoInitializations,
+  } = await import("./workspace/initialization.ts");
+  const states = await readRepoInitializationStates(workspaceDir);
+  if (states.length === 0) {
+    log.info("This workspace has no recorded background initialization.");
+    return;
+  }
+  await finalizeWorkspaceInitialization(workspaceDir);
+
+  const subcommand = args._[0];
+  if (subcommand === "cancel") {
+    const requested = args._.slice(1);
+    const repoNames =
+      requested.length > 0
+        ? requested
+        : states
+            .filter(
+              (state) =>
+                state.status === "queued" || state.status === "running",
+            )
+            .map((state) => state.repo);
+    if (repoNames.length === 0) {
+      log.info("No running repository initializers to cancel.");
+      return;
+    }
+    try {
+      const cancelled = await cancelRepoInitializations(
+        workspaceDir,
+        repoNames,
+      );
+      for (const state of cancelled) {
+        log.success(`${state.repo}: initialization cancelled`);
+      }
+    } catch (error) {
+      log.error(getErrorMessage(error));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (subcommand === "retry") {
+    const requested = args._.slice(1);
+    const repoNames =
+      requested.length > 0
+        ? requested
+        : states
+            .filter(
+              (state) =>
+                state.status === "failed" || state.status === "cancelled",
+            )
+            .map((state) => state.repo);
+    if (repoNames.length === 0) {
+      log.info("No failed or cancelled repository initializers to retry.");
+      return;
+    }
+    try {
+      const retried = await retryRepoInitializations(workspaceDir, repoNames);
+      for (const state of retried) {
+        log.success(
+          `${state.repo}: initialization retry started (attempt ${state.attempt})`,
+        );
+      }
+    } catch (error) {
+      log.error(getErrorMessage(error));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (subcommand !== undefined) {
+    log.error(`Unknown status subcommand: ${subcommand}`);
+    log.info("Available: cancel, retry");
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceState = await readWorkspaceInitializationState(workspaceDir);
+  if (args["--json"]) {
+    console.log(
+      JSON.stringify(
+        {
+          workspace: workspaceState,
+          repos: states,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
+  if (isInteractive() && shouldUseGrid(states.length)) {
+    const { renderInitializationStatus } = await import(
+      "./ui/initialization-status.ts"
+    );
+    await renderInitializationStatus(
+      workspaceDir,
+      states.map((state) => state.repo),
+    );
+    return;
+  }
+
+  printReport({
+    title: "Repository initialization",
+    sections: [
+      {
+        fields: [
+          {
+            label: "Workspace",
+            value: workspaceState?.status ?? "unknown",
+          },
+          ...(workspaceState?.message
+            ? [{ label: "Summary", value: workspaceState.message }]
+            : []),
+          ...(workspaceState?.error
+            ? [{ label: "Error", value: workspaceState.error }]
+            : []),
+          ...(workspaceState?.current_hook
+            ? [{ label: "Hook", value: workspaceState.current_hook }]
+            : []),
+          ...(workspaceState?.warnings?.length
+            ? [
+                {
+                  label: "Warnings",
+                  value: workspaceState.warnings.join("\n"),
+                },
+              ]
+            : []),
+        ],
+      },
+      {
+        entries: states.map((state) => ({
+          title: state.repo,
+          description: state.status,
+          details: [
+            ...(state.step ? [{ label: "Step", value: state.step }] : []),
+            ...(state.message
+              ? [{ label: "Message", value: state.message }]
+              : []),
+            { label: "Attempt", value: String(state.attempt) },
+          ],
+        })),
+      },
+    ],
+    footer: `Workspace: ${workspaceDir}`,
+  });
 }
 
 async function runConfigCommand(argv: string[]): Promise<void> {

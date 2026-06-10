@@ -33,7 +33,9 @@ export type RepoPipelineState =
       output?: string;
       message?: string;
     }
+  | { phase: "worktree-ready"; hasLockfile: boolean }
   | { phase: "complete"; hasLockfile: boolean }
+  | { phase: "cancelled"; message?: string }
   | { phase: "failed"; error: Error; step?: string };
 
 export type RepoPipelineOptions = {
@@ -48,6 +50,12 @@ export type RepoPipelineOptions = {
     repoDir: string;
     workspaceDir: string;
   }) => Promise<void>;
+};
+
+export type RepoInitializationOptions = {
+  repo: RepoConfig;
+  workspaceDir: string;
+  disabledInitializers?: boolean | string[];
 };
 
 /**
@@ -141,13 +149,37 @@ export async function* repoPipelineGenerator({
       return;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Initializers Phase: install → linking
-    // ─────────────────────────────────────────────────────────────────────────
+    yield* repoInitializationGenerator({
+      repo,
+      workspaceDir,
+      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+    });
+  } catch (error) {
+    yield {
+      phase: "failed",
+      error: error instanceof Error ? error : new Error(String(error)),
+      step: currentStep,
+    };
+  }
+}
 
-    currentStep = "initializer:detection";
+/**
+ * Run only the initializer portion of a repository pipeline.
+ *
+ * This is intentionally independent from worktree creation so it can run in a
+ * detached worker after the foreground command returns.
+ */
+export async function* repoInitializationGenerator({
+  repo,
+  workspaceDir,
+  disabledInitializers,
+}: RepoInitializationOptions): AsyncGenerator<RepoPipelineState> {
+  const repoDir = path.join(workspaceDir, repo.name);
+  let currentStep = "initializer:detection";
+
+  try {
     for await (const state of runSingleRepoInitializersGenerator({
-      context,
+      context: { repoDir, workspaceDir, repo },
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     })) {
       if (state.phase === "running") {
@@ -159,7 +191,6 @@ export async function* repoPipelineGenerator({
       const pipelineState = mapInitializerStateToPipelineState(state);
       if (pipelineState) yield pipelineState;
 
-      // Check for initializer failure
       if (state.phase === "running" && state.state.status === "failed") {
         yield {
           phase: "failed",
@@ -170,12 +201,8 @@ export async function* repoPipelineGenerator({
       }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Complete
-    // ─────────────────────────────────────────────────────────────────────────
-
     currentStep = "detect lockfile";
-    const hasLockfile = await hasAny(targetDir, [
+    const hasLockfile = await hasAny(repoDir, [
       "pnpm-lock.yaml",
       "pnpm-lock.yml",
     ]);

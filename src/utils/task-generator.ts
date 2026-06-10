@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createSpawnEnv } from "./spawn-env.ts";
 import { TailBuffer } from "./tail-buffer.ts";
 
@@ -33,6 +33,7 @@ type QueuedOutput = {
 const MAX_STDERR_CHARS = 4096;
 const MAX_QUEUED_OUTPUT_BYTES = 1024 * 1024;
 const RESUME_QUEUED_OUTPUT_BYTES = MAX_QUEUED_OUTPUT_BYTES / 2;
+const activeCommandChildren = new Set<ChildProcess>();
 
 /**
  * Generator that spawns a command and yields state updates as it runs.
@@ -50,6 +51,7 @@ export async function* runCommandGenerator(
     env: createSpawnEnv(options.cwd),
     stdio: ["ignore", "pipe", "pipe"],
   });
+  activeCommandChildren.add(child);
 
   const outputQueue: QueuedOutput[] = [];
   let queuedBytes = 0;
@@ -105,6 +107,7 @@ export async function* runCommandGenerator(
     child.on("error", (error) => resolve({ type: "error", error }));
     child.on("close", (code) => resolve({ type: "close", code }));
   }).then((exit) => {
+    activeCommandChildren.delete(child);
     exitResult = exit;
     wakeConsumer();
     return exit;
@@ -162,6 +165,37 @@ export async function* runCommandGenerator(
     }
 
     await waitForOutputOrExit();
+  }
+}
+
+export async function terminateRunningCommands(): Promise<void> {
+  const children = [...activeCommandChildren];
+  if (children.length === 0) return;
+
+  for (const child of children) {
+    child.kill("SIGTERM");
+  }
+
+  await Promise.race([
+    Promise.all(
+      children.map(
+        (child) =>
+          new Promise<void>((resolve) => {
+            if (child.exitCode !== null || child.signalCode !== null) {
+              resolve();
+              return;
+            }
+            child.once("close", () => resolve());
+          }),
+      ),
+    ),
+    new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
+  ]);
+
+  for (const child of children) {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
   }
 }
 
@@ -246,29 +280,37 @@ export async function* runParallel<T>(
 
   startPendingTasks();
 
-  while (active.size > 0) {
-    // Create promises for all active generators
-    const promises = [...active.entries()].map(([id, entry]) =>
-      getPromise(id, entry),
+  try {
+    while (active.size > 0) {
+      // Create promises for all active generators
+      const promises = [...active.entries()].map(([id, entry]) =>
+        getPromise(id, entry),
+      );
+
+      // Wait for any generator to yield
+      const { id, result } = await Promise.race(promises);
+
+      // Clear the pending promise for this iterator
+      const entry = active.get(id);
+      if (!entry) {
+        // This shouldn't happen, but handle it gracefully
+        continue;
+      }
+      entry.pendingPromise = null;
+
+      if (result.done) {
+        active.delete(id);
+        startPendingTasks();
+      } else {
+        yield { id, state: result.value };
+      }
+    }
+  } finally {
+    await Promise.all(
+      [...active.values()].map(async ({ iterator }) => {
+        await iterator.return?.();
+      }),
     );
-
-    // Wait for any generator to yield
-    const { id, result } = await Promise.race(promises);
-
-    // Clear the pending promise for this iterator
-    const entry = active.get(id);
-    if (!entry) {
-      // This shouldn't happen, but handle it gracefully
-      continue;
-    }
-    entry.pendingPromise = null;
-
-    if (result.done) {
-      active.delete(id);
-      startPendingTasks();
-    } else {
-      yield { id, state: result.value };
-    }
   }
 }
 
