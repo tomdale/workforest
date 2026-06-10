@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type {
   ReviewWorktreeMetadata,
   TemporaryWorktreeMetadata,
@@ -10,7 +12,11 @@ import { pathExists } from "../utils/fs.ts";
 
 const METADATA_FILENAME = ".workforest";
 const WORKSPACE_METADATA_FILENAME = "workspace.json";
+const WORKSPACE_METADATA_LOCK_FILENAME = ".workforest.lock";
 const SCHEMA_VERSION = "1";
+const LOCK_RETRY_MS = 20;
+const LOCK_TIMEOUT_MS = 10_000;
+const STALE_LOCK_MS = 30_000;
 
 export type WriteMetadataOptions = {
   featureName: string;
@@ -63,61 +69,45 @@ export async function upsertReviewWorktree(
   workspaceDir: string,
   worktree: ReviewWorktreeMetadata,
 ): Promise<WorkspaceMetadata> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
+  return mutateWorkspaceMetadata(workspaceDir, (metadata) => {
+    const existing = metadata.review_worktrees ?? [];
+    const nextReviewWorktrees = existing.some(
+      (entry) => entry.pr_number === worktree.pr_number,
+    )
+      ? existing.map((entry) =>
+          entry.pr_number === worktree.pr_number ? worktree : entry,
+        )
+      : [...existing, worktree];
 
-  if (!metadata) {
-    throw new Error(
-      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
-    );
-  }
-
-  const existing = metadata.review_worktrees ?? [];
-  const nextReviewWorktrees = existing.some(
-    (entry) => entry.pr_number === worktree.pr_number,
-  )
-    ? existing.map((entry) =>
-        entry.pr_number === worktree.pr_number ? worktree : entry,
-      )
-    : [...existing, worktree];
-
-  const nextMetadata: WorkspaceMetadata = {
-    ...metadata,
-    review_worktrees: nextReviewWorktrees,
-  };
-
-  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
-  return nextMetadata;
+    return {
+      ...metadata,
+      review_worktrees: nextReviewWorktrees,
+    };
+  });
 }
 
 export async function removeReviewWorktreeMetadata(
   workspaceDir: string,
   prNumber: number,
 ): Promise<WorkspaceMetadata> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-
-  if (!metadata) {
-    throw new Error(
-      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+  return mutateWorkspaceMetadata(workspaceDir, (metadata) => {
+    const reviewWorktrees = (metadata.review_worktrees ?? []).filter(
+      (entry) => entry.pr_number !== prNumber,
     );
-  }
 
-  const reviewWorktrees = (metadata.review_worktrees ?? []).filter(
-    (entry) => entry.pr_number !== prNumber,
-  );
+    const nextMetadata: WorkspaceMetadata = {
+      ...metadata,
+      ...(reviewWorktrees.length > 0
+        ? { review_worktrees: reviewWorktrees }
+        : {}),
+    };
 
-  const nextMetadata: WorkspaceMetadata = {
-    ...metadata,
-    ...(reviewWorktrees.length > 0
-      ? { review_worktrees: reviewWorktrees }
-      : {}),
-  };
+    if (reviewWorktrees.length === 0) {
+      delete nextMetadata.review_worktrees;
+    }
 
-  if (reviewWorktrees.length === 0) {
-    delete nextMetadata.review_worktrees;
-  }
-
-  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
-  return nextMetadata;
+    return nextMetadata;
+  });
 }
 
 /**
@@ -127,9 +117,9 @@ export async function saveWorkspaceMetadata(
   workspaceDir: string,
   metadata: WorkspaceMetadata,
 ): Promise<void> {
-  const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
-  const contents = JSON.stringify(metadata, null, 2);
-  await fs.writeFile(metadataPath, `${contents}\n`, "utf8");
+  await withWorkspaceMetadataLock(workspaceDir, () =>
+    writeWorkspaceMetadataFile(workspaceDir, metadata),
+  );
 }
 
 /**
@@ -139,76 +129,45 @@ export async function appendWorkspaceRepos(
   workspaceDir: string,
   repos: readonly WorkspaceRepoMetadata[],
 ): Promise<WorkspaceMetadata> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-
-  if (!metadata) {
-    throw new Error(
-      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
-    );
-  }
-
-  const nextMetadata: WorkspaceMetadata = {
+  return mutateWorkspaceMetadata(workspaceDir, (metadata) => ({
     ...metadata,
     repos: [...metadata.repos, ...repos],
-  };
-
-  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
-  return nextMetadata;
+  }));
 }
 
 export async function updateWorkspaceRepo(
   workspaceDir: string,
   repo: WorkspaceRepoMetadata,
 ): Promise<WorkspaceMetadata> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-
-  if (!metadata) {
-    throw new Error(
-      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+  return mutateWorkspaceMetadata(workspaceDir, (metadata) => {
+    const existingIndex = metadata.repos.findIndex(
+      (entry) => entry.name === repo.name,
     );
-  }
+    const repos =
+      existingIndex === -1
+        ? [...metadata.repos, repo]
+        : metadata.repos.map((entry, index) =>
+            index === existingIndex ? repo : entry,
+          );
 
-  const existingIndex = metadata.repos.findIndex(
-    (entry) => entry.name === repo.name,
-  );
-  const repos =
-    existingIndex === -1
-      ? [...metadata.repos, repo]
-      : metadata.repos.map((entry, index) =>
-          index === existingIndex ? repo : entry,
-        );
-
-  const nextMetadata: WorkspaceMetadata = {
-    ...metadata,
-    repos,
-  };
-
-  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
-  return nextMetadata;
+    return {
+      ...metadata,
+      repos,
+    };
+  });
 }
 
 export async function appendTemporaryWorktrees(
   workspaceDir: string,
   worktrees: readonly TemporaryWorktreeMetadata[],
 ): Promise<WorkspaceMetadata> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-
-  if (!metadata) {
-    throw new Error(
-      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
-    );
-  }
-
-  const nextMetadata: WorkspaceMetadata = {
+  return mutateWorkspaceMetadata(workspaceDir, (metadata) => ({
     ...metadata,
     temporary_worktrees: [
       ...(metadata.temporary_worktrees ?? []),
       ...worktrees,
     ],
-  };
-
-  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
-  return nextMetadata;
+  }));
 }
 
 export async function removeTemporaryWorktrees(
@@ -218,34 +177,27 @@ export async function removeTemporaryWorktrees(
     "parent_repo" | "slug"
   >[],
 ): Promise<WorkspaceMetadata> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-
-  if (!metadata) {
-    throw new Error(
-      `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+  return mutateWorkspaceMetadata(workspaceDir, (metadata) => {
+    const removeKeys = new Set(
+      entriesToRemove.map((entry) => `${entry.parent_repo}\0${entry.slug}`),
     );
-  }
+    const temporaryWorktrees = (metadata.temporary_worktrees ?? []).filter(
+      (entry) => !removeKeys.has(`${entry.parent_repo}\0${entry.slug}`),
+    );
 
-  const removeKeys = new Set(
-    entriesToRemove.map((entry) => `${entry.parent_repo}\0${entry.slug}`),
-  );
-  const temporaryWorktrees = (metadata.temporary_worktrees ?? []).filter(
-    (entry) => !removeKeys.has(`${entry.parent_repo}\0${entry.slug}`),
-  );
+    const nextMetadata: WorkspaceMetadata = {
+      ...metadata,
+      ...(temporaryWorktrees.length > 0
+        ? { temporary_worktrees: temporaryWorktrees }
+        : {}),
+    };
 
-  const nextMetadata: WorkspaceMetadata = {
-    ...metadata,
-    ...(temporaryWorktrees.length > 0
-      ? { temporary_worktrees: temporaryWorktrees }
-      : {}),
-  };
+    if (temporaryWorktrees.length === 0) {
+      delete nextMetadata.temporary_worktrees;
+    }
 
-  if (temporaryWorktrees.length === 0) {
-    delete nextMetadata.temporary_worktrees;
-  }
-
-  await saveWorkspaceMetadata(workspaceDir, nextMetadata);
-  return nextMetadata;
+    return nextMetadata;
+  });
 }
 
 /**
@@ -359,6 +311,109 @@ async function ensureWorkspaceMetadataFilePath(
 ): Promise<string> {
   const metadataDir = await ensureWorkspaceMetadataDir(workspaceDir);
   return path.join(metadataDir, WORKSPACE_METADATA_FILENAME);
+}
+
+async function mutateWorkspaceMetadata(
+  workspaceDir: string,
+  update: (metadata: WorkspaceMetadata) => WorkspaceMetadata,
+): Promise<WorkspaceMetadata> {
+  return withWorkspaceMetadataLock(workspaceDir, async () => {
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+
+    if (!metadata) {
+      throw new Error(
+        `Workspace metadata not found at ${path.join(workspaceDir, METADATA_FILENAME)}`,
+      );
+    }
+
+    const nextMetadata = update(metadata);
+    await writeWorkspaceMetadataFile(workspaceDir, nextMetadata);
+    return nextMetadata;
+  });
+}
+
+async function writeWorkspaceMetadataFile(
+  workspaceDir: string,
+  metadata: WorkspaceMetadata,
+): Promise<void> {
+  const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
+  const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
+  const contents = `${JSON.stringify(metadata, null, 2)}\n`;
+
+  try {
+    await fs.writeFile(temporaryPath, contents, "utf8");
+    await fs.rename(temporaryPath, metadataPath);
+  } finally {
+    await fs.rm(temporaryPath, { force: true });
+  }
+}
+
+async function withWorkspaceMetadataLock<T>(
+  workspaceDir: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  await fs.mkdir(workspaceDir, { recursive: true });
+  const lockPath = path.join(
+    path.resolve(workspaceDir),
+    WORKSPACE_METADATA_LOCK_FILENAME,
+  );
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let lockHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+
+  while (!lockHandle) {
+    let candidate: Awaited<ReturnType<typeof fs.open>> | undefined;
+
+    try {
+      candidate = await fs.open(lockPath, "wx");
+      await candidate.writeFile(
+        `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`,
+        "utf8",
+      );
+      lockHandle = candidate;
+    } catch (error) {
+      if (candidate) {
+        await candidate.close().catch(() => {});
+        await fs.rm(lockPath, { force: true }).catch(() => {});
+      }
+
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+
+      if (await removeStaleMetadataLock(lockPath)) {
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting for workspace metadata lock at ${lockPath}`,
+        );
+      }
+      await delay(LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await lockHandle.close();
+    await fs.rm(lockPath, { force: true });
+  }
+}
+
+async function removeStaleMetadataLock(lockPath: string): Promise<boolean> {
+  try {
+    const lockStat = await fs.stat(lockPath);
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_MS) {
+      return false;
+    }
+    await fs.rm(lockPath, { force: true });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
 }
 
 async function resolveReadableMetadataPath(

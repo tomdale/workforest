@@ -231,6 +231,40 @@ describe("workspace metadata", () => {
     });
   });
 
+  it("preserves simultaneous temporary worktree metadata updates", async () => {
+    const workspaceDir = await createWorkspaceDir();
+
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "fix-auth-bug",
+      repos: [],
+    });
+
+    const worktree = (slug: string) => ({
+      slug,
+      parent_repo: "front",
+      path: slug,
+      branch: `tomdale/${slug}`,
+      base_branch: "main",
+      base_sha: "abc123",
+      created_at: "2026-05-15T00:00:00.000Z",
+      setup_status: "ready" as const,
+    });
+
+    await Promise.all([
+      appendTemporaryWorktrees(workspaceDir, [worktree("alpha")]),
+      appendTemporaryWorktrees(workspaceDir, [worktree("beta")]),
+      appendTemporaryWorktrees(workspaceDir, [worktree("gamma")]),
+    ]);
+
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+    expect(
+      metadata?.temporary_worktrees?.map((entry) => entry.slug).sort(),
+    ).toEqual(["alpha", "beta", "gamma"]);
+    expect(
+      JSON.parse(await readFile(getMetadataPath(workspaceDir), "utf8")),
+    ).toEqual(metadata);
+  });
+
   it("removes temporary worktrees without changing repos", async () => {
     const workspaceDir = await createWorkspaceDir();
 
