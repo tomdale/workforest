@@ -3,8 +3,10 @@ import {
   escapeBlessedTags,
 } from "../terminal/command-stream-adapter.ts";
 import {
+  createFullscreenKeypress,
   createFullscreenScreen,
   createFullscreenStatusLine,
+  FULLSCREEN_QUIT_KEYS,
 } from "../terminal/fullscreen-surface.ts";
 import { fullscreenColor } from "../terminal/theme.ts";
 import { runParallel } from "../utils/task-generator.ts";
@@ -42,10 +44,6 @@ export async function renderInitializationStatus(
   });
   const paneMap = new Map<string, number>();
   const adapters = new Map<string, CommandStreamAdapter>();
-  let resolveExit!: () => void;
-  const exitPromise = new Promise<void>((resolve) => {
-    resolveExit = resolve;
-  });
 
   repoNames.forEach((repoName, index) => {
     paneMap.set(repoName, index);
@@ -53,7 +51,7 @@ export async function renderInitializationStatus(
       .getPane(index)
       ?.setLabel(`${escapeBlessedTags(repoName)} ${STATUS_ICONS.pending}`);
   });
-  screen.key(["escape", "q", "C-c"], resolveExit);
+  const quit = createFullscreenKeypress(screen, FULLSCREEN_QUIT_KEYS);
 
   const pipelines = new Map(
     repoNames.map((repoName) => [
@@ -86,11 +84,8 @@ export async function renderInitializationStatus(
     grid.render();
 
     while (true) {
-      const next = await Promise.race([
-        nextUpdate.then((result) => ({ type: "update" as const, result })),
-        exitPromise.then(() => ({ type: "exit" as const })),
-      ]);
-      if (next.type === "exit") {
+      const next = await quit.race(nextUpdate);
+      if (next.type === "keypress") {
         await updates.return?.(undefined);
         return;
       }
@@ -120,17 +115,14 @@ export async function renderInitializationStatus(
         workspaceState?.status === "failed" ||
         workspaceState?.status === "cancelled"
       ) {
-        await exitPromise;
+        await quit.wait();
         return;
       }
 
-      const result = await Promise.race([
-        new Promise<"tick">((resolve) =>
-          setTimeout(() => resolve("tick"), 100),
-        ),
-        exitPromise.then(() => "exit" as const),
-      ]);
-      if (result === "exit") return;
+      const result = await quit.race(
+        new Promise<void>((resolve) => setTimeout(resolve, 100)),
+      );
+      if (result.type === "keypress") return;
     }
   } finally {
     for (const [repoName, paneIndex] of paneMap) {

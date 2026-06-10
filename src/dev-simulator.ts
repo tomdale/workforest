@@ -4,8 +4,8 @@ import { commandHelp, devSimulationHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import type { Template } from "./templates/index.ts";
 import {
+  createFullscreenKeypress,
   createFullscreenScreen,
-  waitForFullscreenKey,
 } from "./terminal/fullscreen-surface.ts";
 import type { RepoConfig, WorkspaceConfig } from "./types.ts";
 import {
@@ -167,7 +167,7 @@ async function renderSyntheticConfetti({
 
   try {
     screen.render();
-    await waitForFullscreenKey(screen);
+    await createFullscreenKeypress(screen).wait();
   } finally {
     modal.destroy();
     screen.destroy();

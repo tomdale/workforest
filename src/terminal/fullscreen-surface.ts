@@ -9,6 +9,18 @@ export type FullscreenStatusLine = {
   destroy(): void;
 };
 
+export type FullscreenKeypressRace<T> =
+  | { type: "keypress" }
+  | { type: "result"; result: T };
+
+export type FullscreenKeypress = {
+  readonly received: boolean;
+  wait(): Promise<void>;
+  race<T>(pending: Promise<T>): Promise<FullscreenKeypressRace<T>>;
+};
+
+export const FULLSCREEN_QUIT_KEYS = ["escape", "q", "C-c"] as const;
+
 export function createFullscreenScreen(): FullscreenScreen {
   return new Screen({
     smartCSR: true,
@@ -32,10 +44,46 @@ export function createFullscreenStatusLine(
   });
 }
 
-export function waitForFullscreenKey(screen: FullscreenScreen): Promise<void> {
-  return new Promise((resolve) => {
-    screen.once("keypress", () => {
-      resolve();
-    });
+export function createFullscreenKeypress(
+  screen: FullscreenScreen,
+  keys?: readonly string[],
+): FullscreenKeypress {
+  let received = false;
+  let resolveKeypress!: () => void;
+  const keypressPromise = new Promise<void>((resolve) => {
+    resolveKeypress = resolve;
   });
+
+  const receive = (): void => {
+    if (received) return;
+    received = true;
+    resolveKeypress();
+  };
+
+  if (keys) {
+    screen.key([...keys], receive);
+  } else {
+    screen.once("keypress", receive);
+  }
+
+  return {
+    get received() {
+      return received;
+    },
+    wait: () => keypressPromise,
+    race: async <T>(
+      pending: Promise<T>,
+    ): Promise<FullscreenKeypressRace<T>> => {
+      if (received) return { type: "keypress" };
+
+      return Promise.race([
+        keypressPromise.then(() => ({ type: "keypress" as const })),
+        pending.then((result) =>
+          received
+            ? { type: "keypress" as const }
+            : { type: "result" as const, result },
+        ),
+      ]);
+    },
+  };
 }

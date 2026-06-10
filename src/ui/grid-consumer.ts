@@ -9,11 +9,13 @@ import {
   escapeBlessedTags,
 } from "../terminal/command-stream-adapter.ts";
 import {
+  createFullscreenKeypress,
   createFullscreenScreen,
   createFullscreenStatusLine,
+  FULLSCREEN_QUIT_KEYS,
+  type FullscreenKeypress,
   type FullscreenScreen,
   type FullscreenStatusLine,
-  waitForFullscreenKey,
 } from "../terminal/fullscreen-surface.ts";
 import { fullscreenColor } from "../terminal/theme.ts";
 import { runParallel } from "../utils/task-generator.ts";
@@ -119,7 +121,7 @@ export interface GridRenderEnvironment {
   createCompletionModal?: (
     options: GridCompletionModalOptions,
   ) => GridCompletionModalLike;
-  waitForCompletionAck?: (screen: GridScreenLike) => Promise<void>;
+  createCompletionAck?: (screen: GridScreenLike) => FullscreenKeypress;
   renderIntervalMs?: number;
   finalHoldMs?: number;
 }
@@ -143,8 +145,8 @@ function createDefaultEnvironment(): GridRenderEnvironment {
         screen as FullscreenScreen,
       ) as FullscreenStatusLine,
     createCompletionModal: createDefaultCompletionModal,
-    waitForCompletionAck: (screen) =>
-      waitForFullscreenKey(screen as FullscreenScreen),
+    createCompletionAck: (screen) =>
+      createFullscreenKeypress(screen as FullscreenScreen),
     renderIntervalMs: DEFAULT_RENDER_INTERVAL_MS,
     finalHoldMs: DEFAULT_FINAL_HOLD_MS,
   };
@@ -233,7 +235,7 @@ export async function renderPipelinesGrid({
   let destroyed = false;
   let awaitingCompletionAck = false;
   let completionModal: GridCompletionModalLike | null = null;
-  let completionAckPromise: Promise<void> | null = null;
+  let completionAck: FullscreenKeypress | null = null;
   let completionShown = false;
 
   const destroyScreen = (): void => {
@@ -270,7 +272,7 @@ export async function renderPipelinesGrid({
   };
 
   // Handle keyboard events
-  screen.key(["escape", "q", "C-c"], () => {
+  screen.key([...FULLSCREEN_QUIT_KEYS], () => {
     if (awaitingCompletionAck) return;
     destroyScreen();
     process.exit(0);
@@ -324,13 +326,12 @@ export async function renderPipelinesGrid({
       );
       renderCompletion();
 
-      if (environment.waitForCompletionAck) {
+      if (environment.createCompletionAck) {
         awaitingCompletionAck = true;
-        completionAckPromise = environment
-          .waitForCompletionAck(screen)
-          .finally(() => {
-            awaitingCompletionAck = false;
-          });
+        completionAck = environment.createCompletionAck(screen);
+        void completionAck.wait().finally(() => {
+          awaitingCompletionAck = false;
+        });
       }
     };
 
@@ -338,18 +339,15 @@ export async function renderPipelinesGrid({
     let nextUpdate = updates.next();
 
     while (true) {
-      const ackPromise = completionAckPromise as Promise<void> | null;
-      const next = ackPromise
-        ? await Promise.race([
-            nextUpdate.then((result) => ({ type: "update" as const, result })),
-            ackPromise.then(() => ({ type: "ack" as const })),
-          ])
+      const ack = completionAck as FullscreenKeypress | null;
+      const next = ack
+        ? await ack.race(nextUpdate)
         : {
-            type: "update" as const,
+            type: "result" as const,
             result: await nextUpdate,
           };
 
-      if (next.type === "ack") {
+      if (next.type === "keypress") {
         await updates.return?.(undefined);
         return completeOnWorktreesReady ? worktreeResults : repoResults;
       }
@@ -489,8 +487,9 @@ export async function renderPipelinesGrid({
 
     await showCompletion();
 
-    if (completionAckPromise) {
-      await completionAckPromise;
+    const finalCompletionAck = completionAck as FullscreenKeypress | null;
+    if (finalCompletionAck) {
+      await finalCompletionAck.wait();
     } else if (finalHoldMs > 0) {
       // Compatibility for benchmark/test environments without an acknowledgement
       // hook.

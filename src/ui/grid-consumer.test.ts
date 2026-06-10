@@ -47,8 +47,23 @@ import {
   ScrollableBox,
   setRuntime,
 } from "@unblessed/node";
+import {
+  createFullscreenKeypress,
+  type FullscreenKeypress,
+  type FullscreenScreen,
+} from "../terminal/fullscreen-surface.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "./grid-consumer.ts";
+
+function createManualKeypress(
+  setReceive: (receive: () => void) => void,
+): FullscreenKeypress {
+  return createFullscreenKeypress({
+    once: (_event: string, receive: () => void) => {
+      setReceive(receive);
+    },
+  } as unknown as FullscreenScreen);
+}
 
 // ─── Regression: runtime initialization ──────────────────────────────────────
 
@@ -434,9 +449,9 @@ describe("renderPipelinesGrid", () => {
         createGrid: () => grid,
         createStatusLine: () => statusLine,
         createCompletionModal,
-        waitForCompletionAck: () =>
-          new Promise((resolve) => {
-            acknowledge = resolve;
+        createCompletionAck: () =>
+          createManualKeypress((receive) => {
+            acknowledge = receive;
           }),
         renderIntervalMs: 0,
         finalHoldMs: 0,
@@ -472,6 +487,58 @@ describe("renderPipelinesGrid", () => {
     expect(statusLine.destroy).toHaveBeenCalledTimes(1);
     expect(grid.destroy).toHaveBeenCalledTimes(1);
     expect(screen.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops rendering queued output after completion acknowledgement", async () => {
+    const pane = {
+      setLabel: vi.fn(),
+      appendLine: vi.fn(),
+    };
+    const grid = {
+      getPane: vi.fn(() => pane),
+      render: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const screen = {
+      key: vi.fn(),
+      once: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "worktree-ready", hasLockfile: true };
+      yield {
+        phase: "initializer",
+        name: "pnpm install",
+        status: "output",
+        output: "queued output\n",
+      };
+    };
+
+    const promise = renderPipelinesGrid({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+      completeOnWorktreesReady: true,
+      environment: {
+        createScreen: () => screen,
+        createGrid: () => grid,
+        createCompletionModal: () => ({ destroy: vi.fn() }),
+        createCompletionAck: () => {
+          let acknowledge!: () => void;
+          const keypress = createManualKeypress((receive) => {
+            acknowledge = receive;
+          });
+          acknowledge();
+          return keypress;
+        },
+        renderIntervalMs: 0,
+        finalHoldMs: 0,
+      },
+    });
+
+    await expect(promise).resolves.toEqual(
+      new Map([["repo", { hasLockfile: true }]]),
+    );
+    expect(pane.appendLine).not.toHaveBeenCalledWith("queued output");
   });
 
   it("shows completion at worktree readiness and returns while initialization continues", async () => {
@@ -517,9 +584,9 @@ describe("renderPipelinesGrid", () => {
         createScreen: () => screen,
         createGrid: () => grid,
         createCompletionModal: vi.fn(() => modal),
-        waitForCompletionAck: () =>
-          new Promise((resolve) => {
-            acknowledge = resolve;
+        createCompletionAck: () =>
+          createManualKeypress((receive) => {
+            acknowledge = receive;
           }),
         renderIntervalMs: 0,
         finalHoldMs: 0,
