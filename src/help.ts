@@ -44,7 +44,8 @@ ${chalk.bold("Commands:")}
   list                         List workspaces
   skills list|get|path         List and retrieve bundled agent skills
   init [shell]                 Print shell integration for auto-cd and completion
-  template list|show|info|...  Manage templates
+  templates                    Open the template manager TUI
+  template list|show|info|...  Scriptable template subcommands
   config [show|edit|init]      Manage configuration
 
 ${chalk.bold("Clean options:")}
@@ -73,6 +74,7 @@ ${chalk.bold("Examples:")}
   wf delete                         Infer and delete the current resource
   wf workspace delete               Delete current workspace (self-destruct)
   wf workspace delete ./my-workspace -r
+  wf templates                      Open the template manager
   wf template new "oss-docs" vercel/next.js vercel/turbo
 
 ${chalk.bold("Templates:")}
@@ -293,9 +295,31 @@ Examples:
   eval "$(wf init bash)"
 `,
 
+  templates: `Usage: wf templates
+
+Open the interactive template manager when running in a capable terminal.
+In non-interactive output, prints the configured template list.
+
+Shortcuts:
+  j/k, arrows    Navigate templates
+  enter, e       Edit selected template
+  n              Create a template
+  c              Copy selected template
+  d              Delete selected template
+  o              Jump to template directory
+  /              Search
+  r              Reload
+  q              Quit
+
+Options:
+  -h, --help     Show this help
+`,
+
   template: `Usage: wf template [subcommand]
 
 Manage workspace templates.
+
+With no subcommand in an interactive terminal, opens the template manager.
 
 Subcommands:
   list, ls                  List templates

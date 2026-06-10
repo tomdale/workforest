@@ -29,7 +29,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|delete|workspace|cd|find|template|worktree|wt|review|skills) ;;
+    new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
@@ -195,6 +195,7 @@ _workforest_complete() {
     'list:list workspaces'
     'init:print shell integration'
     'template:manage templates'
+    'templates:open template manager'
     'config:manage configuration'
     'version:show version'
   )

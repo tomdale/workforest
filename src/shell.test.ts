@@ -44,7 +44,7 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|fork|clean|delete|workspace|cd|find|template|worktree|wt|review|skills",
+      "new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
@@ -60,6 +60,7 @@ describe("shell integration", () => {
       "delete:infer and delete current tracked resource",
     );
     expect(script).toContain("skills:list and retrieve bundled agent skills");
+    expect(script).toContain("templates:open template manager");
     expect(script).toContain("_workforest_workspace_names");
     expect(script).not.toContain("CURRENT == 3");
   });

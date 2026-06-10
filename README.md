@@ -257,6 +257,9 @@ Templates save your common workspace configurations. Instead of remembering
 which repos to include, create a template once:
 
 ```bash
+# Open the template manager to inspect, create, edit, copy, or delete templates
+wf templates
+
 # Create a `site` template with the frontend and backend repos
 wf template new site org/frontend org/api
 
@@ -401,11 +404,15 @@ Repos can be specified as:
 - `git@host:path/repo.git` — SSH URL
 - `https://host/path/repo.git` — HTTPS URL
 
-List your templates:
+Manage your templates interactively:
 
 ```bash
-wf template list
+wf templates
 ```
+
+For scripts and non-interactive output, the singular `wf template` subcommands
+remain available, including `wf template list`, `wf template info <name>`,
+`wf template new`, `wf template edit <name>`, and `wf template rm <name>`.
 
 ## Configuration
 
@@ -482,9 +489,10 @@ wf review list                  List review worktrees
 wf review rm <target>           Remove a review worktree
 wf fork <name>                  Fork current workspace with new branches
 wf clean [dir]                  Remove a workspace
-wf template list                List templates
-wf template new                 Create a template
-wf template edit <name>         Edit a template
+wf templates                    Open the template manager TUI
+wf template list                List templates non-interactively
+wf template new                 Create a template from arguments/prompts
+wf template edit <name>         Edit a template from arguments/prompts
 wf template show <name>         Jump to a template directory
 wf template info <name>         Show template details
 wf template rm <name>           Delete a template

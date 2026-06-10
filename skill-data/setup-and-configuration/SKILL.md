@@ -15,6 +15,7 @@ Vercel linking, or default files.
 wf config show
 wf config init
 wf config edit
+wf templates
 wf template list
 wf template info "oss-docs"
 wf template new "oss-docs" vercel/next.js vercel/turbo

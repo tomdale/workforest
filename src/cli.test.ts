@@ -27,6 +27,10 @@ const promptSelectMock = vi.hoisted(() =>
   }),
 );
 const promptConfirmMock = vi.hoisted(() => vi.fn());
+const runTemplateManagerMock = vi.hoisted(() =>
+  vi.fn(async () => ({ type: "quit" as const })),
+);
+const shouldUseTemplateManagerMock = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock("./ui/prompts/index.ts", async () => {
   const actual = await vi.importActual<typeof import("./ui/prompts/index.ts")>(
@@ -39,6 +43,11 @@ vi.mock("./ui/prompts/index.ts", async () => {
     promptSelect: promptSelectMock,
   };
 });
+
+vi.mock("./ui/template-manager.ts", () => ({
+  runTemplateManager: runTemplateManagerMock,
+  shouldUseTemplateManager: shouldUseTemplateManagerMock,
+}));
 
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
@@ -67,6 +76,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
   promptConfirmMock.mockReset();
   promptSelectMock.mockClear();
+  runTemplateManagerMock.mockReset();
+  runTemplateManagerMock.mockResolvedValue({ type: "quit" });
+  shouldUseTemplateManagerMock.mockReset();
+  shouldUseTemplateManagerMock.mockReturnValue(true);
 
   if (ORIGINAL_CONFIG_DIR === undefined) {
     delete process.env["WORKFOREST_CONFIG_DIR"];
@@ -387,6 +400,7 @@ describe("cli", () => {
     ["clean", "Usage: wf clean"],
     ["list", "Usage: wf list"],
     ["init", "Usage: wf init"],
+    ["templates", "Usage: wf templates"],
     ["template", "Usage: wf template"],
     ["config", "Usage: wf config"],
     ["dev", "Usage: wf dev"],
@@ -419,6 +433,7 @@ describe("cli", () => {
     [["review", "delete", "--help"], "Usage: wf review delete"],
     [["review", "rm", "--help"], "Usage: wf review delete"],
     [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
+    [["templates", "list", "--help"], "Usage: wf template list"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
     [["template", "add-file", "--help"], "Usage: wf template add-file"],
@@ -545,6 +560,85 @@ describe("cli", () => {
     expect(written).toBe(
       `${path.resolve(xdgConfigHome, "workforest", "templates", "demo")}\n`,
     );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("opens the interactive template manager for wf templates", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+
+    process.argv = ["node", "wf", "templates"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(shouldUseTemplateManagerMock).toHaveBeenCalled();
+    expect(runTemplateManagerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templatesDir: path.join(xdgConfigHome, "workforest", "templates"),
+        templates: [
+          expect.objectContaining({
+            id: "demo",
+            config: expect.objectContaining({
+              description: "Demo template",
+              repos: ["vercel/front"],
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("falls back to the template list for wf templates outside a TTY", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const logs: string[] = [];
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: false,
+    });
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+
+    process.argv = ["node", "wf", "templates"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(runTemplateManagerMock).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toContain("Templates:");
+    expect(logs.join("\n")).toContain("demo");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("opens the template manager for wf template without a subcommand", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    process.argv = ["node", "wf", "template"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(runTemplateManagerMock).toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
 

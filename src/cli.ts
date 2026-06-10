@@ -137,6 +137,9 @@ export async function cli(): Promise<void> {
     case "init":
       await runInitCommand(commandArgv);
       break;
+    case "templates":
+      await runTemplatesCommand(commandArgv);
+      break;
     case "template":
       await runTemplateCommand(commandArgv);
       break;
@@ -1340,7 +1343,11 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
       await runTemplateList();
       break;
     case undefined:
-      await runTemplateList();
+      if (isInteractive()) {
+        await runTemplateManagerCommand();
+      } else {
+        await runTemplateList();
+      }
       break;
     case "show":
       if (hasHelpFlag(subArgv)) {
@@ -1400,6 +1407,89 @@ async function runTemplateCommand(argv: string[]): Promise<void> {
         "Available: list, show, info, new, edit, add-file, delete, copy",
       );
       process.exitCode = 1;
+  }
+}
+
+async function runTemplatesCommand(argv: string[]): Promise<void> {
+  if (argv[0] === "--help" || argv[0] === "-h") {
+    console.log(commandHelp("templates"));
+    return;
+  }
+
+  if (argv.length > 0) {
+    await runTemplateCommand(argv);
+    return;
+  }
+
+  if (isInteractive()) {
+    await runTemplateManagerCommand();
+  } else {
+    await runTemplateList();
+  }
+}
+
+async function runTemplateManagerCommand(): Promise<void> {
+  const { shouldUseTemplateManager } = await import("./ui/template-manager.ts");
+
+  if (!shouldUseTemplateManager()) {
+    await runTemplateList();
+    return;
+  }
+
+  let initialTemplateId: string | undefined;
+
+  while (true) {
+    const templates = await listTemplates();
+    let workspaceConfig: WorkspaceConfig | undefined;
+    try {
+      ({ config: workspaceConfig } = await loadWorkspaceConfig());
+    } catch {
+      workspaceConfig = undefined;
+    }
+
+    const { runTemplateManager } = await import("./ui/template-manager.ts");
+    const action = await runTemplateManager({
+      templates,
+      templatesDir: getTemplatesDir(),
+      ...(workspaceConfig ? { workspaceConfig } : {}),
+      ...(initialTemplateId ? { initialTemplateId } : {}),
+    });
+
+    switch (action.type) {
+      case "quit":
+        return;
+      case "reload":
+        continue;
+      case "create": {
+        const templateId = await wizardCreateTemplate();
+        initialTemplateId = templateId ?? initialTemplateId;
+        if (templateId) {
+          promptLog.success(`Template "${templateId}" saved.`);
+        }
+        continue;
+      }
+      case "edit": {
+        initialTemplateId = action.templateId;
+        const templateId = await wizardEditTemplateById(action.templateId);
+        if (templateId) {
+          promptLog.success(`Template "${templateId}" saved.`);
+        }
+        continue;
+      }
+      case "copy": {
+        initialTemplateId =
+          (await wizardCloneTemplateById(action.templateId)) ??
+          action.templateId;
+        continue;
+      }
+      case "delete":
+        initialTemplateId = undefined;
+        await runTemplateDelete([action.templateId]);
+        continue;
+      case "show":
+        await runTemplateShow([action.templateId]);
+        return;
+    }
   }
 }
 
@@ -3472,26 +3562,44 @@ async function wizardEditTemplate(
       return null;
     }
 
-    const { config: workspaceConfig } = await loadWorkspaceConfig();
-    const { renderTemplateEditor } = await import("./ui/index.ts");
-
-    let savedTemplateId: string | null = null;
-
-    await renderTemplateEditor({
-      templateId: template.id,
-      initialConfig: template.config,
-      workspaceConfig,
-      onSave: async (config) => {
-        await createTemplate(template.id, config);
-        savedTemplateId = template.id;
-      },
-    });
-
-    return savedTemplateId;
+    return wizardEditLoadedTemplate(template);
   } catch (e) {
     if (e instanceof CancelError) return null;
     throw e;
   }
+}
+
+async function wizardEditTemplateById(
+  templateId: string,
+): Promise<string | null> {
+  const template = await loadTemplate(templateId);
+  if (!template) {
+    promptLog.error(`Template "${templateId}" not found.`);
+    return null;
+  }
+
+  return wizardEditLoadedTemplate(template);
+}
+
+async function wizardEditLoadedTemplate(
+  template: NonNullable<Awaited<ReturnType<typeof loadTemplate>>>,
+): Promise<string | null> {
+  const { config: workspaceConfig } = await loadWorkspaceConfig();
+  const { renderTemplateEditor } = await import("./ui/index.ts");
+
+  let savedTemplateId: string | null = null;
+
+  await renderTemplateEditor({
+    templateId: template.id,
+    initialConfig: template.config,
+    workspaceConfig,
+    onSave: async (config) => {
+      await createTemplate(template.id, config);
+      savedTemplateId = template.id;
+    },
+  });
+
+  return savedTemplateId;
 }
 
 /**
@@ -3522,39 +3630,57 @@ async function wizardCloneTemplate(
       return null;
     }
 
-    const newTemplateId = await promptText("New template name", {
-      placeholder: `${sourceTemplate.id}-copy`,
-      validate: (input) => validateTemplateName(input) ?? null,
-      throwOnCancel: true,
-    });
-
-    // Check if new template already exists
-    const existing = await loadTemplate(newTemplateId);
-    if (existing) {
-      promptLog.error(`Template "${newTemplateId}" already exists.`);
-      return null;
-    }
-
-    const { config: workspaceConfig } = await loadWorkspaceConfig();
-    const { renderTemplateEditor } = await import("./ui/index.ts");
-
-    let savedTemplateId: string | null = null;
-
-    await renderTemplateEditor({
-      templateId: newTemplateId,
-      initialConfig: sourceTemplate.config,
-      workspaceConfig,
-      onSave: async (config) => {
-        await createTemplate(newTemplateId, config);
-        savedTemplateId = newTemplateId;
-      },
-    });
-
-    return savedTemplateId;
+    return wizardCloneLoadedTemplate(sourceTemplate);
   } catch (e) {
     if (e instanceof CancelError) return null;
     throw e;
   }
+}
+
+async function wizardCloneTemplateById(
+  templateId: string,
+): Promise<string | null> {
+  const sourceTemplate = await loadTemplate(templateId);
+  if (!sourceTemplate) {
+    promptLog.error(`Template "${templateId}" not found.`);
+    return null;
+  }
+
+  return wizardCloneLoadedTemplate(sourceTemplate);
+}
+
+async function wizardCloneLoadedTemplate(
+  sourceTemplate: NonNullable<Awaited<ReturnType<typeof loadTemplate>>>,
+): Promise<string | null> {
+  const newTemplateId = await promptText("New template name", {
+    placeholder: `${sourceTemplate.id}-copy`,
+    validate: (input) => validateTemplateName(input) ?? null,
+    throwOnCancel: true,
+  });
+
+  // Check if new template already exists
+  const existing = await loadTemplate(newTemplateId);
+  if (existing) {
+    promptLog.error(`Template "${newTemplateId}" already exists.`);
+    return null;
+  }
+
+  const { config: workspaceConfig } = await loadWorkspaceConfig();
+  const { renderTemplateEditor } = await import("./ui/index.ts");
+
+  let savedTemplateId: string | null = null;
+
+  await renderTemplateEditor({
+    templateId: newTemplateId,
+    initialConfig: sourceTemplate.config,
+    workspaceConfig,
+    onSave: async (config) => {
+      await createTemplate(newTemplateId, config);
+      savedTemplateId = newTemplateId;
+    },
+  });
+
+  return savedTemplateId;
 }
 
 type ManageAction = "create" | "edit" | "clone" | "back";
