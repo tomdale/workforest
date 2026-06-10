@@ -12,6 +12,10 @@ import {
 } from "./config.ts";
 import { commandHelp, help, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
+import {
+  RegisteredRepositoryNameCollisionError,
+  resolveRegisteredRepository,
+} from "./repositories.ts";
 import { runGit } from "./services/git.ts";
 import {
   isShellAutoCdEnabled,
@@ -2969,7 +2973,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
     }
   } catch (error) {
     if (interactive) cancel("Failed to resolve repositories");
-    log.error(getErrorMessage(error));
+    if (error instanceof RegisteredRepositoryNameCollisionError) {
+      log.warn(getErrorMessage(error));
+    } else {
+      log.error(getErrorMessage(error));
+    }
     process.exitCode = 1;
     return;
   }
@@ -3402,8 +3410,8 @@ type ResolvedSelections = {
 
 /**
  * Resolve positional arguments to repos.
- * Arguments containing "/" are treated as org/repo slugs.
- * Other arguments are treated as template names.
+ * Qualified arguments are treated as repository references. Unqualified
+ * arguments resolve as templates first, then as registered repository names.
  */
 async function resolveSelections(
   selections: string[],
@@ -3416,19 +3424,28 @@ async function resolveSelections(
     if (isRepoSlug(selection)) {
       repoSlugs.push(selection);
     } else {
-      // It's a template name
       const template = await loadTemplate(selection);
-      if (!template) {
-        const templates = await listTemplates();
-        const available = templates.map((t) => t.id).join(", ");
-        const suffix = available
-          ? `Available templates: ${available}`
-          : "No templates configured.";
-        throw new Error(`Unknown template "${selection}". ${suffix}`);
+      if (template) {
+        templateId = template.id;
+        templateBranchPrefix = template.config.branchPrefix;
+        repoSlugs.push(...template.config.repos);
+        continue;
       }
-      templateId = template.id;
-      templateBranchPrefix = template.config.branchPrefix;
-      repoSlugs.push(...template.config.repos);
+
+      const registeredRepo = await resolveRegisteredRepository(selection);
+      if (registeredRepo) {
+        repoSlugs.push(registeredRepo);
+        continue;
+      }
+
+      const templates = await listTemplates();
+      const available = templates.map((t) => t.id).join(", ");
+      const suffix = available
+        ? `Available templates: ${available}`
+        : "No templates configured.";
+      throw new Error(
+        `Unknown template or repository "${selection}". ${suffix}`,
+      );
     }
   }
 

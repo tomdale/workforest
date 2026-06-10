@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -9,6 +10,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type PromptOption = {
@@ -76,6 +78,7 @@ import { CancelError } from "./ui/prompts/index.ts";
 import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
+const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 const ORIGINAL_CD_PATH_FILE = process.env[WORKFOREST_CD_PATH_ENV];
 const ORIGINAL_PATH = process.env["PATH"];
@@ -85,11 +88,27 @@ const ORIGINAL_STDIN_IS_TTY = process.stdin.isTTY;
 const ORIGINAL_CWD = process.cwd();
 
 const tempDirs: string[] = [];
+const execFileAsync = promisify(execFile);
 
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+async function createCachedMirror(
+  cacheDir: string,
+  directoryName: string,
+  remote: string,
+): Promise<void> {
+  const mirrorDir = path.join(cacheDir, directoryName);
+  await mkdir(mirrorDir, { recursive: true });
+  await execFileAsync("git", ["init", "--bare", "--quiet"], {
+    cwd: mirrorDir,
+  });
+  await execFileAsync("git", ["remote", "add", "origin", remote], {
+    cwd: mirrorDir,
+  });
 }
 
 afterEach(async () => {
@@ -109,6 +128,12 @@ afterEach(async () => {
     delete process.env["WORKFOREST_CONFIG_DIR"];
   } else {
     process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
+  }
+
+  if (ORIGINAL_CACHE_DIR === undefined) {
+    delete process.env["WORKFOREST_CACHE_DIR"];
+  } else {
+    process.env["WORKFOREST_CACHE_DIR"] = ORIGINAL_CACHE_DIR;
   }
 
   if (ORIGINAL_XDG_CONFIG_HOME === undefined) {
@@ -266,6 +291,128 @@ describe("cli", () => {
     expect(output).toContain("api");
     expect(output).toContain("git@github.com:vercel/api.git");
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("resolves an unqualified registered repository for wf new", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    const workspaceRoot = await createTempDir("workforest-root-");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir: workspaceRoot,
+      branchPrefix: "tomdale/",
+    });
+    await createCachedMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:mycompany/myapp.git",
+    );
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = [
+      "node",
+      "wf",
+      "new",
+      "--dry-run",
+      "myapp",
+      "--",
+      "fix-auth",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toContain("myapp");
+    expect(output).toContain("git@github.com:mycompany/myapp.git");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("prefers a template over a registered repository with the same name", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceRoot = await createTempDir("workforest-root-");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir: workspaceRoot,
+    });
+    await createCachedMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:mycompany/myapp.git",
+    );
+    await createTemplate("myapp", {
+      repos: ["vercel/front"],
+    });
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = [
+      "node",
+      "wf",
+      "new",
+      "--dry-run",
+      "myapp",
+      "--",
+      "fix-auth",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    const output = logs.join("\n");
+    expect(output).toMatch(/Template:\s+myapp/);
+    expect(output).toContain("git@github.com:vercel/front.git");
+    expect(output).not.toContain("git@github.com:mycompany/myapp.git");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("warns and fails when registered repository names collide", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    const warnings: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
+    await createCachedMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:first/myapp.git",
+    );
+    await createCachedMirror(
+      cacheDir,
+      "second-myapp.git",
+      "git@github.com:second/myapp.git",
+    );
+
+    vi.spyOn(console, "warn").mockImplementation((...args) => {
+      warnings.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "new", "myapp", "--", "fix-auth"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(warnings.join("\n")).toContain(
+      'Repository shorthand "myapp" has a naming collision',
+    );
+    expect(warnings.join("\n")).toContain("first/myapp, second/myapp");
+    expect(process.exitCode).toBe(1);
   });
 
   it("parses templates before -- and prose after -- for wf new", async () => {
