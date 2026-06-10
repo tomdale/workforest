@@ -3,6 +3,7 @@ import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
+import { resolveMirrorDir } from "../repositories.ts";
 import { getGitHubSlug } from "../services/git.ts";
 import { fetchRepoDiskUsage } from "../services/github.ts";
 import {
@@ -165,14 +166,19 @@ export async function* stampWorkspaceGenerator({
 
   // Build repo info map
   const repoInfo = new Map(
-    repos.map((repo) => [
-      repo.name,
-      {
-        repo,
-        mirrorDir: path.join(cacheDir, `${repo.name}.git`),
-        targetDir: path.join(workspaceDir, repo.name),
-      },
-    ]),
+    await Promise.all(
+      repos.map(
+        async (repo) =>
+          [
+            repo.name,
+            {
+              repo,
+              mirrorDir: await resolveMirrorDir(repo, cacheDir),
+              targetDir: path.join(workspaceDir, repo.name),
+            },
+          ] as const,
+      ),
+    ),
   );
 
   // Combined generator for all git operations per repo

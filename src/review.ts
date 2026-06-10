@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getCacheDir } from "./config.ts";
 import { log } from "./logger.ts";
+import { resolveMirrorDir } from "./repositories.ts";
 import { runGit } from "./services/git.ts";
 import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
 import type { RepoConfig } from "./types.ts";
@@ -115,7 +116,7 @@ export async function createReviewWorktree({
 }: CreateReviewWorktreeOptions): Promise<ReviewMetadata> {
   const repo = targetToRepoConfig(target);
   const cacheDir = getCacheDir();
-  const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
+  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
   const workspace = await ensureReviewWorkspace({
     target,
     reviewsDir,
@@ -178,7 +179,7 @@ export async function ensureReviewWorkspace({
 }: EnsureReviewWorkspaceOptions): Promise<ReviewWorkspace> {
   const repo = targetToRepoConfig(target);
   const cacheDir = getCacheDir();
-  const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
+  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
   const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
   const repoDir = path.join(workspaceDir, target.repo);
 
@@ -347,7 +348,7 @@ export async function removeReviewWorktree({
     metadata?.branch ?? (await getCurrentBranchIfExists(targetDir));
   const exists = await pathExists(targetDir);
   const repo = targetToRepoConfig(target);
-  const mirrorDir = path.join(getCacheDir(), `${repo.name}.git`);
+  const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
 
   if (!exists && !metadata) {
     throw new Error(

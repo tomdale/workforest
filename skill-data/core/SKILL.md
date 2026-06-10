@@ -20,6 +20,7 @@ wf add vercel/swr                                  # add repo from inside a work
 wf fork "new approach"                             # try another approach
 wf clean --dry-run                                 # preview cleanup
 wf clean --force                                   # remove workspace after review
+wf repository list                                # inspect cached repositories
 ```
 
 For exact command syntax, read `references/commands.md` with:
@@ -79,6 +80,9 @@ separate approach with the same repos but fresh branches.
 - Do not manually delete a workspace before `wf clean`; Workforest removes Git
   worktree registrations as well as directories.
 - Prefer `wf clean --dry-run` before destructive cleanup.
+- Prefer `wf repository clean --dry-run` before deleting cached mirrors.
+- Do not force-delete a mirror with active worktrees unless those worktrees are
+  intentionally being abandoned.
 
 ## Related Skills
 

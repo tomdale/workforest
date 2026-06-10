@@ -47,6 +47,8 @@ Commands:
   init [shell]                 Print shell integration for auto-cd and completion
   templates                    Open the template manager TUI
   template list|show|info|...  Scriptable template subcommands
+  repositories                 Open the cached repository manager TUI
+  repository list|info|...     Scriptable cache management subcommands
   config [show|edit|init]      Manage configuration
 
 Clean options:
@@ -77,6 +79,9 @@ Examples:
   wf workspace delete ./my-workspace -r
   wf templates                      Open the template manager
   wf template new "oss-docs" vercel/next.js vercel/turbo
+  wf repositories                   Open the cached repository manager
+  wf repository doctor              Check every cached mirror
+  wf repository clean --dry-run     Preview unused mirror cleanup
 
 Templates:
   ${templateLines.join("\n  ")}
@@ -385,6 +390,50 @@ Examples:
   wf skills path core
 `,
 
+  repositories: `Usage: wf repositories
+
+Open the interactive cached repository manager. Outside an interactive terminal,
+prints the repository list instead.
+
+Aliases:
+  wf repos
+
+Options:
+  -h, --help  Show this help
+`,
+
+  repos: `Usage: wf repos
+
+Alias for wf repositories.
+`,
+
+  repository: `Usage: wf repository <subcommand> [options]
+
+Inspect and manage cached bare Git mirrors.
+
+Subcommands:
+  list                         List cached repositories and disk usage
+  info <repo>                  Show mirror health, identity, and worktrees
+  path [repo]                  Print the cache or mirror path
+  add <repo...>                Warm the cache for repositories
+  update [repo...]             Fetch one, many, or all cached repositories
+  doctor [repo...]             Check cache health
+  repair [repo...]             Prune stale metadata and verify objects
+  delete <repo...>             Delete selected mirrors
+  clean                        Delete mirrors with no active worktrees
+
+Aliases:
+  wf repo
+
+Options:
+  -h, --help  Show this help
+`,
+
+  repo: `Usage: wf repo <subcommand> [options]
+
+Alias for wf repository.
+`,
+
   version: `Usage: wf version
 
 Print the workforest version.
@@ -520,6 +569,72 @@ Options:
 `,
   },
 
+  repository: {
+    list: `Usage: wf repository list [--json]
+
+List cached repositories, health, disk usage, and active worktree counts.
+`,
+    info: `Usage: wf repository info <repo> [--json]
+
+Show a cached repository's identity, health, disk usage, and worktrees.
+`,
+    path: `Usage: wf repository path [repo]
+
+Print the cache directory, or one cached mirror path. Output is undecorated for
+shell composition.
+`,
+    add: `Usage: wf repository add <repo...>
+
+Clone or update repositories in the cache without creating worktrees.
+
+Aliases:
+  wf repository cache
+`,
+    update: `Usage: wf repository update [repo...]
+
+Fetch and prune selected cached repositories. With no repositories, updates all.
+
+Aliases:
+  wf repository fetch
+`,
+    doctor: `Usage: wf repository doctor [repo...] [--json]
+
+Inspect selected cached repositories, or all repositories when none are given.
+Exits with status 1 when a mirror needs attention.
+
+Aliases:
+  wf repository check
+`,
+    repair: `Usage: wf repository repair [repo...]
+
+Prune stale worktree registrations and verify object connectivity. With no
+repositories, repairs all cached mirrors.
+`,
+    delete: `Usage: wf repository delete <repo...> [options]
+
+Delete selected cached mirrors. Mirrors with active worktrees require --force.
+
+Aliases:
+  wf repository rm
+  wf repository remove
+
+Options:
+  -n, --dry-run  Preview without deleting
+  -f, --force    Skip confirmation and allow active worktrees
+`,
+    clean: `Usage: wf repository clean [options]
+
+Delete every cached mirror with no active worktrees.
+
+Aliases:
+  wf repository prune
+
+Options:
+  -n, --dry-run  Preview without deleting
+  -f, --force    Skip confirmation
+`,
+  },
+
   config: {
     show: `Usage: wf config show
 
@@ -612,6 +727,15 @@ const NESTED_ALIASES: Record<string, Record<string, string>> = {
     create: "new",
     rm: "delete",
     cp: "copy",
+  },
+  repository: {
+    ls: "list",
+    cache: "add",
+    fetch: "update",
+    check: "doctor",
+    rm: "delete",
+    remove: "delete",
+    prune: "clean",
   },
   dev: {
     sim: "simulate",

@@ -30,6 +30,24 @@ wf template copy <source> <dest>
 wf template rm <name>
 ```
 
+## Cached Repository Commands
+
+```sh
+wf repositories                        # interactive cache manager
+wf repository list [--json]            # inventory mirrors
+wf repository info <repo> [--json]     # inspect identity, health, and worktrees
+wf repository path [repo]              # print cache or mirror path
+wf repository add <repo...>            # warm the cache
+wf repository update [repo...]         # fetch selected mirrors, or all
+wf repository doctor [repo...]         # check health
+wf repository repair [repo...]         # prune metadata and verify objects
+wf repository delete <repo...>         # delete selected mirrors
+wf repository clean                    # delete mirrors without active worktrees
+```
+
+Read `references/repository-cache.md` for the jobs, safety rules, and automation
+contracts behind these commands.
+
 ## Config
 
 ```sh

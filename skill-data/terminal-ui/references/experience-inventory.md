@@ -28,6 +28,7 @@ Status values:
 | Parallel repository setup grid | `wf new`, `wf add`, `wf fork`, temporary worktree setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
 | Template browser and manager | `wf templates` | `src/ui/template-manager.ts` | Canonical |
+| Cached repository browser and manager | `wf repositories` | `src/ui/repository-manager.ts` | Canonical |
 | Template create/edit/copy forms | Template manager and `wf template new/edit/copy` | Prompt timeline with preview and confirmation in `src/ui/index.ts` | Canonical |
 | Template file conflict resolution | `wf template add-file` | Select and confirm prompts in `src/cli.ts` | Canonical |
 | Workspace picker | `wf cd` | Select prompt in `src/cli.ts` | Canonical |
@@ -53,6 +54,7 @@ Status values:
 | Temporary worktree list | `wf worktree list` | Canonical |
 | Template list | `wf template list` | Canonical |
 | Template info | `wf template info` | Canonical |
+| Cached repository list, info, and health | `wf repository list|info|doctor` | Canonical |
 | Skills list | `wf skills list` | Canonical |
 | Dry-run reports for new/add/fork/worktree/review/delete | `--dry-run` variants | Canonical |
 | Non-interactive cleanup preview | `wf workspace delete`, `wf clean` outside a TTY | Canonical |
@@ -72,6 +74,8 @@ states use the shared semantic logger or prompt timeline.
 | Skill content | `wf skills get` | Exact Markdown content |
 | Skill paths | `wf skills path` | Exact filesystem paths |
 | Skills JSON | `wf skills ... --json` | One JSON value, no decoration |
+| Repository cache JSON | `wf repository list|info|doctor --json` | One JSON value, no decoration |
+| Repository cache paths | `wf repository path [repo]` | Exact filesystem path |
 | Unified template file diff | `wf template add-file` conflict action | Preserve standard unified diff text |
 | Child command stdout/stderr | Setup commands, hooks, review checkout | Preserve original stream bytes |
 

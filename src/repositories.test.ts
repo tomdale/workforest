@@ -1,11 +1,16 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  cleanCachedRepositories,
+  deleteCachedRepository,
+  listCachedRepositories,
   RegisteredRepositoryNameCollisionError,
+  resolveCachedRepository,
+  resolveMirrorDir,
   resolveRegisteredRepository,
 } from "./repositories.ts";
 
@@ -95,5 +100,154 @@ describe("registered repositories", () => {
     );
 
     await expect(resolveRegisteredRepository("myapp")).resolves.toBeNull();
+  });
+});
+
+describe("cached repository inventory", () => {
+  it("reports identity, size, health, and worktrees", async () => {
+    const cacheDir = await createCacheDir();
+    await createMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:mycompany/myapp.git",
+    );
+
+    const repositories = await listCachedRepositories();
+
+    expect(repositories).toHaveLength(1);
+    expect(repositories[0]).toMatchObject({
+      name: "myapp",
+      slug: "mycompany/myapp",
+      remote: "git@github.com:mycompany/myapp.git",
+      directoryName: "myapp.git",
+      health: "healthy",
+      issues: [],
+      worktrees: [],
+    });
+    expect(repositories[0]?.sizeBytes).toBeGreaterThanOrEqual(0);
+    expect(repositories[0]?.lastFetchedAt).toBeInstanceOf(Date);
+  });
+
+  it("keeps invalid cache directories visible for cleanup", async () => {
+    const cacheDir = await createCacheDir();
+    const invalidDir = path.join(cacheDir, "broken.git");
+    await mkdir(invalidDir);
+    await writeFile(path.join(invalidDir, "README"), "not git\n", "utf8");
+
+    const repositories = await listCachedRepositories();
+
+    expect(repositories).toEqual([
+      expect.objectContaining({
+        name: "broken",
+        mirrorPath: invalidDir,
+        health: "invalid",
+        issues: ["Unreadable or invalid Git repository"],
+      }),
+    ]);
+  });
+
+  it("resolves repositories by slug, name, and cache directory", async () => {
+    const cacheDir = await createCacheDir();
+    await createMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:mycompany/myapp.git",
+    );
+    const repositories = await listCachedRepositories();
+
+    await expect(
+      resolveCachedRepository("mycompany/myapp", repositories),
+    ).resolves.toMatchObject({ directoryName: "myapp.git" });
+    await expect(
+      resolveCachedRepository("myapp", repositories),
+    ).resolves.toMatchObject({ directoryName: "myapp.git" });
+    await expect(
+      resolveCachedRepository("myapp.git", repositories),
+    ).resolves.toMatchObject({ directoryName: "myapp.git" });
+    await expect(
+      resolveCachedRepository(path.join(cacheDir, "myapp.git"), repositories),
+    ).resolves.toMatchObject({ slug: "mycompany/myapp" });
+  });
+
+  it("requires a slug or explicit .git directory when names collide", async () => {
+    const cacheDir = await createCacheDir();
+    await createMirror(cacheDir, "myapp.git", "git@github.com:first/myapp.git");
+    await createMirror(
+      cacheDir,
+      "second--myapp.git",
+      "git@github.com:second/myapp.git",
+    );
+    const repositories = await listCachedRepositories();
+
+    await expect(
+      resolveCachedRepository("myapp", repositories),
+    ).rejects.toThrow('Cached repository "myapp" is ambiguous');
+    await expect(
+      resolveCachedRepository("myapp.git", repositories),
+    ).resolves.toMatchObject({ slug: "first/myapp" });
+  });
+
+  it("uses owner-qualified mirror paths for same-name repositories", async () => {
+    const cacheDir = await createCacheDir();
+    await createMirror(cacheDir, "myapp.git", "git@github.com:first/myapp.git");
+
+    await expect(
+      resolveMirrorDir(
+        {
+          name: "myapp",
+          remote: "git@github.com:second/myapp.git",
+          defaultBranch: "main",
+        },
+        cacheDir,
+      ),
+    ).resolves.toBe(path.join(cacheDir, "second--myapp.git"));
+  });
+
+  it("deletes unused mirrors during clean", async () => {
+    const cacheDir = await createCacheDir();
+    await createMirror(
+      cacheDir,
+      "unused.git",
+      "git@github.com:mycompany/unused.git",
+    );
+
+    const results = await cleanCachedRepositories();
+
+    expect(results.map((result) => result.repository.name)).toContain("unused");
+    await expect(stat(path.join(cacheDir, "unused.git"))).rejects.toThrow();
+  });
+
+  it("requires force before deleting mirrors with active worktrees", async () => {
+    const cacheDir = await createCacheDir();
+    const mirrorPath = path.join(cacheDir, "myapp.git");
+    await mkdir(mirrorPath);
+    const repository = {
+      name: "myapp",
+      slug: "mycompany/myapp",
+      remote: "git@github.com:mycompany/myapp.git",
+      mirrorPath,
+      directoryName: "myapp.git",
+      defaultBranch: "main",
+      sizeBytes: 0,
+      lastFetchedAt: null,
+      worktrees: [
+        {
+          path: "/tmp/myapp",
+          branch: "main",
+          detached: false,
+          prunable: false,
+          exists: true,
+        },
+      ],
+      health: "healthy" as const,
+      issues: [],
+    };
+
+    await expect(deleteCachedRepository(repository)).rejects.toThrow(
+      "has 1 active worktree",
+    );
+    await expect(
+      deleteCachedRepository(repository, { force: true }),
+    ).resolves.toMatchObject({ deleted: true });
   });
 });

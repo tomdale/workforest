@@ -1,6 +1,7 @@
 import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
+import { resolveMirrorDir } from "../repositories.ts";
 import {
   runSingleRepoInitializersGenerator,
   type SingleRepoInitializerState,
@@ -66,7 +67,7 @@ export async function* repoPipelineGenerator({
   beforeInitializers,
 }: RepoPipelineOptions): AsyncGenerator<RepoPipelineState> {
   const cacheDir = getCacheDir();
-  const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
+  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
   const targetDir = path.join(workspaceDir, repo.name);
   let currentStep = "starting setup";
 

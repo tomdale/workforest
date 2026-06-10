@@ -152,6 +152,18 @@ export async function cli(): Promise<void> {
     case "template":
       await runTemplateCommand(commandArgv);
       break;
+    case "repositories":
+    case "repos": {
+      const { runRepositoriesCommand } = await import("./repository-cli.ts");
+      await runRepositoriesCommand(commandArgv);
+      break;
+    }
+    case "repository":
+    case "repo": {
+      const { runRepositoryCommand } = await import("./repository-cli.ts");
+      await runRepositoryCommand(commandArgv, command);
+      break;
+    }
     case "fork":
       await runForkCommand(commandArgv);
       break;

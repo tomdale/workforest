@@ -1,5 +1,6 @@
 import path from "node:path";
 import { log } from "./logger.ts";
+import { resolveMirrorDir } from "./repositories.ts";
 import { runGit } from "./services/git.ts";
 import type { RepoConfig } from "./types.ts";
 import { ensureCacheDir } from "./workspace/index.ts";
@@ -46,7 +47,7 @@ export async function createSingleWorktree({
   targetDir,
 }: CreateSingleWorktreeOptions): Promise<SingleWorktreeResult> {
   const cacheDir = await ensureCacheDir();
-  const mirrorDir = path.join(cacheDir, `${repo.name}.git`);
+  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
 
   for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
     if (state.status === "log") {

@@ -496,6 +496,15 @@ wf template edit <name>         Edit a template from arguments/prompts
 wf template show <name>         Jump to a template directory
 wf template info <name>         Show template details
 wf template rm <name>           Delete a template
+wf repositories                 Open the cached repository manager TUI
+wf repository list              List cached mirrors and disk usage
+wf repository info <repo>       Inspect mirror health and worktrees
+wf repository add <repo...>     Warm the cache without creating a workspace
+wf repository update [repo...]  Fetch selected mirrors, or all mirrors
+wf repository doctor [repo...]  Check mirror health
+wf repository repair [repo...]  Prune stale metadata and verify objects
+wf repository rm <repo...>      Delete selected mirrors
+wf repository clean             Delete mirrors without active worktrees
 wf config                       Show config file location
 ```
 
@@ -523,8 +532,17 @@ wf clean ~/Code/my-workspace
 ```
 
 Mirrors in `~/.cache/workforest/` are preserved by default—they'll speed up
-future workspace creation. To remove everything including mirrors, delete the
-cache directory manually.
+future workspace creation. Inspect and reclaim cache space with:
+
+```bash
+wf repository list
+wf repository clean --dry-run
+wf repository clean --force
+```
+
+Use `wf repositories` for an interactive searchable view of mirror identity,
+health, disk usage, and active worktrees. Explicit mirror deletion refuses
+active worktrees unless `--force` is passed.
 
 ## Troubleshooting
 
@@ -587,9 +605,15 @@ wf template list
 
 ### Cache directory issues
 
-Workforest caches bare mirrors in `~/.cache/workforest/`. If you encounter
-issues, you can safely delete this directory—it will be recreated on next use:
+Workforest caches bare mirrors in `~/.cache/workforest/`. Inspect and repair
+problems before discarding cached data:
 
 ```bash
-rm -rf ~/.cache/workforest
+wf repository doctor
+wf repository repair
+wf repository info <repo>
+wf repository delete <repo> --force
 ```
+
+Repositories with the same basename under different owners are stored in
+distinct mirrors and should be selected by full `owner/repo` slug.

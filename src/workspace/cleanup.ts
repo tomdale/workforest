@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { log } from "../logger.ts";
+import { resolveMirrorDir } from "../repositories.ts";
 import { runGit } from "../services/git.ts";
-import type { CleanupOptions } from "../types.ts";
+import type { CleanupOptions, RepoConfig } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";
@@ -244,6 +245,16 @@ export async function* cleanupWorkspaceGenerator(
   const cacheDir = await ensureCacheDir();
   const removedRepos: string[] = [];
   const deletedBranches: string[] = [];
+  const repoConfigs = new Map(
+    metadata?.repos.map((repo) => [
+      repo.name,
+      {
+        name: repo.name,
+        remote: repo.remote,
+        defaultBranch: repo.default_branch,
+      } satisfies RepoConfig,
+    ]) ?? [],
+  );
 
   // Delete remote branches first (before removing worktrees)
   if (deleteRemoteBranches && metadata) {
@@ -339,7 +350,10 @@ export async function* cleanupWorkspaceGenerator(
 
   // Remove worktrees from mirrors
   for (const repoName of repos) {
-    const mirrorDir = path.join(cacheDir, `${repoName}.git`);
+    const repo = repoConfigs.get(repoName);
+    const mirrorDir = repo
+      ? await resolveMirrorDir(repo, cacheDir)
+      : path.join(cacheDir, `${repoName}.git`);
 
     // Check if mirror exists
     try {
@@ -419,7 +433,10 @@ export async function* cleanupWorkspaceGenerator(
     };
 
     for (const repoName of repos) {
-      const mirrorDir = path.join(cacheDir, `${repoName}.git`);
+      const repo = repoConfigs.get(repoName);
+      const mirrorDir = repo
+        ? await resolveMirrorDir(repo, cacheDir)
+        : path.join(cacheDir, `${repoName}.git`);
 
       // Check if mirror exists
       try {
