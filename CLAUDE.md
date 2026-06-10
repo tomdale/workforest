@@ -53,6 +53,13 @@ Long-running operations use async generators that yield state updates, enabling 
 
 ## Testing the CLI in Interactive Mode
 
+Before changing terminal output or interaction, load the bundled design and
+verification guidance:
+
+```bash
+pnpm exec tsx bin/workforest.js skills get terminal-ui --full
+```
+
 `pnpm test` and the Bash tool both run in non-interactive shells without a real TTY.
 This silently bypasses large parts of the CLI:
 
@@ -65,8 +72,8 @@ smoke-test in a real terminal using tmux:**
 
 ```bash
 # Spin up a PTY session that exercises the full interactive path
-tmux new-session -d -s wf-smoke -x 220 -y 50
-tmux send-keys -t wf-smoke 'node /Users/tomdale/Code/workforest/bin/workforest.js new' Enter
+tmux new-session -d -s wf-smoke -x 120 -y 40
+tmux send-keys -t wf-smoke 'pnpm exec tsx bin/workforest.js dev simulate new --speed fast' Enter
 sleep 1
 tmux capture-pane -t wf-smoke -p   # inspect what the user actually sees
 # Drive the prompts, then watch the TUI grid render
@@ -74,7 +81,7 @@ tmux kill-session -t wf-smoke
 ```
 
 Key things to verify:
-- Clack prompts render and accept input correctly
+- Inline prompts render and accept input correctly
 - `shouldUseGrid()` returns `true` in the tmux PTY (it has a real TTY)
 - The `@unblessed` grid appears and updates as repos are set up
 - The process exits cleanly after completion

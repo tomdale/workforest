@@ -4,6 +4,7 @@ import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import stringWidth from "string-width";
 import type { Template } from "../templates/index.ts";
 import { escapeBlessedTags } from "../terminal/command-stream-adapter.ts";
+import { fullscreenColor } from "../terminal/theme.ts";
 import type { Hook, WorkspaceConfig } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 
@@ -87,7 +88,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: "cyan" },
+        border: { fg: fullscreenColor.accent },
       },
     });
 
@@ -102,7 +103,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: "gray" },
+        border: { fg: fullscreenColor.muted },
       },
     });
 
@@ -117,7 +118,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: "gray" },
+        border: { fg: fullscreenColor.muted },
       },
     });
 
@@ -132,7 +133,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: "gray" },
+        border: { fg: fullscreenColor.muted },
       },
     });
 
@@ -144,7 +145,7 @@ export async function runTemplateManager({
       height: 1,
       tags: true,
       padding: { left: 1 },
-      style: { fg: "gray" },
+      style: { fg: fullscreenColor.muted },
     });
 
     const state: TemplateManagerState = {

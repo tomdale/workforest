@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
-import chalk from "chalk";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
 import { getGitHubSlug } from "../services/git.ts";
@@ -17,6 +16,8 @@ import {
   type HookState,
 } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
+import { printReport } from "../terminal/report.ts";
+import { terminalColor } from "../terminal/theme.ts";
 import type { RepoConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
 import { note, promptLog, withSpinner } from "../ui/prompts/index.ts";
@@ -408,12 +409,17 @@ export async function stampWorkspace(
         break;
       case "complete": {
         log.success("Workspace ready!");
-        console.log();
-        console.log("Next steps:");
-        for (const step of getNextSteps(state.workspaceDir)) {
-          console.log(`  ${step}`);
-        }
-        console.log();
+        printReport({
+          title: "Next steps",
+          sections: [
+            {
+              entries: getNextSteps(state.workspaceDir).map((step) => ({
+                title: step,
+              })),
+            },
+          ],
+          footer: `Workspace: ${state.workspaceDir}`,
+        });
         break;
       }
     }
@@ -966,7 +972,9 @@ export function printRepoSetupFailures(
     return;
   }
 
-  process.stdout.write(`${chalk.red(formatRepoSetupFailures(failures))}\n`);
+  process.stdout.write(
+    `${terminalColor.error(formatRepoSetupFailures(failures))}\n`,
+  );
 }
 
 function formatRepoSetupFailures(

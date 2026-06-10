@@ -35,6 +35,10 @@ const ORIGINAL_CWD = process.cwd();
 
 const tempDirs: string[] = [];
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
@@ -127,10 +131,12 @@ describe("wf worktree", () => {
 
     await cli();
 
-    expect(logs.join("\n")).toContain("Repository: front");
-    expect(logs.join("\n")).toContain("Branch: tomdale/fix-auth");
-    expect(logs.join("\n")).toContain(
-      `Target: ${path.join(resolvedCwd, "fix-auth")}`,
+    expect(logs.join("\n")).toMatch(/Repository:\s+front/);
+    expect(logs.join("\n")).toMatch(/Branch:\s+tomdale\/fix-auth/);
+    expect(logs.join("\n")).toMatch(
+      new RegExp(
+        `Target:\\s+${escapeRegExp(path.join(resolvedCwd, "fix-auth"))}`,
+      ),
     );
     expect(createSingleWorktreeMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
@@ -166,7 +172,9 @@ describe("wf worktree", () => {
 
     await cli();
 
-    expect(logs.join("\n")).toContain(`Target: ${targetDir}`);
+    expect(logs.join("\n")).toMatch(
+      new RegExp(`Target:\\s+${escapeRegExp(targetDir)}`),
+    );
     expect(createSingleWorktreeMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });

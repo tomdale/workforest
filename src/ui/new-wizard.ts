@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import type { Template } from "../templates/index.ts";
+import { fullscreenColor } from "../terminal/theme.ts";
 import type { WorkspaceConfig } from "../types.ts";
 import {
   buildBranchName,
@@ -194,7 +195,7 @@ function runWizardScreen(
 ): Promise<ScreenResult> {
   return new Promise((resolve) => {
     const screen = new Screen({
-      smartCSR: true,
+      smartCSR: false,
       fullUnicode: true,
       title: "wf new",
     });
@@ -207,7 +208,7 @@ function runWizardScreen(
       height: "100%-1",
       border: { type: "line" },
       label: " wf new \u2500 Select Template ",
-      style: { border: { fg: "cyan" } },
+      style: { border: { fg: fullscreenColor.accent } },
       tags: true,
       padding: { left: 1, top: 1 },
     });
@@ -220,7 +221,7 @@ function runWizardScreen(
       height: "100%-1",
       border: { type: "line" },
       label: " Preview ",
-      style: { border: { fg: "gray" } },
+      style: { border: { fg: fullscreenColor.muted } },
       tags: true,
       padding: { left: 1, top: 1 },
     });
@@ -233,7 +234,7 @@ function runWizardScreen(
       height: 1,
       tags: true,
       padding: { left: 1 },
-      style: { fg: "gray" },
+      style: { fg: fullscreenColor.muted },
     });
 
     const selectItems = buildSelectItems(templates);
@@ -256,6 +257,7 @@ function runWizardScreen(
     let spinnerInterval: ReturnType<typeof setInterval> | undefined;
     let spinnerFrame = 0;
     let skipNextEnter = false;
+    let renderedPhase: WizardPhase | undefined;
     let finished = false;
 
     function cleanup() {
@@ -533,7 +535,7 @@ function runWizardScreen(
     // Pad lines to fill box dimensions, clearing leftover content
     function padToBox(lines: string[], box: typeof contentBox): string {
       const availH = (box.height as number) - 2; // minus top+bottom border
-      const availW = (box.width as number) - 3; // border left + padding left + border right
+      const availW = (box.width as number) - 4; // borders + left padding + content inset
       const padded = lines.map((line) => {
         const gap = Math.max(0, availW - visibleLength(line));
         return gap > 0 ? `${line}${" ".repeat(gap)}` : line;
@@ -546,6 +548,14 @@ function runWizardScreen(
     }
 
     function render() {
+      if (renderedPhase !== state.phase) {
+        contentBox.setContent("");
+        previewBox.setContent("");
+        footerBox.setContent("");
+        screen.render();
+        renderedPhase = state.phase;
+      }
+
       updateBoxLabel();
       renderContent();
       renderPreview();

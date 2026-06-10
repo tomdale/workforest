@@ -5,6 +5,7 @@ import { lineEditor } from "./line-editor.ts";
 import type { PromptResult } from "./result.ts";
 import { TerminalSession } from "./session.ts";
 import { truncate, visibleWidth, wrap } from "./text.ts";
+import { terminalColor } from "./theme.ts";
 
 export type TerminalSymbols = {
   active: string;
@@ -72,8 +73,8 @@ export async function confirmPrompt(
   let value = defaultValue;
   return interactivePrompt({
     render: () => {
-      const yes = value ? chalk.underline("Yes") : chalk.dim("Yes");
-      const no = value ? chalk.dim("No") : chalk.underline("No");
+      const yes = value ? chalk.underline("Yes") : terminalColor.muted("Yes");
+      const no = value ? terminalColor.muted("No") : chalk.underline("No");
       return [
         `  ${symbols.active}  ${message}`,
         `  ${symbols.bar}  ${yes} / ${no}`,
@@ -81,7 +82,7 @@ export async function confirmPrompt(
       ];
     },
     done: () =>
-      `  ${symbols.done}  ${message} ${chalk.dim("·")} ${value ? "Yes" : "No"}`,
+      `  ${symbols.done}  ${message} ${terminalColor.muted("·")} ${value ? "Yes" : "No"}`,
     onKey: (event) => {
       if (event.type === "submit") return { submit: true, value };
       if (event.type === "text") {
@@ -115,8 +116,8 @@ export async function selectPrompt<T>(
       const lines = [`  ${symbols.active}  ${message}`];
       for (const [i, item] of items.entries()) {
         const selected = i === index;
-        const label = selected ? item.label : chalk.dim(item.label);
-        const hint = item.hint ? chalk.dim(` ${item.hint}`) : "";
+        const label = selected ? item.label : terminalColor.muted(item.label);
+        const hint = item.hint ? terminalColor.muted(` ${item.hint}`) : "";
         lines.push(
           `  ${symbols.bar}  ${selected ? symbols.radioOn : symbols.radioOff} ${truncate(`${label}${hint}`, contentWidth())}`,
         );
@@ -125,7 +126,7 @@ export async function selectPrompt<T>(
         lines.push(`  ${symbols.bar}`);
         for (const hotkey of hotkeys) {
           lines.push(
-            `  ${symbols.bar}  ${chalk.dim(`${hotkey.key} to ${hotkey.hint}`)}`,
+            `  ${symbols.bar}  ${terminalColor.muted(`${hotkey.key} to ${hotkey.hint}`)}`,
           );
         }
       }
@@ -134,7 +135,7 @@ export async function selectPrompt<T>(
     },
     done: (value) => {
       const selected = items.find((item) => Object.is(item.value, value));
-      return `  ${symbols.done}  ${message} ${chalk.dim("·")} ${selected?.label ?? ""}`;
+      return `  ${symbols.done}  ${message} ${terminalColor.muted("·")} ${selected?.label ?? ""}`;
     },
     onKey: (event) => {
       if (event.type === "submit") {
@@ -187,8 +188,8 @@ export async function multiSelectPrompt<T>(
       const lines = [`  ${options.symbols.active}  ${message}`];
       for (const [i, item] of items.entries()) {
         const selected = i === index;
-        const label = selected ? item.label : chalk.dim(item.label);
-        const hint = item.hint ? chalk.dim(` ${item.hint}`) : "";
+        const label = selected ? item.label : terminalColor.muted(item.label);
+        const hint = item.hint ? terminalColor.muted(` ${item.hint}`) : "";
         lines.push(
           `  ${options.symbols.bar}  ${checked.has(i) ? options.symbols.checkOn : options.symbols.checkOff} ${truncate(`${label}${hint}`, contentWidth())}`,
         );
@@ -200,7 +201,7 @@ export async function multiSelectPrompt<T>(
       const selected = items
         .filter((_, i) => checked.has(i))
         .map((item) => item.label);
-      return `  ${options.symbols.done}  ${message} ${chalk.dim("·")} ${selected.length > 0 ? selected.join(", ") : "none"}`;
+      return `  ${options.symbols.done}  ${message} ${terminalColor.muted("·")} ${selected.length > 0 ? selected.join(", ") : "none"}`;
     },
     onKey: (event) => {
       if (event.type === "submit") {
@@ -273,16 +274,16 @@ export async function fuzzySelectPrompt<T>(
       if (index >= choices.length) index = Math.max(0, choices.length - 1);
       const lines = [
         `  ${symbols.active}  ${message}`,
-        `  ${symbols.bar}  ${query || chalk.dim("Type to filter")}`,
+        `  ${symbols.bar}  ${query || terminalColor.muted("Type to filter")}`,
       ];
 
       if (choices.length === 0) {
-        lines.push(`  ${symbols.bar}  ${chalk.dim("No matches")}`);
+        lines.push(`  ${symbols.bar}  ${terminalColor.muted("No matches")}`);
       } else {
         for (const [i, item] of choices.entries()) {
           const selected = i === index;
-          const label = selected ? item.label : chalk.dim(item.label);
-          const hint = item.hint ? chalk.dim(` ${item.hint}`) : "";
+          const label = selected ? item.label : terminalColor.muted(item.label);
+          const hint = item.hint ? terminalColor.muted(` ${item.hint}`) : "";
           lines.push(
             `  ${symbols.bar}  ${selected ? symbols.radioOn : symbols.radioOff} ${truncate(`${label}${hint}`, contentWidth())}`,
           );
@@ -294,7 +295,7 @@ export async function fuzzySelectPrompt<T>(
     },
     done: (value) => {
       const selected = items.find((item) => Object.is(item.value, value));
-      return `  ${symbols.done}  ${message} ${chalk.dim("·")} ${selected?.label ?? ""}`;
+      return `  ${symbols.done}  ${message} ${terminalColor.muted("·")} ${selected?.label ?? ""}`;
     },
     onKey: (event) => {
       const choices = filtered();
@@ -338,7 +339,9 @@ export function outro(message: string, symbols: TerminalSymbols): void {
 }
 
 export function cancel(message: string, symbols: TerminalSymbols): void {
-  process.stdout.write(`  ${symbols.cancel}  ${chalk.red(message)}\n`);
+  process.stdout.write(
+    `  ${symbols.cancel}  ${terminalColor.error(message)}\n`,
+  );
 }
 
 export function note(

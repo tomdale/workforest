@@ -1,6 +1,6 @@
 import arg from "arg";
 import { reposFromSlugs } from "./config.ts";
-import { commandHelp, nestedCommandHelp } from "./help.ts";
+import { commandHelp, devSimulationHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import type { Template } from "./templates/index.ts";
 import {
@@ -425,24 +425,15 @@ async function* syntheticRepoPipeline(
 }
 
 function printSimulateUsage(): void {
-  log.info("Usage: wf dev simulate <flow> [options]");
-  log.info("Flows:");
-  log.info("  new       Run the synthetic wf new UI simulation");
-  log.info("  confetti  Show the completion confetti modal");
+  console.log(devSimulationHelp("simulate"));
 }
 
 function printNewSimulationUsage(): void {
-  log.info("Usage: wf dev simulate new [options]");
-  log.info("Options:");
-  log.info("  --fail-repo <name>  Mark one synthetic repo setup as failed");
-  log.info("  --speed <speed>     fast, normal, or slow (default: normal)");
+  console.log(devSimulationHelp("new"));
 }
 
 function printConfettiSimulationUsage(): void {
-  log.info("Usage: wf dev simulate confetti [options]");
-  log.info("Options:");
-  log.info("  --workspace <path>  Workspace path to show in the modal");
-  log.info("  --repos <names>     Comma-separated worktree names");
+  console.log(devSimulationHelp("confetti"));
 }
 
 function parseConfettiRepos(value: string | undefined): string[] {

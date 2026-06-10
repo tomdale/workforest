@@ -27,6 +27,11 @@ import {
   listTemplates,
   loadTemplate,
 } from "./templates/index.ts";
+import {
+  printReport,
+  type ReportField,
+  type ReportSection,
+} from "./terminal/report.ts";
 import type {
   RepoConfig,
   TemporaryWorktreeMetadata,
@@ -242,7 +247,7 @@ async function runConfigInit(): Promise<void> {
 
   const { path: configPath, config } = await loadWorkspaceConfig();
 
-  console.log("\nConfigure workforest\n");
+  intro("Configure workforest");
 
   // Default directory
   const currentDefaultDir = config.defaultDir ?? "";
@@ -280,77 +285,107 @@ async function runConfigInit(): Promise<void> {
     ...(branchPrefix ? { branchPrefix } : {}),
   };
 
+  note(
+    [
+      `Default directory: ${defaultDir || "(not set)"}`,
+      `Reviews directory: ${reviewsDir || "(not set)"}`,
+      `Directory prefix: "${dirPrefix}"`,
+      `Branch prefix: "${branchPrefix}"`,
+    ].join("\n"),
+    "Configuration preview",
+  );
+
+  const shouldSave = await promptConfirm("Save configuration?", true);
+  if (!shouldSave) {
+    outro("Configuration unchanged");
+    return;
+  }
+
   await saveWorkspaceConfig(configPath, newConfig);
-  log.success(`Config saved to ${configPath}`);
+  outro(`Config saved to ${configPath}`);
 }
 
 async function runConfigShow(): Promise<void> {
   const { path: configPath, config } = await loadWorkspaceConfig();
 
-  console.log("\nWorkspace Configuration\n");
+  const ownerMappings = Object.entries(
+    config.vercelLink?.teamByGitHubOwner ?? {},
+  );
+  const repoOverrides = Object.entries(config.vercelLink?.repoOverrides ?? {});
 
-  // Default directory
-  console.log("Default Directory:");
-  if (config.defaultDir) {
-    console.log(`  ${config.defaultDir}`);
-  } else {
-    console.log("  (not set - uses current directory)");
-  }
-  console.log("  Example: ~/Code/workspaces");
-
-  // Review directory
-  console.log("\nReviews Directory:");
-  if (config.reviewsDir) {
-    console.log(`  ${config.reviewsDir}`);
-  } else {
-    console.log("  (not set - prompts on first wf review)");
-  }
-  console.log("  Example: ~/Code/reviews");
-
-  // Directory prefix
-  console.log("\nDirectory Prefix:");
-  console.log(`  "${config.dirPrefix ?? ""}"`);
-  console.log('  Example: "wf-" creates directories like wf-my-feature');
-
-  // Branch prefix
-  console.log("\nBranch Prefix:");
-  console.log(`  "${config.branchPrefix ?? ""}"`);
-  console.log('  Example: "tom/" creates branches like tom/my-feature');
-
-  if (config.vercelLink) {
-    console.log("\nVercel Auto-Link:");
-
-    const ownerMappings = Object.entries(
-      config.vercelLink.teamByGitHubOwner ?? {},
-    );
-    if (ownerMappings.length > 0) {
-      console.log("  Team by GitHub Owner:");
-      for (const [owner, team] of ownerMappings) {
-        console.log(`    ${owner} -> ${team}`);
-      }
-    } else {
-      console.log("  Team by GitHub Owner: (none)");
-    }
-
-    const repoOverrides = Object.entries(config.vercelLink.repoOverrides ?? {});
-    if (repoOverrides.length > 0) {
-      console.log("  Repo Overrides:");
-      for (const [repo, override] of repoOverrides) {
-        if (override.disabled) {
-          console.log(`    ${repo}: disabled`);
-        } else if (override.team) {
-          console.log(`    ${repo}: ${override.team}`);
-        } else {
-          console.log(`    ${repo}: (no-op override)`);
-        }
-      }
-    } else {
-      console.log("  Repo Overrides: (none)");
-    }
-  }
-
-  console.log(`\nConfig Location: ${configPath}`);
-  console.log();
+  printReport({
+    title: "Workspace configuration",
+    sections: [
+      {
+        fields: [
+          {
+            label: "Default directory",
+            value: config.defaultDir ?? "(not set; uses current directory)",
+          },
+          {
+            label: "Reviews directory",
+            value: config.reviewsDir ?? "(not set; prompts on first review)",
+          },
+          {
+            label: "Directory prefix",
+            value: `"${config.dirPrefix ?? ""}"`,
+          },
+          {
+            label: "Branch prefix",
+            value: `"${config.branchPrefix ?? ""}"`,
+          },
+        ],
+      },
+      {
+        title: "Examples",
+        fields: [
+          { label: "Default directory", value: "~/Code/workspaces" },
+          { label: "Reviews directory", value: "~/Code/reviews" },
+          {
+            label: "Directory prefix",
+            value: '"wf-" creates wf-my-feature',
+          },
+          {
+            label: "Branch prefix",
+            value: '"tom/" creates tom/my-feature',
+          },
+        ],
+      },
+      ...(config.vercelLink
+        ? [
+            {
+              title: "Vercel auto-link",
+              fields: [
+                {
+                  label: "GitHub owners",
+                  value:
+                    ownerMappings.length > 0
+                      ? ownerMappings
+                          .map(([owner, team]) => `${owner} -> ${team}`)
+                          .join(", ")
+                      : "(none)",
+                },
+                {
+                  label: "Repository overrides",
+                  value:
+                    repoOverrides.length > 0
+                      ? repoOverrides
+                          .map(([repo, override]) => {
+                            if (override.disabled) return `${repo}: disabled`;
+                            if (override.team)
+                              return `${repo}: ${override.team}`;
+                            return `${repo}: no-op`;
+                          })
+                          .join(", ")
+                      : "(none)",
+                },
+              ],
+            },
+          ]
+        : []),
+    ],
+    footer: `Config: ${configPath}`,
+  });
 }
 
 async function runConfigEdit(): Promise<void> {
@@ -497,22 +532,41 @@ async function runListCommand(argv: string[], command = "list"): Promise<void> {
     return;
   }
 
-  console.log(`\nWorkspaces in ${workspaceRoot}\n`);
-
-  for (const ws of workspaces) {
-    const desc = ws.description ? ` - ${ws.description}` : "";
-    const template = ws.template ? ` (${ws.template})` : "";
-    const branch = ws.branch ? `, branch: ${ws.branch}` : "";
-    const created = ws.created
-      ? new Date(ws.created).toLocaleDateString()
-      : "unknown";
-    console.log(`  ${ws.name}${desc}`);
-    console.log(
-      `    ${ws.repos} repos${template}${branch}, created ${created}`,
-    );
-  }
-
-  console.log();
+  printReport({
+    title: "Workspaces",
+    sections: [
+      {
+        entries: workspaces.map((workspace) => ({
+          title: workspace.name,
+          ...(workspace.description
+            ? { description: workspace.description }
+            : {}),
+          details: [
+            {
+              label: "Repositories",
+              value: String(workspace.repos),
+            },
+            ...(workspace.template
+              ? [{ label: "Template", value: workspace.template }]
+              : []),
+            ...(workspace.branch
+              ? [{ label: "Branch", value: workspace.branch }]
+              : []),
+            {
+              label: "Created",
+              value: workspace.created
+                ? new Date(workspace.created).toLocaleDateString()
+                : "unknown",
+            },
+          ],
+        })),
+      },
+    ],
+    footer: [
+      `Directory: ${workspaceRoot}`,
+      `${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"}`,
+    ].join("\n"),
+  });
 }
 
 async function runWorktreeCommand(
@@ -701,14 +755,27 @@ async function runReviewList(targetArgs: string[]): Promise<void> {
       return;
     }
 
-    console.log("\nReview worktrees\n");
-    for (const entry of entries) {
-      const branch = entry.branch ? `, branch: ${entry.branch}` : "";
-      console.log(`  ${entry.owner}/${entry.repo}#${entry.prNumber}`);
-      console.log(`    status: ${entry.state}${branch}`);
-      console.log(`    path:   ${entry.path}`);
-    }
-    console.log();
+    printReport({
+      title: "Review worktrees",
+      sections: [
+        {
+          entries: entries.map((entry) => ({
+            title: `${entry.owner}/${entry.repo}#${entry.prNumber}`,
+            details: [
+              { label: "Status", value: entry.state },
+              ...(entry.branch
+                ? [{ label: "Branch", value: entry.branch }]
+                : []),
+              { label: "Path", value: entry.path },
+            ],
+          })),
+        },
+      ],
+      footer: [
+        `Directory: ${reviewsDir}`,
+        `${entries.length} review worktree${entries.length === 1 ? "" : "s"}`,
+      ].join("\n"),
+    });
   } catch (error) {
     log.error(getErrorMessage(error));
     process.exitCode = 1;
@@ -747,8 +814,20 @@ async function runReviewRemove(
       dryRun: options.dryRun,
       force: options.force,
     });
-    const action = result.dryRun ? "Would remove" : "Removed";
-    log.success(`${action} ${target.repo}#${target.prNumber}: ${result.path}`);
+    if (result.dryRun) {
+      showDryRunReport({
+        fields: [
+          {
+            label: "Review worktree",
+            value: `${target.owner}/${target.repo}#${target.prNumber}`,
+          },
+          ...(result.branch ? [{ label: "Branch", value: result.branch }] : []),
+          { label: "Path", value: result.path },
+        ],
+      });
+    } else {
+      log.success(`Removed ${target.repo}#${target.prNumber}: ${result.path}`);
+    }
   } catch (error) {
     log.error(getErrorMessage(error));
     process.exitCode = 1;
@@ -861,11 +940,14 @@ async function runStandaloneWorktreeCreate(args: {
   }
 
   if (args["--dry-run"]) {
-    console.log("\nDry run - no changes will be made\n");
-    console.log(`Repository: ${repo.name} (${repo.remote})`);
-    console.log(`Branch: ${branchName}`);
-    console.log(`Target: ${targetDir}`);
-    console.log();
+    showDryRunReport({
+      fields: [
+        { label: "Repository", value: repo.name },
+        { label: "Remote", value: repo.remote },
+        { label: "Branch", value: branchName },
+        { label: "Target", value: targetDir },
+      ],
+    });
     return;
   }
 
@@ -923,9 +1005,15 @@ async function runStandaloneWorktreeRemove(args: {
       dryRun: args["--dry-run"] ?? false,
       force: args["--force"] ?? false,
     });
-    const action = result.dryRun ? "Would delete" : "Deleted";
-    log.success(`${action} worktree: ${result.path}`);
-    if (!result.dryRun) {
+    if (result.dryRun) {
+      showDryRunReport({
+        fields: [
+          { label: "Worktree", value: result.path },
+          ...(result.branch ? [{ label: "Branch", value: result.branch }] : []),
+        ],
+      });
+    } else {
+      log.success(`Deleted worktree: ${result.path}`);
       await writeShellCdPath(path.dirname(result.path));
     }
   } catch (error) {
@@ -1020,14 +1108,20 @@ async function runTemporaryWorktreeCreate(
     });
 
     if (args["--dry-run"]) {
-      console.log("\nDry run - no changes will be made\n");
-      for (const worktree of result.created) {
-        console.log(`Slug: ${worktree.slug}`);
-        console.log(`Repository: ${worktree.parentRepo}`);
-        console.log(`Branch: ${worktree.branch}`);
-        console.log(`Target: ${worktree.path}`);
-        console.log();
-      }
+      showDryRunReport({
+        sections: [
+          {
+            entries: result.created.map((worktree) => ({
+              title: worktree.slug,
+              details: [
+                { label: "Repository", value: worktree.parentRepo },
+                { label: "Branch", value: worktree.branch },
+                { label: "Target", value: worktree.path },
+              ],
+            })),
+          },
+        ],
+      });
       return;
     }
 
@@ -1116,17 +1210,31 @@ async function runTemporaryWorktreeList(args: {
     return;
   }
 
-  console.log("\nTemporary worktrees\n");
-  for (const entry of entries) {
-    const merged =
-      entry.merged === null ? "unknown" : entry.merged ? "yes" : "no";
-    console.log(`  ${entry.slug}`);
-    console.log(`    repo:   ${entry.parent_repo}`);
-    console.log(`    branch: ${entry.branch}`);
-    console.log(`    status: ${entry.state}, merged: ${merged}`);
-    console.log(`    path:   ${entry.absolutePath}`);
-  }
-  console.log();
+  printReport({
+    title: "Temporary worktrees",
+    sections: [
+      {
+        entries: entries.map((entry) => ({
+          title: entry.slug,
+          details: [
+            { label: "Repository", value: entry.parent_repo },
+            { label: "Branch", value: entry.branch },
+            { label: "Status", value: entry.state },
+            {
+              label: "Merged",
+              value:
+                entry.merged === null ? "unknown" : entry.merged ? "yes" : "no",
+            },
+            { label: "Path", value: entry.absolutePath },
+          ],
+        })),
+      },
+    ],
+    footer: [
+      `Workspace: ${workspaceDir}`,
+      `${entries.length} temporary worktree${entries.length === 1 ? "" : "s"}`,
+    ].join("\n"),
+  });
 }
 
 async function runTemporaryWorktreeRemove(args: {
@@ -1212,9 +1320,25 @@ async function runTemporaryWorktreeRemove(args: {
       ...(parentRepoName ? { parentRepoName } : {}),
     });
 
-    for (const entry of result.removed) {
-      const action = args["--dry-run"] ? "Would remove" : "Removed";
-      log.success(`${action} ${entry.slug}`);
+    if (args["--dry-run"]) {
+      showDryRunReport({
+        sections: [
+          {
+            entries: result.removed.map((entry) => ({
+              title: entry.slug,
+              details: [
+                { label: "Repository", value: entry.parent_repo },
+                { label: "Branch", value: entry.branch },
+                { label: "Path", value: path.join(workspaceDir, entry.path) },
+              ],
+            })),
+          },
+        ],
+      });
+    } else {
+      for (const entry of result.removed) {
+        log.success(`Removed ${entry.slug}`);
+      }
     }
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -1502,13 +1626,29 @@ async function runTemplateList(): Promise<void> {
     return;
   }
 
-  console.log("\nTemplates:\n");
-  for (const template of templates) {
-    const desc =
-      template.config.description ?? template.config.repos.join(", ");
-    console.log(`  ${template.id.padEnd(20)} ${desc}`);
-  }
-  console.log();
+  printReport({
+    title: "Templates",
+    sections: [
+      {
+        entries: templates.map((template) => ({
+          title: template.id,
+          ...(template.config.description
+            ? { description: template.config.description }
+            : {}),
+          details: [
+            {
+              label: "Repositories",
+              value: template.config.repos.join(", "),
+            },
+          ],
+        })),
+      },
+    ],
+    footer: [
+      `Directory: ${getTemplatesDir()}`,
+      `${templates.length} template${templates.length === 1 ? "" : "s"}`,
+    ].join("\n"),
+  });
 }
 
 async function runTemplateShow(argv: string[]): Promise<void> {
@@ -1559,27 +1699,6 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
     return;
   }
 
-  console.log(`\nTemplate: ${template.id}\n`);
-
-  if (template.config.description) {
-    console.log(`Description: ${template.config.description}`);
-  }
-
-  console.log(`\nRepositories:`);
-  for (const repo of template.config.repos) {
-    console.log(`  - ${repo}`);
-  }
-
-  if (template.config.hooks && template.config.hooks.length > 0) {
-    console.log(`\nHooks:`);
-    for (const hook of template.config.hooks) {
-      console.log(`  - ${hook.name}: ${hook.run}`);
-      if (hook.in) {
-        console.log(`    (runs in: ${hook.in})`);
-      }
-    }
-  }
-
   let workspaceBranchPrefix: string | undefined;
   try {
     ({
@@ -1596,15 +1715,44 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
       : template.config.branchPrefix === ""
         ? "disabled for this template"
         : template.config.branchPrefix;
-  console.log(`\nBranch prefix: ${branchPrefixSummary}`);
-
   const filesDir = path.join(path.dirname(template.path), "files");
-  if (await pathExists(filesDir)) {
-    console.log(`Files: ${filesDir}`);
-  }
+  const hasFiles = await pathExists(filesDir);
 
-  console.log(`\nLocation: ${template.path}`);
-  console.log();
+  printReport({
+    title: `Template ${template.id}`,
+    sections: [
+      {
+        fields: [
+          ...(template.config.description
+            ? [{ label: "Description", value: template.config.description }]
+            : []),
+          { label: "Branch prefix", value: branchPrefixSummary },
+          ...(hasFiles ? [{ label: "Files", value: filesDir }] : []),
+        ],
+      },
+      {
+        title: "Repositories",
+        entries: template.config.repos.map((repo) => ({ title: repo })),
+      },
+      ...(template.config.hooks && template.config.hooks.length > 0
+        ? [
+            {
+              title: "Hooks",
+              entries: template.config.hooks.map((hook) => ({
+                title: hook.name,
+                details: [
+                  { label: "Command", value: hook.run },
+                  ...(hook.in
+                    ? [{ label: "Runs in", value: String(hook.in) }]
+                    : []),
+                ],
+              })),
+            },
+          ]
+        : []),
+    ],
+    footer: `Config: ${template.path}`,
+  });
 }
 
 async function runTemplateNew(argv: string[]): Promise<void> {
@@ -2313,11 +2461,25 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       promptLog.warn("You are inside the workspace being deleted");
     }
   } else {
-    log.info(`Workspace: ${preview.workspaceDir}`);
-    log.info(`Repositories: ${preview.repos.join(", ")}`);
-    if (preview.temporaryWorktrees?.length) {
-      log.info(`Temporary worktrees: ${preview.temporaryWorktrees.join(", ")}`);
-    }
+    printReport({
+      title: "Cleanup preview",
+      sections: [
+        {
+          fields: [
+            { label: "Directory", value: preview.workspaceDir },
+            { label: "Repositories", value: preview.repos.join(", ") },
+            ...(preview.temporaryWorktrees?.length
+              ? [
+                  {
+                    label: "Temporary worktrees",
+                    value: preview.temporaryWorktrees.join(", "),
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
+    });
     if (isInsideWorkspace) {
       log.warn("You are inside the workspace being deleted");
     }
@@ -2856,22 +3018,18 @@ async function runNewCommand(argv: string[]): Promise<void> {
       );
       outro("No changes made");
     } else {
-      console.log("\nDry run - no changes will be made\n");
-      console.log("Workspace:");
-      console.log(`  Directory: ${workspaceDir}`);
-      console.log(`  Feature: ${featureName}`);
-      if (description) {
-        console.log(`  Description: ${description}`);
-      }
-      console.log(`  Branch: ${branchName}`);
-      if (templateId) {
-        console.log(`  Template: ${templateId}`);
-      }
-      console.log("\nRepositories:");
-      for (const repo of repos) {
-        console.log(`  - ${repo.name} (${repo.remote})`);
-      }
-      console.log();
+      showDryRunReport({
+        fields: [
+          { label: "Directory", value: workspaceDir },
+          { label: "Feature", value: featureName },
+          ...(description
+            ? [{ label: "Description", value: description }]
+            : []),
+          { label: "Branch", value: branchName },
+          ...(templateId ? [{ label: "Template", value: templateId }] : []),
+        ],
+        sections: [repositoryReportSection("Repositories", repos)],
+      });
     }
     return;
   }
@@ -2998,14 +3156,13 @@ async function runAddCommand(argv: string[]): Promise<void> {
       );
       outro("No changes made");
     } else {
-      console.log("\nDry run - no changes will be made\n");
-      console.log(`Workspace: ${workspaceDir}`);
-      console.log(`Branch: ${branchName}`);
-      console.log("\nRepositories to add:");
-      for (const repo of repos) {
-        console.log(`  - ${repo.name} (${repo.remote})`);
-      }
-      console.log();
+      showDryRunReport({
+        fields: [
+          { label: "Workspace", value: workspaceDir },
+          { label: "Branch", value: branchName },
+        ],
+        sections: [repositoryReportSection("Repositories to add", repos)],
+      });
     }
     return;
   }
@@ -3184,23 +3341,19 @@ async function runForkCommand(argv: string[]): Promise<void> {
       );
       outro("No changes made");
     } else {
-      console.log("\nDry run - no changes will be made\n");
-      console.log(`Source workspace: ${path.basename(sourceDir)}`);
-      console.log("New workspace:");
-      console.log(`  Directory: ${workspaceDir}`);
-      console.log(`  Feature: ${featureName}`);
-      if (description) {
-        console.log(`  Description: ${description}`);
-      }
-      console.log(`  Branch: ${branchName}`);
-      if (templateId) {
-        console.log(`  Template: ${templateId}`);
-      }
-      console.log("\nRepositories:");
-      for (const repo of repos) {
-        console.log(`  - ${repo.name} (${repo.remote})`);
-      }
-      console.log();
+      showDryRunReport({
+        fields: [
+          { label: "Source workspace", value: path.basename(sourceDir) },
+          { label: "Directory", value: workspaceDir },
+          { label: "Feature", value: featureName },
+          ...(description
+            ? [{ label: "Description", value: description }]
+            : []),
+          { label: "Branch", value: branchName },
+          ...(templateId ? [{ label: "Template", value: templateId }] : []),
+        ],
+        sections: [repositoryReportSection("Repositories", repos)],
+      });
     }
     return;
   }
@@ -4336,4 +4489,31 @@ function showCleanupPreview(preview: CleanupPreview): void {
   }
 
   note(lines.join("\n"), "Cleanup preview");
+}
+
+function showDryRunReport({
+  fields = [],
+  sections = [],
+}: {
+  fields?: ReportField[];
+  sections?: ReportSection[];
+}): void {
+  printReport({
+    title: "Dry run preview",
+    sections: [...(fields.length > 0 ? [{ fields }] : []), ...sections],
+    footer: "No changes made",
+  });
+}
+
+function repositoryReportSection(
+  title: string,
+  repos: readonly RepoConfig[],
+): ReportSection {
+  return {
+    title,
+    entries: repos.map((repo) => ({
+      title: repo.name,
+      details: [{ label: "Remote", value: repo.remote }],
+    })),
+  };
 }

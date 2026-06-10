@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workforest Terminal UI"
+  short_description: "Design and verify consistent Workforest terminal interfaces"
+  default_prompt: "Use $terminal-ui to audit or implement a Workforest terminal interface consistently."

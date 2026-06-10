@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import { loadWorkspaceConfig } from "./config.ts";
 import { getTemplatesDir, listTemplates } from "./templates/index.ts";
+import { helpColor } from "./terminal/theme.ts";
 
 export async function help(): Promise<string> {
   let configPath = "(unavailable)";
@@ -15,20 +16,20 @@ export async function help(): Promise<string> {
   const templates = await listTemplates();
   const templateLines =
     templates.length === 0
-      ? [chalk.dim("(none)")]
+      ? ["(none)"]
       : templates.map(
           (t) =>
-            `${t.id.padEnd(16)}${chalk.dim(t.config.description ?? t.config.repos.join(", "))}`,
+            `${t.id.padEnd(20)}  ${t.config.description ?? t.config.repos.join(", ")}`,
         );
 
-  return `
-${chalk.bold("Usage:")} wf <command> [options]
+  return renderHelp(`
+Usage: wf <command> [options]
 
-${chalk.bold("Start here (for AI agents):")}
+Start here (for AI agents):
   wf skills get core --full
 
-${chalk.bold("Commands:")}
-  new <work> -- <template|repo...> Create a workspace
+Commands:
+  new <work> -- <template|repo...>  Create a workspace
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
   worktree list|delete         List or delete temporary worktrees
   review <target>              Create a review workspace or PR worktree
@@ -48,13 +49,13 @@ ${chalk.bold("Commands:")}
   template list|show|info|...  Scriptable template subcommands
   config [show|edit|init]      Manage configuration
 
-${chalk.bold("Clean options:")}
-  -r, --delete-remote-branches Delete merged remote branches (prompts if not set)
+Clean options:
+  -r, --delete-remote-branches  Delete merged remote branches (prompts if not set)
   -f, --force                  Skip confirmation prompts
   -n, --dry-run                Preview without deleting
   --keep-mirrors               Keep cached git mirrors (default: true)
 
-${chalk.bold("Examples:")}
+Examples:
   wf new "update docs build" -- vercel/next.js vercel/turbo
   wf worktree "fix-tests" "upgrade-deps"
   wf worktree list
@@ -77,12 +78,12 @@ ${chalk.bold("Examples:")}
   wf templates                      Open the template manager
   wf template new "oss-docs" vercel/next.js vercel/turbo
 
-${chalk.bold("Templates:")}
+Templates:
   ${templateLines.join("\n  ")}
 
-${chalk.dim(`Config:     ${configPath}`)}
-${chalk.dim(`Templates:  ${templatesDir}`)}
-`;
+Config:     ${configPath}
+Templates:  ${templatesDir}
+`);
 }
 
 const COMMAND_HELP: Record<string, string> = {
@@ -568,6 +569,29 @@ Print the skills directory path, or one skill's directory.
   },
 };
 
+type DevSimulationFlow = "simulate" | "new" | "confetti";
+
+const DEV_SIMULATION_HELP: Record<DevSimulationFlow, string> = {
+  simulate: `Usage: wf dev simulate <flow> [options]
+
+Flows:
+  new       Run the synthetic wf new UI simulation
+  confetti  Show the completion confetti modal
+`,
+  new: `Usage: wf dev simulate new [options]
+
+Options:
+  --fail-repo <name>  Mark one synthetic repo setup as failed
+  --speed <speed>     fast, normal, or slow (default: normal)
+`,
+  confetti: `Usage: wf dev simulate confetti [options]
+
+Options:
+  --workspace <path>  Workspace path to show in the modal
+  --repos <names>     Comma-separated worktree names
+`,
+};
+
 const NESTED_ALIASES: Record<string, Record<string, string>> = {
   worktree: {
     ls: "list",
@@ -595,7 +619,8 @@ const NESTED_ALIASES: Record<string, Record<string, string>> = {
 };
 
 export function commandHelp(command: string): string | null {
-  return COMMAND_HELP[command] ?? null;
+  const content = COMMAND_HELP[command];
+  return content ? renderHelp(content) : null;
 }
 
 export function nestedCommandHelp(
@@ -603,5 +628,145 @@ export function nestedCommandHelp(
   subcommand: string,
 ): string | null {
   const canonical = NESTED_ALIASES[command]?.[subcommand] ?? subcommand;
-  return NESTED_COMMAND_HELP[command]?.[canonical] ?? null;
+  const content = NESTED_COMMAND_HELP[command]?.[canonical];
+  return content ? renderHelp(content) : null;
+}
+
+export function devSimulationHelp(flow: DevSimulationFlow): string {
+  return renderHelp(DEV_SIMULATION_HELP[flow]);
+}
+
+export function renderHelp(content: string): string {
+  const lines = content.trim().split("\n");
+  let section = "";
+
+  return lines
+    .map((line) => {
+      const usage = line.match(/^(\s*)(Usage:|\s{7})(.*)$/);
+      if (usage) {
+        const [, indent = "", label = "", syntax = ""] = usage;
+        return `${indent}${label.trim() ? helpHeading(label) : " ".repeat(label.length)}${styleCommandSyntax(syntax)}`;
+      }
+
+      const heading = line.match(/^([^ ].*):$/);
+      if (heading) {
+        section = heading[1] ?? "";
+        return helpHeading(line);
+      }
+
+      const row = line.match(/^(\s+)(.*?\S)(\s{2,})(\S.*)$/);
+      if (row) {
+        const [, indent = "", key = "", gap = "", description = ""] = row;
+        return `${indent}${styleRowKey(key, section)}${gap}${styleDescription(description)}`;
+      }
+
+      if (
+        line.startsWith("  ") &&
+        ["Aliases", "Examples", "Start here (for AI agents)"].includes(section)
+      ) {
+        return `${line.slice(0, 2)}${styleExample(line.slice(2))}`;
+      }
+
+      const metadata = line.match(/^([A-Z][^:]+:)(\s+)(.+)$/);
+      if (metadata) {
+        const [, label = "", gap = "", value = ""] = metadata;
+        return helpColor.metadata(`${label}${gap}${value}`);
+      }
+
+      const title = line.match(/^(wf(?:\s+\S+)*)(\s+-\s+)(.+)$/);
+      if (title) {
+        const [, command = "", separator = "", description = ""] = title;
+        return `${styleCommandSyntax(command)}${helpColor.metadata(separator)}${styleDescription(description)}`;
+      }
+
+      return line;
+    })
+    .join("\n");
+}
+
+function helpHeading(value: string): string {
+  return helpColor.heading(chalk.bold(value));
+}
+
+function styleCommandSyntax(value: string): string {
+  return styleTokens(value, true);
+}
+
+function styleOptionSyntax(value: string): string {
+  return styleTokens(value, false);
+}
+
+function styleTokens(value: string, colorBareWords: boolean): string {
+  const tokens =
+    /(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|<[^>]+>|\[[^\]]+\]|(?:^|\s)[a-z][\w|.-]*(?=\s|$)/gi;
+
+  return value.replace(tokens, (token) => {
+    const normalized = token.trimStart();
+    const prefix = token.slice(0, token.length - normalized.length);
+
+    if (normalized === "wf" || normalized === "workforest") {
+      return `${prefix}${helpColor.program(chalk.bold(normalized))}`;
+    }
+    if (normalized.startsWith("-")) {
+      return `${prefix}${helpColor.option(normalized)}`;
+    }
+    if (normalized.startsWith("<") || normalized.startsWith("[")) {
+      return `${prefix}${helpColor.argument(normalized)}`;
+    }
+    if (colorBareWords) {
+      return `${prefix}${helpColor.command(normalized)}`;
+    }
+    return token;
+  });
+}
+
+function styleRowKey(value: string, section: string): string {
+  if (section === "Options" || section.endsWith(" options")) {
+    return styleOptionSyntax(value);
+  }
+  if (["Aliases", "Examples", "Start here (for AI agents)"].includes(section)) {
+    return styleExample(value);
+  }
+  if (section === "Arguments") {
+    return helpColor.argument(value);
+  }
+  if (section === "Shortcuts") {
+    return helpColor.option(value);
+  }
+  return styleCommandSyntax(value);
+}
+
+function styleExample(value: string): string {
+  return value.replace(
+    /"[^"]*"|'[^']*'|(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|(?:^|\s)(?:add|cd|clean|config|confetti|delete|dev|edit|eval|find|fork|get|info|init|list|new|path|review|show|simulate|skills|template|templates|worktree|workspace|wt)(?=\s|$)|(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)\S+|\b\d+\b/gi,
+    (token) => {
+      const normalized = token.trimStart();
+      const prefix = token.slice(0, token.length - normalized.length);
+
+      if (normalized === "wf" || normalized === "workforest") {
+        return `${prefix}${helpColor.program(chalk.bold(normalized))}`;
+      }
+      if (normalized.startsWith("-")) {
+        return `${prefix}${helpColor.option(normalized)}`;
+      }
+      if (
+        normalized.startsWith('"') ||
+        normalized.startsWith("'") ||
+        /^\d+$/.test(normalized) ||
+        normalized.includes("/")
+      ) {
+        return `${prefix}${helpColor.argument(normalized)}`;
+      }
+      return `${prefix}${helpColor.command(normalized)}`;
+    },
+  );
+}
+
+function styleDescription(value: string): string {
+  return value
+    .split(/(\([^)]*(?:default|none|current)[^)]*\)|\$[A-Z][A-Z0-9_]*)/gi)
+    .map((part, index) =>
+      index % 2 === 1 ? helpColor.metadata(part) : helpColor.description(part),
+    )
+    .join("");
 }

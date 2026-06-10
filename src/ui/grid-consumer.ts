@@ -15,6 +15,7 @@ import {
   type FullscreenStatusLine,
   waitForFullscreenKey,
 } from "../terminal/fullscreen-surface.ts";
+import { fullscreenColor } from "../terminal/theme.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
@@ -132,7 +133,7 @@ function createDefaultEnvironment(): GridRenderEnvironment {
         left: 0,
         width: "100%",
         height: "100%-1",
-        borderColor: "cyan",
+        borderColor: fullscreenColor.accent,
       }),
     createStatusLine: ({ screen }) =>
       createFullscreenStatusLine(
@@ -483,10 +484,22 @@ export function createDefaultCompletionModal({
   const top = Math.max(1, Math.floor((screenHeight - height) / 2));
 
   const style: BoxOptions["style"] = hasRepoErrors
-    ? { fg: "white", bg: "black", border: { fg: "red" } }
+    ? {
+        fg: fullscreenColor.primary,
+        bg: "black",
+        border: { fg: fullscreenColor.error },
+      }
     : hasSetupWarnings
-      ? { fg: "white", bg: "black", border: { fg: "yellow" } }
-      : { fg: "white", bg: "black", border: { fg: "cyan" } };
+      ? {
+          fg: fullscreenColor.primary,
+          bg: "black",
+          border: { fg: fullscreenColor.warning },
+        }
+      : {
+          fg: fullscreenColor.primary,
+          bg: "black",
+          border: { fg: fullscreenColor.accent },
+        };
 
   const box = new Box({
     parent: screen as UnblessedScreen,
@@ -552,7 +565,7 @@ function createCompletionModalTitle({
     height: 1,
     content: title,
     tags: true,
-    style: { fg: "gray" },
+    style: { fg: fullscreenColor.muted },
   }) as GridCompletionModalLike;
 }
 

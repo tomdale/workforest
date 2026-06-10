@@ -27,6 +27,7 @@ const promptSelectMock = vi.hoisted(() =>
   }),
 );
 const promptConfirmMock = vi.hoisted(() => vi.fn());
+const promptTextMock = vi.hoisted(() => vi.fn());
 const runTemplateManagerMock = vi.hoisted(() =>
   vi.fn(async () => ({ type: "quit" as const })),
 );
@@ -41,6 +42,7 @@ vi.mock("./ui/prompts/index.ts", async () => {
     ...actual,
     promptConfirm: promptConfirmMock,
     promptSelect: promptSelectMock,
+    promptText: promptTextMock,
   };
 });
 
@@ -76,6 +78,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   promptConfirmMock.mockReset();
   promptSelectMock.mockClear();
+  promptTextMock.mockReset();
   runTemplateManagerMock.mockReset();
   runTemplateManagerMock.mockResolvedValue({ type: "quit" });
   shouldUseTemplateManagerMock.mockReset();
@@ -118,6 +121,37 @@ afterEach(async () => {
 });
 
 describe("cli", () => {
+  it("previews and confirms configuration before saving", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    promptTextMock
+      .mockResolvedValueOnce("~/Code/workspaces")
+      .mockResolvedValueOnce("~/Code/reviews")
+      .mockResolvedValueOnce("wf-")
+      .mockResolvedValueOnce("tomdale/");
+    promptConfirmMock.mockResolvedValue(true);
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    process.argv = ["node", "wf", "config", "init"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promptConfirmMock).toHaveBeenCalledWith("Save configuration?", true);
+    await expect(
+      readFile(path.join(configDir, "config.json"), "utf8").then(JSON.parse),
+    ).resolves.toEqual({
+      defaultDir: "~/Code/workspaces",
+      reviewsDir: "~/Code/reviews",
+      dirPrefix: "wf-",
+      branchPrefix: "tomdale/",
+    });
+  });
+
   it("prints agent skills guidance first in top-level help", async () => {
     const logs: string[] = [];
 
@@ -177,10 +211,12 @@ describe("cli", () => {
     expect(output).toContain(
       `Directory: ${path.join(workspaceRoot, "fix-auth")}`,
     );
-    expect(output).toContain("Feature: fix-auth");
-    expect(output).toContain("Branch: tomdale/fix-auth");
-    expect(output).toContain("front (git@github.com:vercel/front.git)");
-    expect(output).toContain("api (git@github.com:vercel/api.git)");
+    expect(output).toMatch(/Feature:\s+fix-auth/);
+    expect(output).toMatch(/Branch:\s+tomdale\/fix-auth/);
+    expect(output).toContain("front");
+    expect(output).toContain("git@github.com:vercel/front.git");
+    expect(output).toContain("api");
+    expect(output).toContain("git@github.com:vercel/api.git");
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -222,9 +258,10 @@ describe("cli", () => {
     await cli();
 
     const output = logs.join("\n");
-    expect(output).toContain("Description: fixing auth");
-    expect(output).toContain("Template: site");
-    expect(output).toContain("front (git@github.com:vercel/front.git)");
+    expect(output).toMatch(/Description:\s+fixing auth/);
+    expect(output).toMatch(/Template:\s+site/);
+    expect(output).toContain("front");
+    expect(output).toContain("git@github.com:vercel/front.git");
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -622,7 +659,7 @@ describe("cli", () => {
     await cli();
 
     expect(runTemplateManagerMock).not.toHaveBeenCalled();
-    expect(logs.join("\n")).toContain("Templates:");
+    expect(logs.join("\n")).toContain("Templates");
     expect(logs.join("\n")).toContain("demo");
     expect(process.exitCode).toBeUndefined();
   });

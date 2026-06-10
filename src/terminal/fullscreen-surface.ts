@@ -1,4 +1,5 @@
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
+import { fullscreenColor } from "./theme.ts";
 
 setRuntime(new NodeRuntime());
 
@@ -27,7 +28,7 @@ export function createFullscreenStatusLine(
     height: 1,
     tags: true,
     padding: { left: 1 },
-    style: { fg: "gray" },
+    style: { fg: fullscreenColor.muted },
   });
 }
 

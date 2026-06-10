@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
+import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -14,6 +15,81 @@ describe("bin/workforest.js", () => {
     );
 
     expect(result.stdout).toContain("Start here (for AI agents):");
+    expect(result.stdout).toBe(stripAnsi(result.stdout));
     expect(result.stderr).not.toContain("ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX");
+  });
+
+  it("styles every help level when color is supported", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      FORCE_COLOR: "1",
+    };
+    Reflect.deleteProperty(env, "NO_COLOR");
+
+    const results = await Promise.all(
+      [
+        ["--help"],
+        ["worktree", "--help"],
+        ["worktree", "delete", "--help"],
+        ["dev", "simulate", "new", "--help"],
+      ].map((args) =>
+        execFileAsync(
+          process.execPath,
+          [path.resolve("bin/workforest.js"), ...args],
+          {
+            env,
+            timeout: 10_000,
+          },
+        ),
+      ),
+    );
+
+    for (const result of results) {
+      expect(result.stdout).toContain("\u001b[");
+      expect(stripAnsi(result.stdout)).toContain("Usage: wf");
+    }
+
+    const coloredOutput = results.map((result) => result.stdout).join("");
+    expect(coloredOutput).toContain("\u001b[36m");
+    expect(coloredOutput).toContain("\u001b[33m");
+    expect(coloredOutput).toContain("\u001b[96m");
+    expect(coloredOutput).toContain("\u001b[97m");
+    expect(coloredOutput).not.toContain("\u001b[32m");
+    expect(coloredOutput).not.toContain("\u001b[35m");
+  });
+
+  it("keeps bundled skill content undecorated on stdout", async () => {
+    const result = await execFileAsync(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), "skills", "get", "terminal-ui"],
+      {
+        env: {
+          ...process.env,
+          WORKFOREST_SKILLS_DIR: path.resolve("skill-data"),
+        },
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.stdout).toMatch(/^---\nname: terminal-ui\n/);
+    expect(result.stdout).not.toContain("Running local copy");
+  });
+
+  it("keeps JSON skill output parseable", async () => {
+    const result = await execFileAsync(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), "skills", "list", "--json"],
+      {
+        env: {
+          ...process.env,
+          WORKFOREST_SKILLS_DIR: path.resolve("skill-data"),
+        },
+        timeout: 10_000,
+      },
+    );
+
+    expect(JSON.parse(result.stdout)).toEqual(
+      expect.objectContaining({ success: true }),
+    );
   });
 });

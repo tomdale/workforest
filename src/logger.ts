@@ -1,4 +1,4 @@
-import chalk from "chalk";
+import { terminalColor, terminalSymbol } from "./terminal/theme.ts";
 
 /**
  * Simple logger for console output.
@@ -7,15 +7,15 @@ import chalk from "chalk";
  */
 export const log = {
   info: (...messages: unknown[]) => {
-    console.log(chalk.cyan("[info]"), ...messages);
+    console.log(terminalColor.accent(terminalSymbol.info), ...messages);
   },
   warn: (...messages: unknown[]) => {
-    console.warn(chalk.yellow("[warn]"), ...messages);
+    console.warn(terminalColor.warning(terminalSymbol.warning), ...messages);
   },
   error: (...messages: unknown[]) => {
-    console.error(chalk.red("[error]"), ...messages);
+    console.error(terminalColor.error(terminalSymbol.error), ...messages);
   },
   success: (...messages: unknown[]) => {
-    console.log(chalk.green("[done]"), ...messages);
+    console.log(terminalColor.success(terminalSymbol.success), ...messages);
   },
 };

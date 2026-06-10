@@ -4,6 +4,7 @@ import { InputDecoder, type KeyInput } from "./input-decoder.ts";
 import type { PromptResult } from "./result.ts";
 import { TerminalSession } from "./session.ts";
 import { truncate, visibleWidth } from "./text.ts";
+import { terminalColor } from "./theme.ts";
 
 export type LineEditorOptions = {
   message: string;
@@ -38,12 +39,12 @@ export async function lineEditor({
 
   const render = (): void => {
     const value = chars.join("");
-    const display = value || chalk.dim(placeholder ?? "");
+    const display = value || terminalColor.muted(placeholder ?? "");
     const cursorDisplay = renderCursor(display, cursor, value.length === 0);
     const lines = [`  ${prefix.active}  ${message}`];
 
     if (errorMessage) {
-      lines.push(`  ${prefix.bar}  ${chalk.yellow(errorMessage)}`);
+      lines.push(`  ${prefix.bar}  ${terminalColor.warning(errorMessage)}`);
     }
     lines.push(`  ${prefix.bar}  ${cursorDisplay}`);
     lines.push(`  ${prefix.barEnd}`);
@@ -68,7 +69,7 @@ export async function lineEditor({
           }
 
           surface.commit([
-            `  ${prefix.done}  ${message} ${chalk.dim("·")} ${value || chalk.dim(defaultValue ?? "")}`,
+            `  ${prefix.done}  ${message} ${terminalColor.muted("·")} ${value || terminalColor.muted(defaultValue ?? "")}`,
           ]);
           cleanup();
           resolve({ type: "submitted", value });

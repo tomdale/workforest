@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { commandHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
+import { printReport } from "./terminal/report.ts";
 
 const SKILL_DIR_NAMES = ["skills", "skill-data"] as const;
 const SUPPLEMENTARY_DIR_NAMES = ["references", "templates"] as const;
@@ -267,16 +268,24 @@ async function runSkillsList(
   }
 
   if (skills.length === 0) {
-    console.log("No skills found");
+    log.info("No skills found.");
     return;
   }
 
-  const width = Math.max(...skills.map((skill) => skill.name.length));
-  for (const skill of skills) {
-    console.log(
-      `  ${skill.name.padEnd(width)}  ${truncateDescription(skill.description, 70)}`,
-    );
-  }
+  printReport({
+    title: "Agent skills",
+    sections: [
+      {
+        entries: skills.map((skill) => ({
+          title: skill.name,
+          ...(skill.description
+            ? { description: truncateDescription(skill.description, 70) }
+            : {}),
+        })),
+      },
+    ],
+    footer: `${skills.length} skill${skills.length === 1 ? "" : "s"}`,
+  });
 }
 
 async function runSkillsGet(

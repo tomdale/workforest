@@ -1,6 +1,6 @@
-import chalk from "chalk";
 import { InlineSurface } from "../../terminal/inline-surface.ts";
 import { TerminalSession } from "../../terminal/session.ts";
+import { terminalColor } from "../../terminal/theme.ts";
 import {
   barColor,
   S_BAR,
@@ -45,7 +45,7 @@ export function spinner(): Spinner {
   const surface = new InlineSurface(process.stdout);
 
   function draw(): void {
-    const frame = chalk.cyan(SPINNER_FRAMES[frameIndex]);
+    const frame = terminalColor.accent(SPINNER_FRAMES[frameIndex]);
     surface.render([`  ${barColor(S_BAR)}  ${frame} ${currentMessage}`]);
     frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
   }

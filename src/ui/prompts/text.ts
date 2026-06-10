@@ -1,6 +1,5 @@
-import chalk from "chalk";
 import { textPrompt } from "../../terminal/inline-widgets.ts";
-import { S_STEP_CANCEL } from "./symbols.ts";
+import { printCancelled } from "./symbols.ts";
 import { terminalSymbols } from "./terminal-symbols.ts";
 import { CancelError, type PromptBaseOptions } from "./types.ts";
 
@@ -29,10 +28,6 @@ export async function text(
     throw new CancelError();
   }
 
-  printCancel();
+  printCancelled();
   process.exit(0);
-}
-
-function printCancel(message = "Cancelled"): void {
-  process.stdout.write(`  ${S_STEP_CANCEL}  ${chalk.red(message)}\n`);
 }

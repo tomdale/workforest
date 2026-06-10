@@ -1,10 +1,10 @@
-import chalk from "chalk";
 import {
   cancel as terminalCancel,
   intro as terminalIntro,
   note as terminalNote,
   outro as terminalOutro,
 } from "../../terminal/inline-widgets.ts";
+import { terminalColor } from "../../terminal/theme.ts";
 import { confirm as rawConfirm } from "./confirm.ts";
 import { fuzzySelect as rawFuzzySelect } from "./fuzzy-select.ts";
 import { multiSelect as rawMultiSelect } from "./multi-select.ts";
@@ -182,17 +182,17 @@ export const promptLog = {
   },
   warn(message: string): void {
     process.stdout.write(
-      `  ${barColor(S_BAR)}  ${S_WARNING} ${chalk.yellow(message)}\n`,
+      `  ${barColor(S_BAR)}  ${S_WARNING} ${terminalColor.warning(message)}\n`,
     );
   },
   error(message: string): void {
     process.stdout.write(
-      `  ${barColor(S_BAR)}  ${S_ERROR} ${chalk.red(message)}\n`,
+      `  ${barColor(S_BAR)}  ${S_ERROR} ${terminalColor.error(message)}\n`,
     );
   },
   success(message: string): void {
     process.stdout.write(
-      `  ${barColor(S_BAR)}  ${S_SUCCESS} ${chalk.green(message)}\n`,
+      `  ${barColor(S_BAR)}  ${S_SUCCESS} ${terminalColor.success(message)}\n`,
     );
   },
 };
