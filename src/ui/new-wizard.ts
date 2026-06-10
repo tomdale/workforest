@@ -324,7 +324,7 @@ function runWizardScreen(
       } else if (state.phase === "reposInput") {
         lines.push(
           `{bold}Enter repositories{/bold}  ${stepHint}`,
-          "{gray-fg}org/repo or git URL, comma-separated{/gray-fg}",
+          "{gray-fg}cached name, org/repo, or git URL; comma-separated{/gray-fg}",
           "",
         );
 

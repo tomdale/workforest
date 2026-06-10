@@ -95,6 +95,8 @@ const COMMAND_HELP: Record<string, string> = {
   new: `Usage: wf new [options] <template|repo...> -- <name-or-description>
 
 Create a workspace from one or more repositories or templates.
+Repository arguments may be owner/repo slugs, git URLs, or unique names from
+the repository cache.
 
 Options:
   -n, --dry-run    Preview without creating a workspace
@@ -114,7 +116,7 @@ Examples:
 Create, list, or delete worktrees. Inside a workforest workspace, slug-only
 creation makes temporary worktrees tracked in workspace metadata. Outside a
 workspace, slug-only creation uses the current git repo's origin remote when
-available.
+available. Standalone repository arguments may use unique cached names.
 
 Options:
   --dir <path>     Target path for standalone worktree creation
@@ -154,7 +156,8 @@ Options:
        wf review delete <target> [options]
 
 Create, list, or remove GitHub review workspaces and PR worktrees. Numeric-only
-PR targets infer the repo from the current review workspace.
+PR targets infer the repo from the current review workspace. Repository targets
+may use unique cached names instead of owner/repo.
 
 Options:
   -n, --dry-run    Preview review removal without deleting
@@ -213,7 +216,8 @@ Options:
   add: `Usage: wf add [options] <repo...>
 
 Add repositories to an existing workspace. Run from inside a workspace or pass
---workspace.
+--workspace. Repositories may be owner/repo slugs, git URLs, or unique cached
+names.
 
 Options:
   -w, --workspace <dir>  Workspace directory to update
@@ -520,7 +524,7 @@ Print template details, repositories, hooks, branch prefix, and location.
 `,
     new: `Usage: wf template new [options] <name> <repo...>
 
-Create a template from repository slugs or git URLs.
+Create a template from repository slugs, git URLs, or unique cached names.
 
 Aliases:
   wf template create
@@ -586,6 +590,7 @@ shell composition.
     add: `Usage: wf repository add <repo...>
 
 Clone or update repositories in the cache without creating worktrees.
+Existing repositories may be specified by a unique cached name.
 
 Aliases:
   wf repository cache

@@ -73,7 +73,7 @@ vi.mock("./ui/grid-consumer.ts", async () => {
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
-import { createTemplate } from "./templates/index.ts";
+import { createTemplate, loadTemplate } from "./templates/index.ts";
 import { CancelError } from "./ui/prompts/index.ts";
 import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 
@@ -331,6 +331,67 @@ describe("cli", () => {
     const output = logs.join("\n");
     expect(output).toContain("myapp");
     expect(output).toContain("git@github.com:mycompany/myapp.git");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("resolves an unqualified registered repository for wf add", async () => {
+    const cacheDir = await createTempDir("workforest-cache-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    await createCachedMirror(
+      cacheDir,
+      "api.git",
+      "git@github.com:vercel/api.git",
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "fix-auth",
+      branchName: "tomdale/fix-auth",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    process.chdir(workspaceDir);
+
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    process.argv = ["node", "wf", "add", "--dry-run", "api"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("git@github.com:vercel/api.git");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("stores qualified repositories when creating a template", async () => {
+    const cacheDir = await createTempDir("workforest-cache-");
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    await createCachedMirror(
+      cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+
+    process.argv = ["node", "wf", "template", "new", "site", "front"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    await expect(loadTemplate("site")).resolves.toMatchObject({
+      config: { repos: ["vercel/front"] },
+    });
     expect(process.exitCode).toBeUndefined();
   });
 

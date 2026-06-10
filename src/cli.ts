@@ -7,15 +7,17 @@ import arg from "arg";
 import {
   isRepoSlug,
   loadWorkspaceConfig,
-  reposFromSlugs,
   saveWorkspaceConfig,
 } from "./config.ts";
 import { commandHelp, help, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
+import { RegisteredRepositoryNameCollisionError } from "./repositories.ts";
 import {
-  RegisteredRepositoryNameCollisionError,
-  resolveRegisteredRepository,
-} from "./repositories.ts";
+  qualifyRepositorySpecifiers,
+  qualifyTemplateRepositories,
+  resolveRepositoryOrTemplateSpecifiers,
+  resolveRepositorySpecifiers,
+} from "./repository-specifiers.ts";
 import { runGit } from "./services/git.ts";
 import {
   isShellAutoCdEnabled,
@@ -689,16 +691,18 @@ async function runReviewCommand(argv: string[]): Promise<void> {
 
 async function runReviewCreate(targetArgs: string[]): Promise<void> {
   try {
+    const resolvedTargetArgs =
+      await qualifyReviewRepositorySpecifier(targetArgs);
     const {
       createReviewWorktree,
       ensureReviewWorkspace,
       parseReviewRepoTarget,
       resolveReviewTarget,
     } = await import("./review.ts");
-    if (targetArgs.length === 1) {
+    if (resolvedTargetArgs.length === 1) {
       let repoTarget: ReturnType<typeof parseReviewRepoTarget> | undefined;
       try {
-        repoTarget = parseReviewRepoTarget(targetArgs);
+        repoTarget = parseReviewRepoTarget(resolvedTargetArgs);
       } catch {
         // Fall through to PR target parsing so compact targets and URLs keep
         // their existing behavior and error messages.
@@ -721,7 +725,10 @@ async function runReviewCreate(targetArgs: string[]): Promise<void> {
     }
 
     const context = await resolveCurrentReviewWorkspaceContext();
-    const target = resolveReviewTarget(targetArgs, context ?? undefined);
+    const target = resolveReviewTarget(
+      resolvedTargetArgs,
+      context ?? undefined,
+    );
     const reviewsDir = await resolveReviewsDir();
     const metadata = await createReviewWorktree({ target, reviewsDir });
 
@@ -803,11 +810,16 @@ async function runReviewRemove(
   options: { dryRun: boolean; force: boolean; skipConfirmation?: boolean },
 ): Promise<void> {
   try {
+    const resolvedTargetArgs =
+      await qualifyReviewRepositorySpecifier(targetArgs);
     const { removeReviewWorktree, resolveReviewTarget } = await import(
       "./review.ts"
     );
     const context = await resolveCurrentReviewWorkspaceContext();
-    const target = resolveReviewTarget(targetArgs, context ?? undefined);
+    const target = resolveReviewTarget(
+      resolvedTargetArgs,
+      context ?? undefined,
+    );
     const reviewsDir = await resolveReviewsDir();
     const targetDir = path.join(
       reviewsDir,
@@ -848,6 +860,41 @@ async function runReviewRemove(
     log.error(getErrorMessage(error));
     process.exitCode = 1;
   }
+}
+
+async function qualifyReviewRepositorySpecifier(
+  targetArgs: readonly string[],
+): Promise<string[]> {
+  if (targetArgs.length === 2) {
+    const [repoSpecifier, prNumber] = targetArgs;
+    if (repoSpecifier && prNumber && !isRepoSlug(repoSpecifier)) {
+      const [qualified] = await qualifyRepositorySpecifiers([repoSpecifier]);
+      return [qualified ?? repoSpecifier, prNumber];
+    }
+    return [...targetArgs];
+  }
+
+  if (targetArgs.length !== 1) {
+    return [...targetArgs];
+  }
+
+  const target = targetArgs[0] ?? "";
+  if (
+    isRepoSlug(target) ||
+    /^#?[1-9][0-9]*$/.test(target) ||
+    /^(?:https?:\/\/|github\.com\/)/i.test(target)
+  ) {
+    return [target];
+  }
+
+  const compact = target.match(/^([^#]+)(#.+)$/);
+  if (compact?.[1] && compact[2] && !isRepoSlug(compact[1])) {
+    const [qualified] = await qualifyRepositorySpecifiers([compact[1]]);
+    return [`${qualified ?? compact[1]}${compact[2]}`];
+  }
+
+  const [qualified] = await qualifyRepositorySpecifiers([target]);
+  return [qualified ?? target];
 }
 
 async function resolveCurrentReviewWorkspaceContext(): Promise<{
@@ -933,7 +980,7 @@ async function runStandaloneWorktreeCreate(args: {
   let branchName: string;
   let targetDir: string;
   try {
-    const repos = reposFromSlugs([repoInput]);
+    const repos = await resolveRepositorySpecifiers([repoInput]);
     if (repos.length !== 1) {
       throw new Error("Exactly one repository is required.");
     }
@@ -1825,7 +1872,7 @@ async function runTemplateNew(argv: string[]): Promise<void> {
     }
 
     const reposInput = await promptText(
-      "Repositories (org/repo or git URL, comma-separated)",
+      "Repositories (cached name, org/repo, or git URL; comma-separated)",
       {
         validate: (input) => {
           if (!input.trim()) {
@@ -1842,15 +1889,12 @@ async function runTemplateNew(argv: string[]): Promise<void> {
       .filter(Boolean);
   }
 
-  // Validate repos
-  for (const repo of repos) {
-    if (!isRepoSlug(repo)) {
-      log.error(
-        `Invalid repository format: "${repo}". Expected "org/repo" or a git URL.`,
-      );
-      process.exitCode = 1;
-      return;
-    }
+  try {
+    repos = await qualifyRepositorySpecifiers(repos);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
   }
 
   // Get description from flag or prompt
@@ -1952,7 +1996,10 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
     initialConfig: template.config,
     workspaceConfig,
     onSave: async (config) => {
-      await createTemplate(templateId, config);
+      await createTemplate(
+        templateId,
+        await qualifyTemplateRepositories(config),
+      );
       log.success(`Template "${templateId}" saved.`);
     },
   });
@@ -2977,7 +3024,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   let templateId: string | undefined;
 
   try {
-    const resolved = await resolveSelections(selections);
+    const resolved = await resolveRepositoryOrTemplateSpecifiers(selections);
     repos = resolved.repos;
     templateId = resolved.templateId;
     if (templateBranchPrefix === undefined) {
@@ -3111,7 +3158,7 @@ async function runAddCommand(argv: string[]): Promise<void> {
     }
 
     const repos = await promptText("Repositories to add", {
-      placeholder: "org/repo or git URL, comma-separated",
+      placeholder: "cached name, org/repo, or git URL; comma-separated",
       validate: (input) => {
         if (!input.trim()) return "At least one repository is required";
         return null;
@@ -3153,7 +3200,7 @@ async function runAddCommand(argv: string[]): Promise<void> {
 
   let repos: RepoConfig[];
   try {
-    repos = reposFromSlugs(selections);
+    repos = await resolveRepositorySpecifiers(selections);
   } catch (error) {
     log.error(getErrorMessage(error));
     process.exitCode = 1;
@@ -3414,66 +3461,6 @@ function inferDirPrefix(workspaceDir: string, featureName: string): string {
   return "";
 }
 
-type ResolvedSelections = {
-  repos: RepoConfig[];
-  templateId?: string;
-  templateBranchPrefix?: string;
-};
-
-/**
- * Resolve positional arguments to repos.
- * Qualified arguments are treated as repository references. Unqualified
- * arguments resolve as templates first, then as registered repository names.
- */
-async function resolveSelections(
-  selections: string[],
-): Promise<ResolvedSelections> {
-  const repoSlugs: string[] = [];
-  let templateId: string | undefined;
-  let templateBranchPrefix: string | undefined;
-
-  for (const selection of selections) {
-    if (isRepoSlug(selection)) {
-      repoSlugs.push(selection);
-    } else {
-      const template = await loadTemplate(selection);
-      if (template) {
-        templateId = template.id;
-        templateBranchPrefix = template.config.branchPrefix;
-        repoSlugs.push(...template.config.repos);
-        continue;
-      }
-
-      const registeredRepo = await resolveRegisteredRepository(selection);
-      if (registeredRepo) {
-        repoSlugs.push(registeredRepo);
-        continue;
-      }
-
-      const templates = await listTemplates();
-      const available = templates.map((t) => t.id).join(", ");
-      const suffix = available
-        ? `Available templates: ${available}`
-        : "No templates configured.";
-      throw new Error(
-        `Unknown template or repository "${selection}". ${suffix}`,
-      );
-    }
-  }
-
-  if (repoSlugs.length === 0) {
-    throw new Error(
-      "No repositories specified. Provide template names or org/repo arguments.",
-    );
-  }
-
-  return {
-    repos: reposFromSlugs(repoSlugs),
-    ...(templateId && { templateId }),
-    ...(templateBranchPrefix !== undefined && { templateBranchPrefix }),
-  };
-}
-
 /**
  * Simple slug sanitization for fallback when AI generation fails.
  */
@@ -3706,7 +3693,10 @@ async function wizardCreateTemplate(): Promise<string | null> {
       initialConfig: { repos: [] },
       workspaceConfig,
       onSave: async (config) => {
-        await createTemplate(templateId, config);
+        await createTemplate(
+          templateId,
+          await qualifyTemplateRepositories(config),
+        );
         savedTemplateId = templateId;
       },
     });
@@ -3778,7 +3768,10 @@ async function wizardEditLoadedTemplate(
     initialConfig: template.config,
     workspaceConfig,
     onSave: async (config) => {
-      await createTemplate(template.id, config);
+      await createTemplate(
+        template.id,
+        await qualifyTemplateRepositories(config),
+      );
       savedTemplateId = template.id;
     },
   });
@@ -3859,7 +3852,10 @@ async function wizardCloneLoadedTemplate(
     initialConfig: sourceTemplate.config,
     workspaceConfig,
     onSave: async (config) => {
-      await createTemplate(newTemplateId, config);
+      await createTemplate(
+        newTemplateId,
+        await qualifyTemplateRepositories(config),
+      );
       savedTemplateId = newTemplateId;
     },
   });
@@ -3976,7 +3972,7 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
 
         // Manual entry
         const repos = await promptText("Repositories", {
-          placeholder: "org/repo or git URL, comma-separated",
+          placeholder: "cached name, org/repo, or git URL; comma-separated",
           validate: (input) => {
             if (!input.trim()) return "At least one repository is required";
             return null;
@@ -4037,7 +4033,7 @@ async function promptForTemplateOrRepos(): Promise<string[] | null> {
 
       if (selection.type === "custom") {
         const repos = await promptText("Repositories", {
-          placeholder: "org/repo or git URL, comma-separated",
+          placeholder: "cached name, org/repo, or git URL; comma-separated",
           validate: (input) => {
             if (!input.trim()) return "At least one repository is required";
             return null;

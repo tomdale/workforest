@@ -71,14 +71,15 @@ export class CachedRepositorySelectorError extends Error {
 
 export async function resolveRegisteredRepository(
   repositoryName: string,
+  repositories?: CachedRepository[],
 ): Promise<string | null> {
   const normalizedName = repositoryName.trim().toLowerCase();
   if (!normalizedName) {
     return null;
   }
 
-  const repositories = await listCachedRepositories();
-  const matches = repositories.filter(
+  const candidates = repositories ?? (await listCachedRepositories());
+  const matches = candidates.filter(
     (repository) =>
       repository.slug && repository.name.toLowerCase() === normalizedName,
   );

@@ -14,6 +14,7 @@ import {
   resolveCachedRepository,
   updateCachedRepository,
 } from "./repositories.ts";
+import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
 import { printReport } from "./terminal/report.ts";
 import {
   isInteractive,
@@ -224,18 +225,28 @@ async function runRepositoryAdd(argv: string[]): Promise<void> {
     return;
   }
 
-  for (const input of argv) {
+  let inputs: string[];
+  try {
+    inputs = await qualifyRepositorySpecifiers(argv);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+    return;
+  }
+
+  for (const [index, input] of inputs.entries()) {
+    const displayInput = argv[index] ?? input;
     try {
       const repository = await runWithOptionalSpinner(
-        `Caching ${input}`,
+        `Caching ${displayInput}`,
         () => addCachedRepository(input),
-        `Cached ${input}`,
+        `Cached ${displayInput}`,
       );
       log.success(
         `${repositoryDisplayName(repository)}: ${repository.mirrorPath}`,
       );
     } catch (error) {
-      log.error(`${input}: ${getErrorMessage(error)}`);
+      log.error(`${displayInput}: ${getErrorMessage(error)}`);
       process.exitCode = 1;
     }
   }
@@ -443,7 +454,9 @@ async function runRepositoryManagerCommand(): Promise<void> {
       case "reload":
         continue;
       case "add": {
-        const input = await promptText("Repository (owner/repo or git URL)");
+        const input = await promptText(
+          "Repository (cached name, owner/repo, or git URL)",
+        );
         await runRepositoryAdd([input]);
         initialMirrorPath = (await resolveCachedRepository(input))?.mirrorPath;
         continue;

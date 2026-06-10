@@ -19,8 +19,8 @@ type RenderTemplateEditorOptions = {
 };
 
 function validateRepo(repo: string): string | undefined {
-  if (!repo.includes("/")) {
-    return "Invalid format: use org/repo or git URL";
+  if (!repo.trim()) {
+    return "Repository is required";
   }
   return undefined;
 }
@@ -134,14 +134,17 @@ export async function renderTemplateEditor({
     }
 
     while (addMore) {
-      const repo = await promptText("Repository (org/repo or git URL)", {
-        placeholder: "e.g., vercel/next.js or git@gitlab.com:org/repo.git",
-        validate: (value) => {
-          if (!value) return "Repository is required";
-          return validateRepo(value) ?? null;
+      const repo = await promptText(
+        "Repository (cached name, org/repo, or git URL)",
+        {
+          placeholder: "e.g., next.js, vercel/next.js, or a git URL",
+          validate: (value) => {
+            if (!value) return "Repository is required";
+            return validateRepo(value) ?? null;
+          },
+          throwOnCancel: true,
         },
-        throwOnCancel: true,
-      });
+      );
 
       repos.push(repo);
 

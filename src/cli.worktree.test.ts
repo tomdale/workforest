@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
@@ -28,12 +30,14 @@ const {
 }));
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
+const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const ORIGINAL_CD_PATH_FILE = process.env[WORKFOREST_CD_PATH_ENV];
 const ORIGINAL_ARGV = [...process.argv];
 const ORIGINAL_EXIT_CODE = process.exitCode;
 const ORIGINAL_CWD = process.cwd();
 
 const tempDirs: string[] = [];
+const execFileAsync = promisify(execFile);
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -43,6 +47,21 @@ async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+async function createCachedMirror(
+  cacheDir: string,
+  directoryName: string,
+  remote: string,
+): Promise<void> {
+  const mirrorDir = path.join(cacheDir, directoryName);
+  await mkdir(mirrorDir, { recursive: true });
+  await execFileAsync("git", ["init", "--bare", "--quiet"], {
+    cwd: mirrorDir,
+  });
+  await execFileAsync("git", ["remote", "add", "origin", remote], {
+    cwd: mirrorDir,
+  });
 }
 
 async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
@@ -92,6 +111,11 @@ afterEach(async () => {
   } else {
     process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
   }
+  if (ORIGINAL_CACHE_DIR === undefined) {
+    delete process.env["WORKFOREST_CACHE_DIR"];
+  } else {
+    process.env["WORKFOREST_CACHE_DIR"] = ORIGINAL_CACHE_DIR;
+  }
 
   if (ORIGINAL_CD_PATH_FILE === undefined) {
     delete process.env[WORKFOREST_CD_PATH_ENV];
@@ -109,6 +133,36 @@ afterEach(async () => {
 });
 
 describe("wf worktree", () => {
+  it("infers the owner for a cached standalone repository", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    const cwd = await createTempDir("workforest-cwd-");
+    const logs: string[] = [];
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    process.chdir(cwd);
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
+    await createCachedMirror(
+      cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "front", "fix-auth", "-n"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("git@github.com:vercel/front.git");
+    expect(createSingleWorktreeMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("prints a dry-run preview without creating a worktree", async () => {
     const configDir = await createTempDir("workforest-config-");
     const cwd = await createTempDir("workforest-cwd-");

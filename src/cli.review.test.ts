@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
@@ -24,16 +26,33 @@ const {
 }));
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
+const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const ORIGINAL_CD_PATH_FILE = process.env[WORKFOREST_CD_PATH_ENV];
 const ORIGINAL_ARGV = [...process.argv];
 const ORIGINAL_EXIT_CODE = process.exitCode;
 const ORIGINAL_CWD = process.cwd();
 const tempDirs: string[] = [];
+const execFileAsync = promisify(execFile);
 
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+async function createCachedMirror(
+  cacheDir: string,
+  directoryName: string,
+  remote: string,
+): Promise<void> {
+  const mirrorDir = path.join(cacheDir, directoryName);
+  await mkdir(mirrorDir, { recursive: true });
+  await execFileAsync("git", ["init", "--bare", "--quiet"], {
+    cwd: mirrorDir,
+  });
+  await execFileAsync("git", ["remote", "add", "origin", remote], {
+    cwd: mirrorDir,
+  });
 }
 
 async function importCliWithReviewMock(): Promise<typeof import("./cli.ts")> {
@@ -81,6 +100,11 @@ afterEach(async () => {
   } else {
     process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
   }
+  if (ORIGINAL_CACHE_DIR === undefined) {
+    delete process.env["WORKFOREST_CACHE_DIR"];
+  } else {
+    process.env["WORKFOREST_CACHE_DIR"] = ORIGINAL_CACHE_DIR;
+  }
 
   if (ORIGINAL_CD_PATH_FILE === undefined) {
     delete process.env[WORKFOREST_CD_PATH_ENV];
@@ -98,6 +122,43 @@ afterEach(async () => {
 });
 
 describe("wf review", () => {
+  it("infers the owner for a cached repository name", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsDir, "omniagent");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      reviewsDir,
+    });
+    await createCachedMirror(
+      cacheDir,
+      "omniagent.git",
+      "git@github.com:vercel/omniagent.git",
+    );
+    ensureReviewWorkspaceMock.mockResolvedValue({
+      owner: "vercel",
+      repo: "omniagent",
+      path: workspaceDir,
+      repoDir: path.join(workspaceDir, "omniagent"),
+    });
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { cli } = await importCliWithReviewMock();
+    process.argv = ["node", "wf", "review", "omniagent"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
+      reviewsDir,
+      target: { owner: "vercel", repo: "omniagent" },
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("creates a repo review workspace and writes the shell cd target when no PR is specified", async () => {
     const configDir = await createTempDir("workforest-config-");
     const reviewsDir = await createTempDir("workforest-reviews-");
