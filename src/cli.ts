@@ -9,6 +9,7 @@ import { isArgumentParserError, UsageError } from "./cli/errors.ts";
 import {
   applyExitCode,
   errorResult,
+  failure,
   renderCommandResult,
   success,
 } from "./cli/output.ts";
@@ -169,6 +170,10 @@ export async function executeCli(
 async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
+  if (invocation.command.leaf.handler.startsWith("template.")) {
+    return runTemplateInvocation(invocation);
+  }
+
   return runLegacyHandler(async () => {
     const argv = [...invocation.command.argv];
     const invokedRoot =
@@ -239,37 +244,6 @@ async function runInvocation(
         return;
       case "init":
         await runInitCommand(argv);
-        return;
-      case "template.default":
-        if (invokedRoot === "templates") {
-          await runTemplatesCommand(argv);
-        } else {
-          await runTemplateCommand(argv);
-        }
-        return;
-      case "template.list":
-        await runTemplateCommand(["list", ...argv]);
-        return;
-      case "template.show":
-        await runTemplateCommand(["show", ...argv]);
-        return;
-      case "template.info":
-        await runTemplateCommand(["info", ...argv]);
-        return;
-      case "template.new":
-        await runTemplateCommand(["new", ...argv]);
-        return;
-      case "template.edit":
-        await runTemplateCommand(["edit", ...argv]);
-        return;
-      case "template.add-file":
-        await runTemplateCommand(["add-file", ...argv]);
-        return;
-      case "template.copy":
-        await runTemplateCommand(["copy", ...argv]);
-        return;
-      case "template.delete":
-        await runTemplateCommand(["delete", ...argv]);
         return;
       case "repository.default": {
         const { runRepositoriesCommand, runRepositoryCommand } = await import(
@@ -2289,115 +2263,54 @@ async function runFindCommand(argv: string[]): Promise<void> {
   }
 }
 
-async function runTemplateCommand(argv: string[]): Promise<void> {
-  const subcommand = argv[0];
-  const subArgv = argv.slice(1);
-
-  switch (subcommand) {
-    case "--help":
-    case "-h":
-      console.log(commandHelp("template"));
-      break;
-    case "list":
-    case "ls":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "list"));
-        return;
-      }
-      await runTemplateList();
-      break;
-    case undefined:
-      if (isInteractive()) {
-        await runTemplateManagerCommand();
-      } else {
-        await runTemplateList();
-      }
-      break;
-    case "show":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "show"));
-        return;
-      }
-      await runTemplateShow(subArgv);
-      break;
-    case "info":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "info"));
-        return;
-      }
-      await runTemplateInfo(subArgv);
-      break;
-    case "new":
-    case "create":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "new"));
-        return;
-      }
-      await runTemplateNew(subArgv);
-      break;
-    case "delete":
-    case "rm":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "delete"));
-        return;
-      }
-      await runTemplateDelete(subArgv);
-      break;
-    case "edit":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "edit"));
-        return;
-      }
-      await runTemplateEdit(subArgv);
-      break;
-    case "add-file":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "add-file"));
-        return;
-      }
-      await runTemplateAddFile(subArgv);
-      break;
-    case "copy":
-    case "cp":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "copy"));
-        return;
-      }
-      await runTemplateCopy(subArgv);
-      break;
-    default:
-      log.error(`Unknown template subcommand: ${subcommand}`);
-      log.info(
-        "Available: list, show, info, new, edit, add-file, delete, copy",
+async function runTemplateInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  switch (invocation.command.leaf.handler) {
+    case "template.default":
+      return isInteractive() ? runTemplateManagerCommand() : runTemplateList();
+    case "template.list":
+      return runTemplateList();
+    case "template.show":
+      return runTemplateShow(invocation.beforeDoubleDash[0] ?? "");
+    case "template.info":
+      return runTemplateInfo(invocation.beforeDoubleDash[0] ?? "");
+    case "template.new":
+      return runTemplateNew(invocation);
+    case "template.edit":
+      return runTemplateEdit(invocation.beforeDoubleDash[0] ?? "");
+    case "template.add-file":
+      return runTemplateAddFile(invocation);
+    case "template.copy":
+      return runTemplateCopy(
+        invocation.beforeDoubleDash[0] ?? "",
+        invocation.beforeDoubleDash[1] ?? "",
       );
-      process.exitCode = 1;
+    case "template.delete":
+      return runTemplateDelete(
+        invocation.beforeDoubleDash[0] ?? "",
+        invocation.flags["force"] === true,
+      );
+    default:
+      throw new Error(
+        `No template handler registered for ${invocation.command.leaf.handler}.`,
+      );
   }
 }
 
-async function runTemplatesCommand(argv: string[]): Promise<void> {
-  if (argv[0] === "--help" || argv[0] === "-h") {
-    console.log(commandHelp("templates"));
-    return;
-  }
-
-  if (argv.length > 0) {
-    await runTemplateCommand(argv);
-    return;
-  }
-
-  if (isInteractive()) {
-    await runTemplateManagerCommand();
-  } else {
-    await runTemplateList();
-  }
+function templateSuccess(): CommandResult {
+  return success();
 }
 
-async function runTemplateManagerCommand(): Promise<void> {
+function templateFailure(): CommandResult {
+  return failure(1, { kind: "none" });
+}
+
+async function runTemplateManagerCommand(): Promise<CommandResult> {
   const { shouldUseTemplateManager } = await import("./ui/template-manager.ts");
 
   if (!shouldUseTemplateManager()) {
-    await runTemplateList();
-    return;
+    return runTemplateList();
   }
 
   let initialTemplateId: string | undefined;
@@ -2421,7 +2334,7 @@ async function runTemplateManagerCommand(): Promise<void> {
 
     switch (action.type) {
       case "quit":
-        return;
+        return templateSuccess();
       case "reload":
         continue;
       case "create": {
@@ -2448,22 +2361,25 @@ async function runTemplateManagerCommand(): Promise<void> {
       }
       case "delete":
         initialTemplateId = undefined;
-        await runTemplateDelete([action.templateId]);
+        if (
+          (await runTemplateDelete(action.templateId, false)).exitCode !== 0
+        ) {
+          return templateFailure();
+        }
         continue;
       case "show":
-        await runTemplateShow([action.templateId]);
-        return;
+        return runTemplateShow(action.templateId);
     }
   }
 }
 
-async function runTemplateList(): Promise<void> {
+async function runTemplateList(): Promise<CommandResult> {
   const templates = await listTemplates();
 
   if (templates.length === 0) {
     log.info("No templates configured.");
     log.info(`Templates directory: ${getTemplatesDir()}`);
-    return;
+    return templateSuccess();
   }
 
   printReport({
@@ -2489,17 +2405,10 @@ async function runTemplateList(): Promise<void> {
       `${templates.length} template${templates.length === 1 ? "" : "s"}`,
     ].join("\n"),
   });
+  return templateSuccess();
 }
 
-async function runTemplateShow(argv: string[]): Promise<void> {
-  const templateId = argv[0];
-
-  if (!templateId) {
-    log.error("Missing template name. Usage: workforest template show <name>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateShow(templateId: string): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
@@ -2507,8 +2416,7 @@ async function runTemplateShow(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const templateDir = path.dirname(template.path);
@@ -2517,17 +2425,10 @@ async function runTemplateShow(argv: string[]): Promise<void> {
   if (!isShellAutoCdEnabled()) {
     log.info(`Run: cd ${templateDir}`);
   }
+  return templateSuccess();
 }
 
-async function runTemplateInfo(argv: string[]): Promise<void> {
-  const templateId = argv[0];
-
-  if (!templateId) {
-    log.error("Missing template name. Usage: workforest template info <name>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateInfo(templateId: string): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
@@ -2535,8 +2436,7 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   let workspaceBranchPrefix: string | undefined;
@@ -2593,30 +2493,16 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
     ],
     footer: `Config: ${template.path}`,
   });
+  return templateSuccess();
 }
 
-async function runTemplateNew(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--description": String,
-      "-d": "--description",
-    },
-    { argv, permissive: true },
-  );
-
-  // First positional arg is template name, rest are repos
-  let templateId = args._[0];
-  let repos = args._.slice(1);
+async function runTemplateNew(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  let templateId = invocation.beforeDoubleDash[0];
+  let repos = invocation.beforeDoubleDash.slice(1);
 
   if (!templateId) {
-    if (!isInteractive()) {
-      log.error(
-        "Missing template name. Usage: workforest template new <name> [repo...]",
-      );
-      process.exitCode = 1;
-      return;
-    }
-
     templateId = await promptText("Template name", {
       validate: (input) => {
         try {
@@ -2633,20 +2519,11 @@ async function runTemplateNew(argv: string[]): Promise<void> {
   const existing = await loadTemplate(templateId);
   if (existing) {
     log.error(`Template "${templateId}" already exists.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // If no repos provided via args, prompt for them
   if (repos.length === 0) {
-    if (!isInteractive()) {
-      log.error(
-        "Missing repositories. Usage: workforest template new <name> <repo...>",
-      );
-      process.exitCode = 1;
-      return;
-    }
-
     const reposInput = await promptText(
       "Repositories (cached name, org/repo, or git URL; comma-separated)",
       {
@@ -2669,12 +2546,14 @@ async function runTemplateNew(argv: string[]): Promise<void> {
     repos = await qualifyRepositorySpecifiers(repos);
   } catch (error) {
     log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Get description from flag or prompt
-  let description = args["--description"];
+  let description =
+    typeof invocation.flags["description"] === "string"
+      ? invocation.flags["description"]
+      : undefined;
   if (description === undefined && isInteractive()) {
     description = await promptText("Description", {
       placeholder: "(optional)",
@@ -2689,68 +2568,44 @@ async function runTemplateNew(argv: string[]): Promise<void> {
 
   log.success(`Template "${templateId}" created.`);
   log.info(`Location: ${getTemplatesDir()}/${templateId}/template.jsonc`);
+  return templateSuccess();
 }
 
-async function runTemplateDelete(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--force": Boolean,
-      "-f": "--force",
-    },
-    { argv },
-  );
-
-  const templateId = args._[0];
-
-  if (!templateId) {
-    log.error(
-      "Missing template name. Usage: workforest template delete <name>",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateDelete(
+  templateId: string,
+  force: boolean,
+): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Confirm deletion unless --force is passed
-  if (!args["--force"]) {
+  if (!force) {
     if (!isInteractive()) {
       log.error(
         "Cannot confirm deletion in non-interactive mode. Use --force.",
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     const confirmed = await promptConfirm(`Delete template "${templateId}"?`);
     if (!confirmed) {
       log.info("Deletion cancelled.");
-      return;
+      return templateSuccess();
     }
   }
 
   await deleteTemplate(templateId);
   log.success(`Template "${templateId}" deleted.`);
+  return templateSuccess();
 }
 
-async function runTemplateEdit(argv: string[]): Promise<void> {
-  const templateId = argv[0];
-
-  if (!templateId) {
-    log.error("Missing template name. Usage: workforest template edit <name>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateEdit(templateId: string): Promise<CommandResult> {
   if (!isInteractive()) {
     log.error("Template editing requires an interactive terminal.");
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const template = await loadTemplate(templateId);
@@ -2760,8 +2615,7 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const { config: workspaceConfig } = await loadWorkspaceConfig();
@@ -2779,36 +2633,25 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
       log.success(`Template "${templateId}" saved.`);
     },
   });
+  return templateSuccess();
 }
 
-async function runTemplateAddFile(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--template": String,
-      "-t": "--template",
-    },
-    { argv },
-  );
-
-  let sourceInputs = args._;
-  if (sourceInputs.length === 0) {
-    log.error(
-      "Usage: workforest template add-file [--template <name>] <path...>",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateAddFile(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  let sourceInputs = [...invocation.beforeDoubleDash];
   const workspaceDir = await detectWorkspaceFromCwd();
-  let templateId = args["--template"];
+  let templateId =
+    typeof invocation.flags["template"] === "string"
+      ? invocation.flags["template"]
+      : undefined;
   let resolvedTemplate: Awaited<ReturnType<typeof loadTemplate>> | null = null;
   if (!workspaceDir && !templateId) {
     templateId = sourceInputs[0];
     sourceInputs = sourceInputs.slice(1);
     if (!templateId || sourceInputs.length === 0) {
       log.error("Usage: workforest template add-file <template> <path...>");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
   }
 
@@ -2817,8 +2660,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
   if (!templateId) {
     if (!workspaceDir) {
       log.error("Not inside a workspace.");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     const firstInput = sourceInputs[0];
@@ -2826,8 +2668,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       log.error(
         "Usage: workforest template add-file [--template <name>] <path...>",
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     let candidateTemplate: Awaited<ReturnType<typeof loadTemplate>> = null;
@@ -2844,8 +2685,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       log.error(
         `Ambiguous add-file argument "${firstInput}": it matches both a template and an existing file or directory.`,
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     if (candidateTemplate) {
@@ -2854,23 +2694,20 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       sourceInputs = sourceInputs.slice(1);
       if (sourceInputs.length === 0) {
         log.error("Usage: workforest template add-file <template> <path...>");
-        process.exitCode = 1;
-        return;
+        return templateFailure();
       }
     } else if (!candidateExists) {
       log.error(
         `Could not resolve add-file argument "${firstInput}" as either a template or an existing file or directory.`,
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
   }
 
   if (!templateId) {
     if (!workspaceDir) {
       log.error("Not inside a workspace.");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     let metadata: WorkspaceMetadata | null;
@@ -2878,14 +2715,12 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       metadata = await readWorkspaceMetadata(workspaceDir);
     } catch (error) {
       log.error(getErrorMessage(error));
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     if (!metadata?.workspace.template_id) {
       log.error("Current workspace was not created from a template.");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     templateId = metadata.workspace.template_id;
@@ -2894,8 +2729,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
   const template = resolvedTemplate ?? (await loadTemplate(templateId));
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const entries: TemplateAddFileEntry[] = [];
@@ -2906,7 +2740,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       templatePath: template.path,
     });
     if (!resolved) {
-      return;
+      return templateFailure();
     }
     entries.push(...resolved);
   }
@@ -2924,8 +2758,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
         const targetStat = await fs.stat(entry.targetPath);
         if (!targetStat.isDirectory()) {
           log.error(`Template path already exists: ${entry.targetPath}`);
-          process.exitCode = 1;
-          return;
+          return templateFailure();
         }
       }
       continue;
@@ -2935,8 +2768,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       const targetStat = await fs.stat(entry.targetPath);
       if (!targetStat.isFile()) {
         log.error(`Template path already exists: ${entry.targetPath}`);
-        process.exitCode = 1;
-        return;
+        return templateFailure();
       }
 
       const diff = await runNoIndexDiff(entry.targetPath, entry.sourcePath);
@@ -2953,8 +2785,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
 
       if (action === "cancel") {
         log.info("Cancelled.");
-        process.exitCode = 1;
-        return;
+        return templateFailure();
       }
 
       if (action === "skip") {
@@ -2985,6 +2816,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       ? entries[0]?.relativePath
       : `${sourceInputs.length} paths`;
   log.success(`Added ${sourceSummary} to template "${template.id}".${suffix}`);
+  return templateSuccess();
 }
 
 async function resolveTemplateAddFileEntries({
@@ -3005,7 +2837,6 @@ async function resolveTemplateAddFileEntries({
     path.isAbsolute(relativePath)
   ) {
     log.error(`File must be inside ${sourceRoot}: ${sourcePath}`);
-    process.exitCode = 1;
     return null;
   }
 
@@ -3014,13 +2845,11 @@ async function resolveTemplateAddFileEntries({
     sourceStat = await fs.stat(sourcePath);
   } catch {
     log.error(`File not found: ${sourcePath}`);
-    process.exitCode = 1;
     return null;
   }
 
   if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
     log.error(`Not a file or directory: ${sourcePath}`);
-    process.exitCode = 1;
     return null;
   }
 
@@ -3111,7 +2940,6 @@ async function resolveTemplateAddFileConflict(
 ): Promise<Exclude<TemplateAddFileConflictAction, "diff">> {
   if (!isInteractive()) {
     log.error(`Template file already exists: ${entry.targetPath}`);
-    process.exitCode = 1;
     return "cancel";
   }
 
@@ -3191,16 +3019,10 @@ function runNoIndexDiff(oldPath: string, newPath: string): Promise<string> {
   });
 }
 
-async function runTemplateCopy(argv: string[]): Promise<void> {
-  const sourceId = argv[0];
-  const destId = argv[1];
-
-  if (!sourceId || !destId) {
-    log.error("Usage: workforest template copy <source> <destination>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateCopy(
+  sourceId: string,
+  destId: string,
+): Promise<CommandResult> {
   // Load source template
   const sourceTemplate = await loadTemplate(sourceId);
   if (!sourceTemplate) {
@@ -3209,21 +3031,20 @@ async function runTemplateCopy(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Check destination doesn't exist
   const destTemplate = await loadTemplate(destId);
   if (destTemplate) {
     log.error(`Template "${destId}" already exists.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Create the copy
   await createTemplate(destId, sourceTemplate.config);
   log.success(`Template "${sourceId}" copied to "${destId}".`);
+  return templateSuccess();
 }
 
 async function runCleanCommand(argv: string[]): Promise<void> {
