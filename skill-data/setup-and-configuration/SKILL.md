@@ -5,9 +5,9 @@ description: Workforest setup and configuration guidance. Use when configuring W
 
 # Workforest Setup And Configuration
 
-Use this skill when a workspace needs repeatable setup beyond a one-off `wf new`
-command: global config, templates, built-in initializers, hooks, branch prefixes,
-Vercel linking, or default files.
+Use this skill when a workspace needs repeatable setup beyond a one-off
+`wf workspace create` command: global config, templates, built-in initializers,
+hooks, branch prefixes, Vercel linking, or default files.
 
 ## Common Commands
 
@@ -15,13 +15,9 @@ Vercel linking, or default files.
 wf config show
 wf config init
 wf config edit
-wf templates
-wf template list
-wf template info "oss-docs"
-wf template new "oss-docs" vercel/next.js vercel/turbo
-wf template edit "oss-docs"
-wf template copy "oss-docs" "oss-docs-experiment"
-wf template rm "oss-docs-experiment"
+wf template manage
+wf template show "oss-docs"
+wf template open "oss-docs"
 ```
 
 For the detailed setup schema, load `references/template-schema.md`:

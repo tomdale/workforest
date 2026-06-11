@@ -225,7 +225,7 @@ async function runDevNewSimulation(argv: string[]): Promise<void> {
     templates: SYNTHETIC_TEMPLATES,
     handleTemplateManagement: async () => {
       note(
-        "Template management is not simulated here.\nReturning to the synthetic wf new flow.",
+        "Template management is not simulated here.\nReturning to the synthetic workspace creation flow.",
         "Dev simulator",
       );
       return null;
@@ -260,7 +260,7 @@ async function runDevNewSimulation(argv: string[]): Promise<void> {
     ]
       .filter(Boolean)
       .join("\n"),
-    "Synthetic wf new",
+    "Synthetic workspace creation",
   );
 
   await renderSyntheticRepoSetup(repos, {
@@ -284,7 +284,9 @@ async function renderSyntheticRepoSetup(
   options: DevNewOptions,
 ): Promise<void> {
   if (repos.length === 0) {
-    throw new Error("Synthetic wf new simulation requires at least one repo.");
+    throw new Error(
+      "Synthetic workspace creation simulation requires at least one repo.",
+    );
   }
 
   const pipelines = new Map(
