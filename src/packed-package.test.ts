@@ -288,7 +288,7 @@ describe("packed package", () => {
     });
   });
 
-  it("does not hide source-load failures behind the dist fallback", async () => {
+  it("does not hide opt-in source-load failures behind the dist fallback", async () => {
     const destination = path.join(fixture.rootDir, "source-error");
     const packageDir = await fixture.extractRootPackage(destination);
     await mkdir(path.join(packageDir, "src"));
@@ -307,7 +307,10 @@ describe("packed package", () => {
       [path.join(packageDir, "bin", "workforest.js"), "--help"],
       {
         cwd: packageDir,
-        env: fixture.env,
+        env: {
+          ...fixture.env,
+          WORKFOREST_USE_SOURCE_CLI: "1",
+        },
         timeout: 10_000,
       },
     );

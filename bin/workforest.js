@@ -4,10 +4,12 @@ import { access } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 import { fileURLToPath as toPath } from "node:url";
 
+const USE_SOURCE_ENV = "WORKFOREST_USE_SOURCE_CLI";
 const sourceUrl = new URL("../src/cli.ts", import.meta.url);
-const { cli } = (await sourceExists())
-  ? await getCLIFromSource()
-  : await getCLIFromDist();
+const { cli } =
+  shouldUseSource() && (await sourceExists())
+    ? await getCLIFromSource()
+    : await getCLIFromDist();
 await cli();
 
 function getCLIFromSource() {
@@ -32,6 +34,10 @@ function projectPath() {
   return (
     relative(process.cwd(), dirname(dirname(toPath(import.meta.url)))) || "."
   );
+}
+
+function shouldUseSource() {
+  return Boolean(process.env[USE_SOURCE_ENV]);
 }
 
 async function sourceExists() {

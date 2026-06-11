@@ -8,15 +8,36 @@ import { runSubprocess } from "./test-utils/subprocess.ts";
 const execFileAsync = promisify(execFile);
 
 describe("bin/workforest.js", () => {
-  it("runs through node and loads the source CLI", async () => {
+  it("runs through node and loads the built CLI by default", async () => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    Reflect.deleteProperty(env, "WORKFOREST_USE_SOURCE_CLI");
+
     const result = await execFileAsync(
       process.execPath,
       [path.resolve("bin/workforest.js"), "--help"],
-      { timeout: 10_000 },
+      { env, timeout: 10_000 },
     );
 
     expect(result.stdout).toContain("Start here (for AI agents):");
     expect(result.stdout).toBe(stripAnsi(result.stdout));
+    expect(result.stderr).not.toContain("Running local copy");
+  });
+
+  it("loads the source CLI when WORKFOREST_USE_SOURCE_CLI is set", async () => {
+    const result = await execFileAsync(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), "--help"],
+      {
+        env: {
+          ...process.env,
+          WORKFOREST_USE_SOURCE_CLI: "1",
+        },
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.stdout).toContain("Start here (for AI agents):");
+    expect(result.stderr).toContain("Running local copy");
     expect(result.stderr).not.toContain("ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX");
   });
 
