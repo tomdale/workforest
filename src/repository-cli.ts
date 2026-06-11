@@ -1,12 +1,15 @@
 import { OperationalError } from "./cli/errors.ts";
-import { failure, success } from "./cli/output.ts";
-import type {
-  CommandResult,
-  ParsedInvocation,
-  RenderModel,
-} from "./cli/types.ts";
+import {
+  failure,
+  humanOutput,
+  jsonSuccess,
+  pathOutput,
+  renderCommandResult,
+  reportOutput,
+  success,
+} from "./cli/output.ts";
+import type { CommandResult, ParsedInvocation } from "./cli/types.ts";
 import { getCacheDir } from "./config.ts";
-import { log } from "./logger.ts";
 import {
   addCachedRepository,
   type CachedRepository,
@@ -20,7 +23,8 @@ import {
   updateCachedRepository,
 } from "./repositories.ts";
 import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
-import { printReport } from "./terminal/report.ts";
+import { renderReport } from "./terminal/report.ts";
+import { terminalColor, terminalSymbol } from "./terminal/theme.ts";
 import {
   isInteractive,
   promptConfirm,
@@ -73,45 +77,49 @@ export async function runCacheInvocation(
 async function runCacheList(json: boolean): Promise<CommandResult> {
   const repositories = await listCachedRepositories();
   if (json) {
-    return result({
-      kind: "json",
-      value: repositories.map(toJson),
-      stream: "stdout",
-    });
+    return jsonSuccess(repositories.map(toJson));
   }
   if (repositories.length === 0) {
-    log.info("No cached repositories.");
-    log.info(`Cache directory: ${getCacheDir()}`);
-    return success();
+    return success(
+      humanOutput(
+        [
+          formatMessage("info", "No cached repositories."),
+          formatMessage("info", `Cache directory: ${getCacheDir()}`),
+        ].join("\n"),
+      ),
+    );
   }
 
-  printReport({
-    title: "Cached repositories",
-    sections: [
-      {
-        entries: repositories.map((repository) => ({
-          title: repositoryDisplayName(repository),
-          description: healthSummary(repository),
-          details: [
-            { label: "Size", value: formatByteSize(repository.sizeBytes) },
-            {
-              label: "Worktrees",
-              value: String(activeWorktreeCount(repository)),
-            },
-            {
-              label: "Updated",
-              value: formatDate(repository.lastFetchedAt),
-            },
-          ],
-        })),
-      },
-    ],
-    footer: [
-      `Directory: ${getCacheDir()}`,
-      `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}, ${formatByteSize(totalSize(repositories))}`,
-    ].join("\n"),
-  });
-  return success();
+  return success(
+    reportOutput(
+      renderReport({
+        title: "Cached repositories",
+        sections: [
+          {
+            entries: repositories.map((repository) => ({
+              title: repositoryDisplayName(repository),
+              description: healthSummary(repository),
+              details: [
+                { label: "Size", value: formatByteSize(repository.sizeBytes) },
+                {
+                  label: "Worktrees",
+                  value: String(activeWorktreeCount(repository)),
+                },
+                {
+                  label: "Updated",
+                  value: formatDate(repository.lastFetchedAt),
+                },
+              ],
+            })),
+          },
+        ],
+        footer: [
+          `Directory: ${getCacheDir()}`,
+          `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}, ${formatByteSize(totalSize(repositories))}`,
+        ].join("\n"),
+      }),
+    ),
+  );
 }
 
 async function runCacheInfo(
@@ -120,15 +128,10 @@ async function runCacheInfo(
 ): Promise<CommandResult> {
   const repository = await requireRepository(selector);
   if (json) {
-    return result({
-      kind: "json",
-      value: toJson(repository),
-      stream: "stdout",
-    });
+    return jsonSuccess(toJson(repository));
   }
 
-  printRepositoryInfo(repository);
-  return success();
+  return success(reportOutput(renderRepositoryInfo(repository)));
 }
 
 async function runCachePath(
@@ -137,11 +140,7 @@ async function runCachePath(
   const value = selector
     ? (await requireRepository(selector)).mirrorPath
     : getCacheDir();
-  return result({
-    kind: "text",
-    value,
-    stream: "stdout",
-  });
+  return success(pathOutput(value));
 }
 
 async function runCacheAdd(
@@ -154,7 +153,7 @@ async function runCacheAdd(
     throw operationalError(error);
   }
 
-  let failed = false;
+  const messages: OperationMessage[] = [];
   for (const [index, input] of inputs.entries()) {
     const displayInput = operands[index] ?? input;
     try {
@@ -163,15 +162,18 @@ async function runCacheAdd(
         () => addCachedRepository(input),
         `Cached ${displayInput}`,
       );
-      log.success(
-        `${repositoryDisplayName(repository)}: ${repository.mirrorPath}`,
-      );
+      messages.push({
+        kind: "success",
+        text: `${repositoryDisplayName(repository)}: ${repository.mirrorPath}`,
+      });
     } catch (error) {
-      log.error(`${displayInput}: ${getErrorMessage(error)}`);
-      failed = true;
+      messages.push({
+        kind: "error",
+        text: `${displayInput}: ${getErrorMessage(error)}`,
+      });
     }
   }
-  return statusResult(failed);
+  return operationResult(messages);
 }
 
 async function runCacheUpdate(
@@ -179,11 +181,12 @@ async function runCacheUpdate(
 ): Promise<CommandResult> {
   const repositories = await resolveRepositorySelection(selectors);
   if (repositories.length === 0) {
-    log.info("No cached repositories to update.");
-    return success();
+    return success(
+      humanOutput(formatMessage("info", "No cached repositories to update.")),
+    );
   }
 
-  let failed = false;
+  const messages: OperationMessage[] = [];
   for (const repository of repositories) {
     const name = repositoryDisplayName(repository);
     try {
@@ -193,11 +196,13 @@ async function runCacheUpdate(
         `Updated ${name}`,
       );
     } catch (error) {
-      log.error(`${name}: ${getErrorMessage(error)}`);
-      failed = true;
+      messages.push({
+        kind: "error",
+        text: `${name}: ${getErrorMessage(error)}`,
+      });
     }
   }
-  return statusResult(failed);
+  return operationResult(messages);
 }
 
 async function runCacheDoctor(
@@ -210,35 +215,41 @@ async function runCacheDoctor(
   );
 
   if (json) {
-    return result(
-      {
-        kind: "json",
-        value: repositories.map(toJson),
-        stream: "stdout",
-      },
-      unhealthy ? 1 : 0,
-    );
+    return withExitCode(jsonSuccess(repositories.map(toJson)), unhealthy);
   } else if (repositories.length === 0) {
-    log.info("No cached repositories.");
+    return success(
+      humanOutput(formatMessage("info", "No cached repositories.")),
+    );
   } else {
-    printReport({
-      title: "Repository cache health",
-      sections: [
-        {
-          entries: repositories.map((repository) => ({
-            title: repositoryDisplayName(repository),
-            description: healthSummary(repository),
-            details:
-              repository.issues.length > 0
-                ? [{ label: "Issues", value: repository.issues.join("; ") }]
-                : [{ label: "Issues", value: "none" }],
-          })),
-        },
-      ],
-      footer: `${repositories.filter((repository) => repository.health !== "healthy").length} need attention`,
-    });
+    return withExitCode(
+      success(
+        reportOutput(
+          renderReport({
+            title: "Repository cache health",
+            sections: [
+              {
+                entries: repositories.map((repository) => ({
+                  title: repositoryDisplayName(repository),
+                  description: healthSummary(repository),
+                  details:
+                    repository.issues.length > 0
+                      ? [
+                          {
+                            label: "Issues",
+                            value: repository.issues.join("; "),
+                          },
+                        ]
+                      : [{ label: "Issues", value: "none" }],
+                })),
+              },
+            ],
+            footer: `${repositories.filter((repository) => repository.health !== "healthy").length} need attention`,
+          }),
+        ),
+      ),
+      unhealthy,
+    );
   }
-  return statusResult(unhealthy);
 }
 
 async function runCacheRepair(
@@ -246,11 +257,12 @@ async function runCacheRepair(
 ): Promise<CommandResult> {
   const repositories = await resolveRepositorySelection(selectors);
   if (repositories.length === 0) {
-    log.info("No cached repositories to repair.");
-    return success();
+    return success(
+      humanOutput(formatMessage("info", "No cached repositories to repair.")),
+    );
   }
 
-  let failed = false;
+  const messages: OperationMessage[] = [];
   for (const repository of repositories) {
     const name = repositoryDisplayName(repository);
     try {
@@ -260,15 +272,19 @@ async function runCacheRepair(
         `Repaired ${name}`,
       );
       if (repaired.health !== "healthy") {
-        log.warn(`${name}: ${repaired.issues.join("; ")}`);
-        failed = true;
+        messages.push({
+          kind: "warning",
+          text: `${name}: ${repaired.issues.join("; ")}`,
+        });
       }
     } catch (error) {
-      log.error(`${name}: ${getErrorMessage(error)}`);
-      failed = true;
+      messages.push({
+        kind: "error",
+        text: `${name}: ${getErrorMessage(error)}`,
+      });
     }
   }
-  return statusResult(failed);
+  return operationResult(messages);
 }
 
 async function runCacheDelete(
@@ -288,7 +304,7 @@ async function runCacheDelete(
     return success();
   }
 
-  let failed = false;
+  const messages: OperationMessage[] = [];
   for (const repository of repositories) {
     try {
       await deleteCachedRepository(repository, {
@@ -296,13 +312,15 @@ async function runCacheDelete(
         force: options.force,
       });
       const verb = options.dryRun ? "Would delete" : "Deleted";
-      log.success(`${verb} ${repositoryDisplayName(repository)}`);
+      messages.push({
+        kind: "success",
+        text: `${verb} ${repositoryDisplayName(repository)}`,
+      });
     } catch (error) {
-      log.error(getErrorMessage(error));
-      failed = true;
+      messages.push({ kind: "error", text: getErrorMessage(error) });
     }
   }
-  return statusResult(failed);
+  return operationResult(messages);
 }
 
 async function runCachePrune(
@@ -312,8 +330,9 @@ async function runCachePrune(
     (repository) => activeWorktreeCount(repository) === 0,
   );
   if (repositories.length === 0) {
-    log.info("No unused cached repositories.");
-    return success();
+    return success(
+      humanOutput(formatMessage("info", "No unused cached repositories.")),
+    );
   }
   if (!(await confirmDeletion(repositories, options.force, options.dryRun))) {
     return success();
@@ -325,10 +344,14 @@ async function runCachePrune(
       force: options.force,
     });
     const verb = options.dryRun ? "Would delete" : "Deleted";
-    log.success(
-      `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(totalSize(results.map((result) => result.repository)))})`,
+    return success(
+      humanOutput(
+        formatMessage(
+          "success",
+          `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(totalSize(results.map((result) => result.repository)))})`,
+        ),
+      ),
     );
-    return success();
   } catch (error) {
     throw operationalError(error);
   }
@@ -369,8 +392,9 @@ async function runCacheManagerCommand(): Promise<CommandResult> {
         const repository = repositories.find(
           (candidate) => candidate.mirrorPath === action.mirrorPath,
         );
-        if (repository) printRepositoryInfo(repository);
-        return success();
+        return repository
+          ? success(reportOutput(renderRepositoryInfo(repository)))
+          : success();
       }
       case "update":
         initialMirrorPath = action.mirrorPath;
@@ -448,8 +472,8 @@ async function confirmDeletion(
   );
 }
 
-function printRepositoryInfo(repository: CachedRepository): void {
-  printReport({
+function renderRepositoryInfo(repository: CachedRepository): string {
+  return renderReport({
     title: `Cached repository ${repositoryDisplayName(repository)}`,
     sections: [
       {
@@ -548,14 +572,6 @@ function requiredOperand(operands: readonly string[], index: number): string {
   return operand;
 }
 
-function result(render: RenderModel, exitCode: 0 | 1 = 0): CommandResult {
-  return exitCode === 0 ? success(render) : failure(exitCode, render);
-}
-
-function statusResult(failed: boolean): CommandResult {
-  return failed ? failure(1, { kind: "none" }) : success();
-}
-
 function operationalError(error: unknown): OperationalError {
   return error instanceof OperationalError
     ? error
@@ -566,10 +582,17 @@ async function runManagerOperation(
   operation: () => Promise<CommandResult>,
 ): Promise<void> {
   try {
-    await operation();
+    renderCommandResult(await operation());
   } catch (error) {
     if (error instanceof OperationalError) {
-      log.error(error.message);
+      renderCommandResult(
+        failure(
+          1,
+          humanOutput(formatMessage("error", error.message), {
+            stream: "stderr",
+          }),
+        ),
+      );
       return;
     }
     throw error;
@@ -586,4 +609,41 @@ async function runWithOptionalSpinner<T>(
   successMessage: string,
 ): Promise<T> {
   return isInteractive() ? withSpinner(message, task, successMessage) : task();
+}
+
+type OperationMessage = Readonly<{
+  kind: "error" | "success" | "warning";
+  text: string;
+}>;
+
+function operationResult(messages: readonly OperationMessage[]): CommandResult {
+  if (messages.length === 0) {
+    return success();
+  }
+
+  const failed = messages.some((message) => message.kind !== "success");
+  const output = humanOutput(
+    messages
+      .map((message) => formatMessage(message.kind, message.text))
+      .join("\n"),
+    failed ? { stream: "stderr" } : {},
+  );
+  return failed ? failure(1, output) : success(output);
+}
+
+function withExitCode(result: CommandResult, failed: boolean): CommandResult {
+  return failed ? { ...result, exitCode: 1 } : result;
+}
+
+function formatMessage(
+  kind: "error" | "info" | "success" | "warning",
+  message: string,
+): string {
+  const symbol = {
+    error: terminalColor.error(terminalSymbol.error),
+    info: terminalColor.accent(terminalSymbol.info),
+    success: terminalColor.success(terminalSymbol.success),
+    warning: terminalColor.warning(terminalSymbol.warning),
+  }[kind];
+  return `${symbol} ${message}`;
 }
