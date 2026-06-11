@@ -1172,7 +1172,7 @@ function getNextSteps(workspaceDir: string): string[] {
   return [`cd ${workspaceDir}`, `code ${vscodePath}`];
 }
 
-async function writeVSCodeWorkspaceFile(
+export async function writeVSCodeWorkspaceFile(
   workspaceDir: string,
   repos: readonly RepoConfig[],
   { logOutput = true }: { logOutput?: boolean } = {},

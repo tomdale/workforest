@@ -596,7 +596,7 @@ function createRegisteredRepository(
   };
 }
 
-function normalizeRemote(remote: string): string {
+export function normalizeRemote(remote: string): string {
   return remote
     .trim()
     .toLowerCase()
