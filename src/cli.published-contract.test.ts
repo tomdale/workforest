@@ -1,0 +1,93 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { runSubprocess } from "./test-utils/subprocess.ts";
+
+type PublishedCommand = {
+  name: string;
+  summary: string;
+  preserveAsShortcut: boolean;
+};
+
+type PublishedContract = {
+  version: string;
+  publishedAt: string;
+  integrity: string;
+  bins: string[];
+  rootCommands: PublishedCommand[];
+  templateSubcommands: Record<string, string[]>;
+};
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
+});
+
+describe("published npm 0.0.1 command contract", () => {
+  it("records the complete published root command surface", async () => {
+    const contract = await loadPublishedContract();
+
+    expect(contract.rootCommands.map(({ name }) => name)).toEqual([
+      "new",
+      "clean",
+      "config",
+      "template",
+    ]);
+    expect(
+      contract.rootCommands
+        .filter(({ preserveAsShortcut }) => preserveAsShortcut)
+        .map(({ name }) => name),
+    ).toEqual(["new", "clean"]);
+  });
+
+  it("keeps both published executable names", async () => {
+    const contract = await loadPublishedContract();
+    const packageJson = JSON.parse(
+      await readFile(path.resolve("package.json"), "utf8"),
+    ) as { bin?: Record<string, string> };
+
+    expect(Object.keys(packageJson.bin ?? {}).sort()).toEqual(
+      [...contract.bins].sort(),
+    );
+  });
+
+  it("keeps every published root command invocable", async () => {
+    const contract = await loadPublishedContract();
+    const configDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-published-contract-"),
+    );
+    tempDirs.push(configDir);
+
+    for (const command of contract.rootCommands) {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        NO_COLOR: "1",
+        WORKFOREST_CONFIG_DIR: configDir,
+        XDG_CONFIG_HOME: configDir,
+      };
+      Reflect.deleteProperty(env, "FORCE_COLOR");
+
+      const result = await runSubprocess(
+        process.execPath,
+        [path.resolve("bin/workforest.js"), command.name, "--help"],
+        { env },
+      );
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`Usage: wf ${command.name}`);
+    }
+  });
+});
+
+async function loadPublishedContract(): Promise<PublishedContract> {
+  return JSON.parse(
+    await readFile(
+      path.resolve("src/test-fixtures/workforest-0.0.1-command-contract.json"),
+      "utf8",
+    ),
+  ) as PublishedContract;
+}

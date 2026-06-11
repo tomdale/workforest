@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "publishedAt": "2026-01-24T06:42:09.139Z",
+  "integrity": "sha512-L8RlLxW4N5K11a7KSMWvL0f6GH1Z3BvyBSJXyr/VpbLtGrIrqt1QuzKUgaPgOrPBzEdbaSAf6b2XdnyjxYdlqA==",
+  "bins": ["wf", "workforest"],
+  "rootCommands": [
+    {
+      "name": "new",
+      "summary": "Create a workspace",
+      "preserveAsShortcut": true
+    },
+    {
+      "name": "clean",
+      "summary": "Remove a workspace",
+      "preserveAsShortcut": true
+    },
+    {
+      "name": "config",
+      "summary": "Show config location",
+      "preserveAsShortcut": false
+    },
+    {
+      "name": "template",
+      "summary": "Manage templates",
+      "preserveAsShortcut": false
+    }
+  ],
+  "templateSubcommands": {
+    "list": ["ls"],
+    "show": [],
+    "new": ["create"],
+    "delete": ["rm"],
+    "edit": []
+  }
+}
