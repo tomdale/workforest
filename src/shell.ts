@@ -228,6 +228,7 @@ _workforest_complete() {
 __workforest_register_completion() {
   local alias_name alias_value
 
+  (( $+functions[compdef] )) || return 0
   compdef _workforest_complete wf workforest
 
   for alias_name alias_value in "\${(@kv)aliases}"; do

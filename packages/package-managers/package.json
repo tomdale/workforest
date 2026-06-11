@@ -2,24 +2,32 @@
   "name": "@wf-plugin/package-managers",
   "version": "0.0.1",
   "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./initializers/pnpm-install": {
-      "types": "./src/initializers/pnpm-install.ts",
-      "import": "./src/initializers/pnpm-install.ts"
+      "types": "./dist/initializers/pnpm-install.d.mts",
+      "import": "./dist/initializers/pnpm-install.mjs"
     },
     "./initializers/yarn-install": {
-      "types": "./src/initializers/yarn-install.ts",
-      "import": "./src/initializers/yarn-install.ts"
+      "types": "./dist/initializers/yarn-install.d.mts",
+      "import": "./dist/initializers/yarn-install.mjs"
     },
     "./initializers/npm-install": {
-      "types": "./src/initializers/npm-install.ts",
-      "import": "./src/initializers/npm-install.ts"
+      "types": "./dist/initializers/npm-install.d.mts",
+      "import": "./dist/initializers/npm-install.mjs"
     },
     "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsdown src/index.ts src/initializers/*.ts",
+    "prepare": "tsdown src/index.ts src/initializers/*.ts",
+    "prepack": "tsdown src/index.ts src/initializers/*.ts"
   },
   "dependencies": {
     "@wf-plugin/core": "workspace:*"

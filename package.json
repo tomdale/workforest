@@ -13,20 +13,29 @@
     "developer-tools"
   ],
   "type": "module",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "workforest": "bin/workforest.js",
     "wf": "bin/workforest.js"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "pnpm build:plugins && tsdown",
+    "build:plugins": "pnpm --filter '@wf-plugin/*' build",
     "bench:ghostty": "tsx benchmarks/ghostty-real.ts",
     "bench:tui": "tsx benchmarks/tui-grid.ts",
     "check": "pnpm test && pnpm typecheck && pnpm lint",
     "lint": "biome check .",
-    "prepack": "pnpm build",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "prepack": "pnpm build:plugins && tsdown",
+    "test": "pnpm build:plugins && vitest run",
+    "typecheck": "pnpm build:plugins && tsc --noEmit"
   },
   "dependencies": {
     "@wf-plugin/core": "workspace:*",

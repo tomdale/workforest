@@ -1,30 +1,31 @@
 #!/usr/bin/env node
 
+import { access } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 import { fileURLToPath as toPath } from "node:url";
-import chalk from "chalk";
 
-const { cli } = await getCLIFromSource().catch(getCLIFromDist);
+const sourceUrl = new URL("../src/cli.ts", import.meta.url);
+const { cli } = (await sourceExists())
+  ? await getCLIFromSource()
+  : await getCLIFromDist();
 await cli();
 
 function getCLIFromSource() {
-  return import("../src/cli.ts").then((mod) => {
+  return import(sourceUrl.href).then((mod) => {
     mod.log.warn(`Running local copy from ${projectPath()}/src`);
     return mod;
   });
 }
 
-function getCLIFromDist(err) {
-  return checkForActualError(err).then(() =>
-    import("../dist/index.mjs").catch((distError) => {
-      error("Unable to load the CLI from either src/cli.ts or dist/index.mjs.");
-      throw distError;
-    }),
-  );
+function getCLIFromDist() {
+  return import("../dist/index.mjs").catch((distError) => {
+    error("Unable to load the CLI from dist/index.mjs.");
+    throw distError;
+  });
 }
 
 function error(...args) {
-  console.error(chalk.red(...args));
+  console.error(...args);
 }
 
 function projectPath() {
@@ -33,8 +34,14 @@ function projectPath() {
   );
 }
 
-function checkForActualError(err) {
-  if (err.code === "ENOENT" || err.code === "ERR_MODULE_NOT_FOUND")
-    return Promise.resolve();
-  throw err;
+async function sourceExists() {
+  try {
+    await access(sourceUrl);
+    return true;
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return false;
+    }
+    throw err;
+  }
 }

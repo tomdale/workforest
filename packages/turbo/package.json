@@ -2,16 +2,24 @@
   "name": "@wf-plugin/turbo",
   "version": "0.0.1",
   "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./initializers/turbo-link": {
-      "types": "./src/initializers/turbo-link.ts",
-      "import": "./src/initializers/turbo-link.ts"
+      "types": "./dist/initializers/turbo-link.d.mts",
+      "import": "./dist/initializers/turbo-link.mjs"
     },
     "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsdown src/index.ts src/initializers/*.ts",
+    "prepare": "tsdown src/index.ts src/initializers/*.ts",
+    "prepack": "tsdown src/index.ts src/initializers/*.ts"
   },
   "dependencies": {
     "@wf-plugin/core": "workspace:*"
