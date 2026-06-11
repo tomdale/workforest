@@ -247,6 +247,17 @@ describe("review worktrees", () => {
       ["pr", "checkout", "123"],
       expect.objectContaining({ cwd: targetDir }),
     );
+    const checkoutOptions = runCommandMock.mock.calls[0]?.[2];
+    const stdoutWrite = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrWrite = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    checkoutOptions?.onStdout?.("checkout output\n");
+    checkoutOptions?.onStderr?.("checkout warning\n");
+    expect(stdoutWrite).toHaveBeenCalledWith("checkout output\n");
+    expect(stderrWrite).toHaveBeenCalledWith("checkout warning\n");
     expect(runSingleRepoInitializersGeneratorMock).toHaveBeenCalledWith({
       context: {
         repo: {
@@ -328,6 +339,41 @@ describe("review worktrees", () => {
       ],
       { cwd: path.join(cacheDir, "omniagent.git"), timeout: 30_000 },
     );
+  });
+
+  it("preserves the checkout failure when cleanup also fails", async () => {
+    const reviewsDir = await createTempDir("workforest-reviews-");
+    const cacheDir = await createTempDir("workforest-cache-");
+    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
+    await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
+
+    ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersGeneratorMock.mockImplementation(
+      async function* () {
+        yield { phase: "complete" };
+      },
+    );
+    runGitMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === "symbolic-ref") {
+        return { stdout: "refs/heads/main\n", stderr: "" };
+      }
+      if (args[0] === "for-each-ref") {
+        return { stdout: "refs/remotes/origin/main\n", stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "remove") {
+        throw new Error("cleanup failed");
+      }
+      return { stdout: "", stderr: "" };
+    });
+    runCommandMock.mockRejectedValue(new Error("checkout failed"));
+
+    const { createReviewWorktree } = await importReviewWithMocks();
+    await expect(
+      createReviewWorktree({
+        reviewsDir,
+        target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      }),
+    ).rejects.toThrow("checkout failed");
   });
 
   it("refuses to remove dirty review worktrees unless forced", async () => {

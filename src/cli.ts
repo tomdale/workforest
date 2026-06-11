@@ -5,7 +5,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import arg from "arg";
 import { commandRegistry } from "./cli/commands.ts";
-import { isArgumentParserError, UsageError } from "./cli/errors.ts";
+import {
+  isArgumentParserError,
+  OperationalError,
+  UsageError,
+} from "./cli/errors.ts";
 import {
   applyExitCode,
   errorResult,
@@ -169,6 +173,13 @@ export async function executeCli(
 async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
+  switch (invocation.command.leaf.handler) {
+    case "review.create":
+    case "review.list":
+    case "review.delete":
+      return runReviewInvocation(invocation);
+  }
+
   return runLegacyHandler(async () => {
     const argv = [...invocation.command.argv];
     const invokedRoot =
@@ -203,15 +214,6 @@ async function runInvocation(
         return;
       case "worktree.delete":
         await runWorktreeCommand(["delete", ...argv], invokedRoot);
-        return;
-      case "review.create":
-        await runReviewCommand(argv);
-        return;
-      case "review.list":
-        await runReviewCommand(["list", ...argv]);
-        return;
-      case "review.delete":
-        await runReviewCommand(["delete", ...argv]);
         return;
       case "delete":
         await runDeleteCommand(argv);
@@ -1087,55 +1089,29 @@ async function runWorktreeCommand(
   await runStandaloneWorktreeCreate(args);
 }
 
-async function runReviewCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "-h": "--help",
-      "-n": "--dry-run",
-      "-f": "--force",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    const subcommandHelp = args._[0]
-      ? nestedCommandHelp("review", args._[0])
-      : null;
-    console.log(subcommandHelp ?? commandHelp("review"));
-    return;
+async function runReviewInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  switch (invocation.command.leaf.handler) {
+    case "review.create":
+      return runReviewCreate(invocation.beforeDoubleDash);
+    case "review.list":
+      return runReviewList(invocation.beforeDoubleDash);
+    case "review.delete":
+      return runReviewRemove(invocation.beforeDoubleDash, {
+        dryRun: invocation.flags["dryRun"] === true,
+        force: invocation.flags["force"] === true,
+      });
+    default:
+      throw new Error(
+        `Unsupported review handler: ${invocation.command.leaf.handler}`,
+      );
   }
-
-  const subcommand = args._[0];
-  if (subcommand === "list" || subcommand === "ls") {
-    await runReviewList(args._.slice(1));
-    return;
-  }
-
-  if (
-    subcommand === "delete" ||
-    subcommand === "rm" ||
-    subcommand === "remove"
-  ) {
-    await runReviewRemove(args._.slice(1), {
-      dryRun: args["--dry-run"] ?? false,
-      force: args["--force"] ?? false,
-    });
-    return;
-  }
-
-  if (args["--dry-run"] || args["--force"]) {
-    log.error("--dry-run and --force are only supported for wf review delete.");
-    process.exitCode = 1;
-    return;
-  }
-
-  await runReviewCreate(args._);
 }
 
-async function runReviewCreate(targetArgs: string[]): Promise<void> {
+async function runReviewCreate(
+  targetArgs: readonly string[],
+): Promise<CommandResult> {
   try {
     const resolvedTargetArgs =
       await qualifyReviewRepositorySpecifier(targetArgs);
@@ -1166,7 +1142,7 @@ async function runReviewCreate(targetArgs: string[]): Promise<void> {
         if (!isShellAutoCdEnabled()) {
           log.info(`Run: cd ${workspace.path}`);
         }
-        return;
+        return success();
       }
     }
 
@@ -1183,19 +1159,15 @@ async function runReviewCreate(targetArgs: string[]): Promise<void> {
     if (!isShellAutoCdEnabled()) {
       log.info(`Run: cd ${metadata.path}`);
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw toOperationalError(error);
   }
 }
 
-async function runReviewList(targetArgs: string[]): Promise<void> {
-  if (targetArgs.length > 1) {
-    log.error("Usage: wf review list [repo]");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runReviewList(
+  targetArgs: readonly string[],
+): Promise<CommandResult> {
   try {
     const { listReviewWorktrees } = await import("./review.ts");
     const reviewsDir = await resolveReviewsDir();
@@ -1208,20 +1180,16 @@ async function runReviewList(targetArgs: string[]): Promise<void> {
           ? repoParts[0]
           : undefined;
     if (repoInput && !repo) {
-      log.error(`Invalid repo name: ${repoInput}`);
-      process.exitCode = 1;
-      return;
+      throw new OperationalError(`Invalid repo name: ${repoInput}`);
     }
     if (repo && !/^[A-Za-z0-9_.-]+$/.test(repo)) {
-      log.error(`Invalid repo name: ${repoInput}`);
-      process.exitCode = 1;
-      return;
+      throw new OperationalError(`Invalid repo name: ${repoInput}`);
     }
 
     const entries = await listReviewWorktrees(reviewsDir, repo);
     if (entries.length === 0) {
       log.info("No review worktrees found.");
-      return;
+      return success();
     }
 
     printReport({
@@ -1245,16 +1213,16 @@ async function runReviewList(targetArgs: string[]): Promise<void> {
         `${entries.length} review worktree${entries.length === 1 ? "" : "s"}`,
       ].join("\n"),
     });
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw toOperationalError(error);
   }
 }
 
 async function runReviewRemove(
-  targetArgs: string[],
+  targetArgs: readonly string[],
   options: { dryRun: boolean; force: boolean; skipConfirmation?: boolean },
-): Promise<void> {
+): Promise<CommandResult> {
   try {
     const resolvedTargetArgs =
       await qualifyReviewRepositorySpecifier(targetArgs);
@@ -1273,13 +1241,13 @@ async function runReviewRemove(
       `pr-${target.prNumber}`,
     );
     if (!options.skipConfirmation) {
-      const confirmed = await confirmDelete({
+      const confirmed = await confirmReviewDelete({
         dryRun: options.dryRun,
         force: options.force,
         description: `review worktree "${target.owner}/${target.repo}#${target.prNumber}"`,
         targetPath: targetDir,
       });
-      if (!confirmed) return;
+      if (!confirmed) return success();
     }
 
     const result = await removeReviewWorktree({
@@ -1302,10 +1270,34 @@ async function runReviewRemove(
     } else {
       log.success(`Removed ${target.repo}#${target.prNumber}: ${result.path}`);
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw toOperationalError(error);
   }
+}
+
+async function confirmReviewDelete({
+  dryRun,
+  force,
+  description,
+  targetPath,
+}: {
+  dryRun: boolean;
+  force: boolean;
+  description: string;
+  targetPath: string;
+}): Promise<boolean> {
+  if (dryRun || force) {
+    return true;
+  }
+
+  if (!isInteractive()) {
+    throw new OperationalError(
+      "Cannot confirm in non-interactive mode. Use --force.",
+    );
+  }
+
+  return promptConfirm(`Delete ${description} at ${targetPath}?`, false);
 }
 
 async function qualifyReviewRepositorySpecifier(
@@ -4902,6 +4894,12 @@ function expandHome(value: string): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toOperationalError(error: unknown): OperationalError {
+  return error instanceof OperationalError
+    ? error
+    : new OperationalError(getErrorMessage(error), { cause: error });
 }
 
 /**
