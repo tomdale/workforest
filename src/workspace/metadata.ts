@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { promises as fs, lstatSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { validateRepositoryComponent } from "../repository-components.ts";
@@ -265,7 +265,7 @@ export function getMetadataPath(workspaceDir: string): string {
  * Get the path to the workspace metadata directory.
  */
 export function getWorkspaceMetadataDirPath(workspaceDir: string): string {
-  return path.join(workspaceDir, METADATA_FILENAME);
+  return assertWorkspaceMetadataPathNotSymlinkSync(workspaceDir);
 }
 
 /**
@@ -284,10 +284,10 @@ export async function hasWorkspaceMetadata(
 export async function ensureWorkspaceMetadataDir(
   workspaceDir: string,
 ): Promise<string> {
-  const metadataDir = getWorkspaceMetadataDirPath(workspaceDir);
+  const metadataDir = await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
 
   try {
-    const stat = await fs.stat(metadataDir);
+    const stat = await fs.lstat(metadataDir);
     if (stat.isDirectory()) {
       return metadataDir;
     }
@@ -314,6 +314,7 @@ export async function ensureWorkspaceMetadataDir(
   }
 
   await fs.mkdir(metadataDir, { recursive: true });
+  await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
   return metadataDir;
 }
 
@@ -354,6 +355,7 @@ async function writeWorkspaceMetadataFile(
   );
   await validateWorkspaceMetadataFilesystemPaths(validated, workspaceDir);
   const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
+  await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
   const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
   const contents = `${JSON.stringify(metadata, null, 2)}\n`;
 
@@ -370,6 +372,7 @@ async function withWorkspaceMetadataLock<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   await fs.mkdir(workspaceDir, { recursive: true });
+  await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
   const lockPath = path.join(
     path.resolve(workspaceDir),
     WORKSPACE_METADATA_LOCK_FILENAME,
@@ -436,10 +439,10 @@ async function removeStaleMetadataLock(lockPath: string): Promise<boolean> {
 async function resolveReadableMetadataPath(
   workspaceDir: string,
 ): Promise<string | null> {
-  const metadataDir = getWorkspaceMetadataDirPath(workspaceDir);
+  const metadataDir = await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
 
   try {
-    const stat = await fs.stat(metadataDir);
+    const stat = await fs.lstat(metadataDir);
     if (stat.isFile()) {
       return metadataDir;
     }
@@ -455,6 +458,46 @@ async function resolveReadableMetadataPath(
   }
 
   return null;
+}
+
+function assertWorkspaceMetadataPathNotSymlinkSync(
+  workspaceDir: string,
+): string {
+  const metadataPath = path.join(workspaceDir, METADATA_FILENAME);
+
+  try {
+    if (lstatSync(metadataPath).isSymbolicLink()) {
+      throw new Error(
+        `Workspace metadata path must not be a symbolic link: ${path.resolve(metadataPath)}`,
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return metadataPath;
+}
+
+async function assertWorkspaceMetadataPathNotSymlink(
+  workspaceDir: string,
+): Promise<string> {
+  const metadataPath = path.join(workspaceDir, METADATA_FILENAME);
+
+  try {
+    if ((await fs.lstat(metadataPath)).isSymbolicLink()) {
+      throw new Error(
+        `Workspace metadata path must not be a symbolic link: ${path.resolve(metadataPath)}`,
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return metadataPath;
 }
 
 /**
@@ -619,11 +662,12 @@ function validateReviewWorktreeMetadata(
   if (!Number.isSafeInteger(prNumber) || (prNumber as number) < 1) {
     throw new Error(`${source}.pr_number must be a positive integer.`);
   }
-  validateMetadataPath(
-    workspaceDir,
-    requireString(worktree["path"], `${source}.path`),
-    `${source}.path`,
-  );
+  const worktreePath = requireString(worktree["path"], `${source}.path`);
+  const expectedPath = `pr-${prNumber as number}`;
+  if (worktreePath !== expectedPath) {
+    throw new Error(`${source}.path must be exactly "${expectedPath}".`);
+  }
+  validateMetadataPath(workspaceDir, worktreePath, `${source}.path`);
   optionalString(worktree["branch"], `${source}.branch`);
   requireString(worktree["created_at"], `${source}.created_at`);
 }

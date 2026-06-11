@@ -354,6 +354,12 @@ describe("workspace metadata", () => {
         firstReviewWorktree(metadata).path = "/tmp/outside";
       },
     ],
+    [
+      "review worktree path at the wrong contained location",
+      (metadata: UnsafeMetadata) => {
+        firstReviewWorktree(metadata).path = "pr-456";
+      },
+    ],
   ])("rejects an unsafe persisted %s", async (_label, mutate) => {
     const workspaceDir = await createWorkspaceDir();
     const metadata = createUnsafeMetadataFixture();
@@ -389,6 +395,48 @@ describe("workspace metadata", () => {
     await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow(
       "symbolic link",
     );
+  });
+
+  it("rejects reads through a symlinked metadata directory", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const outsideDir = await createWorkspaceDir();
+    const outsideMetadataPath = path.join(outsideDir, "workspace.json");
+    await writeFile(
+      outsideMetadataPath,
+      JSON.stringify(createUnsafeMetadataFixture()),
+      "utf8",
+    );
+    await symlink(outsideDir, path.join(workspaceDir, ".workforest"));
+
+    await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow(
+      "must not be a symbolic link",
+    );
+    expect(() => getMetadataPath(workspaceDir)).toThrow(
+      "must not be a symbolic link",
+    );
+    await expect(readFile(outsideMetadataPath, "utf8")).resolves.toContain(
+      '"feature_name":"safe"',
+    );
+  });
+
+  it("rejects writes through a symlinked metadata directory", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const outsideDir = await createWorkspaceDir();
+    const sentinel = path.join(outsideDir, "sentinel.txt");
+    await writeFile(sentinel, "keep\n", "utf8");
+    await symlink(outsideDir, path.join(workspaceDir, ".workforest"));
+
+    await expect(
+      writeWorkspaceMetadata(workspaceDir, {
+        featureName: "safe",
+        repos: [],
+      }),
+    ).rejects.toThrow("must not be a symbolic link");
+
+    await expect(readFile(sentinel, "utf8")).resolves.toBe("keep\n");
+    await expect(
+      stat(path.join(outsideDir, "workspace.json")),
+    ).rejects.toThrow();
   });
 
   it("rejects unsafe values through metadata write APIs", async () => {

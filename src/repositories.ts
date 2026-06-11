@@ -286,13 +286,17 @@ export async function deleteCachedRepository(
     );
   }
 
-  const mirrorPath = await validateCachedRepositoryDeletionPath(
+  const deletionTarget = await validateCachedRepositoryDeletionPath(
     getCacheDir(),
     repository.mirrorPath,
   );
 
   if (!options.dryRun) {
-    await fs.rm(mirrorPath, { recursive: true, force: true });
+    if (deletionTarget.isSymbolicLink) {
+      await fs.unlink(deletionTarget.path);
+    } else {
+      await fs.rm(deletionTarget.path, { recursive: true, force: true });
+    }
   }
 
   return {
@@ -653,7 +657,7 @@ export function normalizeRemote(remote: string): string {
 async function validateCachedRepositoryDeletionPath(
   cacheDir: string,
   mirrorPath: string,
-): Promise<string> {
+): Promise<{ path: string; isSymbolicLink: boolean }> {
   const resolvedCacheDir = path.resolve(cacheDir);
   const resolvedMirrorPath = path.resolve(mirrorPath);
   const relative = path.relative(resolvedCacheDir, resolvedMirrorPath);
@@ -675,9 +679,7 @@ async function validateCachedRepositoryDeletionPath(
   try {
     const mirrorStat = await fs.lstat(containedMirrorPath);
     if (mirrorStat.isSymbolicLink()) {
-      throw new Error(
-        `Cached repository path must not be a symbolic link: ${containedMirrorPath}`,
-      );
+      return { path: containedMirrorPath, isSymbolicLink: true };
     }
 
     const [realCacheDir, realMirrorPath] = await Promise.all([
@@ -695,5 +697,5 @@ async function validateCachedRepositoryDeletionPath(
     }
   }
 
-  return containedMirrorPath;
+  return { path: containedMirrorPath, isSymbolicLink: false };
 }

@@ -319,7 +319,7 @@ describe("cached repository inventory", () => {
     await expect(stat(sentinel)).resolves.toBeDefined();
   });
 
-  it("refuses to delete a cache symlink that escapes the cache root", async () => {
+  it("deletes a cache symlink without affecting its target", async () => {
     const cacheDir = await createCacheDir();
     const outsideDir = await mkdtemp(
       path.join(os.tmpdir(), "workforest-cache-symlink-"),
@@ -344,8 +344,38 @@ describe("cached repository inventory", () => {
         health: "invalid",
         issues: [],
       }),
-    ).rejects.toThrow("must not be a symbolic link");
+    ).resolves.toMatchObject({ deleted: true });
 
     await expect(stat(sentinel)).resolves.toBeDefined();
+    await expect(stat(mirrorPath)).rejects.toThrow();
+  });
+
+  it("cleans cache symlinks without blocking valid unused mirrors", async () => {
+    const cacheDir = await createCacheDir();
+    const outsideDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-cache-clean-symlink-"),
+    );
+    tempDirs.push(outsideDir);
+    const sentinel = path.join(outsideDir, "sentinel.txt");
+    await writeFile(sentinel, "keep\n", "utf8");
+    const symlinkPath = path.join(cacheDir, "outside.git");
+    await symlink(outsideDir, symlinkPath);
+    const mirrorPath = path.join(cacheDir, "unused.git");
+    await createMirror(
+      cacheDir,
+      "unused.git",
+      "git@github.com:mycompany/unused.git",
+    );
+
+    const results = await cleanCachedRepositories();
+
+    expect(
+      results
+        .map((result) => result.repository.directoryName)
+        .sort((left, right) => left.localeCompare(right)),
+    ).toEqual(["outside.git", "unused.git"]);
+    await expect(stat(sentinel)).resolves.toBeDefined();
+    await expect(stat(symlinkPath)).rejects.toThrow();
+    await expect(stat(mirrorPath)).rejects.toThrow();
   });
 });
