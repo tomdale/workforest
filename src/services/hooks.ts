@@ -1,7 +1,10 @@
 import type { Hook } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import { getNodeVersionPrefix } from "../utils/node-version.ts";
-import { resolveContainedPath } from "../utils/path-safety.ts";
+import {
+  assertContainedPathWithoutSymlinks,
+  resolveContainedPath,
+} from "../utils/path-safety.ts";
 import {
   runCommandGenerator,
   type TaskGenerator,
@@ -17,12 +20,14 @@ export async function* runHook(
   repoDir?: string,
 ): TaskGenerator {
   const cwd = repoDir ?? workspaceDir;
+  await assertContainedPathWithoutSymlinks(workspaceDir, cwd);
 
   yield { status: "running", message: `Checking conditions for ${hook.name}` };
 
   // Check condition if present (relative to cwd)
   if (hook.if?.fileExists) {
     const filePath = resolveContainedPath(cwd, hook.if.fileExists);
+    await assertContainedPathWithoutSymlinks(workspaceDir, filePath);
     const conditionMet = await pathExists(filePath);
     if (!conditionMet) {
       yield {

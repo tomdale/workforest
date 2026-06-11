@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -146,6 +146,22 @@ describe("cached repository inventory", () => {
     ]);
   });
 
+  it("keeps cache entries with non-repository component names visible", async () => {
+    const cacheDir = await createCacheDir();
+    const invalidDir = path.join(cacheDir, "-old mirror.git");
+    await mkdir(invalidDir);
+
+    const repositories = await listCachedRepositories();
+
+    expect(repositories).toEqual([
+      expect.objectContaining({
+        name: "-old mirror",
+        mirrorPath: invalidDir,
+        health: "invalid",
+      }),
+    ]);
+  });
+
   it("resolves repositories by slug, name, and cache directory", async () => {
     const cacheDir = await createCacheDir();
     await createMirror(
@@ -274,7 +290,61 @@ describe("cached repository inventory", () => {
         health: "invalid",
         issues: [],
       }),
-    ).rejects.toThrow("Path escapes");
+    ).rejects.toThrow("must be a direct child");
+
+    await expect(stat(sentinel)).resolves.toBeDefined();
+  });
+
+  it("refuses to delete the cache root", async () => {
+    const cacheDir = await createCacheDir();
+    const sentinel = path.join(cacheDir, "sentinel.txt");
+    await writeFile(sentinel, "keep\n", "utf8");
+
+    await expect(
+      deleteCachedRepository({
+        name: "cache-root",
+        slug: null,
+        remote: null,
+        mirrorPath: cacheDir,
+        directoryName: path.basename(cacheDir),
+        defaultBranch: null,
+        sizeBytes: 0,
+        lastFetchedAt: null,
+        worktrees: [],
+        health: "invalid",
+        issues: [],
+      }),
+    ).rejects.toThrow("must be a direct child");
+
+    await expect(stat(sentinel)).resolves.toBeDefined();
+  });
+
+  it("refuses to delete a cache symlink that escapes the cache root", async () => {
+    const cacheDir = await createCacheDir();
+    const outsideDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-cache-symlink-"),
+    );
+    tempDirs.push(outsideDir);
+    const sentinel = path.join(outsideDir, "sentinel.txt");
+    await writeFile(sentinel, "keep\n", "utf8");
+    const mirrorPath = path.join(cacheDir, "outside.git");
+    await symlink(outsideDir, mirrorPath);
+
+    await expect(
+      deleteCachedRepository({
+        name: "outside",
+        slug: null,
+        remote: null,
+        mirrorPath,
+        directoryName: "outside.git",
+        defaultBranch: null,
+        sizeBytes: 0,
+        lastFetchedAt: null,
+        worktrees: [],
+        health: "invalid",
+        issues: [],
+      }),
+    ).rejects.toThrow("must not be a symbolic link");
 
     await expect(stat(sentinel)).resolves.toBeDefined();
   });

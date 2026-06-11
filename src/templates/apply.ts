@@ -1,8 +1,11 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { runHook } from "../services/hooks.ts";
 import { pathExists } from "../utils/fs.ts";
-import { resolveContainedPath } from "../utils/path-safety.ts";
+import {
+  assertContainedPathWithoutSymlinks,
+  resolveContainedPath,
+} from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import type { Template } from "./index.ts";
 
@@ -23,8 +26,18 @@ export async function copyTemplateFiles(
   template: Template,
   workspaceDir: string,
 ): Promise<void> {
+  const templateDir = path.dirname(template.path);
+  const templateDirStat = await fs.lstat(templateDir);
+  if (templateDirStat.isSymbolicLink()) {
+    throw new Error(
+      `Template path must not be a symbolic link: ${templateDir}`,
+    );
+  }
+  if (!templateDirStat.isDirectory()) {
+    throw new Error(`Template path must be a real directory: ${templateDir}`);
+  }
   const templateFilesDir = resolveContainedPath(
-    path.dirname(template.path),
+    templateDir,
     TEMPLATE_FILES_DIR,
   );
 
@@ -32,32 +45,54 @@ export async function copyTemplateFiles(
     return;
   }
 
-  await copyDirectoryContents(templateFilesDir, workspaceDir);
+  const sourceStat = await fs.lstat(templateFilesDir);
+  if (sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) {
+    throw new Error(
+      `Template files path must be a real directory: ${templateFilesDir}`,
+    );
+  }
+
+  await copyDirectoryContents(templateFilesDir, workspaceDir, workspaceDir);
 }
 
 async function copyDirectoryContents(
   sourceDir: string,
   targetDir: string,
+  workspaceDir: string,
 ): Promise<void> {
+  await assertContainedPathWithoutSymlinks(workspaceDir, targetDir);
   await fs.mkdir(targetDir, { recursive: true });
+  await assertContainedPathWithoutSymlinks(workspaceDir, targetDir);
 
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
     const sourcePath = resolveContainedPath(sourceDir, entry.name);
     const targetPath = resolveContainedPath(targetDir, entry.name);
 
-    if (entry.isDirectory()) {
-      await copyDirectoryContents(sourcePath, targetPath);
-      continue;
-    }
-
-    if (await pathExists(targetPath)) {
+    if (entry.isSymbolicLink()) {
       throw new Error(
-        `Template file already exists in workspace: ${targetPath}`,
+        `Template files must not contain symlinks: ${sourcePath}`,
       );
     }
+    if (entry.isDirectory()) {
+      await copyDirectoryContents(sourcePath, targetPath, workspaceDir);
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error(`Unsupported template file type: ${sourcePath}`);
+    }
 
-    await fs.copyFile(sourcePath, targetPath);
+    await assertContainedPathWithoutSymlinks(workspaceDir, targetPath);
+    try {
+      await fs.copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error(
+          `Template file already exists in workspace: ${targetPath}`,
+        );
+      }
+      throw error;
+    }
   }
 }
 
@@ -93,6 +128,7 @@ export async function* applyTemplateGenerator({
         : path.resolve(workspaceDir);
 
       try {
+        await assertContainedPathWithoutSymlinks(workspaceDir, hookCwd);
         for await (const state of runHook(hook, workspaceDir, hookCwd)) {
           yield { phase: "hook", hookName: hook.name, state };
 

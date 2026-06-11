@@ -4,6 +4,7 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -323,6 +324,12 @@ describe("workspace metadata", () => {
       },
     ],
     [
+      "temporary worktree path at the wrong contained location",
+      (metadata: UnsafeMetadata) => {
+        firstTemporaryWorktree(metadata).path = "another-task";
+      },
+    ],
+    [
       "temporary parent repository",
       (metadata: UnsafeMetadata) => {
         firstTemporaryWorktree(metadata).parent_repo = "..";
@@ -332,6 +339,13 @@ describe("workspace metadata", () => {
       "temporary setup log",
       (metadata: UnsafeMetadata) => {
         firstTemporaryWorktree(metadata).setup_log = "..\\sentinel.txt";
+      },
+    ],
+    [
+      "temporary setup log at the wrong contained location",
+      (metadata: UnsafeMetadata) => {
+        firstTemporaryWorktree(metadata).setup_log =
+          ".workforest/logs/another-task.log";
       },
     ],
     [
@@ -352,6 +366,29 @@ describe("workspace metadata", () => {
     );
 
     await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow();
+  });
+
+  it("rejects a persisted temporary worktree path through a symlink", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const outsideDir = await createWorkspaceDir();
+    await symlink(outsideDir, path.join(workspaceDir, "fix-tests"));
+    await writeRawMetadata(workspaceDir, createUnsafeMetadataFixture());
+
+    await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow(
+      "symbolic link",
+    );
+  });
+
+  it("rejects a persisted setup log path through a symlink", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const outsideDir = await createWorkspaceDir();
+    await mkdir(path.join(workspaceDir, ".workforest"), { recursive: true });
+    await symlink(outsideDir, path.join(workspaceDir, ".workforest", "logs"));
+    await writeRawMetadata(workspaceDir, createUnsafeMetadataFixture());
+
+    await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow(
+      "symbolic link",
+    );
   });
 
   it("rejects unsafe values through metadata write APIs", async () => {
@@ -447,6 +484,18 @@ function createUnsafeMetadataFixture(): UnsafeMetadata {
       },
     ],
   };
+}
+
+async function writeRawMetadata(
+  workspaceDir: string,
+  metadata: UnsafeMetadata,
+): Promise<void> {
+  await mkdir(path.join(workspaceDir, ".workforest"), { recursive: true });
+  await writeFile(
+    path.join(workspaceDir, ".workforest", "workspace.json"),
+    JSON.stringify(metadata),
+    "utf8",
+  );
 }
 
 function firstRepo(metadata: UnsafeMetadata): UnsafeMetadata["repos"][number] {

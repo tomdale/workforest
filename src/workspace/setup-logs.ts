@@ -3,6 +3,7 @@ import { createWriteStream, promises as fs, type WriteStream } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import {
+  assertContainedPathWithoutSymlinks,
   resolveContainedPath,
   validateResourceName,
 } from "../utils/path-safety.ts";
@@ -26,7 +27,9 @@ export async function getRepoSetupLogPath({
     sanitizeLogName(repoName),
     "Repository log name",
   );
-  return resolveContainedPath(metadataDir, "logs", `${safeName}.log`);
+  const logPath = resolveContainedPath(metadataDir, "logs", `${safeName}.log`);
+  await assertContainedPathWithoutSymlinks(workspaceDir, logPath);
+  return logPath;
 }
 
 export async function startRepoSetupLog(
@@ -35,6 +38,7 @@ export async function startRepoSetupLog(
   const logPath = await getRepoSetupLogPath(options);
   const logDir = path.dirname(logPath);
   await fs.mkdir(logDir, { recursive: true });
+  await assertContainedPathWithoutSymlinks(options.workspaceDir, logPath);
   await fs.rm(logPath, { force: true });
 
   await appendRepoSetupLog(
@@ -102,6 +106,7 @@ export async function removeRepoSetupLog(
     workspaceDir,
     path.relative(path.resolve(workspaceDir), path.resolve(logPath)),
   );
+  await assertContainedPathWithoutSymlinks(workspaceDir, safeLogPath);
   await fs.rm(safeLogPath, { force: true });
 }
 

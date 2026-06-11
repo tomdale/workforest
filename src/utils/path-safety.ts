@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 
 const WINDOWS_RESERVED_CHARACTERS = /[<>:"/\\|?*]/;
@@ -53,6 +54,50 @@ export function resolveContainedPath(
   }
 
   return candidate;
+}
+
+export async function assertContainedPathWithoutSymlinks(
+  root: string,
+  target: string,
+): Promise<string> {
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = resolveContainedPath(
+    resolvedRoot,
+    path.relative(resolvedRoot, path.resolve(target)),
+  );
+  const rootRealPath = await fs.realpath(resolvedRoot);
+  const relative = path.relative(resolvedRoot, resolvedTarget);
+  const segments = relative ? relative.split(path.sep) : [];
+  let current = resolvedRoot;
+
+  for (const [index, segment] of segments.entries()) {
+    current = path.join(current, segment);
+
+    let stat: Awaited<ReturnType<typeof fs.lstat>>;
+    try {
+      stat = await fs.lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return resolvedTarget;
+      }
+      throw error;
+    }
+
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Path contains a symbolic link: ${current}`);
+    }
+    if (index < segments.length - 1 && !stat.isDirectory()) {
+      throw new Error(`Path ancestor is not a directory: ${current}`);
+    }
+
+    const currentRealPath = await fs.realpath(current);
+    resolveContainedPath(
+      rootRealPath,
+      path.relative(rootRealPath, currentRealPath),
+    );
+  }
+
+  return resolvedTarget;
 }
 
 function hasControlCharacters(value: string): boolean {

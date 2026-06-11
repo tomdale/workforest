@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -307,5 +314,44 @@ describe("temporary worktrees", () => {
     await expect(
       readWorkspaceMetadata(workspaceDir),
     ).resolves.not.toHaveProperty("temporary_worktrees");
+  });
+
+  it("refuses destructive cleanup when a setup log ancestor is a symlink", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const outsideDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-outside-logs-"),
+    );
+    tempDirs.push(outsideDir);
+    const outsideLog = path.join(outsideDir, "front-fix-tests.log");
+    await writeFile(outsideLog, "keep\n", "utf8");
+    await appendTemporaryWorktrees(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "fix-tests",
+        branch: "tomdale/fix-tests",
+        base_branch: "tomdale/my-feature",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "failed",
+        setup_log: ".workforest/logs/front-fix-tests.log",
+      },
+    ]);
+    await mkdir(path.join(workspaceDir, "fix-tests"));
+    await symlink(outsideDir, path.join(workspaceDir, ".workforest", "logs"));
+    const { removeTemporaryWorktrees } = await import(
+      "./temporary-worktrees.ts"
+    );
+
+    await expect(
+      removeTemporaryWorktrees({
+        workspaceDir,
+        slugs: ["fix-tests"],
+        force: true,
+      }),
+    ).rejects.toThrow("symbolic link");
+
+    await expect(readFile(outsideLog, "utf8")).resolves.toBe("keep\n");
+    expect(runGitMock).not.toHaveBeenCalled();
   });
 });

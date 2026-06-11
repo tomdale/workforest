@@ -116,9 +116,7 @@ export async function listCachedRepositories(): Promise<CachedRepository[]> {
   const entries = await fs.readdir(cacheDir, { withFileTypes: true });
   const repositories = await Promise.all(
     entries
-      .filter(
-        (entry) => entry.isDirectory() && isValidCacheDirectoryName(entry.name),
-      )
+      .filter((entry) => entry.name.endsWith(".git"))
       .map((entry) =>
         inspectCachedRepository(resolveContainedPath(cacheDir, entry.name)),
       ),
@@ -189,7 +187,7 @@ export async function resolveMirrorDir(
   if (await pathExists(cacheDir)) {
     const entries = await fs.readdir(cacheDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory() || !isValidCacheDirectoryName(entry.name)) {
+      if (!entry.isDirectory() || !entry.name.endsWith(".git")) {
         continue;
       }
       const mirrorPath = resolveContainedPath(cacheDir, entry.name);
@@ -288,15 +286,12 @@ export async function deleteCachedRepository(
     );
   }
 
+  const mirrorPath = await validateCachedRepositoryDeletionPath(
+    getCacheDir(),
+    repository.mirrorPath,
+  );
+
   if (!options.dryRun) {
-    const cacheDir = getCacheDir();
-    const mirrorPath = resolveContainedPath(
-      cacheDir,
-      path.relative(
-        path.resolve(cacheDir),
-        path.resolve(repository.mirrorPath),
-      ),
-    );
     await fs.rm(mirrorPath, { recursive: true, force: true });
   }
 
@@ -352,6 +347,27 @@ async function inspectCachedRepository(
   const directoryName = path.basename(mirrorPath);
   const fallbackName = directoryName.replace(/\.git$/i, "");
   const issues: string[] = [];
+  const mirrorStat = await fs.lstat(mirrorPath);
+
+  if (mirrorStat.isSymbolicLink() || !mirrorStat.isDirectory()) {
+    return {
+      name: fallbackName,
+      slug: null,
+      remote: null,
+      mirrorPath,
+      directoryName,
+      defaultBranch: null,
+      sizeBytes: mirrorStat.isFile() ? mirrorStat.size : null,
+      lastFetchedAt: null,
+      worktrees: [],
+      health: "invalid",
+      issues: [
+        mirrorStat.isSymbolicLink()
+          ? "Cache entry is a symbolic link"
+          : "Cache entry is not a directory",
+      ],
+    };
+  }
 
   try {
     const { stdout } = await runGit(["rev-parse", "--is-bare-repository"], {
@@ -634,12 +650,50 @@ export function normalizeRemote(remote: string): string {
     .replace(/\/+$/, "");
 }
 
-function isValidCacheDirectoryName(value: string): boolean {
-  if (!value.endsWith(".git")) return false;
-  try {
-    validateRepositoryComponent(value, "Cache repository name");
-    return true;
-  } catch {
-    return false;
+async function validateCachedRepositoryDeletionPath(
+  cacheDir: string,
+  mirrorPath: string,
+): Promise<string> {
+  const resolvedCacheDir = path.resolve(cacheDir);
+  const resolvedMirrorPath = path.resolve(mirrorPath);
+  const relative = path.relative(resolvedCacheDir, resolvedMirrorPath);
+
+  if (
+    relative === "" ||
+    path.isAbsolute(relative) ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.dirname(relative) !== "."
+  ) {
+    throw new Error(
+      `Cached repository path must be a direct child of ${resolvedCacheDir}: ${mirrorPath}`,
+    );
   }
+
+  const containedMirrorPath = resolveContainedPath(resolvedCacheDir, relative);
+
+  try {
+    const mirrorStat = await fs.lstat(containedMirrorPath);
+    if (mirrorStat.isSymbolicLink()) {
+      throw new Error(
+        `Cached repository path must not be a symbolic link: ${containedMirrorPath}`,
+      );
+    }
+
+    const [realCacheDir, realMirrorPath] = await Promise.all([
+      fs.realpath(resolvedCacheDir),
+      fs.realpath(containedMirrorPath),
+    ]);
+    if (path.dirname(realMirrorPath) !== realCacheDir) {
+      throw new Error(
+        `Cached repository path escapes ${resolvedCacheDir}: ${mirrorPath}`,
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return containedMirrorPath;
 }

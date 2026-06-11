@@ -168,6 +168,20 @@ describe("workspace config", () => {
 
 describe("repository parsing", () => {
   it.each([
+    "git@gitlab.com:team/subgroup/lib.git",
+    "ssh://git@gitlab.com/team/sub+group/lib.git",
+  ])("accepts generic git remote paths %j", (input) => {
+    expect(isRepoSlug(input)).toBe(true);
+    expect(reposFromSlugs([input])).toEqual([
+      {
+        name: "lib",
+        remote: input,
+        defaultBranch: "main",
+      },
+    ]);
+  });
+
+  it.each([
     "owner/.",
     "owner/..",
     "./repo",

@@ -23,6 +23,7 @@ import { isSlug } from "../utils/slug.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
   appendTemporaryWorktrees,
+  getTemporaryWorktreeSetupLogRelativePath,
   readWorkspaceMetadata,
   removeTemporaryWorktrees as removeTemporaryWorktreeMetadata,
 } from "./metadata.ts";
@@ -181,7 +182,7 @@ export async function createTemporaryWorktrees({
       created.map((result) => ({
         slug: result.slug,
         parent_repo: result.parentRepo,
-        path: path.relative(resolvedWorkspaceDir, result.path),
+        path: result.slug,
         branch: result.branch,
         base_branch: baseBranch,
         base_sha: baseSha,
@@ -255,7 +256,7 @@ export async function removeTemporaryWorktrees({
   const removed: TemporaryWorktreeMetadata[] = [];
 
   for (const entry of targets) {
-    const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.path);
+    const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.slug);
     const parentRepoDir = resolveContainedPath(
       resolvedWorkspaceDir,
       entry.parent_repo,
@@ -291,9 +292,16 @@ export async function removeTemporaryWorktrees({
     await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
 
     if (entry.setup_log) {
-      await fs.rm(resolveContainedPath(resolvedWorkspaceDir, entry.setup_log), {
-        force: true,
-      });
+      await fs.rm(
+        resolveContainedPath(
+          resolvedWorkspaceDir,
+          getTemporaryWorktreeSetupLogRelativePath(
+            entry.parent_repo,
+            entry.slug,
+          ),
+        ),
+        { force: true },
+      );
     }
 
     removed.push(entry);
@@ -346,7 +354,12 @@ async function* createAndSetupTemporaryWorktree({
         branch: entry.branch,
         setupStatus: result.status,
         ...(result.logPath
-          ? { setupLog: path.relative(workspaceDir, result.logPath) }
+          ? {
+              setupLog: getTemporaryWorktreeSetupLogRelativePath(
+                entry.parent_repo,
+                entry.slug,
+              ),
+            }
           : {}),
       },
     };

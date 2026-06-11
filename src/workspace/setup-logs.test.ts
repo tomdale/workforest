@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -186,5 +186,29 @@ describe("repo setup logs", () => {
     expect(logPath).toBe(
       path.join(workspaceDir, ".workforest", "logs", "vercel_front.log"),
     );
+  });
+
+  it("does not write setup logs through a workspace symlink", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const outsideDir = await createWorkspaceDir();
+    await mkdir(path.join(workspaceDir, ".workforest"));
+    await symlink(outsideDir, path.join(workspaceDir, ".workforest", "logs"));
+
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "failed", error: new Error("setup failed") };
+    };
+
+    await expect(
+      collect(
+        withRepoSetupLog(pipeline(), {
+          workspaceDir,
+          repoName: "front",
+          repoDir: path.join(workspaceDir, "front"),
+        }),
+      ),
+    ).rejects.toThrow("symbolic link");
+    await expect(
+      readFile(path.join(outsideDir, "front.log"), "utf8"),
+    ).rejects.toThrow();
   });
 });

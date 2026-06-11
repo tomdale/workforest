@@ -439,12 +439,14 @@ function parseGitUrl(token: string): ParsedGitUrl | null {
       .split("/")
       .map((part) => decodeURIComponent(part));
     if (pathParts.length < 2) return null;
-    for (const [index, part] of pathParts.entries()) {
-      validateRepositoryComponent(
-        part,
-        index === pathParts.length - 1 ? "Repository name" : "Repository owner",
-      );
+    const repositoryName = pathParts.at(-1);
+    if (!repositoryName) return null;
+    for (const part of pathParts.slice(0, -1)) {
+      if (!isSafeGitRemotePathComponent(part)) {
+        return null;
+      }
     }
+    validateRepositoryComponent(repositoryName, "Repository name");
   } catch {
     return null;
   }
@@ -457,6 +459,19 @@ function parseGitUrl(token: string): ParsedGitUrl | null {
   }
 
   return { name, remote };
+}
+
+function isSafeGitRemotePathComponent(value: string): boolean {
+  if (value === "" || value === "." || value === "..") {
+    return false;
+  }
+  if (value.includes("/") || value.includes("\\")) {
+    return false;
+  }
+  return ![...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
 }
 
 function createRepoConfig(org: string, repo: string): RepoConfig {

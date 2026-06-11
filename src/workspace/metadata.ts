@@ -11,6 +11,7 @@ import type {
 } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import {
+  assertContainedPathWithoutSymlinks,
   resolveContainedPath,
   validateResourceName,
 } from "../utils/path-safety.ts";
@@ -241,7 +242,13 @@ export async function readWorkspaceMetadata(
     );
   }
 
-  return validateWorkspaceMetadata(parsed, workspaceDir, metadataPath);
+  const metadata = validateWorkspaceMetadata(
+    parsed,
+    workspaceDir,
+    metadataPath,
+  );
+  await validateWorkspaceMetadataFilesystemPaths(metadata, workspaceDir);
+  return metadata;
 }
 
 /**
@@ -340,7 +347,12 @@ async function writeWorkspaceMetadataFile(
   workspaceDir: string,
   metadata: WorkspaceMetadata,
 ): Promise<void> {
-  validateWorkspaceMetadata(metadata, workspaceDir, "workspace metadata");
+  const validated = validateWorkspaceMetadata(
+    metadata,
+    workspaceDir,
+    "workspace metadata",
+  );
+  await validateWorkspaceMetadataFilesystemPaths(validated, workspaceDir);
   const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
   const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
   const contents = `${JSON.stringify(metadata, null, 2)}\n`;
@@ -559,19 +571,19 @@ function validateTemporaryWorktreeMetadata(
   source: string,
 ): void {
   const worktree = requireRecord(value, source);
-  validateResourceName(
+  const slug = validateResourceName(
     requireString(worktree["slug"], `${source}.slug`),
     "Task name",
   );
-  validateRepositoryComponent(
+  const parentRepo = validateRepositoryComponent(
     requireString(worktree["parent_repo"], `${source}.parent_repo`),
     "Repository name",
   );
-  validateMetadataPath(
-    workspaceDir,
-    requireString(worktree["path"], `${source}.path`),
-    `${source}.path`,
-  );
+  const worktreePath = requireString(worktree["path"], `${source}.path`);
+  if (worktreePath !== slug) {
+    throw new Error(`${source}.path must be exactly "${slug}".`);
+  }
+  validateMetadataPath(workspaceDir, worktreePath, `${source}.path`);
   requireString(worktree["branch"], `${source}.branch`);
   requireString(worktree["base_branch"], `${source}.base_branch`);
   requireString(worktree["base_sha"], `${source}.base_sha`);
@@ -584,6 +596,15 @@ function validateTemporaryWorktreeMetadata(
   }
   const setupLog = optionalString(worktree["setup_log"], `${source}.setup_log`);
   if (setupLog !== undefined) {
+    const expectedSetupLog = getTemporaryWorktreeSetupLogRelativePath(
+      parentRepo,
+      slug,
+    );
+    if (setupLog !== expectedSetupLog) {
+      throw new Error(
+        `${source}.setup_log must be exactly "${expectedSetupLog}".`,
+      );
+    }
     validateMetadataPath(workspaceDir, setupLog, `${source}.setup_log`);
   }
 }
@@ -617,6 +638,44 @@ function validateMetadataPath(
   if (resolved === resolvedWorkspaceDir) {
     throw new Error(`${source} must identify a path inside the workspace.`);
   }
+}
+
+async function validateWorkspaceMetadataFilesystemPaths(
+  metadata: WorkspaceMetadata,
+  workspaceDir: string,
+): Promise<void> {
+  for (const worktree of metadata.temporary_worktrees ?? []) {
+    await assertContainedPathWithoutSymlinks(
+      workspaceDir,
+      resolveContainedPath(workspaceDir, worktree.path),
+    );
+    if (worktree.setup_log) {
+      await assertContainedPathWithoutSymlinks(
+        workspaceDir,
+        resolveContainedPath(workspaceDir, worktree.setup_log),
+      );
+    }
+  }
+
+  for (const worktree of metadata.review_worktrees ?? []) {
+    await assertContainedPathWithoutSymlinks(
+      workspaceDir,
+      resolveContainedPath(workspaceDir, worktree.path),
+    );
+  }
+}
+
+export function getTemporaryWorktreeSetupLogRelativePath(
+  parentRepo: string,
+  slug: string,
+): string {
+  const repoName = validateRepositoryComponent(parentRepo, "Repository name");
+  const taskName = validateResourceName(slug, "Task name");
+  return path.posix.join(
+    METADATA_FILENAME,
+    "logs",
+    `${repoName}-${taskName}.log`,
+  );
 }
 
 function requireRecord(
