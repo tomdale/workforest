@@ -1,7 +1,8 @@
-import type { ExitCode } from "./types.ts";
+import type { CliErrorKind, ExitCode } from "./types.ts";
 
 export abstract class CliError extends Error {
   abstract readonly exitCode: Exclude<ExitCode, 0>;
+  abstract readonly kind: CliErrorKind;
 
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -11,10 +12,12 @@ export abstract class CliError extends Error {
 
 export class UsageError extends CliError {
   readonly exitCode = 2;
+  readonly kind = "usage";
 }
 
 export class OperationalError extends CliError {
   readonly exitCode = 1;
+  readonly kind = "operational";
 }
 
 export function isCliError(error: unknown): error is CliError {
