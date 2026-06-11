@@ -18,6 +18,7 @@ describe("shell command model", () => {
       "shell",
       "config",
       "skills",
+      "help",
       "version",
     ]);
     expect(model.commands.map((command) => command.name)).not.toContain(

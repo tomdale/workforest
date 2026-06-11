@@ -105,9 +105,6 @@ Usage: wf <command> [options]
 
 ${wrapText(ROOT_OVERVIEW, 80)}
 
-Concepts:
-${formatRows(concepts)}
-
 Start here (for AI agents):
   wf skills get core --full
 
@@ -126,11 +123,124 @@ Examples:
   wf template manage
   eval "$(wf shell init zsh)"
 
+Concepts:
+${formatRows(concepts)}
+
 Templates:
   ${context.templates.join("\n  ")}
 
 Config:     ${context.configPath}
 Templates:  ${context.templatesDir}
+`);
+}
+
+export function conceptsPage(): string {
+  return renderHelp(`
+wf help concepts - Core concepts and the git model behind workforest.
+
+Nouns:
+  workspace            A directory of git worktrees, one per repository, all sharing a branch name.
+                       Created with \`wf workspace create\`. workforest writes metadata to
+                       \`.workforest/workspace.json\` at the root and records the workspace in a
+                       global registry so \`wf workspace list\` and \`wf workspace open\` can find it.
+
+  task                 A short-lived extra worktree inside a workspace, on its own branch.
+                       Created with \`wf task create\` from inside a workspace. Because tasks reuse
+                       the workspace's cached mirrors, setup is instant. Delete with \`wf task delete\`.
+
+  standalone worktree  A single repository's worktree not attached to any workspace. Created with
+                       \`wf worktree create\`. Useful for one-off explorations or single-repo work.
+
+  template             A saved workspace recipe: a list of repositories plus optional hooks, extra
+                       files, and a branch prefix. Stored under
+                       \`~/.config/workforest/templates/<name>/template.jsonc\`.
+                       Create and edit with \`wf template manage\`.
+
+  cached mirror        A bare local clone of a remote repository kept under \`~/.cache/workforest/\`.
+                       All worktrees are built from these mirrors, so workspace creation works
+                       offline after the first clone, and is fast on every subsequent call.
+                       Inspect and repair with \`wf cache\`.
+
+  review workspace     A persistent bare workspace for reviewing pull requests from one repository.
+                       Created once with \`wf review open\`; individual PRs are added as worktrees
+                       with \`wf review checkout\`.
+
+  shell integration    A wrapper function installed by \`eval "$(wf shell init zsh)"\` that intercepts
+                       directory-changing commands and changes your shell's working directory, so
+                       \`wf workspace create\` lands you in the new workspace automatically.
+
+Git model:
+  Workspace creation follows this sequence for each repository:
+    1. Clone the remote as a bare mirror into \`~/.cache/workforest/\` if one does not exist.
+       The clone uses \`--filter=blob:none\` to skip file blobs (fetched on demand).
+    2. Create a git worktree from the mirror onto a new branch whose name is derived
+       from the work words you supplied after \`--\`.
+    3. Run \`pnpm install\` (or the configured installer) inside the worktree.
+    4. Run the template hooks in the order they are defined.
+  Steps 1-4 run in parallel across all repositories; \`wf workspace status\` shows progress.
+
+See also:
+  wf --help            Overview of all commands and examples
+  wf help workflow     Recommended workflows for users and agents
+  wf skills get core   Agent skill covering the full workspace lifecycle
+`);
+}
+
+export function workflowPage(): string {
+  return renderHelp(`
+wf help workflow - Recommended workflows for users and agents.
+
+Interactive user workflows:
+
+  Start a feature across multiple repos:
+    wf workspace create vercel/next.js vercel/turbo -- "update docs build"
+    wf workspace status         # monitor background setup; wait for READY
+    cd ~/Code/workspaces/update-docs-build/next.js
+    # ... make changes, commit, open PRs ...
+    wf workspace delete update-docs-build
+
+  Try a second approach without losing the first:
+    wf workspace create --like current -- "try different approach"
+
+  Review a pull request:
+    wf review open vercel/next.js       # one-time setup for this repo
+    wf review checkout vercel/next.js#1234
+
+  Add an isolated experiment inside an existing workspace:
+    wf task create fix-auth             # new branch, instant setup
+    cd ../fix-auth/next.js
+    # ... experiment ...
+    wf task delete fix-auth
+
+  Create a workspace from a saved template:
+    wf template manage                  # browse and edit templates
+    wf workspace create my-template -- "feature description"
+
+Agent workflows:
+
+  Orientation (do this first in every new session):
+    wf skills get core --full           # complete lifecycle reference for agents
+
+  Typical lifecycle:
+    wf workspace create <repos or template> -- <work description>
+    wf workspace status                 # confirm all repos are READY
+    # work inside the worktrees using normal project tooling
+    wf workspace delete <name> --force  # clean up when done
+
+  Adding to an existing workspace:
+    wf workspace add vercel/swr         # add another repo mid-session
+    wf task create <name>               # add an isolated branch for an experiment
+
+  Inspection:
+    wf workspace list                   # list all known workspaces
+    wf workspace open --search          # fuzzy-find a workspace (interactive)
+    wf cache list                       # inspect cached mirrors
+    wf cache doctor                     # diagnose mirror health
+
+See also:
+  wf --help            Overview of all commands and examples
+  wf help concepts     The git model and glossary behind these commands
+  wf skills get core   Full agent skill with annotated examples
 `);
 }
 

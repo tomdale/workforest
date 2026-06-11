@@ -32,7 +32,14 @@ import {
   loadWorkspaceConfig,
   saveWorkspaceConfig,
 } from "./config.ts";
-import { commandHelp, help, nestedCommandHelp, renderHelp } from "./help.ts";
+import {
+  commandHelp,
+  conceptsPage,
+  help,
+  nestedCommandHelp,
+  renderHelp,
+  workflowPage,
+} from "./help.ts";
 import { log } from "./logger.ts";
 import { RegisteredRepositoryNameCollisionError } from "./repositories.ts";
 import {
@@ -288,6 +295,24 @@ async function runInvocation(
         `Unsupported skills handler: ${invocation.command.leaf.handler}`,
       );
     }
+    case "help":
+      return success({
+        kind: "text",
+        value: await help(),
+        stream: "stdout",
+      });
+    case "help.concepts":
+      return success({
+        kind: "text",
+        value: conceptsPage(),
+        stream: "stdout",
+      });
+    case "help.workflow":
+      return success({
+        kind: "text",
+        value: workflowPage(),
+        stream: "stdout",
+      });
     case "version":
       return runVersionCommand();
     case "initialize-repo":

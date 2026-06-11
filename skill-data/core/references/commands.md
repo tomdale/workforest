@@ -927,6 +927,46 @@ Examples:
 - `wf skills path core` — Print the `core` skill's directory for use in a script.
 - `cat "$(wf skills path core)/SKILL.md"` — Capture a skill's directory and read a file from it.
 
+## `wf help`
+
+Show help pages.
+
+Prints the overview help page, the conceptual glossary, or the recommended workflow guide. With no subcommand, `wf help` prints the same overview as `wf --help`.
+
+```text
+wf help [subcommand]
+```
+
+Without a subcommand: Show overview help.
+
+### `wf help concepts`
+
+Explain core concepts.
+
+Describes the mental model behind workforest: what workspaces, tasks, templates, cached mirrors, and review workspaces are, and the git operations that underpin them.
+
+```text
+wf help concepts
+```
+
+Examples:
+
+- `wf help concepts` — Read the conceptual glossary and the git model.
+
+### `wf help workflow`
+
+Show recommended workflows.
+
+Describes recommended day-to-day workflows for both interactive users and AI agents, covering workspace creation, task management, PR review, and orientation patterns.
+
+```text
+wf help workflow
+```
+
+Examples:
+
+- `wf help workflow` — Read the recommended workflows for users and agents.
+
 ## `wf version`
 
 Print the workforest version.

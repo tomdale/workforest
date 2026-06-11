@@ -1693,6 +1693,59 @@ export const commandRegistry: CommandRegistry = {
           }),
         ],
       }),
+      group({
+        name: "help",
+        path: ["help"],
+        summary: "Show help pages",
+        description:
+          "Prints the overview help page, the conceptual glossary, or the recommended workflow guide. With no subcommand, `wf help` prints the same overview as `wf --help`.",
+        help: { kind: "command", command: "help" },
+        default: leaf({
+          name: "help",
+          path: ["help"],
+          summary: "Show overview help",
+          description: "Prints the same overview as `wf --help`.",
+          handler: "help",
+          help: { kind: "command", command: "help" },
+          outputModes: ["human"],
+        }),
+        children: [
+          leaf({
+            name: "concepts",
+            path: ["help", "concepts"],
+            summary: "Explain core concepts",
+            description:
+              "Describes the mental model behind workforest: what workspaces, tasks, templates, cached mirrors, and review workspaces are, and the git operations that underpin them.",
+            handler: "help.concepts",
+            help: nestedHelp("help", "concepts"),
+            outputModes: ["human"],
+            examples: [
+              {
+                command: "wf help concepts",
+                description:
+                  "Read the conceptual glossary and the git model.",
+              },
+            ],
+          }),
+          leaf({
+            name: "workflow",
+            path: ["help", "workflow"],
+            summary: "Show recommended workflows",
+            description:
+              "Describes recommended day-to-day workflows for both interactive users and AI agents, covering workspace creation, task management, PR review, and orientation patterns.",
+            handler: "help.workflow",
+            help: nestedHelp("help", "workflow"),
+            outputModes: ["human"],
+            examples: [
+              {
+                command: "wf help workflow",
+                description:
+                  "Read the recommended workflows for users and agents.",
+              },
+            ],
+          }),
+        ],
+      }),
       leaf({
         name: "version",
         path: ["version"],

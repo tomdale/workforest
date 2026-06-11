@@ -82,7 +82,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'new clean workspace task worktree cache review template shell config skills version'",
+      "_workforest_complete_words 'new clean workspace task worktree cache review template shell config skills help version'",
     );
     expect(script).toContain(
       "_workforest_complete_words 'create delete open list status add'",

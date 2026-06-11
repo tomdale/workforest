@@ -40,6 +40,7 @@ describe("commandRegistry", () => {
       shell: ["init"],
       config: ["show", "init", "edit"],
       skills: ["list", "get", "path"],
+      help: ["concepts", "workflow"],
       version: null,
     });
   });
@@ -77,6 +78,9 @@ describe("commandRegistry", () => {
     );
     expect(findGroup(commandRegistry.root, "skills").default?.handler).toBe(
       "skills.list",
+    );
+    expect(findGroup(commandRegistry.root, "help").default?.handler).toBe(
+      "help",
     );
   });
 
