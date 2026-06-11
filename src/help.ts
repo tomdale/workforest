@@ -32,7 +32,9 @@ Commands:
   new <template|repo...> -- <work>  Create a workspace
   status                       Monitor background repository initialization
   worktree <slug...>           Create temporary worktree(s) in a workspace repo
-  worktree list|delete         List or delete temporary worktrees
+  worktree new <repo> <name>   Create a managed single-repo worktree
+  worktree promote             Promote a managed worktree to a workspace
+  worktree list|delete         List or delete contextual worktrees
   review <target>              Create a review workspace or PR worktree
   review list|delete           List or delete PR review worktrees
   delete                       Infer and delete current tracked resource
@@ -63,6 +65,8 @@ Examples:
   wf status
   wf status retry front
   wf worktree "fix-tests" "upgrade-deps"
+  wf worktree new next.js "fix-auth"
+  wf worktree promote full-stack vercel/swr
   wf worktree list
   wf worktree delete "fix-tests"
   wf review vercel/omniagent 123
@@ -133,13 +137,18 @@ Examples:
 
   worktree: `Usage: wf worktree <repo> <slug> [options]
        wf worktree <slug...> [options]
+       wf worktree new <repo> <name> [options]
+       wf worktree new <name> [options]
+       wf worktree promote [template] [repo...] [options]
        wf worktree list [options]
        wf worktree delete [slug...] [options]
 
 Create, list, or delete worktrees. Inside a workforest workspace, slug-only
-creation makes temporary worktrees tracked in workspace metadata. Outside a
-workspace, slug-only creation uses the current git repo's origin remote when
-available. Standalone repository arguments may use unique cached names.
+creation makes temporary worktrees tracked in workspace metadata. Managed
+single-repo worktrees live under defaultDir/<repo>/<name>; from one of those
+checkouts, slug-only creation, list, and delete operate on its siblings.
+Promotion converts the current managed checkout into a normal workspace.
+Legacy standalone repository arguments may use unique cached names.
 
 Options:
   --dir <path>     Target path for standalone worktree creation
@@ -150,6 +159,8 @@ Options:
 
 Examples:
   wf worktree next.js fix-auth --dir ../next.js-fix-auth
+  wf worktree new next.js fix-auth
+  wf worktree promote full-stack vercel/swr
   wf worktree fix-tests
   wf worktree list --repo front
   wf worktree delete fix-tests --dry-run
@@ -157,6 +168,8 @@ Examples:
 
   wt: `Usage: wf wt <repo> <slug> [options]
        wf wt <slug...> [options]
+       wf wt new <repo> <name> [options]
+       wf wt promote [template] [repo...] [options]
        wf wt list [options]
        wf wt delete [slug...] [options]
 
@@ -505,9 +518,33 @@ Options:
   },
 
   worktree: {
+    new: `Usage: wf worktree new <repo> <name> [options]
+       wf worktree new <name> [options]
+
+Create a managed single-repository worktree at defaultDir/<repo>/<name>.
+The contextual form uses the current managed worktree's repository. The new
+branch starts from the remote default branch and built-in initializers run with
+the checkout as both repository and workspace context.
+
+Options:
+  -n, --dry-run  Preview without changing files
+  -h, --help     Show this help
+`,
+    promote: `Usage: wf worktree promote [template] [repo...] [options]
+
+Promote the current managed single-repository worktree into a normal workspace.
+The checkout moves to defaultDir/<dirPrefix><name>/<repo>, keeps its branch and
+uncommitted changes, and becomes the first workspace repository. At most one
+template may be supplied. Additional repositories use the current branch.
+
+Options:
+  -n, --dry-run  Preview without changing files
+  -h, --help     Show this help
+`,
     list: `Usage: wf worktree list [options]
 
-List temporary worktrees tracked by the current workspace.
+List temporary worktrees tracked by the current workspace, or managed sibling
+worktrees when run from a managed single-repository checkout.
 
 Options:
   --repo <repo>  Limit results to one workspace repo
@@ -515,8 +552,8 @@ Options:
 `,
     delete: `Usage: wf worktree delete [slug...] [options]
 
-Delete temporary worktrees tracked by the current workspace, or standalone
-worktrees outside a workspace.
+Delete temporary worktrees tracked by the current workspace, managed sibling
+worktrees, or standalone worktrees outside those contexts.
 When run inside a temporary worktree, the slug defaults to the current worktree.
 
 Options:

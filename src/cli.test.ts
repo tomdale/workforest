@@ -723,6 +723,8 @@ describe("cli", () => {
   });
 
   it.each([
+    [["worktree", "new", "--help"], "Usage: wf worktree new"],
+    [["worktree", "promote", "--help"], "Usage: wf worktree promote"],
     [["worktree", "list", "--help"], "Usage: wf worktree list"],
     [["worktree", "delete", "--help"], "Usage: wf worktree delete"],
     [["worktree", "rm", "--help"], "Usage: wf worktree delete"],

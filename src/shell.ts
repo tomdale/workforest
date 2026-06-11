@@ -217,6 +217,9 @@ _workforest_complete() {
         status)
           _values 'status action' cancel retry
           ;;
+        worktree|wt)
+          _values 'worktree action' new promote list delete rm
+          ;;
       esac
       ;;
   esac

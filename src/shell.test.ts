@@ -57,6 +57,9 @@ describe("shell integration", () => {
     expect(script).toContain("find:fuzzy-find a workspace");
     expect(script).toContain("review:create or manage PR review worktrees");
     expect(script).toContain(
+      "_values 'worktree action' new promote list delete rm",
+    );
+    expect(script).toContain(
       "delete:infer and delete current tracked resource",
     );
     expect(script).toContain("skills:list and retrieve bundled agent skills");

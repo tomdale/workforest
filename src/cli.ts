@@ -831,7 +831,20 @@ async function runWorktreeCommand(
 
   const subcommand = args._[0];
   if (subcommand === "list") {
-    await runTemporaryWorktreeList(args);
+    const workspaceDir = await detectWorkspaceFromCwd();
+    if (workspaceDir) {
+      await runTemporaryWorktreeList(args);
+      return;
+    }
+
+    const managedContext = await resolveManagedWorktreeContextFromCwd();
+    if (managedContext) {
+      await runManagedWorktreeList(managedContext, args);
+      return;
+    }
+
+    log.error("Not inside a workspace or managed single-repository worktree.");
+    process.exitCode = 1;
     return;
   }
 
@@ -842,7 +855,28 @@ async function runWorktreeCommand(
       return;
     }
 
+    const managedContext = await resolveManagedWorktreeContextFromCwd();
+    if (managedContext) {
+      await runManagedWorktreeRemove(managedContext, args);
+      return;
+    }
+
     await runStandaloneWorktreeRemove(args);
+    return;
+  }
+
+  if (subcommand === "new") {
+    const managedContext = await resolveManagedWorktreeContextFromCwd();
+    if (managedContext) {
+      await runManagedWorktreeCreate(args, managedContext);
+    } else {
+      await runManagedWorktreeCreate(args);
+    }
+    return;
+  }
+
+  if (subcommand === "promote") {
+    await runManagedWorktreePromote(args);
     return;
   }
 
@@ -851,6 +885,14 @@ async function runWorktreeCommand(
     if (workspaceDir) {
       await runTemporaryWorktreeCreate(args, workspaceDir);
       return;
+    }
+
+    if (args._.length === 1) {
+      const managedContext = await resolveManagedWorktreeContextFromCwd();
+      if (managedContext) {
+        await runManagedWorktreeCreate(args, managedContext);
+        return;
+      }
     }
   }
 
@@ -1237,6 +1279,328 @@ async function runStandaloneWorktreeCreate(args: {
     log.success(`Worktree ready: ${targetDir}`);
     if (!isShellAutoCdEnabled()) {
       log.info(`Run: cd ${targetDir}`);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runManagedWorktreeCreate(
+  args: {
+    _: string[];
+    "--dir"?: string;
+    "--repo"?: string;
+    "--dry-run"?: boolean;
+  },
+  contextual?: import("./managed-worktrees.ts").ManagedWorktreeContext,
+): Promise<void> {
+  if (args["--dir"]) {
+    log.error("--dir is only supported for standalone worktrees.");
+    process.exitCode = 1;
+    return;
+  }
+  if (args["--repo"]) {
+    log.error("--repo is only supported for workspace temporary worktrees.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const selections = args._[0] === "new" ? args._.slice(1) : args._;
+  if (
+    selections.length === 0 ||
+    selections.length > 2 ||
+    (selections.length === 1 && !contextual)
+  ) {
+    log.error("Usage: wf worktree new <repo> <name>");
+    log.error("       wf worktree new <name>  # from a managed worktree");
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const { config, path: configPath } = await loadWorkspaceConfig();
+    if (!config.defaultDir) {
+      throw new Error(
+        `No defaultDir configured. Run 'wf config init' or set defaultDir in ${configPath}.`,
+      );
+    }
+
+    const name = selections.at(-1);
+    if (!name) {
+      throw new Error("A worktree name is required.");
+    }
+
+    let repo: RepoConfig;
+    if (selections.length === 1) {
+      if (!contextual) {
+        throw new Error(
+          "Contextual creation requires a managed single-repository worktree.",
+        );
+      }
+      repo = contextual.repo;
+    } else {
+      const [repoInput] = selections;
+      const repos = await resolveRepositorySpecifiers([repoInput ?? ""]);
+      const resolvedRepo = repos[0];
+      if (!resolvedRepo || repos.length !== 1) {
+        throw new Error("Exactly one repository is required.");
+      }
+      repo = resolvedRepo;
+    }
+
+    const { createManagedWorktree } = await import("./managed-worktrees.ts");
+    const result = await createManagedWorktree({
+      repo,
+      name,
+      defaultDir: path.resolve(expandHome(config.defaultDir)),
+      ...(config.branchPrefix !== undefined
+        ? { branchPrefix: config.branchPrefix }
+        : {}),
+      dryRun: args["--dry-run"] ?? false,
+    });
+
+    if (result.dryRun) {
+      showDryRunReport({
+        fields: [
+          { label: "Repository", value: result.repo.name },
+          { label: "Remote", value: result.repo.remote },
+          { label: "Branch", value: result.branchName },
+          { label: "Target", value: result.targetDir },
+        ],
+      });
+      return;
+    }
+
+    await writeShellCdPath(result.targetDir);
+    if (result.setupStatus === "failed") {
+      log.error(
+        `Worktree created, but setup failed: ${result.setupError?.message ?? "unknown error"}`,
+      );
+      log.info(`Worktree retained at ${result.targetDir}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    log.success(`Worktree ready: ${result.targetDir}`);
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${result.targetDir}`);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runManagedWorktreeList(
+  context: import("./managed-worktrees.ts").ManagedWorktreeContext,
+  args: { _: string[]; "--repo"?: string },
+): Promise<void> {
+  if (args._.length > 1 || args["--repo"]) {
+    log.error("Usage: wf worktree list");
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const { listManagedWorktrees } = await import("./managed-worktrees.ts");
+    const entries = await listManagedWorktrees(context);
+    if (entries.length === 0) {
+      log.info("No managed worktrees found.");
+      return;
+    }
+
+    printReport({
+      title: `${context.repo.name} worktrees`,
+      sections: [
+        {
+          entries: entries.map((entry) => ({
+            title: entry.name,
+            details: [
+              {
+                label: "Branch",
+                value:
+                  entry.branch ?? (entry.detached ? "detached" : "unknown"),
+              },
+              ...(entry.locked ? [{ label: "Locked", value: "yes" }] : []),
+              { label: "Path", value: entry.path },
+            ],
+          })),
+        },
+      ],
+      footer: `Directory: ${context.familyDir}`,
+    });
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runManagedWorktreeRemove(
+  context: import("./managed-worktrees.ts").ManagedWorktreeContext,
+  args: {
+    _: string[];
+    "--repo"?: string;
+    "--dry-run"?: boolean;
+    "--force"?: boolean;
+    skipConfirmation?: boolean;
+  },
+): Promise<void> {
+  if (args["--repo"]) {
+    log.error("--repo is only supported for workspace temporary worktrees.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const names = args._.slice(1);
+  if (names.length > 1) {
+    log.error("Usage: wf worktree delete [name] [--dry-run] [--force]");
+    process.exitCode = 1;
+    return;
+  }
+  const name = names[0] ?? context.name;
+  const targetDir = path.join(context.familyDir, name);
+
+  try {
+    if (!args.skipConfirmation) {
+      const confirmed = await confirmDelete({
+        dryRun: args["--dry-run"] ?? false,
+        force: args["--force"] ?? false,
+        description: `managed worktree "${name}"`,
+        targetPath: targetDir,
+      });
+      if (!confirmed) return;
+    }
+
+    const { removeManagedWorktree } = await import("./managed-worktrees.ts");
+    const removed = await removeManagedWorktree({
+      context,
+      name,
+      dryRun: args["--dry-run"] ?? false,
+      force: args["--force"] ?? false,
+    });
+    if (args["--dry-run"]) {
+      showDryRunReport({
+        fields: [
+          { label: "Worktree", value: removed.name },
+          ...(removed.branch
+            ? [{ label: "Branch", value: removed.branch }]
+            : []),
+          { label: "Path", value: removed.path },
+        ],
+      });
+      return;
+    }
+
+    log.success(`Deleted managed worktree: ${removed.path}`);
+    if (path.resolve(removed.path) === path.resolve(context.checkoutPath)) {
+      await writeShellCdPath(context.familyDir);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    process.exitCode = 1;
+  }
+}
+
+async function runManagedWorktreePromote(args: {
+  _: string[];
+  "--dir"?: string;
+  "--repo"?: string;
+  "--dry-run"?: boolean;
+}): Promise<void> {
+  if (args["--dir"] || args["--repo"]) {
+    log.error("--dir and --repo are not supported for worktree promotion.");
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const { config, path: configPath } = await loadWorkspaceConfig();
+    if (!config.defaultDir) {
+      throw new Error(
+        `No defaultDir configured. Run 'wf config init' or set defaultDir in ${configPath}.`,
+      );
+    }
+    const defaultDir = path.resolve(expandHome(config.defaultDir));
+    const { resolveManagedWorktreeContext, promoteManagedWorktree } =
+      await import("./managed-worktrees.ts");
+    const context = await resolveManagedWorktreeContext({
+      cwd: process.cwd(),
+      defaultDir,
+    });
+    if (!context) {
+      throw new Error(
+        "Run wf worktree promote from inside a managed single-repository worktree.",
+      );
+    }
+
+    let template: Awaited<ReturnType<typeof loadTemplate>> = null;
+    const repoSelections: string[] = [];
+    for (const selection of args._.slice(1)) {
+      const candidate = isRepoSlug(selection)
+        ? null
+        : await loadTemplate(selection);
+      if (candidate) {
+        if (template) {
+          throw new Error("Promotion accepts at most one template.");
+        }
+        template = candidate;
+      } else {
+        repoSelections.push(selection);
+      }
+    }
+
+    const templateConfig = template
+      ? await qualifyTemplateRepositories(template.config)
+      : null;
+    const repos = await resolveRepositorySpecifiers([
+      ...(templateConfig?.repos ?? []),
+      ...repoSelections,
+    ]);
+    const resolvedTemplate =
+      template && templateConfig
+        ? { ...template, config: templateConfig }
+        : template;
+    const result = await promoteManagedWorktree({
+      context,
+      defaultDir,
+      ...(config.dirPrefix !== undefined
+        ? { dirPrefix: config.dirPrefix }
+        : {}),
+      template: resolvedTemplate,
+      repos,
+      dryRun: args["--dry-run"] ?? false,
+    });
+
+    if (result.dryRun) {
+      showDryRunReport({
+        fields: [
+          { label: "Workspace", value: result.workspaceDir },
+          { label: "Repository", value: result.repoDir },
+          { label: "Branch", value: context.branch ?? "detached" },
+          ...(resolvedTemplate
+            ? [{ label: "Template", value: resolvedTemplate.id }]
+            : []),
+        ],
+        sections: [repositoryReportSection("Repositories", result.repos)],
+      });
+      return;
+    }
+
+    await writeShellCdPath(result.repoDir);
+    log.success(`Promoted worktree to workspace: ${result.workspaceDir}`);
+    if (result.failures.length > 0) {
+      for (const failure of result.failures) {
+        log.error(failure);
+      }
+      log.info(
+        `The promoted workspace remains available at ${result.workspaceDir}`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${result.repoDir}`);
     }
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -2917,6 +3281,25 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
     }
   }
 
+  const managedContext = await resolveManagedWorktreeContextFromCwd();
+  if (managedContext) {
+    const confirmed = await confirmDelete({
+      dryRun,
+      force,
+      description: `managed worktree "${managedContext.name}"`,
+      targetPath: managedContext.checkoutPath,
+    });
+    if (!confirmed) return;
+
+    await runManagedWorktreeRemove(managedContext, {
+      _: ["delete"],
+      "--dry-run": dryRun,
+      "--force": force,
+      skipConfirmation: true,
+    });
+    return;
+  }
+
   const standaloneWorktree = await resolveStandaloneWorktreeFromCwd(cwd);
   const exactReview = standaloneWorktree
     ? await resolveReviewWorktreeFromCwd(standaloneWorktree.path, {
@@ -3097,6 +3480,21 @@ async function resolveStandaloneWorktreeFromCwd(
 ): Promise<{ path: string; branch?: string } | null> {
   const { resolveStandaloneWorktree } = await import("./worktree.ts");
   return resolveStandaloneWorktree(cwd);
+}
+
+async function resolveManagedWorktreeContextFromCwd(): Promise<
+  import("./managed-worktrees.ts").ManagedWorktreeContext | null
+> {
+  const { config } = await loadWorkspaceConfig();
+  if (!config.defaultDir) return null;
+
+  const { resolveManagedWorktreeContext } = await import(
+    "./managed-worktrees.ts"
+  );
+  return resolveManagedWorktreeContext({
+    cwd: process.cwd(),
+    defaultDir: path.resolve(expandHome(config.defaultDir)),
+  });
 }
 
 function logNewUsage(): void {
