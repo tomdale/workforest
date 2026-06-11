@@ -44,7 +44,7 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills",
+      "new|clean|workspace|task|worktree|review|template",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
@@ -53,19 +53,33 @@ describe("shell integration", () => {
     expect(script).toContain("compdef _workforest_complete wf workforest");
     expect(script).toContain("__workforest_workspace_root()");
     expect(script).toContain('local subcommand="$' + '{words[2]:-}"');
-    expect(script).toContain("cd|clean|delete|workspace)");
-    expect(script).toContain("find:fuzzy-find a workspace");
-    expect(script).toContain("review:create or manage PR review worktrees");
     expect(script).toContain(
-      "_values 'worktree action' new promote list delete rm",
+      "_values 'workspace action' create delete open list status add",
     );
     expect(script).toContain(
-      "delete:infer and delete current tracked resource",
+      'elif [[ "$' +
+        '{words[3]:-}" == "open" || "$' +
+        '{words[3]:-}" == "delete" ]]',
     );
+    expect(script).toContain("clean)\n          _workforest_workspace_names");
+    expect(script).toContain(
+      "review:open review workspaces and check out pull requests",
+    );
+    expect(script).toContain("_values 'review action' open checkout");
+    expect(script).toContain("_values 'task action' create list delete");
+    expect(script).toContain("_values 'worktree action' create list delete");
+    expect(script).toContain(
+      "_values 'cache action' manage list info path add update doctor repair delete prune",
+    );
+    expect(script).toContain("_values 'template action' manage show open");
+    expect(script).toContain("_values 'shell action' init");
     expect(script).toContain("skills:list and retrieve bundled agent skills");
-    expect(script).toContain("templates:open template manager");
     expect(script).toContain("_workforest_workspace_names");
-    expect(script).not.toContain("CURRENT == 3");
+    expect(script).not.toContain("'fork:");
+    expect(script).not.toContain("'templates:");
+    expect(script).not.toContain("'wt:");
+    expect(script).not.toContain("'init:");
+    expect(script).not.toContain(" promote ");
   });
 
   it("does not emit zsh completion helpers for bash", () => {

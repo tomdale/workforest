@@ -66,7 +66,7 @@ export function runRepositoryManager({
     const screen = new Screen({
       smartCSR: true,
       fullUnicode: true,
-      title: "wf repositories",
+      title: "wf cache manage",
     });
     const initialLayout = repositoryManagerLayout(
       Number(screen.width),

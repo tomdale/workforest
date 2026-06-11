@@ -1,484 +1,325 @@
 # workforest
 
-A CLI tool for creating workspaces of multiple git worktrees.
+A CLI for creating disposable development workspaces from cached Git
+repositories and worktrees.
 
-## Why workforest?
+## Why Workforest?
 
-[Git worktrees](https://git-scm.com/docs/git-worktree) let you have multiple
-checkouts of a repository simultaneously, helping you juggle between feature
-work, code review, and bug fixes without constant stashing or branch switching.
-But worktrees only help within a single repository.
+[Git worktrees](https://git-scm.com/docs/git-worktree) make it practical to
+work on several branches of one repository at the same time. Workforest extends
+that model across repositories: one workspace can contain coordinated
+checkouts for a frontend, API, documentation site, and any other repositories a
+task needs.
 
-I've found that giving coding agents like Claude Code access to the entire
-system, like both the frontend and backend repos, is like giving them
-superpowers. However, manually setting up groups of multiple worktrees and
-getting each repo up and running is a pain in the ass.
-
-Workforest just extends the worktree concept to multi-repo development. It
-creates a single directory containing coordinated worktrees with all the repos
-you need, each on a consistently-named feature branch, with dependencies
-installed and ready to go.
+Workforest creates consistently named branches, reuses cached bare mirrors,
+runs repository setup in parallel, applies reusable templates, and records the
+workspace so it can be opened or deleted safely later.
 
 ## Installation
 
-```bash
+```sh
 npm install -g workforest
 ```
 
-Or use npx without installing:
+The package installs both `wf` and `workforest`. Usage text uses the shorter
+`wf` executable.
 
-```bash
-npx workforest new ...
+Install the shell integration once to enable command handoff and zsh workspace
+completion:
+
+```sh
+eval "$(wf shell init zsh)"
 ```
 
-To have `wf new`, `wf fork`, and single-target `wf worktree` commands drop you
-straight into the new workspace or worktree, `wf cd` jump into an existing
-workspace, `wf clean` jump to the deleted workspace's parent when you ran it
-from inside that workspace, and zsh complete workspace names for `wf cd` /
-`wf clean`, install the shell hook once in your shell rc:
-
-```bash
-eval "$(wf init zsh)"
-```
-
-`wf init` currently supports `zsh` and `bash`.
+Use `bash` instead of `zsh` for Bash. Bash receives command handoff but does not
+currently include generated completion.
 
 ## Quick Start
 
-```bash
-# Create a workspace with the frontend and backend repos
-# on new branches named after the feature.
-wf new vercel/front vercel/api -- fixing the auth bug
+```sh
+# Create a multi-repository workspace.
+wf workspace create vercel/front vercel/api -- "fix authentication"
 
-# Monitor dependency installation and other background setup
-wf status
+# Monitor background dependency installation and hooks.
+wf workspace status
 
-# Add another repo to the current workspace later
-wf add vercel/docs
+# Add another repository to the current workspace.
+wf workspace add vercel/docs
 
-# Create temporary sibling worktrees for parallel agents from inside a repo
-wf wt fix-tests upgrade-dependencies
+# Open an existing workspace.
+wf workspace open fix-authentication
 
-# Create a managed single-repo worktree under defaultDir/front/fix-auth
-wf wt new vercel/front fix-auth
-
-# Promote it into a normal multi-repo workspace later
-wf wt promote full-stack vercel/docs
-
-# List and remove temporary worktrees after merging their branches
-wf wt list
-wf wt rm fix-tests
-
-# Jump back to an existing workspace by name
-wf cd fix-auth-bug
-
-# Or save frequently used groups as templates
-wf template new full-stack org/frontend org/api
-wf new full-stack -- implementing user avatars
+# Delete it after the work is merged.
+wf workspace delete fix-authentication --dry-run
+wf workspace delete fix-authentication --force
 ```
 
-### Interactive Wizard
+`wf new` is the documented shortcut for `wf workspace create`. `wf clean` is a
+temporary shortcut for `wf workspace delete`. Other commands use their
+resource-first canonical paths.
 
-Run `wf new` without arguments for the interactive wizard:
+## Workspace Workflows
 
-```bash
-wf new
+### Create A Workspace
+
+Create a workspace from repositories:
+
+```sh
+wf workspace create vercel/front vercel/api -- "add account switching"
 ```
 
-The wizard guides you through:
+The command creates a directory such as `add-account-switching/`, adds a
+matching feature branch to each repository, and returns after the worktrees are
+available. Initializers and template hooks continue in background workers.
 
-1. **Template selection** — Choose a template or enter repositories manually
-2. **Template preview** — See full details before committing to a template
-3. **Feature name** — Describe your work in prose or enter a slug directly
+Run the command without repository arguments for the interactive creation
+flow:
 
-When you select a template, you'll see a preview showing repositories, hooks,
-and branch prefix. From the preview, you can:
-
-- **Use this template** — Proceed with workspace creation
-- **Edit template first** — Modify the template before using it
-- **Choose different template** — Go back to template selection
-
-The wizard also provides inline **template management** without leaving the
-flow. Select "Manage templates..." to:
-
-- **Create new template** — Start from scratch with the interactive editor
-- **Edit existing template** — Modify any saved template
-- **Clone and modify** — Copy a template as a starting point for a new one
-
-If no templates exist, the wizard offers to create one before falling back to
-manual repository entry.
-
-This example creates a directory like `user-avatars/` containing:
-
-- Fresh checkouts of each repository
-- Feature branches (e.g., `feature/user-avatars`) created from each repo's
-  default branch
-- Dependencies installed
-- A VS Code workspace file for multi-root editing
-
-## Use Cases
-
-### Feature Development Across Repos
-
-When a feature spans your frontend and API, create a workspace that includes
-both:
-
-```bash
-wf new frontend backend -- add dark mode support
+```sh
+wf workspace create
 ```
 
-Both repos get a `dark-mode-support` branch, ready for coordinated development.
+### Create From The Current Workspace
 
-### Adding a Repo Later
+Start a separate approach with the same repository set:
 
-If the workspace already exists and you need to bring in another repository,
-run `wf add` from inside that workspace:
-
-```bash
-cd ~/Code/workspaces/fix-auth-bug
-wf add vercel/docs
+```sh
+cd ~/Code/workspaces/fix-authentication
+wf workspace create --like current -- "try token refresh"
 ```
 
-You can also target a workspace explicitly:
+The new workspace uses fresh branches from each repository's default branch.
 
-```bash
-wf add vercel/docs --workspace ~/Code/workspaces/fix-auth-bug
+### Add A Repository
+
+From anywhere inside a workspace:
+
+```sh
+wf workspace add vercel/docs
 ```
 
-The new repo is checked out onto the workspace's existing feature branch, then
-the `.workforest/workspace.json` metadata and VS Code workspace file are updated
-in place.
+Or target one explicitly:
 
-### Temporary Worktrees For Parallel Agents
-
-When you are inside a workspace repo and want to hand independent tasks to
-parallel agents, create temporary sibling worktrees:
-
-```bash
-cd ~/Code/workspaces/my-feature/omniagent
-wf worktree fix-tests upgrade-dependencies
+```sh
+wf workspace add vercel/docs --workspace ~/Code/workspaces/fix-authentication
 ```
 
-This creates directories like:
+Workforest checks out the repository on the workspace branch, runs its
+initializers, and updates workspace metadata.
 
-- `~/Code/workspaces/my-feature/fix-tests`
-- `~/Code/workspaces/my-feature/upgrade-dependencies`
+### Open And List Workspaces
 
-Each temporary worktree starts from the primary repo's committed `HEAD`, gets a
-branch such as `tomdale/fix-tests`, and runs the same built-in
-repo initializers used during workspace setup, such as dependency installation
-and Vercel/Turbo linking. Template files and hooks are not rerun, and the VS
-Code workspace file is left unchanged.
-
-After reviewing and merging a temporary branch into the primary repo, remove it:
-
-```bash
-wf worktree rm fix-tests
+```sh
+wf workspace list
+wf workspace open fix-authentication
+wf workspace open --search
 ```
 
-Removal refuses dirty or unmerged worktrees unless you pass `--force`, then
-removes the worktree, deletes the local temporary branch, and updates
-Workforest metadata. To inspect temporary worktrees:
+With shell integration installed, `workspace open` changes the current shell
+directory. `--search` opens an interactive workspace picker.
 
-```bash
-wf worktree list
+### Monitor Setup
+
+```sh
+wf workspace status
 ```
 
-From a workspace root, pass the parent repo explicitly:
+Run status from anywhere inside the workspace to inspect repository setup and
+hook progress. Detailed repository logs live under `.workforest/logs/`.
 
-```bash
-wf worktree --repo omniagent fix-tests
-wf worktree rm --repo omniagent fix-tests
+### Delete A Workspace
+
+```sh
+wf workspace delete fix-authentication --dry-run
+wf workspace delete fix-authentication --force
 ```
 
-### Managed Single-Repo Worktrees
+Use Workforest rather than deleting the directory manually so cached Git
+worktree registrations are cleaned up with the workspace.
 
-For a single-repository checkout that can grow into a workspace later, use the
-managed layout:
+## Parallel Tasks
 
-```bash
-wf worktree new vercel/front fix-auth
-# ~/Code/workspaces/front/fix-auth
-# branch: tomdale/fix-auth
+Use task worktrees when parallel agents need independent branches of a
+repository in the same workspace:
+
+```sh
+cd ~/Code/workspaces/account-switching/front
+wf task create fix-tests upgrade-dependencies
 ```
 
-Managed worktrees require `defaultDir`. The name must be a slug, the branch uses
-the configured `branchPrefix`, and creation starts from the repository's remote
-default branch. Built-in initializers run with the checkout as both repository
-and workspace context, but Workforest does not create workspace metadata or a
-VS Code workspace file yet.
+Each task starts from the primary repository's committed `HEAD`, receives a
+branch derived from the configured branch prefix, and runs repository
+initializers. Template files and workspace hooks are not reapplied.
 
-From inside a managed checkout, create and manage siblings contextually:
+From the workspace root, identify the parent repository explicitly:
 
-```bash
-wf wt new experiment
-wf wt experiment
-wf wt list
-wf wt delete experiment
+```sh
+wf task create --repo front fix-tests
 ```
 
-Promote the current checkout when the work expands:
+Inspect and remove tasks after their branches are integrated:
 
-```bash
-wf wt promote
-wf wt promote full-stack vercel/docs
+```sh
+wf task list
+wf task delete fix-tests
 ```
 
-Promotion moves only the current checkout to
-`<defaultDir>/<dirPrefix><name>/<repo>`, preserving its branch, dirty files, and
-siblings. It creates normal workspace metadata and a VS Code workspace file,
-then adds template and explicit repositories on the current branch. Template
-files and hooks apply during promotion; initializers run only for newly added
-repositories.
+Deletion refuses dirty or unmerged task worktrees unless `--force` is supplied.
+Destructive commands require an explicit resource; Workforest does not infer a
+task to delete from the current directory.
 
-### Standalone Single-Repo Worktrees
+## Standalone Worktrees
 
-When you only need one repo outside a workspace and do not want workspace
-metadata, templates, initializers, hooks, or a VS Code workspace file, create a
-standalone worktree:
+Create a single-repository worktree without workspace metadata, templates,
+hooks, or a VS Code workspace:
 
-```bash
-wf worktree vercel/front fix-auth
-wf wt vercel/front fix-auth --dir ../front-fix-auth
+```sh
+wf worktree create vercel/front fix-auth
+wf worktree create vercel/front fix-auth --dir ../front-fix-auth
 ```
 
-The target defaults to `./<slug>`. `--dir <path>` is the exact target path. The
-branch is named from the configured `branchPrefix` plus the slug, and creation
-fails if either the target directory or computed branch already exists.
+The target defaults to `./<slug>`. Inspect or remove standalone worktrees with
+explicit commands:
 
-### Forking a Workspace
-
-When you want to try a different approach without losing your current work, fork
-the workspace. This creates a new sibling workspace with the same repos and
-template hooks, but with fresh branches off each repo's default branch:
-
-```bash
-cd ~/Code/workspaces/fix-auth-bug
-wf fork new-approach
+```sh
+wf worktree list vercel/front
+wf worktree delete ../front-fix-auth --dry-run
+wf worktree delete ../front-fix-auth --force
 ```
 
-The fork inherits the branch prefix, directory prefix, and template from the
-source workspace. You can also use a description:
+## Code Review
 
-```bash
-wf fork -d "trying a different strategy"
+Open a repository review workspace:
+
+```sh
+wf review open vercel/omniagent
 ```
 
-### Code Review
+Check out a pull request into that review workspace:
 
-Create disposable GitHub PR review worktrees without switching branches in your
-main workspace:
-
-```bash
-wf review vercel/omniagent
-wf review vercel/omniagent 123
-wf review 123 # inside a review workspace
-wf review vercel/omniagent#123
-wf review https://github.com/vercel/omniagent/pull/123
+```sh
+wf review checkout vercel/omniagent#123
+wf review checkout https://github.com/vercel/omniagent/pull/123
 ```
 
-Running `wf review <owner>/<repo>` creates or reuses a repo review workspace at
-`reviewsDir/<repo>` and a default-branch checkout at `reviewsDir/<repo>/<repo>`,
-then changes your shell to the workspace. PR review worktrees are created under
-`reviewsDir/<repo>/pr-<number>`. On first use, `wf review` prompts for
-`reviewsDir` and saves it to the global config. For PR targets, the command
-seeds or updates the cached mirror, creates a detached worktree from the repo's
-default branch, then runs `gh pr checkout <number>` in that worktree.
-Inside a review workspace, `wf review 123` and `wf review #123` infer the
-current review repository.
-
-Anywhere a command accepts a repository specifier, a unique repository name
-already present in the cache may be used instead of repeating its owner. For
-example, after caching `vercel/omniagent`, `wf add omniagent`,
-`wf worktree omniagent fix-auth`, and `wf review omniagent` infer `vercel`.
-When the same name is cached under multiple owners, use the full `owner/repo`.
-
-To inspect or remove review worktrees:
-
-```bash
-wf review list
-wf review list omniagent
-wf review rm vercel/omniagent#123
-wf review rm vercel/omniagent#123 --dry-run
-wf review rm vercel/omniagent#123 --force
-```
-
-Removal refuses dirty worktrees unless you pass `--force`, then removes the
-worktree and deletes the checked-out local PR branch when one is present.
+On first use, Workforest prompts for `reviewsDir` and saves it to the global
+configuration. Review worktrees are stored below that directory and use the
+cached repository mirror.
 
 ## Templates
 
-Templates save your common workspace configurations. Instead of remembering
-which repos to include, create a template once:
+Templates capture repeated repository sets, branch prefixes, setup hooks, and
+default files.
 
-```bash
-# Open the template manager to inspect, create, edit, copy, or delete templates
-wf templates
+Open the interactive manager to create, edit, copy, or delete templates:
 
-# Create a `site` template with the frontend and backend repos
-wf template new site org/frontend org/api
-
-# Follow the prompts to name a new template and add repos
-wf template new
+```sh
+wf template manage
 ```
 
-Templates are stored as JSONC files in
+Inspect a template non-interactively:
+
+```sh
+wf template show full-stack
+```
+
+Open its directory in the current shell:
+
+```sh
+wf template open full-stack
+```
+
+Templates live at
 `~/.config/workforest/templates/<name>/template.jsonc`:
 
 ```jsonc
 {
-  // Repositories to clone (cached name, GitHub shorthand, or full git URL)
-  "repos": [
-    "my-org/frontend", // GitHub shorthand
-    "my-org/api",
-    "git@gitlab.com:team/lib.git", // Full URL
-  ],
-
-  // Optional description shown in template list
-  "description": "Full stack development",
-
-  // Optional template override for the global branch prefix
-  // Use "" to disable the global prefix for this template
+  "repos": ["my-org/frontend", "my-org/api"],
+  "description": "Full-stack development",
   "branchPrefix": "feature/",
-
-  // Optional hooks run after automatic initializers
   "hooks": [
     {
       "name": "Build project",
       "run": "pnpm build",
-      "in": ["frontend"],
-    },
-  ],
+      "in": ["frontend"]
+    }
+  ]
 }
 ```
 
-You can also place default files under
-`~/.config/workforest/templates/<name>/files/`. That subtree is copied into
-the new workspace before initializers and hooks run, so you can seed root files
-like `.envrc` or repo-specific files like `frontend/.env.local`.
+Files under `~/.config/workforest/templates/<name>/files/` are copied into a
+new workspace before initializers and hooks run.
+
+Create a workspace from a template by passing its name:
+
+```sh
+wf workspace create full-stack -- "implement user avatars"
+```
+
+## Repository Cache
+
+Workforest stores partial bare mirrors under `~/.cache/workforest/`. The first
+use downloads repository metadata; later workspaces reuse it.
+
+Common cache workflows:
+
+```sh
+wf cache list
+wf cache info vercel/front
+wf cache add vercel/front vercel/api
+wf cache update
+wf cache doctor
+wf cache repair vercel/front
+wf cache path vercel/front
+```
+
+Open the interactive cache manager:
+
+```sh
+wf cache manage
+```
+
+Preview unused mirror cleanup before deleting anything:
+
+```sh
+wf cache prune --dry-run
+```
+
+Delete a selected mirror explicitly:
+
+```sh
+wf cache delete vercel/front --dry-run
+wf cache delete vercel/front --force
+```
+
+Deletion refuses mirrors with active worktrees unless `--force` is supplied.
 
 ## Automatic Initializers
 
-Workforest automatically detects project configurations and runs setup commands
-in detached background workers after each repository worktree is created.
-`wf new` returns as soon as all worktrees are available; dependency installation,
-linking, and template hooks continue without keeping the terminal command alive.
-Run `wf status` from anywhere inside the workspace to watch the live panes.
+Workforest detects repository configuration and runs setup in detached
+background workers after each worktree is created.
 
-Initializers are provided by hardcoded built-in plugin packages for now.
-Workforest loads each plugin's package entry point and runs its exported `detect`
-function once per repo. That function returns either `{ "activate": false }` or
-`{ "activate": true, "initializers": ["id"] }`. Workforest then dynamically
-imports only the activated initializer modules listed in `workforest.plugin`
-metadata, orders them, and runs them before any custom hooks.
+Built-in initializers currently cover:
 
-Failed or cancelled repository initialization can be controlled independently:
+| Plugin | Initializer | Detects |
+| --- | --- | --- |
+| `@wf-plugin/package-managers` | `pnpm-install` | `pnpm-lock.yaml` or `pnpm-lock.yml` |
+| `@wf-plugin/package-managers` | `yarn-install` | `yarn.lock` without a pnpm lockfile |
+| `@wf-plugin/package-managers` | `npm-install` | `package-lock.json` without pnpm or Yarn |
+| `@wf-plugin/vercel` | `vercel-link` | `vercel.json` or a Vercel dependency |
+| `@wf-plugin/turbo` | `turbo-link` | `turbo.json` in a repository or workspace |
 
-```bash
-wf status cancel front
-wf status retry front
-```
-
-Initializer metadata uses conventional package-root-relative module paths. A
-string entry such as `"pnpm-install"` expands to `{ "id": "pnpm-install" }`,
-and a missing `module` defaults to `initializers/<id>`.
-
-**Built-in initializers:**
-
-| Plugin                        | Initializer    | Detects                                |
-| ----------------------------- | -------------- | -------------------------------------- |
-| `@wf-plugin/package-managers` | `pnpm-install` | `pnpm-lock.yaml` or `pnpm-lock.yml`    |
-| `@wf-plugin/package-managers` | `yarn-install` | `yarn.lock` (no pnpm lockfile)         |
-| `@wf-plugin/package-managers` | `npm-install`  | `package-lock.json` (no pnpm/yarn)     |
-| `@wf-plugin/vercel`           | `vercel-link`  | `vercel.json` or vercel in package.json |
-| `@wf-plugin/turbo`            | `turbo-link`   | `turbo.json` in repo or workspace root |
-
-Package-manager detection is mutually exclusive. The Vercel and Turbo plugins
-run after the package-manager plugin when detected.
-
-The `vercel-link` initializer is fail-closed. When it can resolve a Vercel
-team for a GitHub repo, it runs `vercel link --yes --repo --scope <team>` and
-only succeeds if Vercel already has an existing project linked to that GitHub
-repository under the chosen team. It will not create a new Vercel project
-automatically. After a successful link, it runs
-`vercel env pull --environment development --yes` for each linked project
-directory from `.vercel/repo.json`, or at the repo root when the repo is linked
-through `.vercel/project.json`.
-
-**Disabling initializers:**
-
-You can disable initializers per-template using `disableInitializers`:
+Templates can disable all initializers or selected initializer IDs:
 
 ```jsonc
 {
   "repos": ["org/repo"],
-
-  // Disable all automatic initializers
-  "disableInitializers": true,
-
-  // Or disable specific ones
-  "disableInitializers": ["vercel-link", "turbo-link"],
+  "disableInitializers": ["vercel-link", "turbo-link"]
 }
 ```
 
-### Hook Configuration
-
-Hooks run shell commands after workspace setup. Each hook supports:
-
-- **name** (required): Description shown during execution
-- **run** (required): Shell command to execute
-- **in** (optional): Array of repo names to run in (runs in all repos if omitted)
-- **if** (optional): Only run if this file exists relative to the repo root
-- **continueOnError** (optional): Continue with next hook if this one fails
-
-```jsonc
-{
-  "hooks": [
-    // Run in specific repos
-    {
-      "name": "Install frontend deps",
-      "run": "pnpm install",
-      "in": ["frontend"],
-    },
-
-    // Conditional execution - only run if file exists
-    {
-      "name": "Setup database",
-      "run": "./scripts/setup-db.sh",
-      "if": "scripts/setup-db.sh",
-    },
-
-    // Continue even if hook fails
-    {
-      "name": "Optional optimization",
-      "run": "pnpm run optimize",
-      "continueOnError": true,
-    },
-
-    // Run in all repos (no "in" field)
-    {
-      "name": "Configure git hooks",
-      "run": "git config core.hooksPath .githooks",
-    },
-  ],
-}
-```
-
-Repos can be specified as:
-
-- `org/repo` — GitHub shorthand
-- `git@host:path/repo.git` — SSH URL
-- `https://host/path/repo.git` — HTTPS URL
-
-Manage your templates interactively:
-
-```bash
-wf templates
-```
-
-For scripts and non-interactive output, the singular `wf template` subcommands
-remain available, including `wf template list`, `wf template info <name>`,
-`wf template new`, `wf template edit <name>`, and `wf template rm <name>`.
+Hooks run after repository initializers. Each hook supports `name`, `run`,
+optional `in`, optional `if`, and optional `continueOnError`.
 
 ## Configuration
 
@@ -492,200 +333,94 @@ Global settings live in `~/.config/workforest/config.json`:
   "branchPrefix": "feature/",
   "vercelLink": {
     "teamByGitHubOwner": {
-      "vercel": "vercel",
-      "vercel-labs": "vercel-labs"
-    },
-    "repoOverrides": {
-      "vercel/omniagent": {
-        "team": "vercel"
-      },
-      "vercel/internal-only": {
-        "disabled": true
-      }
+      "vercel": "vercel"
     }
   }
 }
 ```
 
-- **defaultDir**: Where workspaces are created
-- **reviewsDir**: Where disposable PR review worktrees are created by
-  `wf review`
-- **dirPrefix**: Prefix for workspace directory names
-- **branchPrefix**: Global default prefix for feature branch names (templates
-  can override it, or set `""` to disable it for that template)
-- **vercelLink.teamByGitHubOwner**: Optional owner-to-team mappings for
-  automatic Vercel repo-linking
-- **vercelLink.repoOverrides**: Optional per-repo overrides or disables for
-  Vercel auto-linking
+Manage configuration with:
 
-Workforest includes built-in Vercel owner defaults for `vercel -> vercel` and
-`vercel-labs -> vercel-labs`. Any other owner must be configured explicitly or
-automatic Vercel linking is skipped.
-
-## Performance
-
-Workforest attempts to optimize creating new worktrees as much as possible.
-
-**Cached bare mirrors**: The first time you use a repository, workforest clones
-it as a bare mirror to `~/.cache/workforest/`. Subsequent workspaces reuse this
-mirror to avoid re-downloading.
-
-**Partial clones**: Mirrors use `--filter=blob:none`, downloading only commits
-and trees. File contents are fetched on-demand when you actually access them.
-This dramatically reduces initial clone time and disk usage for large repos.
-
-**Git worktrees**: Instead of cloning repos into each workspace, workforest
-creates [worktrees](https://git-scm.com/docs/git-worktree) from the cached
-mirror. Worktree creation is nearly instant since no data transfer is needed.
-
-**Background parallel installation**: Repository initializers such as dependency
-installation run concurrently in detached workers. Workspace-level template
-hooks run after every repository initializer reaches a terminal state.
-
-## Commands
-
-```
-wf new <template|repo...> -- <work> Create a workspace
-wf status                       Monitor background repository initialization
-wf status cancel [repo...]      Cancel queued or running initialization
-wf status retry [repo...]       Retry failed or cancelled initialization
-wf worktree <slug...>           Create temporary worktree(s) in a workspace repo
-wf worktree new <repo> <name>   Create a managed single-repo worktree
-wf worktree promote [args...]   Promote the current managed worktree
-wf worktree list                List contextual worktrees
-wf worktree rm <slug...>        Remove temporary worktrees
-wf worktree <repo> <slug>       Create a standalone repo worktree
-wf wt                           Alias for worktree
-wf review <target>              Create a review workspace or PR worktree
-wf review list                  List review worktrees
-wf review rm <target>           Remove a review worktree
-wf fork <name>                  Fork current workspace with new branches
-wf clean [dir]                  Remove a workspace
-wf templates                    Open the template manager TUI
-wf template list                List templates non-interactively
-wf template new                 Create a template from arguments/prompts
-wf template edit <name>         Edit a template from arguments/prompts
-wf template show <name>         Jump to a template directory
-wf template info <name>         Show template details
-wf template rm <name>           Delete a template
-wf repositories                 Open the cached repository manager TUI
-wf repository list              List cached mirrors and disk usage
-wf repository info <repo>       Inspect mirror health and worktrees
-wf repository add <repo...>     Warm the cache without creating a workspace
-wf repository update [repo...]  Fetch selected mirrors, or all mirrors
-wf repository doctor [repo...]  Check mirror health
-wf repository repair [repo...]  Prune stale metadata and verify objects
-wf repository rm <repo...>      Delete selected mirrors
-wf repository clean             Delete mirrors without active worktrees
-wf config                       Show config file location
+```sh
+wf config show
+wf config init
+wf config edit
 ```
 
-## Building from Source
+## Command Map
 
-Requires Node.js 25+ and pnpm.
+This is a workflow map rather than an exhaustive flag reference:
 
-```bash
-# Clone and build
+```text
+wf workspace create    Create a workspace
+wf workspace delete    Delete an explicit workspace
+wf workspace open      Open or search for a workspace
+wf workspace list      List workspaces
+wf workspace status    Inspect background setup
+wf workspace add       Add repositories
+
+wf task create         Create workspace-scoped task worktrees
+wf task list           List task worktrees
+wf task delete         Delete explicit task worktrees
+
+wf worktree create     Create a standalone worktree
+wf worktree list       List standalone worktrees
+wf worktree delete     Delete an explicit standalone worktree
+
+wf cache manage        Open the cache manager
+wf review open         Open a review workspace
+wf review checkout     Check out a pull request
+wf template manage     Open the template manager
+wf template show       Show template details
+wf template open       Open a template directory
+wf shell init          Print shell integration
+```
+
+The only command shortcuts are:
+
+```text
+wf new                 Shortcut for wf workspace create
+wf clean <workspace>   Shortcut for wf workspace delete <workspace>
+```
+
+## Building From Source
+
+Requires Node.js 25+ and pnpm:
+
+```sh
 git clone https://github.com/your-org/workforest
 cd workforest
 pnpm install
 pnpm build
-
-# Link globally
-pnpm link --global
 ```
-
-## Cleanup
-
-Remove a workspace and its worktree references:
-
-```bash
-wf clean ~/Code/my-workspace
-```
-
-Mirrors in `~/.cache/workforest/` are preserved by default—they'll speed up
-future workspace creation. Inspect and reclaim cache space with:
-
-```bash
-wf repository list
-wf repository clean --dry-run
-wf repository clean --force
-```
-
-Use `wf repositories` for an interactive searchable view of mirror identity,
-health, disk usage, and active worktrees. Explicit mirror deletion refuses
-active worktrees unless `--force` is passed.
 
 ## Troubleshooting
 
-### Git clone fails
+### Repository Access Fails
 
-**SSH key issues**: Ensure your SSH key is added to the agent:
+Verify SSH authentication and repository access:
 
-```bash
-ssh-add -l  # List loaded keys
-ssh-add ~/.ssh/id_ed25519  # Add your key if missing
+```sh
+ssh-add -l
+ssh -T git@github.com
 ```
 
-**Permission denied**: Verify you have access to the repository:
+### Workspace Setup Fails
 
-```bash
-ssh -T git@github.com  # Test GitHub access
+Run `wf workspace status` inside the workspace and inspect
+`.workforest/logs/<repo>.log`.
+
+### Cache Health Fails
+
+Inspect before repairing or deleting data:
+
+```sh
+wf cache doctor
+wf cache info <repo>
+wf cache repair <repo>
 ```
 
-### Slow clone times
+### A Template Is Missing
 
-Initial clones can be slow for large repositories. Workforest uses partial clones
-(`--filter=blob:none`) to minimize data transfer. Subsequent workspace creation
-is much faster since it reuses cached mirrors.
-
-### "Directory already exists" error
-
-This happens when you try to create a workspace in a directory that already has
-content. Either:
-
-- Choose a different feature name/description
-- Remove the existing directory: `rm -rf ~/Code/workspaces/existing-name`
-
-### Hooks fail
-
-If a hook command fails, `wf status` reports the error while leaving the
-workspace and its worktrees available. Common issues:
-
-- **Command not found**: Ensure the command is installed and in your PATH
-- **File not found**: Check that the `if` condition file path is correct
-- **Permission denied**: Make scripts executable: `chmod +x script.sh`
-
-To allow hooks to fail without stopping workspace creation, add
-`"continueOnError": true` to the hook.
-
-### Repo setup fails
-
-When repo setup fails during git, dependency installation, or linking, run
-`wf status` to inspect the failed step and recent output. Workforest also writes
-detailed diagnostics to `.workforest/logs/<repo>.log` in the workspace. Retry
-the failed repository with `wf status retry <repo>`.
-
-### Template not found
-
-Templates are stored in `~/.config/workforest/templates/`. List available
-templates with:
-
-```bash
-wf template list
-```
-
-### Cache directory issues
-
-Workforest caches bare mirrors in `~/.cache/workforest/`. Inspect and repair
-problems before discarding cached data:
-
-```bash
-wf repository doctor
-wf repository repair
-wf repository info <repo>
-wf repository delete <repo> --force
-```
-
-Repositories with the same basename under different owners are stored in
-distinct mirrors and should be selected by full `owner/repo` slug.
+Use `wf template manage` to inspect saved templates or
+`wf template show <name>` for a non-interactive lookup.

@@ -1,6 +1,6 @@
 ---
 name: core
-description: Core Workforest usage guide for AI agents. Use when creating, listing, adding to, forking, or cleaning Workforest workspaces; understanding workspace metadata; or deciding which specialized Workforest skill to load.
+description: Core Workforest usage guide for AI agents. Use when creating, opening, listing, extending, or deleting Workforest workspaces; understanding workspace metadata; or deciding which specialized Workforest skill to load.
 ---
 
 # Workforest Core
@@ -14,16 +14,14 @@ for each repo.
 Use these commands for the usual workspace lifecycle:
 
 ```sh
-wf new vercel/next.js vercel/turbo -- "update docs build" # create a workspace
-wf status                                          # monitor background setup
-wf list                                            # list workspaces
-wf add vercel/swr                                  # add repo from inside a workspace
-wf wt new vercel/next.js fix-auth                  # managed single-repo checkout
-wf wt promote vercel/turbo                         # grow it into a workspace
-wf fork "new approach"                             # try another approach
-wf clean --dry-run                                 # preview cleanup
-wf clean --force                                   # remove workspace after review
-wf repository list                                # inspect cached repositories
+wf workspace create vercel/next.js vercel/turbo -- "update docs build"
+wf workspace status                               # monitor background setup
+wf workspace list                                 # list workspaces
+wf workspace add vercel/swr                       # add a repository
+wf workspace create --like current -- "new approach"
+wf workspace delete update-docs-build --dry-run  # preview cleanup
+wf workspace delete update-docs-build --force    # remove the workspace
+wf cache list                                     # inspect cached repositories
 ```
 
 For exact command syntax, read `references/commands.md` with:
@@ -42,13 +40,13 @@ Agent workflow:
 
 ```sh
 # Create a named workspace with both repos on matching feature branches.
-wf new vercel/next.js vercel/turbo -- "update docs build"
+wf workspace create vercel/next.js vercel/turbo -- "update docs build"
 
 cd ~/Code/workspaces/update-docs-build
 
 # Inspect what Workforest created.
-wf status
-wf list
+wf workspace status
+wf workspace list
 ls
 
 # Work in the repos using normal project commands.
@@ -59,11 +57,11 @@ pnpm test
 
 # Add another repo later if the investigation needs it.
 cd ..
-wf add vercel/swr
+wf workspace add vercel/swr
 
 # When the workspace is no longer needed, preview and clean it.
-wf clean --dry-run
-wf clean --force
+wf workspace delete update-docs-build --dry-run
+wf workspace delete update-docs-build --force
 ```
 
 Expected shape:
@@ -76,20 +74,21 @@ Expected shape:
   .workforest/workspace.json
 ```
 
-Use `wf fork "try token refresh"` from inside the workspace when the user wants a
-separate approach with the same repos but fresh branches.
+Use `wf workspace create --like current -- "try token refresh"` from inside the
+workspace when the user wants a separate approach with the same repositories
+but fresh branches.
 
-Use `wf wt new <repo> <name>` when the task starts in one repository but may
-need promotion later. From that checkout, `wf wt <name>` creates a sibling from
-the remote default branch, and `wf wt promote [template] [repo...]` converts the
-current checkout into a normal workspace without losing dirty changes.
+Use `wf worktree create <repo> <name>` for a standalone single-repository
+checkout. Use `wf task create <name...>` inside a workspace repository when
+parallel agents need short-lived sibling worktrees.
 
 ## Safety Rules
 
-- Do not manually delete a workspace before `wf clean`; Workforest removes Git
-  worktree registrations as well as directories.
-- Prefer `wf clean --dry-run` before destructive cleanup.
-- Prefer `wf repository clean --dry-run` before deleting cached mirrors.
+- Do not manually delete a workspace before `wf workspace delete`; Workforest
+  removes Git worktree registrations as well as directories.
+- Prefer `wf workspace delete <workspace> --dry-run` before destructive
+  cleanup.
+- Prefer `wf cache prune --dry-run` before deleting unused cached mirrors.
 - Do not force-delete a mirror with active worktrees unless those worktrees are
   intentionally being abandoned.
 
