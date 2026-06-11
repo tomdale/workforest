@@ -200,6 +200,45 @@ async function runInvocation(
       return runTypedCommand(() => runForkCommand(invocation));
     case "list":
       return runTypedCommand(runListCommand);
+    case "init":
+      return runInitCommand(invocation.beforeDoubleDash[0]);
+    case "config.show":
+      return runConfigShow();
+    case "config.init":
+      return runConfigInit();
+    case "config.edit":
+      return runConfigEdit();
+    case "skills.list":
+    case "skills.get":
+    case "skills.path": {
+      const { runSkillsCommand } = await import("./skills.ts");
+      switch (invocation.command.leaf.handler) {
+        case "skills.list":
+          return runSkillsCommand({
+            command: "list",
+            json: invocation.flags["json"] === true,
+          });
+        case "skills.get":
+          return runSkillsCommand({
+            command: "get",
+            names: invocation.beforeDoubleDash,
+            all: invocation.flags["all"] === true,
+            full: invocation.flags["full"] === true,
+            json: invocation.flags["json"] === true,
+          });
+        case "skills.path":
+          return runSkillsCommand({
+            command: "path",
+            name: invocation.beforeDoubleDash[0],
+            json: invocation.flags["json"] === true,
+          });
+      }
+      throw new Error(
+        `Unsupported skills handler: ${invocation.command.leaf.handler}`,
+      );
+    }
+    case "version":
+      return runVersionCommand();
   }
 
   if (invocation.command.leaf.handler.startsWith("template.")) {
@@ -217,41 +256,8 @@ async function runInvocation(
 
   return runLegacyHandler(async () => {
     const argv = [...invocation.command.argv];
-    const invokedRoot =
-      invocation.command.invokedPath[0] ??
-      invocation.command.canonicalPath[0] ??
-      "";
 
     switch (invocation.command.leaf.handler) {
-      case "init":
-        await runInitCommand(argv);
-        return;
-      case "config.show":
-        await runConfigCommand(
-          invocation.command.canonicalPath.length === 1
-            ? argv
-            : ["show", ...argv],
-        );
-        return;
-      case "config.init":
-        await runConfigCommand(["init", ...argv]);
-        return;
-      case "config.edit":
-        await runConfigCommand(["edit", ...argv]);
-        return;
-      case "skills.list":
-      case "skills.get":
-      case "skills.path": {
-        const { runSkillsCommand } = await import("./skills.ts");
-        const subcommand =
-          invocation.command.leaf.handler.split(".")[1] ?? "list";
-        const commandArgv =
-          invocation.command.canonicalPath.length === 1
-            ? argv
-            : [subcommand, ...argv];
-        await runSkillsCommand(commandArgv);
-        return;
-      }
       case "dev.simulate.new":
       case "dev.simulate.confetti": {
         const { runDevCommand } = await import("./dev-simulator.ts");
@@ -259,9 +265,6 @@ async function runInvocation(
         await runDevCommand(["simulate", flow, ...argv]);
         return;
       }
-      case "version":
-        await runVersionCommand(argv);
-        return;
       case "initialize-repo":
         await runInitializeRepoWorkerCommand(argv);
         return;
@@ -554,80 +557,33 @@ async function runStatusCommand(
   return success();
 }
 
-async function runConfigCommand(argv: string[]): Promise<void> {
-  const subcommand = argv[0];
-
-  switch (subcommand) {
-    case "--help":
-    case "-h":
-      console.log(commandHelp("config"));
-      break;
-    case "edit":
-      if (hasHelpFlag(argv.slice(1))) {
-        console.log(nestedCommandHelp("config", "edit"));
-        return;
-      }
-      await runConfigEdit();
-      break;
-    case "init":
-      if (hasHelpFlag(argv.slice(1))) {
-        console.log(nestedCommandHelp("config", "init"));
-        return;
-      }
-      await runConfigInit();
-      break;
-    case "show":
-      if (hasHelpFlag(argv.slice(1))) {
-        console.log(nestedCommandHelp("config", "show"));
-        return;
-      }
-      await runConfigShow();
-      break;
-    case undefined:
-      await runConfigShow();
-      break;
-    default:
-      log.error(`Unknown config subcommand: ${subcommand}`);
-      log.info("Available: show, edit, init");
-      process.exitCode = 1;
-  }
-}
-
-async function runInitCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("init"));
-    return;
-  }
-
-  const requestedShell = args._[0] ?? process.env["SHELL"];
+async function runInitCommand(
+  requestedShell: string | undefined,
+): Promise<CommandResult> {
+  requestedShell ??= process.env["SHELL"];
   const shell = normalizeShellName(requestedShell);
 
   if (!shell) {
-    log.error("Unsupported shell. Use 'wf init zsh' or 'wf init bash'.");
-    process.exitCode = 1;
-    return;
+    throw new OperationalError(
+      "Unsupported shell. Use 'wf init zsh' or 'wf init bash'.",
+    );
   }
 
-  console.log(renderShellInit(shell));
+  return success({
+    kind: "text",
+    value: renderShellInit(shell),
+    stream: "stdout",
+  });
 }
 
-async function runConfigInit(): Promise<void> {
+async function runConfigInit(): Promise<CommandResult> {
   if (!isInteractive()) {
-    log.error("Config init requires an interactive terminal.");
-    log.info("Use 'wf config edit' to edit the config file directly.");
-    process.exitCode = 1;
-    return;
+    throw new OperationalError(
+      "Config init requires an interactive terminal.\nUse 'wf config edit' to edit the config file directly.",
+    );
   }
 
-  const { path: configPath, config } = await loadWorkspaceConfig();
+  const { path: configPath, config } = await loadWorkspaceConfigForCommand();
 
   intro("Configure workforest");
 
@@ -680,15 +636,16 @@ async function runConfigInit(): Promise<void> {
   const shouldSave = await promptConfirm("Save configuration?", true);
   if (!shouldSave) {
     outro("Configuration unchanged");
-    return;
+    return success();
   }
 
-  await saveWorkspaceConfig(configPath, newConfig);
+  await saveWorkspaceConfigForCommand(configPath, newConfig);
   outro(`Config saved to ${configPath}`);
+  return success();
 }
 
-async function runConfigShow(): Promise<void> {
-  const { path: configPath, config } = await loadWorkspaceConfig();
+async function runConfigShow(): Promise<CommandResult> {
+  const { path: configPath, config } = await loadWorkspaceConfigForCommand();
 
   const ownerMappings = Object.entries(
     config.vercelLink?.teamByGitHubOwner ?? {},
@@ -768,11 +725,11 @@ async function runConfigShow(): Promise<void> {
     ],
     footer: `Config: ${configPath}`,
   });
+  return success();
 }
 
-async function runConfigEdit(): Promise<void> {
-  const { spawn } = await import("node:child_process");
-  const { path: configPath } = await loadWorkspaceConfig();
+async function runConfigEdit(): Promise<CommandResult> {
+  const { path: configPath } = await loadWorkspaceConfigForCommand();
 
   // Get editor from environment
   const editor = process.env["EDITOR"] || process.env["VISUAL"] || "vi";
@@ -789,37 +746,48 @@ async function runConfigEdit(): Promise<void> {
         log.success("Config file closed.");
         resolve();
       } else {
-        reject(new Error(`Editor exited with code ${code}`));
+        reject(new OperationalError(`Editor exited with code ${code}`));
       }
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      reject(new OperationalError(`Could not open editor: ${error.message}`));
+    });
   });
+  return success();
 }
 
-async function runVersionCommand(argv: string[] = []): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("version"));
-    return;
+async function loadWorkspaceConfigForCommand(): Promise<
+  Awaited<ReturnType<typeof loadWorkspaceConfig>>
+> {
+  try {
+    return await loadWorkspaceConfig();
+  } catch (error) {
+    throw new OperationalError(getErrorMessage(error), { cause: error });
   }
+}
 
-  if (args._.length > 0) {
-    log.error("Usage: wf version");
-    process.exitCode = 1;
-    return;
+async function saveWorkspaceConfigForCommand(
+  configPath: string,
+  config: WorkspaceConfig,
+): Promise<void> {
+  try {
+    await saveWorkspaceConfig(configPath, config);
+  } catch (error) {
+    throw new OperationalError(getErrorMessage(error), { cause: error });
   }
+}
 
+async function runVersionCommand(): Promise<CommandResult> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = path.join(__dirname, "..", "package.json");
-  const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-  console.log(`workforest ${packageJson.version}`);
+  const packageJson = JSON.parse(
+    await fs.readFile(packageJsonPath, "utf8"),
+  ) as { version: string };
+  return success({
+    kind: "text",
+    value: `workforest ${packageJson.version}`,
+    stream: "stdout",
+  });
 }
 
 function hasHelpFlag(argv: readonly string[]): boolean {
