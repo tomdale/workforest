@@ -2,11 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderCommandResult } from "./cli/output.ts";
 import { cli } from "./cli.ts";
 import {
   discoverSkills,
   getSkillContents,
   parseSkillFrontmatter,
+  runSkillsCommand,
 } from "./skills.ts";
 
 const ORIGINAL_SKILLS_DIR = process.env["WORKFOREST_SKILLS_DIR"];
@@ -188,6 +190,33 @@ hidden: true
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("returns JSON success envelopes", async () => {
+    const skillsDir = await createTempDir("workforest-skills-");
+    const stdout: string[] = [];
+    process.env["WORKFOREST_SKILLS_DIR"] = skillsDir;
+    await writeSkill({
+      root: skillsDir,
+      name: "core",
+      description: "Core Workforest usage guide",
+    });
+
+    const result = await runSkillsCommand({ command: "list", json: true });
+    renderCommandResult(result, {
+      stdout: (value) => stdout.push(value),
+      stderr: () => undefined,
+    });
+
+    expect(JSON.parse(stdout.join(""))).toEqual({
+      ok: true,
+      data: [
+        {
+          name: "core",
+          description: "Core Workforest usage guide",
+        },
+      ],
+    });
+  });
+
   it("gets a skill with full supplementary files through the CLI", async () => {
     const skillsDir = await createTempDir("workforest-skills-");
     const skillDir = await writeSkill({
@@ -258,8 +287,11 @@ hidden: true
     await cli();
 
     expect(JSON.parse(logs.join(""))).toEqual({
-      success: false,
-      error: "Skill not found: missing",
+      ok: false,
+      error: {
+        kind: "operational",
+        message: "Skill not found: missing",
+      },
     });
     expect(process.exitCode).toBe(1);
   });
