@@ -75,7 +75,7 @@ beforeEach(() => {
         has_lockfile: true,
       },
     ],
-    temporary_worktrees: [
+    tasks: [
       {
         slug: "fix-tests",
         parent_repo: "api",
@@ -123,11 +123,11 @@ describe("cleanupWorkspaceGenerator", () => {
     });
   });
 
-  it("includes temporary worktrees in cleanup previews", async () => {
+  it("includes tasks in cleanup previews", async () => {
     await expect(previewCleanup("/tmp/workspace/demo")).resolves.toMatchObject({
       workspaceDir: "/tmp/workspace/demo",
       repos: ["api"],
-      temporaryWorktrees: ["api-fix-tests"],
+      tasks: ["api-fix-tests"],
     });
   });
 });

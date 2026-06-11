@@ -150,8 +150,9 @@ const workspaceCreateOperands: OperandSpec = {
       when: { flag: "like", present: false, interactive: false },
     },
     {
-      beforeDoubleDash: cardinality(0, 1, "name or description"),
-      delimiter: "forbidden",
+      beforeDoubleDash: cardinality(0, 0),
+      delimiter: "required",
+      afterDoubleDash: cardinality(1, null, "work words"),
       when: { flag: "like", present: true },
     },
   ],

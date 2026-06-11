@@ -44,7 +44,7 @@ export type RemoteBranchInfo = {
 export type CleanupPreview = {
   workspaceDir: string;
   repos: string[];
-  temporaryWorktrees?: string[];
+  tasks?: string[];
   workspaceFile: string;
   metadataFile?: string;
   remoteBranches?: RemoteBranchInfo[];
@@ -213,9 +213,9 @@ export async function previewCleanup(
   return {
     workspaceDir: resolvedDir,
     repos: workspace.folders.map((f) => f.path),
-    ...(metadata?.temporary_worktrees?.length
+    ...(metadata?.tasks?.length
       ? {
-          temporaryWorktrees: metadata.temporary_worktrees.map(
+          tasks: metadata.tasks.map(
             (entry) => `${entry.parent_repo}-${entry.slug}`,
           ),
         }

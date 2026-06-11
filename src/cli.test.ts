@@ -245,7 +245,7 @@ describe("cli", () => {
     );
     expect(output).not.toContain("Skills ship with the CLI");
     expect(output).not.toContain("skills get parallel-worktrees");
-    expect(output).toContain("wf find");
+    expect(output).toContain("wf workspace open --search");
     expect(output).toContain("wf review");
     expect(output).toContain('eval "$(wf shell init zsh)"');
     expect(process.exitCode).toBeUndefined();
@@ -366,7 +366,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("resolves an unqualified registered repository for wf add", async () => {
+  it("resolves an unqualified registered repository for wf workspace add", async () => {
     const cacheDir = await createTempDir("workforest-cache-");
     const workspaceDir = await createTempDir("workforest-workspace-");
     const logs: string[] = [];
@@ -395,7 +395,7 @@ describe("cli", () => {
       logs.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "add", "--dry-run", "api"];
+    process.argv = ["node", "wf", "workspace", "add", "--dry-run", "api"];
     process.exitCode = undefined;
 
     await cli();
@@ -566,7 +566,9 @@ describe("cli", () => {
     await cli();
 
     expect(process.exitCode).toBe(2);
-    expect(errors.join("\n")).toContain("Invalid operands for wf new");
+    expect(errors.join("\n")).toContain(
+      "Invalid operands for wf workspace create",
+    );
 
     errors.length = 0;
     process.argv = ["node", "wf", "new", "site", "--"];
@@ -575,82 +577,12 @@ describe("cli", () => {
     await cli();
 
     expect(process.exitCode).toBe(2);
-    expect(errors.join("\n")).toContain("Invalid operands for wf new");
+    expect(errors.join("\n")).toContain(
+      "Invalid operands for wf workspace create",
+    );
   });
 
-  it("rejects the old wf new -d syntax", async () => {
-    const errors: string[] = [];
-
-    vi.spyOn(console, "error").mockImplementation((...args) => {
-      errors.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "new", "site", "-d", "fix auth"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(process.exitCode).toBe(2);
-    expect(errors.join("\n")).toContain('Unknown flag "-d" for wf new');
-  });
-
-  it("exposes development UI simulation help", async () => {
-    const logs: string[] = [];
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "dev", "simulate", "new", "--help"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toContain("Usage: wf dev simulate new [options]");
-    expect(output).toContain("--fail-repo <name>");
-    expect(output).toContain("--speed <speed>");
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("exposes development confetti simulation help", async () => {
-    const logs: string[] = [];
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "dev", "simulate", "confetti", "--help"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toContain("Usage: wf dev simulate confetti [options]");
-    expect(output).toContain("--workspace <path>");
-    expect(output).toContain("--repos <names>");
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("lists confetti in development simulation help", async () => {
-    const logs: string[] = [];
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "dev", "simulate", "--help"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toContain("Usage: wf dev simulate <flow> [options]");
-    expect(output).toContain("confetti");
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("writes the configured workspace path for wf cd", async () => {
+  it("writes the configured path for wf workspace open", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
     const cdDir = await createTempDir("workforest-cd-");
@@ -679,7 +611,7 @@ describe("cli", () => {
       dirPrefix: "wf-",
     });
 
-    process.argv = ["node", "wf", "cd", "fix-auth"];
+    process.argv = ["node", "wf", "workspace", "open", "fix-auth"];
     process.exitCode = undefined;
 
     await cli();
@@ -692,21 +624,14 @@ describe("cli", () => {
   it.each([
     ["new", "Usage: wf new"],
     ["worktree", "Usage: wf worktree"],
-    ["wt", "Usage: wf wt"],
+    ["task", "Usage: wf task"],
     ["review", "Usage: wf review"],
-    ["delete", "Usage: wf delete"],
     ["workspace", "Usage: wf workspace"],
-    ["cd", "Usage: wf cd"],
-    ["find", "Usage: wf find"],
-    ["add", "Usage: wf add"],
-    ["fork", "Usage: wf fork"],
     ["clean", "Usage: wf clean"],
-    ["list", "Usage: wf list"],
-    ["shell", "Usage: wf shell"],
     ["template", "Usage: wf template"],
     ["cache", "Usage: wf cache"],
+    ["shell", "Usage: wf shell"],
     ["config", "Usage: wf config"],
-    ["dev", "Usage: wf dev"],
     ["skills", "Usage: wf skills"],
     ["version", "Usage: wf version"],
   ])("prints scoped help for wf %s --help", async (command, usage) => {
@@ -729,22 +654,27 @@ describe("cli", () => {
   });
 
   it.each([
-    [["worktree", "new", "--help"], "Usage: wf worktree new"],
-    [["worktree", "promote", "--help"], "Usage: wf worktree promote"],
+    [["worktree", "create", "--help"], "Usage: wf worktree create"],
     [["worktree", "list", "--help"], "Usage: wf worktree list"],
     [["worktree", "delete", "--help"], "Usage: wf worktree delete"],
-    [["worktree", "rm", "--help"], "Usage: wf worktree delete"],
+    [["task", "create", "--help"], "Usage: wf task create"],
+    [["task", "list", "--help"], "Usage: wf task list"],
+    [["task", "delete", "--help"], "Usage: wf task delete"],
     [["review", "open", "--help"], "Usage: wf review open"],
     [["review", "checkout", "--help"], "Usage: wf review checkout"],
+    [["workspace", "create", "--help"], "Usage: wf workspace create"],
     [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
-    [["shell", "init", "--help"], "Usage: wf shell init"],
-    [["template", "manage", "--help"], "Usage: wf template manage"],
+    [["workspace", "open", "--help"], "Usage: wf workspace open"],
+    [["workspace", "list", "--help"], "Usage: wf workspace list"],
+    [["workspace", "status", "--help"], "Usage: wf workspace status"],
+    [["workspace", "add", "--help"], "Usage: wf workspace add"],
+    [["template", "list", "--help"], "Usage: wf template list"],
     [["template", "open", "--help"], "Usage: wf template open"],
     [["template", "show", "--help"], "Usage: wf template show"],
+    [["template", "manage", "--help"], "Usage: wf template manage"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
     [["template", "add-file", "--help"], "Usage: wf template add-file"],
-    [["cache", "manage", "--help"], "Usage: wf cache manage"],
     [["cache", "list", "--help"], "Usage: wf cache list"],
     [["cache", "info", "--help"], "Usage: wf cache info"],
     [["cache", "add", "--help"], "Usage: wf cache add"],
@@ -753,9 +683,10 @@ describe("cli", () => {
     [["cache", "repair", "--help"], "Usage: wf cache repair"],
     [["cache", "delete", "--help"], "Usage: wf cache delete"],
     [["cache", "prune", "--help"], "Usage: wf cache prune"],
+    [["cache", "manage", "--help"], "Usage: wf cache manage"],
+    [["shell", "init", "--help"], "Usage: wf shell init"],
     [["config", "edit", "--help"], "Usage: wf config edit"],
     [["skills", "get", "--help"], "Usage: wf skills get"],
-    [["dev", "simulate", "--help"], "Usage: wf dev simulate"],
   ])("prints scoped help for wf %s", async (argv, usage) => {
     const logs: string[] = [];
 
@@ -808,7 +739,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("requires an interactive terminal for wf find", async () => {
+  it("requires an interactive terminal for workspace search", async () => {
     const errors: string[] = [];
     Object.defineProperty(process.stdin, "isTTY", {
       configurable: true,
@@ -819,18 +750,18 @@ describe("cli", () => {
       errors.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "find"];
+    process.argv = ["node", "wf", "workspace", "open", "--search"];
     process.exitCode = undefined;
 
     await cli();
 
     expect(errors.join("\n")).toContain(
-      "wf find requires an interactive terminal",
+      "wf workspace open --search requires an interactive terminal",
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it("reports missing defaultDir for wf find", async () => {
+  it("reports missing defaultDir for workspace search", async () => {
     const configDir = await createTempDir("workforest-config-");
     const writes: string[] = [];
 
@@ -845,7 +776,7 @@ describe("cli", () => {
       return true;
     });
 
-    process.argv = ["node", "wf", "find"];
+    process.argv = ["node", "wf", "workspace", "open", "--search"];
     process.exitCode = undefined;
 
     await cli();
@@ -876,31 +807,6 @@ describe("cli", () => {
     expect(written).toBe(
       `${path.resolve(xdgConfigHome, "workforest", "templates", "demo")}\n`,
     );
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("shows template information for wf template show", async () => {
-    const xdgConfigHome = await createTempDir("workforest-xdg-");
-    const logs: string[] = [];
-
-    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
-    await createTemplate("demo", {
-      repos: ["vercel/front"],
-      description: "Demo template",
-    });
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "template", "show", "demo"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toContain("Template demo");
-    expect(output).toContain("Demo template");
-    expect(output).toContain("vercel/front");
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -940,7 +846,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("falls back to the template list for wf template manage outside a TTY", async () => {
+  it("lists templates for wf template list outside a TTY", async () => {
     const xdgConfigHome = await createTempDir("workforest-xdg-");
     const logs: string[] = [];
     process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
@@ -948,7 +854,6 @@ describe("cli", () => {
       configurable: true,
       value: false,
     });
-    shouldUseTemplateManagerMock.mockReturnValue(false);
     vi.spyOn(console, "log").mockImplementation((...args) => {
       logs.push(args.join(" "));
     });
@@ -958,7 +863,7 @@ describe("cli", () => {
       description: "Demo template",
     });
 
-    process.argv = ["node", "wf", "template", "manage"];
+    process.argv = ["node", "wf", "template", "list"];
     process.exitCode = undefined;
 
     await cli();

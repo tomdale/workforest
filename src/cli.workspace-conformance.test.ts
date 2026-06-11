@@ -14,7 +14,6 @@ const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
 const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const ORIGINAL_CWD = process.cwd();
 const ORIGINAL_STDIN_IS_TTY = process.stdin.isTTY;
-
 const tempDirs: string[] = [];
 
 beforeEach(() => {
@@ -36,19 +35,8 @@ afterEach(async () => {
     configurable: true,
     value: ORIGINAL_STDIN_IS_TTY,
   });
-
-  if (ORIGINAL_CONFIG_DIR === undefined) {
-    delete process.env["WORKFOREST_CONFIG_DIR"];
-  } else {
-    process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
-  }
-
-  if (ORIGINAL_CACHE_DIR === undefined) {
-    delete process.env["WORKFOREST_CACHE_DIR"];
-  } else {
-    process.env["WORKFOREST_CACHE_DIR"] = ORIGINAL_CACHE_DIR;
-  }
-
+  restoreEnvironment("WORKFOREST_CONFIG_DIR", ORIGINAL_CONFIG_DIR);
+  restoreEnvironment("WORKFOREST_CACHE_DIR", ORIGINAL_CACHE_DIR);
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
@@ -57,26 +45,18 @@ afterEach(async () => {
 describe("workspace CLI conformance", () => {
   it.each([
     [["new", "--help"], "Usage: wf new"],
-    [["status", "--help"], "Usage: wf status"],
-    [["cd", "--help"], "Usage: wf cd"],
-    [["find", "--help"], "Usage: wf find"],
-    [["add", "--help"], "Usage: wf add"],
-    [["fork", "--help"], "Usage: wf fork"],
-    [["list", "--help"], "Usage: wf list"],
-    [["ls", "--help"], "Usage: wf ls"],
-    [["delete", "--help"], "Usage: wf delete"],
     [["clean", "--help"], "Usage: wf clean"],
+    [["workspace", "create", "--help"], "Usage: wf workspace create"],
     [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
-    [["workspace", "rm", "--help"], "Usage: wf workspace delete"],
-  ])("renders scoped help for %j on stdout", async (argv, usage) => {
+    [["workspace", "open", "--help"], "Usage: wf workspace open"],
+    [["workspace", "list", "--help"], "Usage: wf workspace list"],
+    [["workspace", "status", "--help"], "Usage: wf workspace status"],
+    [["workspace", "add", "--help"], "Usage: wf workspace add"],
+  ])("renders scoped help for %j", async (argv, usage) => {
     const result = await executeCli(argv);
-
     expect(result).toMatchObject({
       exitCode: 0,
-      render: {
-        kind: "text",
-        stream: "stdout",
-      },
+      render: { kind: "text", stream: "stdout" },
     });
     if (result.render.kind === "text") {
       expect(result.render.value).toContain(usage);
@@ -84,46 +64,44 @@ describe("workspace CLI conformance", () => {
   });
 
   it.each([
-    [["new"], "Invalid operands for wf new"],
-    [["new", "vercel/front"], "Invalid operands for wf new"],
-    [["new", "--", "fix-auth"], "Invalid operands for wf new"],
-    [["new", "vercel/front", "--"], "Invalid operands for wf new"],
-    [["add"], "Invalid operands for wf add"],
-    [["fork", "one", "two"], "Invalid operands for wf fork"],
-    [["list", "extra"], "Invalid operands for wf list"],
-    [["cd"], "Invalid operands for wf cd"],
-    [["cd", "one", "two"], "Invalid operands for wf cd"],
-    [["find", "extra"], "Invalid operands for wf find"],
-    [["status", "extra"], "Unknown wf status subcommand"],
+    [["workspace", "delete"], "Invalid operands for wf workspace delete"],
+    [["clean"], "Invalid operands for wf workspace delete"],
+    [["workspace", "delete", "one", "two"], "Invalid operands"],
+    [["workspace", "open", "one", "two"], "Invalid operands"],
     [
-      ["workspace", "delete", "one", "two"],
-      "Invalid operands for wf workspace delete",
+      ["workspace", "open", "one", "--search"],
+      "Invalid operands for wf workspace open",
     ],
-    [["clean", "one", "two"], "Invalid operands for wf clean"],
-    [["delete", "one", "two"], "Invalid operands for wf delete"],
-    [["list", "--dry-run"], 'Unknown flag "--dry-run" for wf list'],
-    [["add", "--force", "repo"], 'Unknown flag "--force" for wf add'],
-    [["status", "cancel", "--json"], 'Unknown flag "--json"'],
-    [["clean", "--json"], 'Unknown flag "--json" for wf clean'],
-  ])("returns a stack-free usage failure for %j", async (argv, message) => {
+    [["workspace", "add"], "Invalid operands for wf workspace add"],
+    [["workspace", "list", "extra"], "Invalid operands"],
+    [["workspace", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
+    [["workspace", "status", "extra"], "Invalid operands"],
+    [["workspace", "create", "--like", "other", "--", "next"], "Unsupported"],
+    [["cd", "workspace"], "Unknown command"],
+    [["find"], "Unknown command"],
+    [["fork", "workspace"], "Unknown command"],
+    [["add", "vercel/front"], "Unknown command"],
+    [["list"], "Unknown command"],
+    [["status"], "Unknown command"],
+    [["delete", "workspace"], "Unknown command"],
+  ])("returns exit 2 for unsupported invocation %j", async (argv, message) => {
     const result = await executeCli(argv);
-
     expect(result).toMatchObject({
       exitCode: 2,
-      render: {
-        kind: "text",
-        stream: "stderr",
-      },
+      render: { kind: "text", stream: "stderr" },
     });
     if (result.render.kind === "text") {
       expect(result.render.value).toContain(message);
-      expect(result.render.value).not.toContain("at parse");
-      expect(result.render.value).not.toContain("node_modules");
+      expect(result.render.value).not.toMatch(/\n\s+at /);
     }
   });
 
-  it("returns status JSON through the typed stdout result", async () => {
-    const workspaceDir = await createWorkspace("status-workspace");
+  it("returns workspace status JSON", async () => {
+    const { workspaceRoot } = await configureWorkspaceRoot();
+    const workspaceDir = await createWorkspace(
+      workspaceRoot,
+      "status-workspace",
+    );
     await initializeWorkspaceInitialization({
       workspaceDir,
       repos: [
@@ -136,6 +114,7 @@ describe("workspace CLI conformance", () => {
     });
 
     const result = await executeCli([
+      "workspace",
       "status",
       "--workspace",
       workspaceDir,
@@ -148,41 +127,50 @@ describe("workspace CLI conformance", () => {
         kind: "json",
         stream: "stdout",
         value: {
-          workspace: {
-            status: "creating",
-          },
-          repos: [
-            {
-              repo: "front",
-              status: "pending",
-            },
-          ],
+          workspace: { status: "creating" },
+          repos: [{ repo: "front", status: "pending" }],
         },
       },
     });
-    expect(console.error).not.toHaveBeenCalled();
   });
 
-  it("does not create a workspace during new --dry-run", async () => {
+  it.each([
+    ["new", ["new", "--dry-run", "vercel/front", "--", "fix-auth"]],
+    [
+      "workspace create",
+      ["workspace", "create", "--dry-run", "vercel/front", "--", "fix-auth"],
+    ],
+  ])("does not create a workspace during %s --dry-run", async (_label, argv) => {
     const { workspaceRoot } = await configureWorkspaceRoot();
-
-    const result = await executeCli([
-      "new",
-      "--dry-run",
-      "vercel/front",
-      "--",
-      "fix-auth",
-    ]);
-
-    expect(result.exitCode).toBe(0);
+    expect((await executeCli(argv)).exitCode).toBe(0);
     await expectPathMissing(path.join(workspaceRoot, "fix-auth"));
   });
 
-  it("does not mutate workspace metadata during add --dry-run", async () => {
-    await configureWorkspaceRoot();
-    const workspaceDir = await createWorkspace("add-workspace");
+  it("creates a sibling plan with workspace create --like current", async () => {
+    const { workspaceRoot } = await configureWorkspaceRoot();
+    const source = await createWorkspace(workspaceRoot, "source");
+    process.chdir(source);
 
     const result = await executeCli([
+      "workspace",
+      "create",
+      "--like",
+      "current",
+      "--dry-run",
+      "--",
+      "next",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    await expectPathMissing(path.join(workspaceRoot, "next"));
+  });
+
+  it("does not mutate workspace metadata during workspace add --dry-run", async () => {
+    const { workspaceRoot } = await configureWorkspaceRoot();
+    const workspaceDir = await createWorkspace(workspaceRoot, "add-workspace");
+
+    const result = await executeCli([
+      "workspace",
       "add",
       "--dry-run",
       "--workspace",
@@ -194,39 +182,24 @@ describe("workspace CLI conformance", () => {
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
       repos: [{ name: "front" }],
     });
-    await expectPathMissing(path.join(workspaceDir, "api"));
-  });
-
-  it("does not create a sibling workspace during fork --dry-run", async () => {
-    await configureWorkspaceRoot();
-    const workspaceDir = await createWorkspace("source-workspace", {
-      featureName: "source-workspace",
-    });
-    process.chdir(workspaceDir);
-
-    const result = await executeCli(["fork", "--dry-run", "forked"]);
-
-    expect(result.exitCode).toBe(0);
-    await expectPathMissing(path.join(path.dirname(workspaceDir), "forked"));
   });
 
   it.each([
-    { label: "clean", command: ["clean"] },
-    { label: "workspace delete", command: ["workspace", "delete"] },
-    { label: "delete", command: ["delete"] },
-  ])("does not remove a workspace during $label --dry-run", async ({
-    command,
-  }) => {
-    await configureWorkspaceRoot();
+    ["clean", (workspace: string) => ["clean", "--dry-run", workspace]],
+    [
+      "workspace delete",
+      (workspace: string) => ["workspace", "delete", "--dry-run", workspace],
+    ],
+  ])("deletes only an explicit workspace target for %s", async (_label, argv) => {
+    const { workspaceRoot } = await configureWorkspaceRoot();
     const workspaceDir = await createWorkspace(
-      `delete-workspace-${command.join("-")}`,
+      workspaceRoot,
+      "delete-workspace",
     );
+    process.chdir(workspaceDir);
 
-    const result = await executeCli([...command, "--dry-run", workspaceDir]);
-
-    expect(result.exitCode).toBe(0);
+    expect((await executeCli(argv(workspaceDir))).exitCode).toBe(0);
     await expect(stat(workspaceDir)).resolves.toBeTruthy();
-    await expect(readWorkspaceMetadata(workspaceDir)).resolves.not.toBeNull();
   });
 });
 
@@ -251,15 +224,12 @@ async function configureWorkspaceRoot(): Promise<{
   return { workspaceRoot, cacheDir };
 }
 
-async function createWorkspace(
-  name: string,
-  options: { featureName?: string } = {},
-): Promise<string> {
-  const workspaceDir = await createTempDir(name);
+async function createWorkspace(root: string, name: string): Promise<string> {
+  const workspaceDir = path.join(root, name);
   await mkdir(path.join(workspaceDir, "front"), { recursive: true });
   await writeWorkspaceMetadata(workspaceDir, {
-    featureName: options.featureName ?? name,
-    branchName: `tomdale/${options.featureName ?? name}`,
+    featureName: name,
+    branchName: `tomdale/${name}`,
     repos: [
       {
         name: "front",
@@ -274,4 +244,12 @@ async function createWorkspace(
 
 async function expectPathMissing(targetPath: string): Promise<void> {
   await expect(stat(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }

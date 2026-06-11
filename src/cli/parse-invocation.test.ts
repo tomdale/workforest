@@ -99,13 +99,13 @@ describe("parseInvocation", () => {
       parse(["workspace", "create", "vercel/front", "--", "fix", "auth"])
         .afterDoubleDash,
     ).toEqual(["fix", "auth"]);
-    expect(parse(["workspace", "create", "--like", "current"]).flags).toEqual({
-      like: "current",
-    });
     expect(
-      parse(["workspace", "create", "--like", "current", "fix-auth"])
-        .beforeDoubleDash,
-    ).toEqual(["fix-auth"]);
+      parse(["workspace", "create", "--like", "current", "--", "fix-auth"]),
+    ).toMatchObject({
+      flags: { like: "current" },
+      beforeDoubleDash: [],
+      afterDoubleDash: ["fix-auth"],
+    });
   });
 
   it("requires --search to be used without a workspace name", () => {
