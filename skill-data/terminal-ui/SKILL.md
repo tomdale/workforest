@@ -102,8 +102,7 @@ pnpm lint
 ```
 
 For prompt or fullscreen changes, also exercise the real interface in a PTY at
-`120x40` or larger. Use `wf dev simulate new` for the workspace creation flow
-and inspect both the rich TTY path and a non-TTY fallback.
+`120x40` or larger and inspect both the rich TTY path and a non-TTY fallback.
 
 Check:
 

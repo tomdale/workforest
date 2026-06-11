@@ -1,74 +1,538 @@
 # Workforest Command Reference
 
-## Workspace Commands
+<!-- Generated from the executable registry. Do not edit directly. -->
 
-```sh
-wf new <template|repo...> -- <work>  # create a workspace
-wf status                            # monitor background repo initialization
-wf status cancel [repo...]           # cancel queued/running initialization
-wf status retry [repo...]            # retry failed/cancelled initialization
-wf list                              # list known workspaces
-wf add <repo...>                     # add repos to the current workspace
-wf fork <name>                       # fork current workspace with new branches
-wf clean [dir]                       # remove a workspace
+All syntax is generated from the CLI command registry. Use `wf`; `workforest` remains an executable alias.
+
+## `wf workspace`
+
+Manage workspaces.
+
+```text
+wf workspace <subcommand>
 ```
 
-`wf new` returns once repository worktrees are ready. Initializers and template
-hooks continue in detached background workers and can be inspected from anywhere
-inside the workspace with `wf status`.
+### `wf workspace create`
 
-## Worktree Commands
+Create a workspace.
 
-```sh
-wf worktree <slug...>                # temp sibling worktrees inside a workspace repo
-wf worktree new <repo> <name>        # managed checkout in defaultDir/<repo>/<name>
-wf worktree new <name>               # managed sibling from managed context
-wf worktree promote [template] [repo...] # promote current managed checkout
-wf worktree list                     # list tracked temp worktrees
-wf worktree rm <slug...>             # remove tracked temp worktrees
-wf worktree <repo> <slug>            # standalone single-repo worktree
+```text
+wf workspace create [options]
+wf workspace create [options] <templates or repositories...> -- <work words...>
+wf workspace create [options] -- <work words...>
 ```
 
-## Template Commands
+Options:
 
-```sh
+- `--like <workspace>`
+- `-d`, `--description <description>`
+- `-n`, `--dry-run`
+
+### `wf workspace delete`
+
+Delete a workspace.
+
+```text
+wf workspace delete [options] <workspace>
+```
+
+Options:
+
+- `-n`, `--dry-run`
+- `-f`, `--force`
+- `--delete-mirrors`
+- `-r`, `--delete-remote-branches`
+
+### `wf workspace open`
+
+Open a workspace.
+
+```text
+wf workspace open [options] [workspace]
+wf workspace open [options]
+```
+
+Options:
+
+- `--search`
+
+### `wf workspace list`
+
+List workspaces.
+
+```text
+wf workspace list
+```
+
+### `wf workspace status`
+
+Show repository initialization status.
+
+```text
+wf workspace status [options]
+```
+
+Options:
+
+- `--json`
+- `-w`, `--workspace <dir>`
+
+### `wf workspace add`
+
+Add repositories to a workspace.
+
+```text
+wf workspace add [options] [repositories...]
+wf workspace add [options] <repositories...>
+```
+
+Options:
+
+- `-w`, `--workspace <dir>`
+- `-n`, `--dry-run`
+
+## `wf task`
+
+Manage temporary workspace tasks.
+
+```text
+wf task <subcommand>
+```
+
+### `wf task create`
+
+Create temporary worktrees.
+
+```text
+wf task create [options] <task names...>
+```
+
+Options:
+
+- `--repo <repository>`
+- `-n`, `--dry-run`
+- `-f`, `--force`
+
+### `wf task list`
+
+List temporary worktrees.
+
+```text
+wf task list [options]
+```
+
+Options:
+
+- `--repo <repository>`
+
+### `wf task delete`
+
+Delete temporary worktrees.
+
+```text
+wf task delete [options] <task names...>
+```
+
+Options:
+
+- `--repo <repository>`
+- `-n`, `--dry-run`
+- `-f`, `--force`
+
+## `wf worktree`
+
+Manage standalone worktrees.
+
+```text
+wf worktree <subcommand>
+```
+
+### `wf worktree create`
+
+Create a standalone worktree.
+
+```text
+wf worktree create [options] <repository> <worktree name>
+```
+
+Options:
+
+- `--dir <path>`
+- `-n`, `--dry-run`
+
+### `wf worktree list`
+
+List standalone worktrees.
+
+```text
+wf worktree list [repository]
+```
+
+### `wf worktree delete`
+
+Delete a standalone worktree.
+
+```text
+wf worktree delete [options] <worktree path>
+```
+
+Options:
+
+- `-n`, `--dry-run`
+- `-f`, `--force`
+
+## `wf cache`
+
+Manage cached repositories.
+
+```text
+wf cache <subcommand>
+```
+
+### `wf cache list`
+
+List cached repositories.
+
+```text
+wf cache list [options]
+```
+
+Options:
+
+- `--json`
+
+### `wf cache info`
+
+Show cached repository information.
+
+```text
+wf cache info [options] <repository>
+```
+
+Options:
+
+- `--json`
+
+### `wf cache path`
+
+Print a cached repository path.
+
+```text
+wf cache path [repository]
+```
+
+### `wf cache add`
+
+Cache repositories.
+
+```text
+wf cache add <repositories...>
+```
+
+### `wf cache update`
+
+Update cached repositories.
+
+```text
+wf cache update [repositories...]
+```
+
+### `wf cache doctor`
+
+Check cached repositories.
+
+```text
+wf cache doctor [options] [repositories...]
+```
+
+Options:
+
+- `--json`
+
+### `wf cache repair`
+
+Repair cached repositories.
+
+```text
+wf cache repair [repositories...]
+```
+
+### `wf cache delete`
+
+Delete cached repositories.
+
+```text
+wf cache delete [options] <repositories...>
+```
+
+Options:
+
+- `-n`, `--dry-run`
+- `-f`, `--force`
+
+### `wf cache prune`
+
+Delete unused cached repositories.
+
+```text
+wf cache prune [options]
+```
+
+Options:
+
+- `-n`, `--dry-run`
+- `-f`, `--force`
+
+### `wf cache manage`
+
+Open the repository cache manager.
+
+```text
+wf cache manage
+```
+
+## `wf review`
+
+Manage review workspaces and PR worktrees.
+
+```text
+wf review <subcommand>
+```
+
+### `wf review open`
+
+Open a review workspace.
+
+```text
+wf review open <repository>
+```
+
+### `wf review checkout`
+
+Check out a pull request worktree.
+
+```text
+wf review checkout <review target> [pull request]
+```
+
+## `wf template`
+
+Manage templates.
+
+```text
+wf template <subcommand>
+```
+
+### `wf template list`
+
+List templates.
+
+```text
 wf template list
-wf template info <name>
-wf template new <name> [repo...]
-wf template edit <name>
-wf template copy <source> <dest>
-wf template rm <name>
 ```
 
-## Cached Repository Commands
+### `wf template open`
 
-```sh
-wf repositories                        # interactive cache manager
-wf repository list [--json]            # inventory mirrors
-wf repository info <repo> [--json]     # inspect identity, health, and worktrees
-wf repository path [repo]              # print cache or mirror path
-wf repository add <repo...>            # warm the cache
-wf repository update [repo...]         # fetch selected mirrors, or all
-wf repository doctor [repo...]         # check health
-wf repository repair [repo...]         # prune metadata and verify objects
-wf repository delete <repo...>         # delete selected mirrors
-wf repository clean                    # delete mirrors without active worktrees
+Open a template directory.
+
+```text
+wf template open <template>
 ```
 
-Repository specifiers accept `owner/repo`, git URLs, or unique repository names
-already present in the cache. Bare names fail when multiple cached owners match.
+### `wf template show`
 
-Read `references/repository-cache.md` for the jobs, safety rules, and automation
-contracts behind these commands.
+Show template information.
 
-## Config
+```text
+wf template show <template>
+```
 
-```sh
+### `wf template manage`
+
+Open the template manager.
+
+```text
+wf template manage
+```
+
+### `wf template new`
+
+Create a template.
+
+```text
+wf template new [options] [template] [repositories...]
+wf template new [options] <template> <repositories...>
+```
+
+Options:
+
+- `-d`, `--description <description>`
+
+### `wf template edit`
+
+Edit a template.
+
+```text
+wf template edit <template>
+```
+
+### `wf template add-file`
+
+Add files to a template.
+
+```text
+wf template add-file [options] <paths...>
+```
+
+Options:
+
+- `-t`, `--template <template>`
+
+### `wf template copy`
+
+Copy a template.
+
+```text
+wf template copy <source template> <destination template>
+```
+
+### `wf template delete`
+
+Delete a template.
+
+```text
+wf template delete [options] <template>
+```
+
+Options:
+
+- `-f`, `--force`
+
+## `wf shell`
+
+Manage shell integration.
+
+```text
+wf shell <subcommand>
+```
+
+### `wf shell init`
+
+Print shell integration.
+
+```text
+wf shell init [shell]
+```
+
+## `wf config`
+
+Manage configuration.
+
+```text
+wf config [subcommand]
+```
+
+Without a subcommand: Show configuration.
+
+### `wf config show`
+
+Show configuration.
+
+```text
 wf config show
+```
+
+### `wf config init`
+
+Configure workforest interactively.
+
+```text
 wf config init
+```
+
+### `wf config edit`
+
+Open the configuration editor.
+
+```text
 wf config edit
 ```
 
-Global config controls `defaultDir`, `dirPrefix`, `branchPrefix`, and optional
-Vercel linking behavior. Templates can override branch prefix behavior and
-disable specific initializers.
+## `wf skills`
+
+Inspect bundled agent skills.
+
+```text
+wf skills [subcommand]
+```
+
+Without a subcommand: List bundled agent skills.
+
+### `wf skills list`
+
+List bundled agent skills.
+
+```text
+wf skills list [options]
+```
+
+Options:
+
+- `--json`
+
+### `wf skills get`
+
+Print bundled skill content.
+
+```text
+wf skills get [options] <skill names...>
+wf skills get [options]
+```
+
+Options:
+
+- `--full`
+- `--all`
+- `--json`
+
+### `wf skills path`
+
+Print bundled skill paths.
+
+```text
+wf skills path [options] [skill]
+```
+
+Options:
+
+- `--json`
+
+## `wf version`
+
+Print the workforest version.
+
+```text
+wf version
+```
+
+## Shortcuts
+
+Shortcuts preserve the published command surface while using the same parser and handler as their canonical commands.
+
+### `wf new`
+
+Shortcut for `wf workspace create`.
+
+```text
+wf new [options]
+wf new [options] <templates or repositories...> -- <work words...>
+wf new [options] -- <work words...>
+```
+
+### `wf clean`
+
+Shortcut for `wf workspace delete`.
+
+```text
+wf clean [options] <workspace>
+```

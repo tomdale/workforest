@@ -25,21 +25,6 @@ const requiredStdin: TtyRequirement = {
   kind: "required",
   streams: ["stdin"],
 };
-const requiredStdout: TtyRequirement = {
-  kind: "required",
-  streams: ["stdout"],
-};
-
-function alias(
-  name: string,
-  options: { visibility?: Visibility; help?: HelpReference } = {},
-): AliasDefinition {
-  return {
-    name,
-    visibility: options.visibility ?? visible,
-    ...(options.help ? { help: options.help } : {}),
-  };
-}
 
 function booleanFlag(
   name: string,
@@ -74,19 +59,21 @@ function cardinality(
   min: number,
   max: number | null,
   label = "operands",
+  usage?: string,
 ): Cardinality {
-  return { min, max, label };
+  return { min, max, label, ...(usage ? { usage } : {}) };
 }
 
 function operands(
   min: number,
   max: number | null,
   label = "operands",
+  usage?: string,
 ): OperandSpec {
   return {
     variants: [
       {
-        beforeDoubleDash: cardinality(min, max, label),
+        beforeDoubleDash: cardinality(min, max, label, usage),
         delimiter: "forbidden",
       },
     ],
@@ -131,7 +118,6 @@ function group(options: {
   help: HelpReference;
   children: readonly CommandNode[];
   default?: CommandLeaf;
-  defaultOn?: "empty" | "unmatched";
   aliases?: readonly AliasDefinition[];
   visibility?: Visibility;
 }): CommandGroup {
@@ -145,65 +131,49 @@ function group(options: {
     help: options.help,
     children: options.children,
     ...(options.default ? { default: options.default } : {}),
-    defaultOn: options.defaultOn ?? "empty",
   };
 }
+
+function nestedHelp(command: string, subcommand: string): HelpReference {
+  return { kind: "nested", command, subcommand };
+}
+
+const workspaceCreateOperands: OperandSpec = {
+  variants: [
+    {
+      beforeDoubleDash: cardinality(0, 0),
+      delimiter: "forbidden",
+      when: { flag: "like", present: false, interactive: true },
+    },
+    {
+      beforeDoubleDash: cardinality(1, null, "templates or repositories"),
+      delimiter: "required",
+      afterDoubleDash: cardinality(1, null, "work words"),
+      when: { flag: "like", present: false, interactive: false },
+    },
+    {
+      beforeDoubleDash: cardinality(0, 0),
+      delimiter: "required",
+      afterDoubleDash: cardinality(1, null, "work words"),
+      when: { flag: "like", present: true },
+    },
+  ],
+};
 
 const workspaceDeleteFlags = [
   booleanFlag("dryRun", "--dry-run", "-n"),
   booleanFlag("force", "--force", "-f"),
-  booleanFlag("keepMirrors", "--keep-mirrors"),
+  booleanFlag("deleteMirrors", "--delete-mirrors"),
   booleanFlag("deleteRemoteBranches", "--delete-remote-branches", "-r"),
 ] as const;
 
-const worktreeDefault = leaf({
+const configDefault = leaf({
   name: "",
-  path: ["worktree"],
-  summary: "Create a contextual worktree",
-  handler: "worktree.create",
-  help: { kind: "command", command: "worktree" },
-  operands: operands(1, null, "worktree operands"),
-  flags: [
-    stringFlag("dir", "--dir", "path"),
-    stringFlag("repo", "--repo", "repository"),
-    booleanFlag("dryRun", "--dry-run", "-n"),
-    booleanFlag("force", "--force", "-f"),
-  ],
-  outputModes: ["human", "report"],
-  tty: optionalStdin,
-  shellHandoff: "optional-cd",
-});
-
-const reviewDefault = leaf({
-  name: "",
-  path: ["review"],
-  summary: "Create a review workspace or PR worktree",
-  handler: "review.create",
-  help: { kind: "command", command: "review" },
-  operands: operands(1, 2, "review targets"),
-  outputModes: ["human", "report"],
-  tty: optionalStdin,
-  shellHandoff: "optional-cd",
-});
-
-const templateDefault = leaf({
-  name: "",
-  path: ["template"],
-  summary: "Open the template manager or list templates",
-  handler: "template.default",
-  help: { kind: "command", command: "template" },
-  outputModes: ["interactive", "report"],
-  tty: optionalStdin,
-});
-
-const repositoryDefault = leaf({
-  name: "",
-  path: ["repository"],
-  summary: "Open the repository manager or list cached repositories",
-  handler: "repository.default",
-  help: { kind: "command", command: "repository" },
-  outputModes: ["interactive", "report"],
-  tty: optionalStdin,
+  path: ["config"],
+  summary: "Show configuration",
+  handler: "config.show",
+  help: { kind: "command", command: "config" },
+  outputModes: ["report"],
 });
 
 const skillsDefault = leaf({
@@ -216,158 +186,179 @@ const skillsDefault = leaf({
   outputModes: ["report", "json"],
 });
 
-const statusDefault = leaf({
-  name: "",
-  path: ["status"],
-  summary: "Show repository initialization status",
-  handler: "status.show",
-  help: { kind: "command", command: "status" },
+const workspaceCreate = leaf({
+  name: "create",
+  path: ["workspace", "create"],
+  summary: "Create a workspace",
+  handler: "workspace.create",
+  help: nestedHelp("workspace", "create"),
+  operands: workspaceCreateOperands,
   flags: [
-    booleanFlag("json", "--json"),
-    stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
+    stringFlag("like", "--like", "workspace"),
+    stringFlag("description", "--description", "description", { short: "-d" }),
+    booleanFlag("dryRun", "--dry-run", "-n"),
   ],
-  outputModes: ["interactive", "report", "json"],
+  outputModes: ["interactive", "report"],
   tty: optionalStdin,
+  shellHandoff: "optional-cd",
 });
 
-const configDefault = leaf({
-  name: "",
-  path: ["config"],
-  summary: "Show configuration",
-  handler: "config.show",
-  help: { kind: "command", command: "config" },
-  outputModes: ["report"],
+const workspaceDelete = leaf({
+  name: "delete",
+  path: ["workspace", "delete"],
+  summary: "Delete a workspace",
+  handler: "workspace.delete",
+  help: nestedHelp("workspace", "delete"),
+  operands: operands(1, 1, "workspace"),
+  flags: workspaceDeleteFlags,
+  outputModes: ["human", "report"],
+  tty: optionalStdin,
+  shellHandoff: "optional-cd",
 });
 
 export const commandRegistry: CommandRegistry = {
+  shortcuts: [
+    {
+      name: "new",
+      target: ["workspace", "create"],
+      visibility: visible,
+      summary: "Create a workspace",
+      help: { kind: "command", command: "new" },
+    },
+    {
+      name: "clean",
+      target: ["workspace", "delete"],
+      visibility: visible,
+      summary: "Delete a workspace",
+      help: { kind: "command", command: "clean" },
+    },
+  ],
   root: group({
     name: "",
     path: [],
     summary: "Workforest command line interface",
     help: { kind: "root" },
     children: [
-      leaf({
-        name: "new",
-        path: ["new"],
-        summary: "Create a workspace",
-        handler: "new",
-        help: { kind: "command", command: "new" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(0, 0),
-              delimiter: "forbidden",
-              when: { interactive: true },
-            },
-            {
-              beforeDoubleDash: cardinality(
-                1,
-                null,
-                "templates or repositories",
-              ),
-              delimiter: "required",
-              afterDoubleDash: cardinality(1, null, "work words"),
-            },
-          ],
-        },
-        flags: [booleanFlag("dryRun", "--dry-run", "-n")],
-        outputModes: ["interactive", "report"],
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
       group({
-        name: "status",
-        path: ["status"],
-        summary: "Monitor repository initialization",
-        help: { kind: "command", command: "status" },
-        default: statusDefault,
+        name: "workspace",
+        path: ["workspace"],
+        summary: "Manage workspaces",
+        help: { kind: "command", command: "workspace" },
         children: [
+          workspaceCreate,
+          workspaceDelete,
           leaf({
-            name: "cancel",
-            path: ["status", "cancel"],
-            summary: "Cancel repository initializers",
-            handler: "status.cancel",
-            help: { kind: "nested", command: "status", subcommand: "cancel" },
-            operands: operands(0, null, "repositories"),
-            flags: [
-              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
-            ],
-          }),
-          leaf({
-            name: "retry",
-            path: ["status", "retry"],
-            summary: "Retry repository initializers",
-            handler: "status.retry",
-            help: { kind: "nested", command: "status", subcommand: "retry" },
-            operands: operands(0, null, "repositories"),
-            flags: [
-              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
-            ],
-          }),
-        ],
-      }),
-      group({
-        name: "worktree",
-        path: ["worktree"],
-        aliases: [
-          alias("wt", {
-            help: { kind: "command", command: "wt" },
-          }),
-        ],
-        summary: "Manage contextual worktrees",
-        help: { kind: "command", command: "worktree" },
-        default: worktreeDefault,
-        defaultOn: "unmatched",
-        children: [
-          leaf({
-            name: "new",
-            path: ["worktree", "new"],
-            summary: "Create a managed worktree",
-            handler: "worktree.new",
-            help: { kind: "nested", command: "worktree", subcommand: "new" },
-            operands: operands(1, 2, "worktree operands"),
-            flags: [booleanFlag("dryRun", "--dry-run", "-n")],
-            outputModes: ["human", "report"],
+            name: "open",
+            path: ["workspace", "open"],
+            summary: "Open a workspace",
+            handler: "workspace.open",
+            help: nestedHelp("workspace", "open"),
+            operands: {
+              variants: [
+                {
+                  beforeDoubleDash: cardinality(0, 1, "workspace"),
+                  delimiter: "forbidden",
+                  when: { flag: "search", present: false },
+                },
+                {
+                  beforeDoubleDash: cardinality(0, 0, "workspace"),
+                  delimiter: "forbidden",
+                  when: { flag: "search", present: true },
+                },
+              ],
+            },
+            flags: [booleanFlag("search", "--search")],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
           }),
           leaf({
-            name: "promote",
-            path: ["worktree", "promote"],
-            summary: "Promote a managed worktree",
-            handler: "worktree.promote",
-            help: {
-              kind: "nested",
-              command: "worktree",
-              subcommand: "promote",
+            name: "list",
+            path: ["workspace", "list"],
+            summary: "List workspaces",
+            handler: "workspace.list",
+            help: nestedHelp("workspace", "list"),
+            outputModes: ["report"],
+          }),
+          leaf({
+            name: "status",
+            path: ["workspace", "status"],
+            summary: "Show repository initialization status",
+            handler: "workspace.status",
+            help: nestedHelp("workspace", "status"),
+            flags: [
+              booleanFlag("json", "--json"),
+              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
+            ],
+            outputModes: ["interactive", "report", "json"],
+            tty: optionalStdin,
+          }),
+          leaf({
+            name: "add",
+            path: ["workspace", "add"],
+            summary: "Add repositories to a workspace",
+            handler: "workspace.add",
+            help: nestedHelp("workspace", "add"),
+            operands: {
+              variants: [
+                {
+                  beforeDoubleDash: cardinality(0, null, "repositories"),
+                  delimiter: "forbidden",
+                  when: { interactive: true },
+                },
+                {
+                  beforeDoubleDash: cardinality(1, null, "repositories"),
+                  delimiter: "forbidden",
+                  when: { interactive: false },
+                },
+              ],
             },
-            operands: operands(0, null, "templates or repositories"),
-            flags: [booleanFlag("dryRun", "--dry-run", "-n")],
+            flags: [
+              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+            ],
+            outputModes: ["interactive", "report"],
+            tty: optionalStdin,
+          }),
+        ],
+      }),
+      group({
+        name: "task",
+        path: ["task"],
+        summary: "Manage temporary workspace tasks",
+        help: { kind: "command", command: "task" },
+        children: [
+          leaf({
+            name: "create",
+            path: ["task", "create"],
+            summary: "Create temporary worktrees",
+            handler: "task.create",
+            help: nestedHelp("task", "create"),
+            operands: operands(1, null, "task names"),
+            flags: [
+              stringFlag("repo", "--repo", "repository"),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+              booleanFlag("force", "--force", "-f"),
+            ],
             outputModes: ["human", "report"],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
           }),
           leaf({
             name: "list",
-            path: ["worktree", "list"],
-            summary: "List contextual worktrees",
-            handler: "worktree.list",
-            help: { kind: "nested", command: "worktree", subcommand: "list" },
+            path: ["task", "list"],
+            summary: "List temporary worktrees",
+            handler: "task.list",
+            help: nestedHelp("task", "list"),
             flags: [stringFlag("repo", "--repo", "repository")],
             outputModes: ["report"],
           }),
           leaf({
             name: "delete",
-            path: ["worktree", "delete"],
-            aliases: [alias("rm")],
-            summary: "Delete contextual worktrees",
-            handler: "worktree.delete",
-            help: {
-              kind: "nested",
-              command: "worktree",
-              subcommand: "delete",
-            },
-            operands: operands(0, null, "worktree names"),
+            path: ["task", "delete"],
+            summary: "Delete temporary worktrees",
+            handler: "task.delete",
+            help: nestedHelp("task", "delete"),
+            operands: operands(1, null, "task names"),
             flags: [
               stringFlag("repo", "--repo", "repository"),
               booleanFlag("dryRun", "--dry-run", "-n"),
@@ -380,31 +371,47 @@ export const commandRegistry: CommandRegistry = {
         ],
       }),
       group({
-        name: "review",
-        path: ["review"],
-        summary: "Manage review workspaces and PR worktrees",
-        help: { kind: "command", command: "review" },
-        default: reviewDefault,
-        defaultOn: "unmatched",
+        name: "worktree",
+        path: ["worktree"],
+        summary: "Manage standalone worktrees",
+        help: { kind: "command", command: "worktree" },
         children: [
           leaf({
+            name: "create",
+            path: ["worktree", "create"],
+            summary: "Create a standalone worktree",
+            handler: "worktree.create",
+            help: nestedHelp("worktree", "create"),
+            operands: operands(
+              2,
+              2,
+              "repository and worktree name",
+              "<repository> <worktree name>",
+            ),
+            flags: [
+              stringFlag("dir", "--dir", "path"),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+            ],
+            outputModes: ["human", "report"],
+            tty: optionalStdin,
+            shellHandoff: "optional-cd",
+          }),
+          leaf({
             name: "list",
-            path: ["review", "list"],
-            aliases: [alias("ls")],
-            summary: "List review worktrees",
-            handler: "review.list",
-            help: { kind: "nested", command: "review", subcommand: "list" },
+            path: ["worktree", "list"],
+            summary: "List standalone worktrees",
+            handler: "worktree.list",
+            help: nestedHelp("worktree", "list"),
             operands: operands(0, 1, "repository"),
             outputModes: ["report"],
           }),
           leaf({
             name: "delete",
-            path: ["review", "delete"],
-            aliases: [alias("rm"), alias("remove")],
-            summary: "Delete a review worktree",
-            handler: "review.delete",
-            help: { kind: "nested", command: "review", subcommand: "delete" },
-            operands: operands(1, 2, "review targets"),
+            path: ["worktree", "delete"],
+            summary: "Delete a standalone worktree",
+            handler: "worktree.delete",
+            help: nestedHelp("worktree", "delete"),
+            operands: operands(1, 1, "worktree path"),
             flags: [
               booleanFlag("dryRun", "--dry-run", "-n"),
               booleanFlag("force", "--force", "-f"),
@@ -415,220 +422,196 @@ export const commandRegistry: CommandRegistry = {
           }),
         ],
       }),
-      leaf({
-        name: "delete",
-        path: ["delete"],
-        summary: "Delete the current tracked resource",
-        handler: "delete",
-        help: { kind: "command", command: "delete" },
-        operands: operands(0, 1, "workspace"),
-        flags: workspaceDeleteFlags,
-        outputModes: ["human", "report"],
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
       group({
-        name: "workspace",
-        path: ["workspace"],
-        summary: "Manage workspaces",
-        help: { kind: "command", command: "workspace" },
+        name: "cache",
+        path: ["cache"],
+        summary: "Manage cached repositories",
+        help: { kind: "command", command: "cache" },
         children: [
           leaf({
+            name: "list",
+            path: ["cache", "list"],
+            summary: "List cached repositories",
+            handler: "cache.list",
+            help: nestedHelp("cache", "list"),
+            flags: [booleanFlag("json", "--json")],
+            outputModes: ["report", "json"],
+          }),
+          leaf({
+            name: "info",
+            path: ["cache", "info"],
+            summary: "Show cached repository information",
+            handler: "cache.info",
+            help: nestedHelp("cache", "info"),
+            operands: operands(1, 1, "repository"),
+            flags: [booleanFlag("json", "--json")],
+            outputModes: ["report", "json"],
+          }),
+          leaf({
+            name: "path",
+            path: ["cache", "path"],
+            summary: "Print a cached repository path",
+            handler: "cache.path",
+            help: nestedHelp("cache", "path"),
+            operands: operands(0, 1, "repository"),
+            outputModes: ["path"],
+          }),
+          leaf({
+            name: "add",
+            path: ["cache", "add"],
+            summary: "Cache repositories",
+            handler: "cache.add",
+            help: nestedHelp("cache", "add"),
+            operands: operands(1, null, "repositories"),
+            tty: optionalStdin,
+          }),
+          leaf({
+            name: "update",
+            path: ["cache", "update"],
+            summary: "Update cached repositories",
+            handler: "cache.update",
+            help: nestedHelp("cache", "update"),
+            operands: operands(0, null, "repositories"),
+            tty: optionalStdin,
+          }),
+          leaf({
+            name: "doctor",
+            path: ["cache", "doctor"],
+            summary: "Check cached repositories",
+            handler: "cache.doctor",
+            help: nestedHelp("cache", "doctor"),
+            operands: operands(0, null, "repositories"),
+            flags: [booleanFlag("json", "--json")],
+            outputModes: ["report", "json"],
+          }),
+          leaf({
+            name: "repair",
+            path: ["cache", "repair"],
+            summary: "Repair cached repositories",
+            handler: "cache.repair",
+            help: nestedHelp("cache", "repair"),
+            operands: operands(0, null, "repositories"),
+            tty: optionalStdin,
+          }),
+          leaf({
             name: "delete",
-            path: ["workspace", "delete"],
-            aliases: [alias("rm")],
-            summary: "Delete a workspace",
-            handler: "workspace.delete",
-            help: {
-              kind: "nested",
-              command: "workspace",
-              subcommand: "delete",
-            },
-            operands: operands(0, 1, "workspace"),
-            flags: workspaceDeleteFlags,
+            path: ["cache", "delete"],
+            summary: "Delete cached repositories",
+            handler: "cache.delete",
+            help: nestedHelp("cache", "delete"),
+            operands: operands(1, null, "repositories"),
+            flags: [
+              booleanFlag("dryRun", "--dry-run", "-n"),
+              booleanFlag("force", "--force", "-f"),
+            ],
+            tty: optionalStdin,
+          }),
+          leaf({
+            name: "prune",
+            path: ["cache", "prune"],
+            summary: "Delete unused cached repositories",
+            handler: "cache.prune",
+            help: nestedHelp("cache", "prune"),
+            flags: [
+              booleanFlag("dryRun", "--dry-run", "-n"),
+              booleanFlag("force", "--force", "-f"),
+            ],
+            tty: optionalStdin,
+          }),
+          leaf({
+            name: "manage",
+            path: ["cache", "manage"],
+            summary: "Open the repository cache manager",
+            handler: "cache.manage",
+            help: nestedHelp("cache", "manage"),
+            outputModes: ["interactive"],
+            tty: requiredStdin,
+          }),
+        ],
+      }),
+      group({
+        name: "review",
+        path: ["review"],
+        summary: "Manage review workspaces and PR worktrees",
+        help: { kind: "command", command: "review" },
+        children: [
+          leaf({
+            name: "open",
+            path: ["review", "open"],
+            summary: "Open a review workspace",
+            handler: "review.open",
+            help: nestedHelp("review", "open"),
+            operands: operands(1, 1, "repository"),
+            outputModes: ["human", "report"],
+            tty: optionalStdin,
+            shellHandoff: "optional-cd",
+          }),
+          leaf({
+            name: "checkout",
+            path: ["review", "checkout"],
+            summary: "Check out a pull request worktree",
+            handler: "review.checkout",
+            help: nestedHelp("review", "checkout"),
+            operands: operands(
+              1,
+              2,
+              "review targets",
+              "<review target> [pull request]",
+            ),
             outputModes: ["human", "report"],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
           }),
         ],
       }),
-      leaf({
-        name: "cd",
-        path: ["cd"],
-        summary: "Open a workspace",
-        handler: "cd",
-        help: { kind: "command", command: "cd" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(1, 1, "workspace"),
-              delimiter: "forbidden",
-            },
-            {
-              beforeDoubleDash: cardinality(0, 0, "workspace"),
-              delimiter: "forbidden",
-              when: { interactive: true },
-            },
-          ],
-        },
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "find",
-        path: ["find"],
-        summary: "Fuzzy-find a workspace",
-        handler: "find",
-        help: { kind: "command", command: "find" },
-        tty: requiredStdin,
-        shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "add",
-        path: ["add"],
-        summary: "Add repositories to a workspace",
-        handler: "add",
-        help: { kind: "command", command: "add" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(0, null, "repositories"),
-              delimiter: "forbidden",
-              when: { interactive: true },
-            },
-            {
-              beforeDoubleDash: cardinality(1, null, "repositories"),
-              delimiter: "forbidden",
-              when: { interactive: false },
-            },
-          ],
-        },
-        flags: [
-          stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
-          booleanFlag("dryRun", "--dry-run", "-n"),
-        ],
-        outputModes: ["interactive", "report"],
-        tty: optionalStdin,
-      }),
-      leaf({
-        name: "fork",
-        path: ["fork"],
-        summary: "Fork the current workspace",
-        handler: "fork",
-        help: { kind: "command", command: "fork" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(1, 1, "name or description"),
-              delimiter: "forbidden",
-            },
-            {
-              beforeDoubleDash: cardinality(0, 0, "name or description"),
-              delimiter: "forbidden",
-              when: { flag: "description", present: true },
-            },
-            {
-              beforeDoubleDash: cardinality(0, 0, "name or description"),
-              delimiter: "forbidden",
-              when: {
-                flag: "description",
-                present: false,
-                interactive: true,
-              },
-            },
-          ],
-        },
-        flags: [
-          stringFlag("description", "--description", "description", {
-            short: "-d",
-          }),
-          booleanFlag("dryRun", "--dry-run", "-n"),
-        ],
-        outputModes: ["interactive", "report"],
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "clean",
-        path: ["clean"],
-        summary: "Delete a workspace",
-        handler: "clean",
-        help: { kind: "command", command: "clean" },
-        operands: operands(0, 1, "workspace"),
-        flags: workspaceDeleteFlags,
-        outputModes: ["human", "report"],
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "list",
-        path: ["list"],
-        aliases: [
-          alias("ls", {
-            help: { kind: "command", command: "ls" },
-          }),
-        ],
-        summary: "List workspaces",
-        handler: "list",
-        help: { kind: "command", command: "list" },
-        outputModes: ["report"],
-      }),
-      leaf({
-        name: "init",
-        path: ["init"],
-        summary: "Print shell integration",
-        handler: "init",
-        help: { kind: "command", command: "init" },
-        operands: operands(0, 1, "shell"),
-        outputModes: ["shell"],
-      }),
       group({
         name: "template",
         path: ["template"],
-        aliases: [
-          alias("templates", {
-            help: { kind: "command", command: "templates" },
-          }),
-        ],
         summary: "Manage templates",
         help: { kind: "command", command: "template" },
-        default: templateDefault,
         children: [
           leaf({
             name: "list",
             path: ["template", "list"],
-            aliases: [alias("ls")],
             summary: "List templates",
             handler: "template.list",
-            help: { kind: "nested", command: "template", subcommand: "list" },
+            help: nestedHelp("template", "list"),
             outputModes: ["report"],
           }),
           leaf({
-            name: "show",
-            path: ["template", "show"],
+            name: "open",
+            path: ["template", "open"],
             summary: "Open a template directory",
-            handler: "template.show",
-            help: { kind: "nested", command: "template", subcommand: "show" },
+            handler: "template.open",
+            help: nestedHelp("template", "open"),
             operands: operands(1, 1, "template"),
             outputModes: ["path"],
             shellHandoff: "optional-cd",
           }),
           leaf({
-            name: "info",
-            path: ["template", "info"],
+            name: "show",
+            path: ["template", "show"],
             summary: "Show template information",
-            handler: "template.info",
-            help: { kind: "nested", command: "template", subcommand: "info" },
+            handler: "template.show",
+            help: nestedHelp("template", "show"),
             operands: operands(1, 1, "template"),
             outputModes: ["report"],
           }),
           leaf({
+            name: "manage",
+            path: ["template", "manage"],
+            summary: "Open the template manager",
+            handler: "template.manage",
+            help: nestedHelp("template", "manage"),
+            outputModes: ["interactive"],
+            tty: requiredStdin,
+          }),
+          leaf({
             name: "new",
             path: ["template", "new"],
-            aliases: [alias("create")],
             summary: "Create a template",
             handler: "template.new",
-            help: { kind: "nested", command: "template", subcommand: "new" },
+            help: nestedHelp("template", "new"),
             operands: {
               variants: [
                 {
@@ -636,6 +619,7 @@ export const commandRegistry: CommandRegistry = {
                     0,
                     null,
                     "template and repositories",
+                    "[template] [repositories...]",
                   ),
                   delimiter: "forbidden",
                   when: { interactive: true },
@@ -645,6 +629,7 @@ export const commandRegistry: CommandRegistry = {
                     2,
                     null,
                     "template and repositories",
+                    "<template> <repositories...>",
                   ),
                   delimiter: "forbidden",
                   when: { interactive: false },
@@ -663,7 +648,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["template", "edit"],
             summary: "Edit a template",
             handler: "template.edit",
-            help: { kind: "nested", command: "template", subcommand: "edit" },
+            help: nestedHelp("template", "edit"),
             operands: operands(1, 1, "template"),
             outputModes: ["interactive"],
             tty: requiredStdin,
@@ -673,11 +658,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["template", "add-file"],
             summary: "Add files to a template",
             handler: "template.add-file",
-            help: {
-              kind: "nested",
-              command: "template",
-              subcommand: "add-file",
-            },
+            help: nestedHelp("template", "add-file"),
             operands: operands(1, null, "paths"),
             flags: [
               stringFlag("template", "--template", "template", {
@@ -689,23 +670,22 @@ export const commandRegistry: CommandRegistry = {
           leaf({
             name: "copy",
             path: ["template", "copy"],
-            aliases: [alias("cp")],
             summary: "Copy a template",
             handler: "template.copy",
-            help: { kind: "nested", command: "template", subcommand: "copy" },
-            operands: operands(2, 2, "templates"),
+            help: nestedHelp("template", "copy"),
+            operands: operands(
+              2,
+              2,
+              "templates",
+              "<source template> <destination template>",
+            ),
           }),
           leaf({
             name: "delete",
             path: ["template", "delete"],
-            aliases: [alias("rm")],
             summary: "Delete a template",
             handler: "template.delete",
-            help: {
-              kind: "nested",
-              command: "template",
-              subcommand: "delete",
-            },
+            help: nestedHelp("template", "delete"),
             operands: operands(1, 1, "template"),
             flags: [booleanFlag("force", "--force", "-f")],
             tty: optionalStdin,
@@ -713,154 +693,19 @@ export const commandRegistry: CommandRegistry = {
         ],
       }),
       group({
-        name: "repository",
-        path: ["repository"],
-        aliases: [
-          alias("repo", {
-            help: { kind: "command", command: "repo" },
-          }),
-          alias("repositories", {
-            help: { kind: "command", command: "repositories" },
-          }),
-          alias("repos", {
-            help: { kind: "command", command: "repos" },
-          }),
-        ],
-        summary: "Manage cached repositories",
-        help: { kind: "command", command: "repository" },
-        default: repositoryDefault,
+        name: "shell",
+        path: ["shell"],
+        summary: "Manage shell integration",
+        help: { kind: "command", command: "shell" },
         children: [
           leaf({
-            name: "list",
-            path: ["repository", "list"],
-            aliases: [alias("ls")],
-            summary: "List cached repositories",
-            handler: "repository.list",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "list",
-            },
-            flags: [booleanFlag("json", "--json")],
-            outputModes: ["report", "json"],
-          }),
-          leaf({
-            name: "info",
-            path: ["repository", "info"],
-            summary: "Show cached repository information",
-            handler: "repository.info",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "info",
-            },
-            operands: operands(1, 1, "repository"),
-            flags: [booleanFlag("json", "--json")],
-            outputModes: ["report", "json"],
-          }),
-          leaf({
-            name: "path",
-            path: ["repository", "path"],
-            summary: "Print a cached repository path",
-            handler: "repository.path",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "path",
-            },
-            operands: operands(0, 1, "repository"),
-            outputModes: ["path"],
-          }),
-          leaf({
-            name: "add",
-            path: ["repository", "add"],
-            aliases: [alias("cache")],
-            summary: "Cache repositories",
-            handler: "repository.add",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "add",
-            },
-            operands: operands(1, null, "repositories"),
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "update",
-            path: ["repository", "update"],
-            aliases: [alias("fetch")],
-            summary: "Update cached repositories",
-            handler: "repository.update",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "update",
-            },
-            operands: operands(0, null, "repositories"),
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "doctor",
-            path: ["repository", "doctor"],
-            aliases: [alias("check")],
-            summary: "Check cached repositories",
-            handler: "repository.doctor",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "doctor",
-            },
-            operands: operands(0, null, "repositories"),
-            flags: [booleanFlag("json", "--json")],
-            outputModes: ["report", "json"],
-          }),
-          leaf({
-            name: "repair",
-            path: ["repository", "repair"],
-            summary: "Repair cached repositories",
-            handler: "repository.repair",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "repair",
-            },
-            operands: operands(0, null, "repositories"),
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "delete",
-            path: ["repository", "delete"],
-            aliases: [alias("rm"), alias("remove")],
-            summary: "Delete cached repositories",
-            handler: "repository.delete",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "delete",
-            },
-            operands: operands(1, null, "repositories"),
-            flags: [
-              booleanFlag("dryRun", "--dry-run", "-n"),
-              booleanFlag("force", "--force", "-f"),
-            ],
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "clean",
-            path: ["repository", "clean"],
-            aliases: [alias("prune")],
-            summary: "Delete unused cached repositories",
-            handler: "repository.clean",
-            help: {
-              kind: "nested",
-              command: "repository",
-              subcommand: "clean",
-            },
-            flags: [
-              booleanFlag("dryRun", "--dry-run", "-n"),
-              booleanFlag("force", "--force", "-f"),
-            ],
-            tty: optionalStdin,
+            name: "init",
+            path: ["shell", "init"],
+            summary: "Print shell integration",
+            handler: "shell.init",
+            help: nestedHelp("shell", "init"),
+            operands: operands(0, 1, "shell"),
+            outputModes: ["shell"],
           }),
         ],
       }),
@@ -876,7 +721,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["config", "show"],
             summary: "Show configuration",
             handler: "config.show",
-            help: { kind: "nested", command: "config", subcommand: "show" },
+            help: nestedHelp("config", "show"),
             outputModes: ["report"],
           }),
           leaf({
@@ -884,7 +729,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["config", "init"],
             summary: "Configure workforest interactively",
             handler: "config.init",
-            help: { kind: "nested", command: "config", subcommand: "init" },
+            help: nestedHelp("config", "init"),
             outputModes: ["interactive"],
             tty: requiredStdin,
           }),
@@ -893,7 +738,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["config", "edit"],
             summary: "Open the configuration editor",
             handler: "config.edit",
-            help: { kind: "nested", command: "config", subcommand: "edit" },
+            help: nestedHelp("config", "edit"),
             outputModes: ["interactive"],
             tty: requiredStdin,
           }),
@@ -911,7 +756,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["skills", "list"],
             summary: "List bundled agent skills",
             handler: "skills.list",
-            help: { kind: "nested", command: "skills", subcommand: "list" },
+            help: nestedHelp("skills", "list"),
             flags: [booleanFlag("json", "--json")],
             outputModes: ["report", "json"],
           }),
@@ -920,7 +765,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["skills", "get"],
             summary: "Print bundled skill content",
             handler: "skills.get",
-            help: { kind: "nested", command: "skills", subcommand: "get" },
+            help: nestedHelp("skills", "get"),
             operands: {
               variants: [
                 {
@@ -947,67 +792,16 @@ export const commandRegistry: CommandRegistry = {
             path: ["skills", "path"],
             summary: "Print bundled skill paths",
             handler: "skills.path",
-            help: { kind: "nested", command: "skills", subcommand: "path" },
+            help: nestedHelp("skills", "path"),
             operands: operands(0, 1, "skill"),
             flags: [booleanFlag("json", "--json")],
             outputModes: ["path", "json"],
           }),
         ],
       }),
-      group({
-        name: "dev",
-        path: ["dev"],
-        summary: "Run development simulations",
-        help: { kind: "command", command: "dev" },
-        visibility: hidden,
-        children: [
-          group({
-            name: "simulate",
-            path: ["dev", "simulate"],
-            aliases: [alias("sim", { visibility: hidden })],
-            summary: "Run a development UI simulation",
-            help: { kind: "dev-simulation", flow: "simulate" },
-            visibility: hidden,
-            children: [
-              leaf({
-                name: "new",
-                path: ["dev", "simulate", "new"],
-                summary: "Run the workspace creation simulation",
-                handler: "dev.simulate.new",
-                help: { kind: "dev-simulation", flow: "new" },
-                flags: [
-                  stringFlag("failRepo", "--fail-repo", "repository"),
-                  stringFlag("speed", "--speed", "speed"),
-                ],
-                outputModes: ["interactive"],
-                tty: requiredStdout,
-                visibility: hidden,
-              }),
-              leaf({
-                name: "confetti",
-                path: ["dev", "simulate", "confetti"],
-                summary: "Run the completion simulation",
-                handler: "dev.simulate.confetti",
-                help: { kind: "dev-simulation", flow: "confetti" },
-                flags: [
-                  stringFlag("workspace", "--workspace", "path"),
-                  stringFlag("repos", "--repos", "repositories"),
-                ],
-                outputModes: ["interactive"],
-                tty: requiredStdout,
-                visibility: hidden,
-              }),
-            ],
-          }),
-        ],
-      }),
       leaf({
         name: "version",
         path: ["version"],
-        aliases: [
-          alias("--version", { visibility: hidden }),
-          alias("-V", { visibility: hidden }),
-        ],
         summary: "Print the workforest version",
         handler: "version",
         help: { kind: "command", command: "version" },
@@ -1038,6 +832,49 @@ export function validateCommandRegistry(registry: CommandRegistry): void {
     );
   }
   validateGroup(registry.root);
+  validateShortcuts(registry);
+}
+
+function validateShortcuts(registry: CommandRegistry): void {
+  const tokens = new Set<string>();
+  for (const child of registry.root.children) {
+    registerToken(tokens, child.name, []);
+    for (const childAlias of child.aliases) {
+      registerToken(tokens, childAlias.name, []);
+    }
+  }
+  for (const shortcut of registry.shortcuts) {
+    registerToken(tokens, shortcut.name, []);
+    if (!shortcut.summary.trim()) {
+      throw new Error(`Shortcut ${shortcut.name} is missing a summary.`);
+    }
+    const target = findNode(registry.root, shortcut.target);
+    if (!target || target.kind !== "leaf") {
+      throw new Error(
+        `Shortcut ${shortcut.name} targets unknown command ${formatPath(shortcut.target)}.`,
+      );
+    }
+  }
+}
+
+function findNode(
+  root: CommandGroup,
+  path: readonly string[],
+): CommandNode | undefined {
+  let node: CommandNode = root;
+  for (const segment of path) {
+    if (node.kind !== "group") {
+      return undefined;
+    }
+    const child: CommandNode | undefined = node.children.find(
+      (candidate) => candidate.name === segment,
+    );
+    if (!child) {
+      return undefined;
+    }
+    node = child;
+  }
+  return node;
 }
 
 function validateGroup(groupNode: CommandGroup): void {
@@ -1058,10 +895,6 @@ function validateGroup(groupNode: CommandGroup): void {
       );
     }
     validateLeaf(groupNode.default);
-  } else if (groupNode.defaultOn === "unmatched") {
-    throw new Error(
-      `Command group ${formatPath(groupNode.path)} cannot use unmatched defaults without a default leaf.`,
-    );
   }
 }
 
@@ -1149,6 +982,16 @@ function validateCardinality(
       (!Number.isInteger(value.max) || value.max < value.min))
   ) {
     throw new Error(`Invalid operand cardinality for ${formatPath(path)}.`);
+  }
+  if (value.label.trim() === "") {
+    throw new Error(
+      `Operand cardinality needs a label for ${formatPath(path)}.`,
+    );
+  }
+  if (value.usage !== undefined && value.usage.trim() === "") {
+    throw new Error(
+      `Operand cardinality usage cannot be empty for ${formatPath(path)}.`,
+    );
   }
 }
 

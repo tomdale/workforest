@@ -11,11 +11,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  appendTemporaryWorktrees,
+  appendTasks,
   appendWorkspaceRepos,
   getMetadataPath,
   readWorkspaceMetadata,
-  removeTemporaryWorktrees,
+  removeTasks,
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 
@@ -185,7 +185,7 @@ describe("workspace metadata", () => {
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toBeNull();
   });
 
-  it("tracks temporary worktrees separately from workspace repos", async () => {
+  it("tracks tasks separately from workspace repos", async () => {
     const workspaceDir = await createWorkspaceDir();
 
     await writeWorkspaceMetadata(workspaceDir, {
@@ -200,7 +200,7 @@ describe("workspace metadata", () => {
       ],
     });
 
-    await appendTemporaryWorktrees(workspaceDir, [
+    await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "front",
@@ -222,7 +222,7 @@ describe("workspace metadata", () => {
           has_lockfile: true,
         },
       ],
-      temporary_worktrees: [
+      tasks: [
         {
           slug: "fix-tests",
           parent_repo: "front",
@@ -232,7 +232,7 @@ describe("workspace metadata", () => {
     });
   });
 
-  it("preserves simultaneous temporary worktree metadata updates", async () => {
+  it("preserves simultaneous task metadata updates", async () => {
     const workspaceDir = await createWorkspaceDir();
 
     await writeWorkspaceMetadata(workspaceDir, {
@@ -252,21 +252,23 @@ describe("workspace metadata", () => {
     });
 
     await Promise.all([
-      appendTemporaryWorktrees(workspaceDir, [worktree("alpha")]),
-      appendTemporaryWorktrees(workspaceDir, [worktree("beta")]),
-      appendTemporaryWorktrees(workspaceDir, [worktree("gamma")]),
+      appendTasks(workspaceDir, [worktree("alpha")]),
+      appendTasks(workspaceDir, [worktree("beta")]),
+      appendTasks(workspaceDir, [worktree("gamma")]),
     ]);
 
     const metadata = await readWorkspaceMetadata(workspaceDir);
-    expect(
-      metadata?.temporary_worktrees?.map((entry) => entry.slug).sort(),
-    ).toEqual(["alpha", "beta", "gamma"]);
+    expect(metadata?.tasks?.map((entry) => entry.slug).sort()).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
     expect(
       JSON.parse(await readFile(getMetadataPath(workspaceDir), "utf8")),
     ).toEqual(metadata);
   });
 
-  it("removes temporary worktrees without changing repos", async () => {
+  it("removes tasks without changing repos", async () => {
     const workspaceDir = await createWorkspaceDir();
 
     await writeWorkspaceMetadata(workspaceDir, {
@@ -280,7 +282,7 @@ describe("workspace metadata", () => {
         },
       ],
     });
-    await appendTemporaryWorktrees(workspaceDir, [
+    await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "front",
@@ -293,7 +295,7 @@ describe("workspace metadata", () => {
       },
     ]);
 
-    await removeTemporaryWorktrees(workspaceDir, [
+    await removeTasks(workspaceDir, [
       { parent_repo: "front", slug: "fix-tests" },
     ]);
 
@@ -318,34 +320,33 @@ describe("workspace metadata", () => {
       },
     ],
     [
-      "temporary worktree path",
+      "task path",
       (metadata: UnsafeMetadata) => {
-        firstTemporaryWorktree(metadata).path = "../outside";
+        firstTask(metadata).path = "../outside";
       },
     ],
     [
-      "temporary worktree path at the wrong contained location",
+      "task path at the wrong contained location",
       (metadata: UnsafeMetadata) => {
-        firstTemporaryWorktree(metadata).path = "another-task";
+        firstTask(metadata).path = "another-task";
       },
     ],
     [
-      "temporary parent repository",
+      "task parent repository",
       (metadata: UnsafeMetadata) => {
-        firstTemporaryWorktree(metadata).parent_repo = "..";
+        firstTask(metadata).parent_repo = "..";
       },
     ],
     [
-      "temporary setup log",
+      "task setup log",
       (metadata: UnsafeMetadata) => {
-        firstTemporaryWorktree(metadata).setup_log = "..\\sentinel.txt";
+        firstTask(metadata).setup_log = "..\\sentinel.txt";
       },
     ],
     [
-      "temporary setup log at the wrong contained location",
+      "task setup log at the wrong contained location",
       (metadata: UnsafeMetadata) => {
-        firstTemporaryWorktree(metadata).setup_log =
-          ".workforest/logs/another-task.log";
+        firstTask(metadata).setup_log = ".workforest/logs/another-task.log";
       },
     ],
     [
@@ -374,7 +375,7 @@ describe("workspace metadata", () => {
     await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow();
   });
 
-  it("rejects a persisted temporary worktree path through a symlink", async () => {
+  it("rejects a persisted task path through a symlink", async () => {
     const workspaceDir = await createWorkspaceDir();
     const outsideDir = await createWorkspaceDir();
     await symlink(outsideDir, path.join(workspaceDir, "fix-tests"));
@@ -478,7 +479,7 @@ type UnsafeMetadata = {
     default_branch: string;
     has_lockfile: boolean;
   }>;
-  temporary_worktrees?: Array<{
+  tasks?: Array<{
     slug: string;
     parent_repo: string;
     path: string;
@@ -511,7 +512,7 @@ function createUnsafeMetadataFixture(): UnsafeMetadata {
         has_lockfile: true,
       },
     ],
-    temporary_worktrees: [
+    tasks: [
       {
         slug: "fix-tests",
         parent_repo: "front",
@@ -552,11 +553,11 @@ function firstRepo(metadata: UnsafeMetadata): UnsafeMetadata["repos"][number] {
   return repo;
 }
 
-function firstTemporaryWorktree(
+function firstTask(
   metadata: UnsafeMetadata,
-): NonNullable<UnsafeMetadata["temporary_worktrees"]>[number] {
-  const worktree = metadata.temporary_worktrees?.[0];
-  if (!worktree) throw new Error("Missing temporary worktree fixture.");
+): NonNullable<UnsafeMetadata["tasks"]>[number] {
+  const worktree = metadata.tasks?.[0];
+  if (!worktree) throw new Error("Missing task fixture.");
   return worktree;
 }
 

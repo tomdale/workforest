@@ -37,21 +37,22 @@ invocations of commands added after the npm publication:
 The search excluded Git metadata, dependency directories, environment files,
 and files whose names indicated secrets, credentials, or tokens.
 
-One unique command invocation was found:
+One unique shell-initialization invocation using the superseded root form was
+found. Its supported replacement is:
 
 ```sh
-eval "$(wf init zsh)"
+eval "$(wf shell init zsh)"
 ```
 
-It appears in the active config at `~/.config/zsh/.zshrc:117` and in its
-chezmoi source at
+The existing invocation appears in the active config at
+`~/.config/zsh/.zshrc:117` and in its chezmoi source at
 `~/.local/share/chezmoi/home/dot_config/zsh/dot_zshrc:117`.
 
 No invocations of the other post-publication commands were found in the audit
 scope. Generated zsh completion registration and a symlink to the `wf`
 executable were present, but neither invokes a command.
 
-`init` therefore has a real personal consumer. Replacing it with `shell init`
-requires updating the active dotfile and its chezmoi source as part of the
-migration. The audit found no evidence requiring compatibility aliases for the
-other post-publication command forms.
+Shell initialization therefore has a real personal consumer. The active dotfile
+and its chezmoi source must be updated as part of the command migration. The
+audit found no evidence requiring compatibility aliases for the other
+post-publication command forms.

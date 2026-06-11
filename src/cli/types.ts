@@ -1,5 +1,7 @@
 export type ExitCode = 0 | 1 | 2;
 
+export type CliErrorKind = "operational" | "usage";
+
 export type CommandPath = readonly string[];
 
 export type Visibility = "visible" | "hidden";
@@ -29,11 +31,7 @@ export type TtyRequirement =
 export type HelpReference =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "command"; command: string }>
-  | Readonly<{ kind: "nested"; command: string; subcommand: string }>
-  | Readonly<{
-      kind: "dev-simulation";
-      flow: "simulate" | "new" | "confetti";
-    }>;
+  | Readonly<{ kind: "nested"; command: string; subcommand: string }>;
 
 export type AliasDefinition = Readonly<{
   name: string;
@@ -45,6 +43,7 @@ export type Cardinality = Readonly<{
   min: number;
   max: number | null;
   label: string;
+  usage?: string;
 }>;
 
 export type OperandVariant = Readonly<{
@@ -96,13 +95,21 @@ export type CommandGroup = CommandMetadata &
     kind: "group";
     children: readonly CommandNode[];
     default?: CommandLeaf;
-    defaultOn: "empty" | "unmatched";
   }>;
 
 export type CommandNode = CommandGroup | CommandLeaf;
 
+export type CommandShortcut = Readonly<{
+  name: string;
+  target: CommandPath;
+  visibility: Visibility;
+  summary: string;
+  help: HelpReference;
+}>;
+
 export type CommandRegistry = Readonly<{
   root: CommandGroup;
+  shortcuts: readonly CommandShortcut[];
 }>;
 
 export type ResolvedCommand = Readonly<{
@@ -136,6 +143,27 @@ export type InvocationContext = Readonly<{
   interactive: boolean;
 }>;
 
+export type JsonSuccessEnvelope<Data = unknown> = Readonly<{
+  ok: true;
+  data: Data;
+}>;
+
+export type JsonError = Readonly<{
+  kind: CliErrorKind;
+  message: string;
+}>;
+
+export type JsonFailureEnvelope = Readonly<{
+  ok: false;
+  error: JsonError;
+}>;
+
+export type JsonEnvelope<Data = unknown> =
+  | JsonSuccessEnvelope<Data>
+  | JsonFailureEnvelope;
+
+export type TextOutputKind = "human" | "path" | "report" | "shell";
+
 export type RenderModel =
   | Readonly<{ kind: "none" }>
   | Readonly<{
@@ -143,10 +171,16 @@ export type RenderModel =
       value: string;
       stream: "stdout" | "stderr";
       trailingNewline?: boolean;
+      outputKind?: TextOutputKind;
     }>
   | Readonly<{
       kind: "json";
       value: unknown;
+      stream: "stdout" | "stderr";
+    }>
+  | Readonly<{
+      kind: "json-error";
+      error: JsonError;
       stream: "stdout" | "stderr";
     }>;
 

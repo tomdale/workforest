@@ -1,7 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { commandRegistry } from "./cli/commands.ts";
+import type { CommandRegistry } from "./cli/types.ts";
 import {
   normalizeShellName,
   renderShellInit,
@@ -44,35 +47,110 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills",
+      "new|clean|workspace|task|worktree|review|template",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
     expect(script).toContain("workforest() {");
     expect(script).toContain("_workforest_complete()");
+    expect(script).toContain("(( $+functions[compdef] )) || return 0");
     expect(script).toContain("compdef _workforest_complete wf workforest");
     expect(script).toContain("__workforest_workspace_root()");
-    expect(script).toContain('local subcommand="$' + '{words[2]:-}"');
-    expect(script).toContain("cd|clean|delete|workspace)");
-    expect(script).toContain("find:fuzzy-find a workspace");
-    expect(script).toContain("review:create or manage PR review worktrees");
+    expect(script).toContain('local root_command="$' + '{words[2]:-}"');
+    expect(script).toContain('local subcommand="$' + '{words[3]:-}"');
+    expect(script).toContain("'workspace:Manage workspaces'");
+    expect(script).toContain("'create:Create a workspace'");
+    expect(script).toContain("'--json:option'");
     expect(script).toContain(
-      "_values 'worktree action' new promote list delete rm",
+      'if [[ "$PREFIX" != -* ]]; then\n            _workforest_workspace_names',
     );
     expect(script).toContain(
-      "delete:infer and delete current tracked resource",
+      "'review:Manage review workspaces and PR worktrees'",
     );
-    expect(script).toContain("skills:list and retrieve bundled agent skills");
-    expect(script).toContain("templates:open template manager");
-    expect(script).toContain("_workforest_workspace_names");
-    expect(script).not.toContain("CURRENT == 3");
+    expect(script).toContain("'checkout:Check out a pull request worktree'");
+    expect(script).toContain("'add-file:Add files to a template'");
+    expect(script).not.toContain("'fork:");
+    expect(script).not.toContain("'templates:");
+    expect(script).not.toContain("'wt:");
+    expect(script).not.toContain("\n      'init:");
+    expect(script).not.toContain(" promote ");
   });
 
-  it("does not emit zsh completion helpers for bash", () => {
+  it("renders generated bash completion for both executable names", () => {
     const script = renderShellInit("bash");
 
-    expect(script).not.toContain("_workforest_complete()");
+    expect(script).toContain("_workforest_complete()");
+    expect(script).toContain("complete -F _workforest_complete wf workforest");
+    expect(script).toContain(
+      "_workforest_complete_words 'new clean workspace task worktree cache review template shell config skills version'",
+    );
+    expect(script).toContain(
+      "_workforest_complete_words 'create delete open list status add'",
+    );
+    expect(script).toContain(
+      "_workforest_complete_words '--like -d --description -n --dry-run'",
+    );
+    expect(script).toContain('_workforest_workspace_names "$current"');
     expect(script).not.toContain("compdef _workforest_complete");
+  });
+
+  it("derives completion and handoff commands from the registry", () => {
+    const registry = structuredClone(commandRegistry) as MutableCommandRegistry;
+    registry.shortcuts.push({
+      name: "inspect",
+      target: ["cache", "info"],
+      visibility: "visible",
+      summary: "Inspect a cached repository",
+      help: { kind: "command", command: "inspect" },
+    });
+    registry.shortcuts.push({
+      name: "visit",
+      target: ["review", "open"],
+      visibility: "visible",
+      summary: "Visit a review workspace",
+      help: { kind: "command", command: "visit" },
+    });
+
+    const script = renderShellInit("bash", registry);
+
+    expect(script).toContain(
+      "_workforest_complete_words 'new clean inspect visit workspace",
+    );
+    expect(script).toContain(
+      "new|clean|visit|workspace|task|worktree|review|template)",
+    );
+    expect(script).not.toContain("new|clean|inspect|visit|workspace");
+  });
+
+  it.each(["bash", "zsh"] as const)("renders valid %s syntax", (shell) => {
+    const result = spawnSync(shell, ["-n"], {
+      input: renderShellInit(shell),
+      encoding: "utf8",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("registers and executes bash completion", () => {
+    const result = spawnSync("bash", [], {
+      input: `${renderShellInit("bash")}
+complete -p wf
+complete -p workforest
+COMP_WORDS=(wf wor)
+COMP_CWORD=1
+_workforest_complete
+printf '%s\\n' "\${COMPREPLY[@]}"
+`,
+      encoding: "utf8",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("complete -F _workforest_complete wf");
+    expect(result.stdout).toContain(
+      "complete -F _workforest_complete workforest",
+    );
+    expect(result.stdout).toContain("workspace\n");
+    expect(result.stdout).toContain("worktree\n");
   });
 
   it("resolves cleanup cd target only when current dir is inside the workspace", () => {
@@ -106,3 +184,11 @@ describe("shell integration", () => {
     expect(written).toBe(`${path.resolve("./examples/demo")}\n`);
   });
 });
+
+type MutableCommandRegistry = Mutable<CommandRegistry>;
+
+type Mutable<Value> = Value extends readonly (infer Item)[]
+  ? Mutable<Item>[]
+  : Value extends object
+    ? { -readonly [Key in keyof Value]: Mutable<Value[Key]> }
+    : Value;

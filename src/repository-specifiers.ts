@@ -58,8 +58,9 @@ export async function qualifyTemplateRepositories(
 }
 
 /**
- * Resolve arguments accepted by `wf new`. Qualified repository references are
- * used directly. Unqualified values prefer templates, then cached repositories.
+ * Resolve arguments accepted by `wf workspace create`. Qualified repository
+ * references are used directly. Unqualified values prefer templates, then
+ * cached repositories.
  */
 export async function resolveRepositoryOrTemplateSpecifiers(
   selections: readonly string[],

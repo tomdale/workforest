@@ -28,30 +28,34 @@ async function createTempDir(): Promise<string> {
 }
 
 describe("workspace stamping output", () => {
-  it("prints setup failures to stdout", () => {
-    const writes: string[] = [];
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      writes.push(String(chunk));
-      return true;
-    });
+  it("emits setup failures without writing to stdout", () => {
+    const events: import("../services/events.ts").ServiceEvent[] = [];
+    const stdoutWrite = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
 
-    printRepoSetupFailures([
-      {
-        repoName: "front",
-        step: "initializer:Turbo link",
-        message: "turbo link --yes failed to start: command not found (turbo)",
-        logPath: "/workspace/.workforest/logs/front.log",
-        logExcerpt: "[initializer:Turbo link] turbo link --yes",
-      },
-    ]);
+    printRepoSetupFailures(
+      [
+        {
+          repoName: "front",
+          step: "initializer:Turbo link",
+          message:
+            "turbo link --yes failed to start: command not found (turbo)",
+          logPath: "/workspace/.workforest/logs/front.log",
+          logExcerpt: "[initializer:Turbo link] turbo link --yes",
+        },
+      ],
+      (event) => events.push(event),
+    );
 
-    const output = writes.join("");
+    const output = events[0]?.type === "message" ? events[0].message : "";
 
     expect(output).toContain("Some repositories did not complete setup");
     expect(output).toContain("front");
     expect(output).toContain("Step: initializer:Turbo link");
     expect(output).toContain("command not found");
     expect(output).toContain("/workspace/.workforest/logs/front.log");
+    expect(stdoutWrite).not.toHaveBeenCalled();
   });
 
   it("updates repo metadata as each worktree is prepared", async () => {

@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import stringWidth from "string-width";
+import {
+  isEnvironmentVariableSet,
+  STANDARD_ENVIRONMENT_VARIABLES,
+  WORKFOREST_ENVIRONMENT_VARIABLES,
+} from "../environment.ts";
 import type { Template } from "../templates/index.ts";
 import { escapeBlessedTags } from "../terminal/command-stream-adapter.ts";
 import { fullscreenColor } from "../terminal/theme.ts";
@@ -50,7 +55,12 @@ const MIN_TEMPLATE_MANAGER_ROWS = 20;
 
 export function shouldUseTemplateManager(): boolean {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
-  if (process.env["CI"] || process.env["WORKFOREST_NO_TUI"]) return false;
+  if (
+    isEnvironmentVariableSet(STANDARD_ENVIRONMENT_VARIABLES.ci) ||
+    isEnvironmentVariableSet(WORKFOREST_ENVIRONMENT_VARIABLES.noTui)
+  ) {
+    return false;
+  }
   const columns = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
   return (
@@ -74,7 +84,7 @@ export async function runTemplateManager({
     const screen = new Screen({
       smartCSR: true,
       fullUnicode: true,
-      title: "wf templates",
+      title: "wf template manage",
     });
 
     const listBox = new Box({

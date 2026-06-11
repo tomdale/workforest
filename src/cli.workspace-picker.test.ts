@@ -86,7 +86,7 @@ afterEach(async () => {
 });
 
 describe("workspace picker", () => {
-  it("orders interactive wf cd choices by newest workspace modification", async () => {
+  it("orders interactive workspace choices by newest modification", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
     const cdDir = await createTempDir("workforest-cd-");
@@ -109,7 +109,7 @@ describe("workspace picker", () => {
       defaultDir: workspaceRoot,
     });
 
-    process.argv = ["node", "wf", "cd"];
+    process.argv = ["node", "wf", "workspace", "open"];
     process.exitCode = undefined;
 
     await cli();
@@ -142,7 +142,7 @@ describe("workspace picker", () => {
       defaultDir: workspaceRoot,
     });
 
-    process.argv = ["node", "wf", "find"];
+    process.argv = ["node", "wf", "workspace", "open", "--search"];
     process.exitCode = undefined;
 
     await cli();
@@ -174,7 +174,7 @@ describe("workspace picker", () => {
       defaultDir: workspaceRoot,
     });
 
-    process.argv = ["node", "wf", "find"];
+    process.argv = ["node", "wf", "workspace", "open", "--search"];
     process.exitCode = undefined;
 
     await cli();

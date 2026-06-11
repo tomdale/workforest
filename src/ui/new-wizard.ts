@@ -197,7 +197,7 @@ function runWizardScreen(
     const screen = new Screen({
       smartCSR: false,
       fullUnicode: true,
-      title: "wf new",
+      title: "wf workspace create",
     });
 
     const contentBox = new Box({
@@ -207,7 +207,7 @@ function runWizardScreen(
       width: "60%",
       height: "100%-1",
       border: { type: "line" },
-      label: " wf new \u2500 Select Template ",
+      label: " wf workspace create \u2500 Select Template ",
       style: { border: { fg: fullscreenColor.accent } },
       tags: true,
       padding: { left: 1, top: 1 },
@@ -524,7 +524,7 @@ function runWizardScreen(
 
     function updateBoxLabel() {
       const label = STEP_LABELS[state.phase];
-      contentBox.setLabel(` wf new \u2500 ${label} `);
+      contentBox.setLabel(` wf workspace create \u2500 ${label} `);
     }
 
     // Strip blessed tags to estimate visible character count
