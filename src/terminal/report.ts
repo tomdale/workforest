@@ -1,28 +1,28 @@
 import chalk from "chalk";
 import { terminalColor } from "./theme.ts";
 
-export type ReportField = {
+export type ReportField = Readonly<{
   label: string;
   value: string;
-};
+}>;
 
-export type ReportEntry = {
+export type ReportEntry = Readonly<{
   title: string;
   description?: string;
-  details?: ReportField[];
-};
+  details?: readonly ReportField[];
+}>;
 
-export type ReportSection = {
+export type ReportSection = Readonly<{
   title?: string;
-  fields?: ReportField[];
-  entries?: ReportEntry[];
-};
+  fields?: readonly ReportField[];
+  entries?: readonly ReportEntry[];
+}>;
 
-export type Report = {
+export type Report = Readonly<{
   title: string;
-  sections: ReportSection[];
+  sections: readonly ReportSection[];
   footer?: string;
-};
+}>;
 
 export function printReport(report: Report): void {
   console.log(renderReport(report));
@@ -60,7 +60,10 @@ export function renderReport(report: Report): string {
   return lines.join("\n");
 }
 
-function renderFields(fields: ReportField[], indent: number): string[] {
+function renderFields(
+  fields: readonly ReportField[],
+  indent: number,
+): string[] {
   const labelWidth = Math.max(0, ...fields.map((field) => field.label.length));
   const prefix = " ".repeat(indent);
 
