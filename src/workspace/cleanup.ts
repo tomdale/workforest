@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { log } from "../logger.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { runGit } from "../services/git.ts";
@@ -48,6 +47,18 @@ export type CleanupPreview = {
   workspaceFile: string;
   metadataFile?: string;
   remoteBranches?: RemoteBranchInfo[];
+};
+
+export type CleanupResult = {
+  dryRun: boolean;
+  removedRepos: string[];
+  deletedBranches: string[];
+};
+
+export type CleanupStateSink = (state: CleanupState) => void | Promise<void>;
+
+export type CleanupExecutionOptions = CleanupOptions & {
+  onState?: CleanupStateSink;
 };
 
 /**
@@ -488,69 +499,26 @@ export async function* cleanupWorkspaceGenerator(
   };
 }
 
-/**
- * Run the workspace cleanup with simple console logging.
- * This is for non-TUI usage.
- */
 export async function cleanupWorkspace(
   workspaceDir: string,
-  options: CleanupOptions = {},
-): Promise<void> {
+  { onState, ...options }: CleanupExecutionOptions = {},
+): Promise<CleanupResult> {
+  let result: CleanupResult | undefined;
+
   for await (const state of cleanupWorkspaceGenerator(workspaceDir, options)) {
-    switch (state.phase) {
-      case "init":
-        log.info(state.message);
-        break;
-      case "worktree":
-        if (state.state.status === "log") {
-          log[state.state.level](`${state.repo}: ${state.state.message}`);
-        } else if (state.state.status === "skipped") {
-          log.info(`${state.repo}: ${state.state.reason}`);
-        } else if (state.state.status === "failed") {
-          log.error(`${state.repo}: ${state.state.error.message}`);
-        }
-        break;
-      case "worktree-complete":
-        log.success(`${state.repo}: worktree removed from mirror`);
-        break;
-      case "remote-branch":
-        switch (state.status) {
-          case "checking":
-            log.info(`${state.repo}: checking remote branch ${state.branch}`);
-            break;
-          case "deleting":
-            log.info(`${state.repo}: deleting remote branch ${state.branch}`);
-            break;
-          case "deleted":
-            log.success(`${state.repo}: deleted remote branch ${state.branch}`);
-            break;
-          case "skipped":
-            log.info(
-              `${state.repo}: skipped ${state.branch} - ${state.reason}`,
-            );
-            break;
-          case "failed":
-            log.error(
-              `${state.repo}: failed to delete ${state.branch} - ${state.reason}`,
-            );
-            break;
-        }
-        break;
-      case "remove-dir":
-        log.info(state.message);
-        break;
-      case "complete":
-        if (options.dryRun) {
-          log.info("Dry-run complete. No changes made.");
-        } else {
-          const branchMsg = state.deletedBranches?.length
-            ? `, deleted ${state.deletedBranches.length} remote branch(es)`
-            : "";
-          log.success(
-            `Cleanup complete. Removed ${state.removedRepos.length} worktree(s)${branchMsg}.`,
-          );
-        }
-        break;
+    await onState?.(state);
+    if (state.phase === "complete") {
+      result = {
+        dryRun: options.dryRun ?? false,
+        removedRepos: state.removedRepos,
+        deletedBranches: state.deletedBranches ?? [],
+      };
     }
   }
+
+  if (!result) {
+    throw new Error("Workspace cleanup did not produce a result.");
+  }
+
+  return result;
 }
