@@ -227,7 +227,7 @@ _workforest_complete() {
           _values 'review action' open checkout
           ;;
         template)
-          _values 'template action' manage show open
+          _values 'template action' manage list open show new edit add-file copy delete
           ;;
         shell)
           _values 'shell action' init

@@ -35,8 +35,8 @@ Commands:
   worktree new <repo> <name>   Create a managed single-repo worktree
   worktree promote             Promote a managed worktree to a workspace
   worktree list|delete         List or delete contextual worktrees
-  review <target>              Create a review workspace or PR worktree
-  review list|delete           List or delete PR review worktrees
+  review open <repo>           Open a review repository
+  review checkout <target>     Check out a pull request
   delete                       Infer and delete current tracked resource
   workspace delete [dir]       Delete a workspace
   wt                           Alias for worktree
@@ -47,11 +47,9 @@ Commands:
   clean [dir]                  Alias for workspace delete
   list                         List workspaces
   skills list|get|path         List and retrieve bundled agent skills
-  init [shell]                 Print shell integration for auto-cd and completion
-  templates                    Open the template manager TUI
-  template list|show|info|...  Scriptable template subcommands
-  repositories                 Open the cached repository manager TUI
-  repository list|info|...     Scriptable cache management subcommands
+  shell init [shell]           Print shell integration for auto-cd and completion
+  template manage|list|...     Manage workspace templates
+  cache manage|list|...        Manage cached repositories
   config [show|edit|init]      Manage configuration
 
 Clean options:
@@ -69,8 +67,8 @@ Examples:
   wf worktree promote full-stack vercel/swr
   wf worktree list
   wf worktree delete "fix-tests"
-  wf review vercel/omniagent 123
-  wf review delete vercel/omniagent#123 --dry-run
+  wf review open vercel/omniagent
+  wf review checkout vercel/omniagent 123
   wf worktree next.js "fix-auth"
   wf wt next.js "fix-auth" --dir ../next.js-fix-auth
   wf new --dry-run my-template -- "fixing auth"
@@ -79,16 +77,16 @@ Examples:
   wf add vercel/swr                Add a repo from inside a workspace
   wf add vercel/swr -w ./my-ws     Add a repo to a specific workspace
   wf fork "new approach"            Fork workspace with new branch names
-  eval "$(wf init zsh)"            Auto-cd + zsh completion for workspace commands
+  eval "$(wf shell init zsh)"      Auto-cd + zsh completion for workspace commands
   wf list                           Show all workspaces
   wf delete                         Infer and delete the current resource
   wf workspace delete               Delete current workspace (self-destruct)
   wf workspace delete ./my-workspace -r
-  wf templates                      Open the template manager
+  wf template manage               Open the template manager
   wf template new "oss-docs" vercel/next.js vercel/turbo
-  wf repositories                   Open the cached repository manager
-  wf repository doctor              Check every cached mirror
-  wf repository clean --dry-run     Preview unused mirror cleanup
+  wf cache manage                  Open the cached repository manager
+  wf cache doctor                  Check every cached mirror
+  wf cache prune --dry-run         Preview unused mirror cleanup
 
 Templates:
   ${templateLines.join("\n  ")}
@@ -183,31 +181,20 @@ Options:
   -h, --help       Show this help
 `,
 
-  review: `Usage: wf review <owner>/<repo>
-       wf review <pr-number>
-       wf review <owner>/<repo> <pr-number>
-       wf review <owner>/<repo>#<pr-number>
-       wf review <github-pr-url>
-       wf review list [repo]
-       wf review delete <target> [options]
+  review: `Usage: wf review <subcommand>
 
-Create, list, or remove GitHub review workspaces and PR worktrees. Numeric-only
-PR targets infer the repo from the current review workspace. Repository targets
-may use unique cached names instead of owner/repo.
+Open GitHub review repositories and check out pull requests.
 
-Options:
-  -n, --dry-run    Preview review removal without deleting
-  -f, --force      Skip prompts and remove dirty review worktrees
-  -h, --help       Show this help
+Subcommands:
+  open <repo>                 Open a review repository
+  checkout <target...>       Check out a pull request
 
 Examples:
-  wf review vercel/omniagent
-  wf review 123
-  wf review vercel/omniagent 123
-  wf review vercel/omniagent#123
-  wf review https://github.com/vercel/omniagent/pull/123
-  wf review list omniagent
-  wf review delete vercel/omniagent#123 --force
+  wf review open vercel/omniagent
+  wf review checkout 123
+  wf review checkout vercel/omniagent 123
+  wf review checkout vercel/omniagent#123
+  wf review checkout https://github.com/vercel/omniagent/pull/123
 `,
 
   delete: `Usage: wf delete [options] [workspace-dir]
@@ -326,58 +313,30 @@ Options:
   -h, --help       Show this help
 `,
 
-  init: `Usage: wf init [shell]
+  shell: `Usage: wf shell <subcommand>
 
-Print shell integration for auto-cd and completion.
+Configure shell integration.
 
-Arguments:
-  shell            zsh or bash. Defaults to the current SHELL.
-
-Options:
-  -h, --help       Show this help
-
-Examples:
-  eval "$(wf init zsh)"
-  eval "$(wf init bash)"
-`,
-
-  templates: `Usage: wf templates
-
-Open the interactive template manager when running in a capable terminal.
-In non-interactive output, prints the configured template list.
-
-Shortcuts:
-  j/k, arrows    Navigate templates
-  enter, e       Edit selected template
-  n              Create a template
-  c              Copy selected template
-  d              Delete selected template
-  o              Jump to template directory
-  /              Search
-  r              Reload
-  q              Quit
-
-Options:
-  -h, --help     Show this help
+Subcommands:
+  init [shell]    Print shell integration for auto-cd and completion
 `,
 
   template: `Usage: wf template [subcommand]
 
 Manage workspace templates.
 
-With no subcommand in an interactive terminal, opens the template manager.
-
 Subcommands:
-  list, ls                  List templates
-  show <name>               Jump to a template directory
-  info <name>               Print template details
-  new, create <name> <repo...>
+  manage                    Open the interactive template manager
+  list                      List templates
+  open <name>               Jump to a template directory
+  show <name>               Print template details
+  new <name> <repo...>
                             Create a template
   edit <name>               Edit a template interactively
   add-file [options] <path...>
                             Add file(s) or directories to a template
-  copy, cp <source> <dest>  Copy a template
-  delete, rm <name>         Delete a template
+  copy <source> <dest>      Copy a template
+  delete <name>             Delete a template
 
 Options:
   -h, --help                Show this help
@@ -430,28 +389,12 @@ Examples:
   wf skills path core
 `,
 
-  repositories: `Usage: wf repositories
-
-Open the interactive cached repository manager. Outside an interactive terminal,
-prints the repository list instead.
-
-Aliases:
-  wf repos
-
-Options:
-  -h, --help  Show this help
-`,
-
-  repos: `Usage: wf repos
-
-Alias for wf repositories.
-`,
-
-  repository: `Usage: wf repository <subcommand> [options]
+  cache: `Usage: wf cache <subcommand> [options]
 
 Inspect and manage cached bare Git mirrors.
 
 Subcommands:
+  manage                       Open the interactive cache manager
   list                         List cached repositories and disk usage
   info <repo>                  Show mirror health, identity, and worktrees
   path [repo]                  Print the cache or mirror path
@@ -460,18 +403,10 @@ Subcommands:
   doctor [repo...]             Check cache health
   repair [repo...]             Prune stale metadata and verify objects
   delete <repo...>             Delete selected mirrors
-  clean                        Delete mirrors with no active worktrees
-
-Aliases:
-  wf repo
+  prune                        Delete mirrors with no active worktrees
 
 Options:
   -h, --help  Show this help
-`,
-
-  repo: `Usage: wf repo <subcommand> [options]
-
-Alias for wf repository.
 `,
 
   version: `Usage: wf version
@@ -499,21 +434,24 @@ repositories, retries every eligible initializer.
   },
 
   review: {
-    list: `Usage: wf review list [repo]
+    open: `Usage: wf review open <repo>
 
-List known review worktrees and stale entries.
+Open a repository in the review workspace root. The repository may be an
+owner/repo slug or a unique cached repository name.
 
 Options:
-  -h, --help     Show this help
+  -h, --help  Show this help
 `,
-    delete: `Usage: wf review delete <target> [options]
+    checkout: `Usage: wf review checkout <target...>
 
-Delete a PR review worktree.
+Check out a pull request in its review repository. Numeric-only targets infer
+the repository from the current review workspace.
 
-Options:
-  -n, --dry-run  Preview without deleting
-  -f, --force    Skip prompts and remove dirty worktrees
-  -h, --help     Show this help
+Targets:
+  <pr-number>
+  <owner>/<repo> <pr-number>
+  <owner>/<repo>#<pr-number>
+  <github-pr-url>
 `,
   },
 
@@ -579,28 +517,44 @@ Options:
 `,
   },
 
+  shell: {
+    init: `Usage: wf shell init [shell]
+
+Print shell integration for auto-cd and completion.
+
+Arguments:
+  shell            zsh or bash. Defaults to the current SHELL.
+
+Options:
+  -h, --help       Show this help
+
+Examples:
+  eval "$(wf shell init zsh)"
+  eval "$(wf shell init bash)"
+`,
+  },
+
   template: {
+    manage: `Usage: wf template manage
+
+Open the interactive template manager when running in a capable terminal.
+Outside an interactive terminal, print the configured template list.
+`,
     list: `Usage: wf template list
 
 List configured templates.
-
-Aliases:
-  wf template ls
 `,
-    show: `Usage: wf template show <name>
+    open: `Usage: wf template open <name>
 
 Jump to a template directory.
 `,
-    info: `Usage: wf template info <name>
+    show: `Usage: wf template show <name>
 
 Print template details, repositories, hooks, branch prefix, and location.
 `,
     new: `Usage: wf template new [options] <name> <repo...>
 
 Create a template from repository slugs, git URLs, or unique cached names.
-
-Aliases:
-  wf template create
 
 Options:
   -d, --description <text>  Template description
@@ -629,16 +583,10 @@ Options:
     copy: `Usage: wf template copy <source> <destination>
 
 Copy an existing template to a new template id.
-
-Aliases:
-  wf template cp
 `,
     delete: `Usage: wf template delete [options] <name>
 
 Delete a template.
-
-Aliases:
-  wf template rm
 
 Options:
   -f, --force  Skip confirmation prompts
@@ -646,66 +594,55 @@ Options:
 `,
   },
 
-  repository: {
-    list: `Usage: wf repository list [--json]
+  cache: {
+    manage: `Usage: wf cache manage
+
+Open the interactive cached repository manager. Outside an interactive
+terminal, print the cached repository list.
+`,
+    list: `Usage: wf cache list [--json]
 
 List cached repositories, health, disk usage, and active worktree counts.
 `,
-    info: `Usage: wf repository info <repo> [--json]
+    info: `Usage: wf cache info <repo> [--json]
 
 Show a cached repository's identity, health, disk usage, and worktrees.
 `,
-    path: `Usage: wf repository path [repo]
+    path: `Usage: wf cache path [repo]
 
 Print the cache directory, or one cached mirror path. Output is undecorated for
 shell composition.
 `,
-    add: `Usage: wf repository add <repo...>
+    add: `Usage: wf cache add <repo...>
 
 Clone or update repositories in the cache without creating worktrees.
 Existing repositories may be specified by a unique cached name.
-
-Aliases:
-  wf repository cache
 `,
-    update: `Usage: wf repository update [repo...]
+    update: `Usage: wf cache update [repo...]
 
 Fetch and prune selected cached repositories. With no repositories, updates all.
-
-Aliases:
-  wf repository fetch
 `,
-    doctor: `Usage: wf repository doctor [repo...] [--json]
+    doctor: `Usage: wf cache doctor [repo...] [--json]
 
 Inspect selected cached repositories, or all repositories when none are given.
 Exits with status 1 when a mirror needs attention.
-
-Aliases:
-  wf repository check
 `,
-    repair: `Usage: wf repository repair [repo...]
+    repair: `Usage: wf cache repair [repo...]
 
 Prune stale worktree registrations and verify object connectivity. With no
 repositories, repairs all cached mirrors.
 `,
-    delete: `Usage: wf repository delete <repo...> [options]
+    delete: `Usage: wf cache delete <repo...> [options]
 
 Delete selected cached mirrors. Mirrors with active worktrees require --force.
-
-Aliases:
-  wf repository rm
-  wf repository remove
 
 Options:
   -n, --dry-run  Preview without deleting
   -f, --force    Skip confirmation and allow active worktrees
 `,
-    clean: `Usage: wf repository clean [options]
+    prune: `Usage: wf cache prune [options]
 
 Delete every cached mirror with no active worktrees.
-
-Aliases:
-  wf repository prune
 
 Options:
   -n, --dry-run  Preview without deleting
@@ -791,29 +728,9 @@ const NESTED_ALIASES: Record<string, Record<string, string>> = {
     rm: "delete",
     remove: "delete",
   },
-  review: {
-    ls: "list",
-    rm: "delete",
-    remove: "delete",
-  },
   workspace: {
     rm: "delete",
     remove: "delete",
-  },
-  template: {
-    ls: "list",
-    create: "new",
-    rm: "delete",
-    cp: "copy",
-  },
-  repository: {
-    ls: "list",
-    cache: "add",
-    fetch: "update",
-    check: "doctor",
-    rm: "delete",
-    remove: "delete",
-    prune: "clean",
   },
   dev: {
     sim: "simulate",
@@ -940,7 +857,7 @@ function styleRowKey(value: string, section: string): string {
 
 function styleExample(value: string): string {
   return value.replace(
-    /"[^"]*"|'[^']*'|(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|(?:^|\s)(?:add|cd|clean|config|confetti|delete|dev|edit|eval|find|fork|get|info|init|list|new|path|review|show|simulate|skills|template|templates|worktree|workspace|wt)(?=\s|$)|(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)\S+|\b\d+\b/gi,
+    /"[^"]*"|'[^']*'|(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|(?:^|\s)(?:add|cache|checkout|clean|config|confetti|delete|dev|edit|eval|find|fork|get|info|init|list|manage|new|open|path|prune|review|shell|show|simulate|skills|task|template|worktree|workspace)(?=\s|$)|(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)\S+|\b\d+\b/gi,
     (token) => {
       const normalized = token.trimStart();
       const prefix = token.slice(0, token.length - normalized.length);

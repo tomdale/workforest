@@ -71,7 +71,9 @@ describe("shell integration", () => {
     expect(script).toContain(
       "_values 'cache action' manage list info path add update doctor repair delete prune",
     );
-    expect(script).toContain("_values 'template action' manage show open");
+    expect(script).toContain(
+      "_values 'template action' manage list open show new edit add-file copy delete",
+    );
     expect(script).toContain("_values 'shell action' init");
     expect(script).toContain("skills:list and retrieve bundled agent skills");
     expect(script).toContain("_workforest_workspace_names");

@@ -28,51 +28,49 @@ import {
   withSpinner,
 } from "./ui/prompts/index.ts";
 
-export async function runRepositoryInvocation(
+export async function runCacheInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   const operands = [...invocation.beforeDoubleDash];
 
   switch (invocation.command.leaf.handler) {
-    case "repository.default":
-      return isInteractive()
-        ? runRepositoryManagerCommand()
-        : runRepositoryList(false);
-    case "repository.list":
-      return runRepositoryList(flag(invocation, "json"));
-    case "repository.info":
-      return runRepositoryInfo(
+    case "cache.manage":
+      return runCacheManagerCommand();
+    case "cache.list":
+      return runCacheList(flag(invocation, "json"));
+    case "cache.info":
+      return runCacheInfo(
         requiredOperand(operands, 0),
         flag(invocation, "json"),
       );
-    case "repository.path":
-      return runRepositoryPath(operands[0]);
-    case "repository.add":
-      return runRepositoryAdd(operands);
-    case "repository.update":
-      return runRepositoryUpdate(operands);
-    case "repository.doctor":
-      return runRepositoryDoctor(operands, flag(invocation, "json"));
-    case "repository.repair":
-      return runRepositoryRepair(operands);
-    case "repository.delete":
-      return runRepositoryDelete(operands, {
+    case "cache.path":
+      return runCachePath(operands[0]);
+    case "cache.add":
+      return runCacheAdd(operands);
+    case "cache.update":
+      return runCacheUpdate(operands);
+    case "cache.doctor":
+      return runCacheDoctor(operands, flag(invocation, "json"));
+    case "cache.repair":
+      return runCacheRepair(operands);
+    case "cache.delete":
+      return runCacheDelete(operands, {
         dryRun: flag(invocation, "dryRun"),
         force: flag(invocation, "force"),
       });
-    case "repository.clean":
-      return runRepositoryClean({
+    case "cache.prune":
+      return runCachePrune({
         dryRun: flag(invocation, "dryRun"),
         force: flag(invocation, "force"),
       });
     default:
       throw new Error(
-        `Unsupported repository handler: ${invocation.command.leaf.handler}`,
+        `Unsupported cache handler: ${invocation.command.leaf.handler}`,
       );
   }
 }
 
-async function runRepositoryList(json: boolean): Promise<CommandResult> {
+async function runCacheList(json: boolean): Promise<CommandResult> {
   const repositories = await listCachedRepositories();
   if (json) {
     return result({
@@ -116,7 +114,7 @@ async function runRepositoryList(json: boolean): Promise<CommandResult> {
   return success();
 }
 
-async function runRepositoryInfo(
+async function runCacheInfo(
   selector: string,
   json: boolean,
 ): Promise<CommandResult> {
@@ -133,7 +131,7 @@ async function runRepositoryInfo(
   return success();
 }
 
-async function runRepositoryPath(
+async function runCachePath(
   selector: string | undefined,
 ): Promise<CommandResult> {
   const value = selector
@@ -146,7 +144,7 @@ async function runRepositoryPath(
   });
 }
 
-async function runRepositoryAdd(
+async function runCacheAdd(
   operands: readonly string[],
 ): Promise<CommandResult> {
   let inputs: string[];
@@ -176,7 +174,7 @@ async function runRepositoryAdd(
   return statusResult(failed);
 }
 
-async function runRepositoryUpdate(
+async function runCacheUpdate(
   selectors: readonly string[],
 ): Promise<CommandResult> {
   const repositories = await resolveRepositorySelection(selectors);
@@ -202,7 +200,7 @@ async function runRepositoryUpdate(
   return statusResult(failed);
 }
 
-async function runRepositoryDoctor(
+async function runCacheDoctor(
   selectors: readonly string[],
   json: boolean,
 ): Promise<CommandResult> {
@@ -243,7 +241,7 @@ async function runRepositoryDoctor(
   return statusResult(unhealthy);
 }
 
-async function runRepositoryRepair(
+async function runCacheRepair(
   selectors: readonly string[],
 ): Promise<CommandResult> {
   const repositories = await resolveRepositorySelection(selectors);
@@ -273,7 +271,7 @@ async function runRepositoryRepair(
   return statusResult(failed);
 }
 
-async function runRepositoryDelete(
+async function runCacheDelete(
   selectors: readonly string[],
   options: Readonly<{ dryRun: boolean; force: boolean }>,
 ): Promise<CommandResult> {
@@ -307,7 +305,7 @@ async function runRepositoryDelete(
   return statusResult(failed);
 }
 
-async function runRepositoryClean(
+async function runCachePrune(
   options: Readonly<{ dryRun: boolean; force: boolean }>,
 ): Promise<CommandResult> {
   const repositories = (await listCachedRepositories()).filter(
@@ -336,12 +334,12 @@ async function runRepositoryClean(
   }
 }
 
-async function runRepositoryManagerCommand(): Promise<CommandResult> {
+async function runCacheManagerCommand(): Promise<CommandResult> {
   const { shouldUseRepositoryManager } = await import(
     "./ui/repository-manager.ts"
   );
   if (!shouldUseRepositoryManager()) {
-    return runRepositoryList(false);
+    return runCacheList(false);
   }
 
   let initialMirrorPath: string | undefined;
@@ -363,7 +361,7 @@ async function runRepositoryManagerCommand(): Promise<CommandResult> {
         const input = await promptText(
           "Repository (cached name, owner/repo, or git URL)",
         );
-        await runManagerOperation(() => runRepositoryAdd([input]));
+        await runManagerOperation(() => runCacheAdd([input]));
         initialMirrorPath = (await resolveCachedRepository(input))?.mirrorPath;
         continue;
       }
@@ -376,28 +374,24 @@ async function runRepositoryManagerCommand(): Promise<CommandResult> {
       }
       case "update":
         initialMirrorPath = action.mirrorPath;
-        await runManagerOperation(() =>
-          runRepositoryUpdate([action.mirrorPath]),
-        );
+        await runManagerOperation(() => runCacheUpdate([action.mirrorPath]));
         continue;
       case "repair":
         initialMirrorPath = action.mirrorPath;
-        await runManagerOperation(() =>
-          runRepositoryRepair([action.mirrorPath]),
-        );
+        await runManagerOperation(() => runCacheRepair([action.mirrorPath]));
         continue;
       case "delete":
         await runManagerOperation(() =>
-          runRepositoryDelete([action.mirrorPath], {
+          runCacheDelete([action.mirrorPath], {
             dryRun: false,
             force: false,
           }),
         );
         initialMirrorPath = undefined;
         continue;
-      case "clean":
+      case "prune":
         await runManagerOperation(() =>
-          runRepositoryClean({ dryRun: false, force: false }),
+          runCachePrune({ dryRun: false, force: false }),
         );
         initialMirrorPath = undefined;
         continue;
@@ -549,9 +543,7 @@ function flag(invocation: ParsedInvocation, name: string): boolean {
 function requiredOperand(operands: readonly string[], index: number): string {
   const operand = operands[index];
   if (operand === undefined) {
-    throw new Error(
-      "The CLI kernel accepted an invalid repository invocation.",
-    );
+    throw new Error("The CLI kernel accepted an invalid cache invocation.");
   }
   return operand;
 }

@@ -41,9 +41,13 @@ afterEach(async () => {
 describe("template command conformance", () => {
   const helpCases = [
     { argv: ["template"], usage: "Usage: wf template" },
+    {
+      argv: ["template", "manage"],
+      usage: "Usage: wf template manage",
+    },
     { argv: ["template", "list"], usage: "Usage: wf template list" },
+    { argv: ["template", "open"], usage: "Usage: wf template open" },
     { argv: ["template", "show"], usage: "Usage: wf template show" },
-    { argv: ["template", "info"], usage: "Usage: wf template info" },
     { argv: ["template", "new"], usage: "Usage: wf template new" },
     { argv: ["template", "edit"], usage: "Usage: wf template edit" },
     {
@@ -65,47 +69,26 @@ describe("template command conformance", () => {
     expect(output.stderr).toBe("");
   });
 
-  const aliasCases = [
-    { argv: ["templates", "--help"], usage: "Usage: wf templates" },
-    {
-      argv: ["template", "ls", "--help"],
-      usage: "Usage: wf template list",
-    },
-    {
-      argv: ["template", "create", "--help"],
-      usage: "Usage: wf template new",
-    },
-    {
-      argv: ["template", "cp", "--help"],
-      usage: "Usage: wf template copy",
-    },
-    {
-      argv: ["template", "rm", "--help"],
-      usage: "Usage: wf template delete",
-    },
-  ] as const;
-
-  it.each(aliasCases)("resolves alias $argv to canonical help", async ({
-    argv,
-    usage,
-  }) => {
-    const output = await invoke(argv);
-
-    expect(output.exitCode).toBe(0);
-    expect(output.stdout).toContain(usage);
-    expect(output.stderr).toBe("");
-  });
-
   const invalidCases = [
     {
-      label: "template default surplus operands",
-      argv: ["template", "--", "extra"],
-      message: "Invalid operands for wf template",
+      label: "template manage surplus operands",
+      argv: ["template", "manage", "extra"],
+      message: "Invalid operands for wf template manage",
     },
     {
       label: "template list surplus operands",
       argv: ["template", "list", "extra"],
       message: "Invalid operands for wf template list",
+    },
+    {
+      label: "template open missing operand",
+      argv: ["template", "open"],
+      message: "Invalid operands for wf template open",
+    },
+    {
+      label: "template open surplus operands",
+      argv: ["template", "open", "one", "two"],
+      message: "Invalid operands for wf template open",
     },
     {
       label: "template show missing operand",
@@ -116,16 +99,6 @@ describe("template command conformance", () => {
       label: "template show surplus operands",
       argv: ["template", "show", "one", "two"],
       message: "Invalid operands for wf template show",
-    },
-    {
-      label: "template info missing operand",
-      argv: ["template", "info"],
-      message: "Invalid operands for wf template info",
-    },
-    {
-      label: "template info surplus operands",
-      argv: ["template", "info", "one", "two"],
-      message: "Invalid operands for wf template info",
     },
     {
       label: "template new missing operands",
@@ -184,7 +157,7 @@ describe("template command conformance", () => {
 
   const flagScopes = [
     {
-      argv: ["template"],
+      argv: ["template", "manage"],
       foreign: ["--description", "foreign"],
     },
     {
@@ -192,11 +165,11 @@ describe("template command conformance", () => {
       foreign: ["--force"],
     },
     {
-      argv: ["template", "show", "demo"],
+      argv: ["template", "open", "demo"],
       foreign: ["--description", "foreign"],
     },
     {
-      argv: ["template", "info", "demo"],
+      argv: ["template", "show", "demo"],
       foreign: ["--force"],
     },
     {
@@ -236,7 +209,7 @@ describe("template command conformance", () => {
   });
 
   it("keeps operational failures at exit 1", async () => {
-    const output = await invoke(["template", "show", "missing"]);
+    const output = await invoke(["template", "open", "missing"]);
 
     expect(output.exitCode).toBe(1);
     expect(output.stdout).toBe("");
@@ -248,6 +221,15 @@ describe("template command conformance", () => {
 
     expect(output.exitCode).toBe(0);
     expect(output.stdout).toContain("No templates configured");
+    expect(output.stderr).toBe("");
+  });
+
+  it("keeps bare template scoped to help", async () => {
+    const output = await invoke(["template"]);
+
+    expect(output.exitCode).toBe(0);
+    expect(output.stdout).toContain("Usage: wf template");
+    expect(output.stdout).toContain("manage");
     expect(output.stderr).toBe("");
   });
 });

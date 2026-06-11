@@ -55,6 +55,10 @@ export function resolveCommand(
       continue;
     }
 
+    if (node.default && (token.startsWith("-") || token === "--")) {
+      return resolvedDefault(node, invokedPath, argv.slice(index), aliasHelp);
+    }
+
     throw unknownCommandError(node.path, token);
   }
 

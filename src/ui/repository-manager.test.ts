@@ -144,6 +144,23 @@ describe("runRepositoryManager", () => {
     expect(screens[0]?.destroy).toHaveBeenCalled();
   });
 
+  it("uses prune terminology for unused cache cleanup", async () => {
+    const promise = runRepositoryManager({
+      repositories: [cachedRepository()],
+      cacheDir: "/tmp/cache",
+    });
+
+    await vi.waitFor(() => expect(screens.length).toBe(1));
+    screens[0]?.handlers["keypress"]?.("?", { name: "?" });
+    expect(boxes.map((box) => box.content).join("\n")).toContain(
+      "prune unused",
+    );
+
+    screens[0]?.handlers["keypress"]?.("?", { name: "?" });
+    screens[0]?.handlers["keypress"]?.("x", { name: "x" });
+    await expect(promise).resolves.toEqual({ type: "prune" });
+  });
+
   it("filters repositories before resolving delete", async () => {
     const front = cachedRepository();
     const api = cachedRepository({
