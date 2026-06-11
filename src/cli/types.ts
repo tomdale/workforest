@@ -1,0 +1,161 @@
+export type ExitCode = 0 | 1 | 2;
+
+export type CommandPath = readonly string[];
+
+export type Visibility = "visible" | "hidden";
+
+export type OutputMode =
+  | "human"
+  | "interactive"
+  | "json"
+  | "path"
+  | "report"
+  | "shell";
+
+export type ShellHandoff = "none" | "optional-cd";
+
+export type TtyRequirement =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "optional" | "required";
+      streams: readonly ("stdin" | "stdout")[];
+    }>
+  | Readonly<{
+      kind: "conditional";
+      streams: readonly ("stdin" | "stdout")[];
+      bypassFlags: readonly string[];
+    }>;
+
+export type HelpReference =
+  | Readonly<{ kind: "root" }>
+  | Readonly<{ kind: "command"; command: string }>
+  | Readonly<{ kind: "nested"; command: string; subcommand: string }>
+  | Readonly<{
+      kind: "dev-simulation";
+      flow: "simulate" | "new" | "confetti";
+    }>;
+
+export type AliasDefinition = Readonly<{
+  name: string;
+  visibility: Visibility;
+  help?: HelpReference;
+}>;
+
+export type Cardinality = Readonly<{
+  min: number;
+  max: number | null;
+  label: string;
+}>;
+
+export type OperandVariant = Readonly<{
+  beforeDoubleDash: Cardinality;
+  delimiter: "forbidden" | "required";
+  afterDoubleDash?: Cardinality;
+  when?: Readonly<{
+    flag?: string;
+    present?: boolean;
+    interactive?: boolean;
+  }>;
+}>;
+
+export type OperandSpec = Readonly<{
+  variants: readonly OperandVariant[];
+}>;
+
+export type FlagDefinition = Readonly<{
+  name: string;
+  long: `--${string}`;
+  short?: `-${string}`;
+  kind: "boolean" | "string";
+  valueName?: string;
+  required?: boolean;
+}>;
+
+type CommandMetadata = Readonly<{
+  name: string;
+  path: CommandPath;
+  aliases: readonly AliasDefinition[];
+  visibility: Visibility;
+  summary: string;
+  help: HelpReference;
+}>;
+
+export type CommandLeaf = CommandMetadata &
+  Readonly<{
+    kind: "leaf";
+    operands: OperandSpec;
+    flags: readonly FlagDefinition[];
+    outputModes: readonly OutputMode[];
+    tty: TtyRequirement;
+    shellHandoff: ShellHandoff;
+    handler: string;
+  }>;
+
+export type CommandGroup = CommandMetadata &
+  Readonly<{
+    kind: "group";
+    children: readonly CommandNode[];
+    default?: CommandLeaf;
+    defaultOn: "empty" | "unmatched";
+  }>;
+
+export type CommandNode = CommandGroup | CommandLeaf;
+
+export type CommandRegistry = Readonly<{
+  root: CommandGroup;
+}>;
+
+export type ResolvedCommand = Readonly<{
+  kind: "command";
+  leaf: CommandLeaf;
+  canonicalPath: CommandPath;
+  invokedPath: readonly string[];
+  argv: readonly string[];
+  help: HelpReference;
+}>;
+
+export type ResolvedHelp = Readonly<{
+  kind: "help";
+  canonicalPath: CommandPath;
+  invokedPath: readonly string[];
+  help: HelpReference;
+}>;
+
+export type CommandResolution = ResolvedCommand | ResolvedHelp;
+
+export type ParsedInvocation = Readonly<{
+  command: ResolvedCommand;
+  flags: Readonly<Record<string, boolean | string | undefined>>;
+  beforeDoubleDash: readonly string[];
+  afterDoubleDash: readonly string[];
+  hadDoubleDash: boolean;
+  helpRequested: boolean;
+}>;
+
+export type InvocationContext = Readonly<{
+  interactive: boolean;
+}>;
+
+export type RenderModel =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "text";
+      value: string;
+      stream: "stdout" | "stderr";
+      trailingNewline?: boolean;
+    }>
+  | Readonly<{
+      kind: "json";
+      value: unknown;
+      stream: "stdout" | "stderr";
+    }>;
+
+export type CommandResult = Readonly<{
+  exitCode: ExitCode;
+  render: RenderModel;
+}>;
+
+export type OutputWriter = Readonly<{
+  stdout: (value: string) => void;
+  stderr: (value: string) => void;
+}>;

@@ -4,12 +4,33 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import arg from "arg";
+import { commandRegistry } from "./cli/commands.ts";
+import { isArgumentParserError, UsageError } from "./cli/errors.ts";
+import {
+  applyExitCode,
+  errorResult,
+  renderCommandResult,
+  success,
+} from "./cli/output.ts";
+import { parseInvocation } from "./cli/parse-invocation.ts";
+import { resolveCommand } from "./cli/resolve-command.ts";
+import type {
+  CommandResult,
+  HelpReference,
+  ParsedInvocation,
+} from "./cli/types.ts";
 import {
   isRepoSlug,
   loadWorkspaceConfig,
   saveWorkspaceConfig,
 } from "./config.ts";
-import { commandHelp, help, nestedCommandHelp } from "./help.ts";
+import {
+  commandHelp,
+  devSimulationHelp,
+  help,
+  nestedCommandHelp,
+  renderHelp,
+} from "./help.ts";
 import { log } from "./logger.ts";
 import { RegisteredRepositoryNameCollisionError } from "./repositories.ts";
 import {
@@ -97,108 +118,270 @@ type TemplateAddFileConflictAction = "overwrite" | "diff" | "skip" | "cancel";
 type DeleteWorkspaceWorktreeAction = "worktree" | "workspace" | "cancel";
 
 export async function cli(): Promise<void> {
-  const argv = process.argv.slice(2);
+  const result = await executeCli(process.argv.slice(2));
+  renderCommandResult(result);
+  applyExitCode(result.exitCode);
+}
 
-  // Check for help flag at top level
-  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
-    console.log(await help());
-    return;
+export async function executeCli(
+  argv: readonly string[],
+): Promise<CommandResult> {
+  try {
+    const resolution = resolveCommand(commandRegistry, argv);
+    if (resolution.kind === "help") {
+      return success({
+        kind: "text",
+        value: await renderHelpReference(
+          resolution.help,
+          resolution.canonicalPath,
+        ),
+        stream: "stdout",
+      });
+    }
+
+    const invocation = parseInvocation(resolution, {
+      interactive: isInteractive(),
+    });
+    if (invocation.helpRequested) {
+      return success({
+        kind: "text",
+        value: await renderHelpReference(
+          invocation.command.help,
+          invocation.command.canonicalPath,
+        ),
+        stream: "stdout",
+      });
+    }
+
+    return await runInvocation(invocation);
+  } catch (error) {
+    if (isArgumentParserError(error)) {
+      return errorResult(new UsageError(error.message)) ?? success();
+    }
+    const result = errorResult(error);
+    if (result) {
+      return result;
+    }
+    throw error;
+  }
+}
+
+async function runInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runLegacyHandler(async () => {
+    const argv = [...invocation.command.argv];
+    const invokedRoot =
+      invocation.command.invokedPath[0] ??
+      invocation.command.canonicalPath[0] ??
+      "";
+
+    switch (invocation.command.leaf.handler) {
+      case "new":
+        await runNewCommand(argv);
+        return;
+      case "status.show":
+        await runStatusCommand(argv);
+        return;
+      case "status.cancel":
+        await runStatusCommand(["cancel", ...argv]);
+        return;
+      case "status.retry":
+        await runStatusCommand(["retry", ...argv]);
+        return;
+      case "worktree.create":
+        await runWorktreeCommand(argv, invokedRoot);
+        return;
+      case "worktree.new":
+        await runWorktreeCommand(["new", ...argv], invokedRoot);
+        return;
+      case "worktree.promote":
+        await runWorktreeCommand(["promote", ...argv], invokedRoot);
+        return;
+      case "worktree.list":
+        await runWorktreeCommand(["list", ...argv], invokedRoot);
+        return;
+      case "worktree.delete":
+        await runWorktreeCommand(["delete", ...argv], invokedRoot);
+        return;
+      case "review.create":
+        await runReviewCommand(argv);
+        return;
+      case "review.list":
+        await runReviewCommand(["list", ...argv]);
+        return;
+      case "review.delete":
+        await runReviewCommand(["delete", ...argv]);
+        return;
+      case "delete":
+        await runDeleteCommand(argv);
+        return;
+      case "workspace.delete":
+        await runWorkspaceCommand(["delete", ...argv]);
+        return;
+      case "cd":
+        await runCdCommand(argv);
+        return;
+      case "find":
+        await runFindCommand(argv);
+        return;
+      case "add":
+        await runAddCommand(argv);
+        return;
+      case "fork":
+        await runForkCommand(argv);
+        return;
+      case "clean":
+        await runCleanCommand(argv);
+        return;
+      case "list":
+        await runListCommand(argv, invokedRoot);
+        return;
+      case "init":
+        await runInitCommand(argv);
+        return;
+      case "template.default":
+        if (invokedRoot === "templates") {
+          await runTemplatesCommand(argv);
+        } else {
+          await runTemplateCommand(argv);
+        }
+        return;
+      case "template.list":
+        await runTemplateCommand(["list", ...argv]);
+        return;
+      case "template.show":
+        await runTemplateCommand(["show", ...argv]);
+        return;
+      case "template.info":
+        await runTemplateCommand(["info", ...argv]);
+        return;
+      case "template.new":
+        await runTemplateCommand(["new", ...argv]);
+        return;
+      case "template.edit":
+        await runTemplateCommand(["edit", ...argv]);
+        return;
+      case "template.add-file":
+        await runTemplateCommand(["add-file", ...argv]);
+        return;
+      case "template.copy":
+        await runTemplateCommand(["copy", ...argv]);
+        return;
+      case "template.delete":
+        await runTemplateCommand(["delete", ...argv]);
+        return;
+      case "repository.default": {
+        const { runRepositoriesCommand, runRepositoryCommand } = await import(
+          "./repository-cli.ts"
+        );
+        if (invokedRoot === "repositories" || invokedRoot === "repos") {
+          await runRepositoriesCommand(argv);
+        } else {
+          await runRepositoryCommand(argv, invokedRoot);
+        }
+        return;
+      }
+      case "repository.list":
+      case "repository.info":
+      case "repository.path":
+      case "repository.add":
+      case "repository.update":
+      case "repository.doctor":
+      case "repository.repair":
+      case "repository.delete":
+      case "repository.clean": {
+        const { runRepositoryCommand } = await import("./repository-cli.ts");
+        const subcommand =
+          invocation.command.leaf.handler.split(".")[1] ?? "list";
+        await runRepositoryCommand([subcommand, ...argv], invokedRoot);
+        return;
+      }
+      case "config.show":
+        await runConfigCommand(
+          invocation.command.canonicalPath.length === 1
+            ? argv
+            : ["show", ...argv],
+        );
+        return;
+      case "config.init":
+        await runConfigCommand(["init", ...argv]);
+        return;
+      case "config.edit":
+        await runConfigCommand(["edit", ...argv]);
+        return;
+      case "skills.list":
+      case "skills.get":
+      case "skills.path": {
+        const { runSkillsCommand } = await import("./skills.ts");
+        const subcommand =
+          invocation.command.leaf.handler.split(".")[1] ?? "list";
+        const commandArgv =
+          invocation.command.canonicalPath.length === 1
+            ? argv
+            : [subcommand, ...argv];
+        await runSkillsCommand(commandArgv);
+        return;
+      }
+      case "dev.simulate.new":
+      case "dev.simulate.confetti": {
+        const { runDevCommand } = await import("./dev-simulator.ts");
+        const flow = invocation.command.leaf.handler.split(".")[2] ?? "new";
+        await runDevCommand(["simulate", flow, ...argv]);
+        return;
+      }
+      case "version":
+        await runVersionCommand(argv);
+        return;
+      case "initialize-repo":
+        await runInitializeRepoWorkerCommand(argv);
+        return;
+      default:
+        throw new Error(
+          `No CLI handler registered for ${invocation.command.leaf.handler}.`,
+        );
+    }
+  });
+}
+
+async function runLegacyHandler(
+  handler: () => Promise<void>,
+): Promise<CommandResult> {
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    await handler();
+    const exitCode = process.exitCode === 2 ? 2 : process.exitCode ? 1 : 0;
+    return { exitCode, render: { kind: "none" } };
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+}
+
+async function renderHelpReference(
+  reference: HelpReference,
+  pathSegments: readonly string[],
+): Promise<string> {
+  let rendered: string | null;
+  switch (reference.kind) {
+    case "root":
+      return help();
+    case "command":
+      rendered = commandHelp(reference.command);
+      break;
+    case "nested":
+      rendered = nestedCommandHelp(reference.command, reference.subcommand);
+      break;
+    case "dev-simulation":
+      return devSimulationHelp(reference.flow);
   }
 
-  // Check for version flag at top level
-  if (argv[0] === "--version" || argv[0] === "-V") {
-    await runVersionCommand();
-    return;
-  }
+  return (
+    rendered ??
+    renderHelp(`Usage: wf ${pathSegments.join(" ")}
 
-  // Route to subcommands
-  const command = argv[0];
-  const commandArgv = argv.slice(1);
-
-  switch (command) {
-    case "new":
-      await runNewCommand(commandArgv);
-      break;
-    case "status":
-      await runStatusCommand(commandArgv);
-      break;
-    case "cd":
-      await runCdCommand(commandArgv);
-      break;
-    case "find":
-      await runFindCommand(commandArgv);
-      break;
-    case "add":
-      await runAddCommand(commandArgv);
-      break;
-    case "clean":
-      await runCleanCommand(commandArgv);
-      break;
-    case "delete":
-      await runDeleteCommand(commandArgv);
-      break;
-    case "workspace":
-      await runWorkspaceCommand(commandArgv);
-      break;
-    case "config":
-      await runConfigCommand(commandArgv);
-      break;
-    case "dev": {
-      const { runDevCommand } = await import("./dev-simulator.ts");
-      await runDevCommand(commandArgv);
-      break;
-    }
-    case "skills": {
-      const { runSkillsCommand } = await import("./skills.ts");
-      await runSkillsCommand(commandArgv);
-      break;
-    }
-    case "init":
-      await runInitCommand(commandArgv);
-      break;
-    case "templates":
-      await runTemplatesCommand(commandArgv);
-      break;
-    case "template":
-      await runTemplateCommand(commandArgv);
-      break;
-    case "repositories":
-    case "repos": {
-      const { runRepositoriesCommand } = await import("./repository-cli.ts");
-      await runRepositoriesCommand(commandArgv);
-      break;
-    }
-    case "repository":
-    case "repo": {
-      const { runRepositoryCommand } = await import("./repository-cli.ts");
-      await runRepositoryCommand(commandArgv, command);
-      break;
-    }
-    case "fork":
-      await runForkCommand(commandArgv);
-      break;
-    case "worktree":
-    case "wt":
-      await runWorktreeCommand(commandArgv, command);
-      break;
-    case "review":
-      await runReviewCommand(commandArgv);
-      break;
-    case "list":
-    case "ls":
-      await runListCommand(commandArgv, command);
-      break;
-    case "version":
-      await runVersionCommand(commandArgv);
-      break;
-    case "_initialize-repo":
-      await runInitializeRepoWorkerCommand(commandArgv);
-      break;
-    default:
-      log.error(`Unknown command: ${command}`);
-      console.log(await help());
-      process.exitCode = 1;
-  }
+No additional help is available for this internal command.`)
+  );
 }
 
 async function runInitializeRepoWorkerCommand(argv: string[]): Promise<void> {

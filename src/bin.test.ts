@@ -3,6 +3,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
+import { runSubprocess } from "./test-utils/subprocess.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -91,5 +92,27 @@ describe("bin/workforest.js", () => {
     expect(JSON.parse(result.stdout)).toEqual(
       expect.objectContaining({ success: true }),
     );
+  });
+
+  it.each([
+    [["wat"], "Unknown command: wat"],
+    [["list", "--bogus"], 'Unknown flag "--bogus" for wf list'],
+    [
+      ["status", "cancel", "--json"],
+      'Unknown flag "--json" for wf status cancel',
+    ],
+    [["template", "copy", "only-one"], "Invalid operands for wf template copy"],
+  ])("reports invocation errors without parser stacks for %j", async (args, message) => {
+    const result = await runSubprocess(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), ...args],
+      { timeout: 10_000 },
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain(message);
+    expect(result.stderr).not.toContain("ArgError");
+    expect(result.stderr).not.toContain("at parse");
+    expect(result.stderr).not.toContain("node_modules/arg");
   });
 });

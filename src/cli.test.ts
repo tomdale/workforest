@@ -548,13 +548,9 @@ describe("cli", () => {
 
   it("rejects wf new without both sides of the -- delimiter", async () => {
     const errors: string[] = [];
-    const logs: string[] = [];
 
     vi.spyOn(console, "error").mockImplementation((...args) => {
       errors.push(args.join(" "));
-    });
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
     });
 
     process.argv = ["node", "wf", "new", "--", "fix-auth"];
@@ -562,39 +558,24 @@ describe("cli", () => {
 
     await cli();
 
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toContain(
-      'Missing template or repositories before "--"',
-    );
-    expect(logs.join("\n")).toContain(
-      "Usage: wf new <template|repo...> -- <name-or-description>",
-    );
+    expect(process.exitCode).toBe(2);
+    expect(errors.join("\n")).toContain("Invalid operands for wf new");
 
     errors.length = 0;
-    logs.length = 0;
     process.argv = ["node", "wf", "new", "site", "--"];
     process.exitCode = undefined;
 
     await cli();
 
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toContain(
-      'Missing name or description after "--"',
-    );
-    expect(logs.join("\n")).toContain(
-      "Usage: wf new <template|repo...> -- <name-or-description>",
-    );
+    expect(process.exitCode).toBe(2);
+    expect(errors.join("\n")).toContain("Invalid operands for wf new");
   });
 
   it("rejects the old wf new -d syntax", async () => {
     const errors: string[] = [];
-    const logs: string[] = [];
 
     vi.spyOn(console, "error").mockImplementation((...args) => {
       errors.push(args.join(" "));
-    });
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
     });
 
     process.argv = ["node", "wf", "new", "site", "-d", "fix auth"];
@@ -602,11 +583,8 @@ describe("cli", () => {
 
     await cli();
 
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toContain("unknown or unexpected option: -d");
-    expect(logs.join("\n")).toContain(
-      "Usage: wf new <template|repo...> -- <name-or-description>",
-    );
+    expect(process.exitCode).toBe(2);
+    expect(errors.join("\n")).toContain('Unknown flag "-d" for wf new');
   });
 
   it("exposes development UI simulation help", async () => {
