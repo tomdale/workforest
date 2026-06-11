@@ -296,11 +296,15 @@ describe("cli", () => {
   it("rejects a configured directory prefix that escapes defaultDir", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
+    const errors: string[] = [];
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
       defaultDir: workspaceRoot,
       dirPrefix: "../",
+    });
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
     });
     process.argv = [
       "node",
@@ -312,7 +316,10 @@ describe("cli", () => {
       "fix-auth",
     ];
 
-    await expect(cli()).rejects.toThrow("Workspace name");
+    await expect(cli()).resolves.toBeUndefined();
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain("Workspace name");
+    expect(errors.join("\n")).not.toContain("at runNewCommand");
     await expect(
       stat(path.join(path.dirname(workspaceRoot), "fix-auth")),
     ).rejects.toThrow();
