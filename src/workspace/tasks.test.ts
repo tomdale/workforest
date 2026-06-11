@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  appendTemporaryWorktrees,
+  appendTasks,
   readWorkspaceMetadata,
   writeWorkspaceMetadata,
 } from "./metadata.ts";
@@ -63,12 +63,10 @@ afterEach(async () => {
   );
 });
 
-describe("temporary worktrees", () => {
+describe("workspace tasks", () => {
   it("creates tracked sibling worktrees from the current branch", async () => {
     const workspaceDir = await createWorkspaceDir();
-    const { createTemporaryWorktrees } = await import(
-      "./temporary-worktrees.ts"
-    );
+    const { createTasks } = await import("./tasks.ts");
 
     runGitMock
       .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
@@ -77,7 +75,7 @@ describe("temporary worktrees", () => {
       .mockRejectedValueOnce(new Error("missing branch"))
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    const result = await createTemporaryWorktrees({
+    const result = await createTasks({
       workspaceDir,
       parentRepo: {
         name: "front",
@@ -110,7 +108,7 @@ describe("temporary worktrees", () => {
     );
 
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
-      temporary_worktrees: [
+      tasks: [
         {
           slug: "fix-tests",
           parent_repo: "front",
@@ -126,9 +124,7 @@ describe("temporary worktrees", () => {
 
   it("uses the configured branch prefix instead of inheriting the current branch namespace", async () => {
     const workspaceDir = await createWorkspaceDir();
-    const { createTemporaryWorktrees } = await import(
-      "./temporary-worktrees.ts"
-    );
+    const { createTasks } = await import("./tasks.ts");
 
     runGitMock
       .mockResolvedValueOnce({ stdout: "h/ai-alerts-follow-up\n", stderr: "" })
@@ -137,7 +133,7 @@ describe("temporary worktrees", () => {
       .mockRejectedValueOnce(new Error("missing branch"))
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    const result = await createTemporaryWorktrees({
+    const result = await createTasks({
       workspaceDir,
       parentRepo: {
         name: "front",
@@ -168,7 +164,7 @@ describe("temporary worktrees", () => {
 
   it("rejects duplicate slugs anywhere in the workspace", async () => {
     const workspaceDir = await createWorkspaceDir();
-    await appendTemporaryWorktrees(workspaceDir, [
+    await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "docs",
@@ -180,9 +176,7 @@ describe("temporary worktrees", () => {
         setup_status: "ready",
       },
     ]);
-    const { createTemporaryWorktrees } = await import(
-      "./temporary-worktrees.ts"
-    );
+    const { createTasks } = await import("./tasks.ts");
 
     runGitMock
       .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
@@ -190,7 +184,7 @@ describe("temporary worktrees", () => {
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     await expect(
-      createTemporaryWorktrees({
+      createTasks({
         workspaceDir,
         parentRepo: {
           name: "front",
@@ -205,9 +199,7 @@ describe("temporary worktrees", () => {
 
   it("keeps a worktree and records a setup log when initializers fail", async () => {
     const workspaceDir = await createWorkspaceDir();
-    const { createTemporaryWorktrees } = await import(
-      "./temporary-worktrees.ts"
-    );
+    const { createTasks } = await import("./tasks.ts");
 
     runSingleRepoInitializersGeneratorMock.mockImplementation(
       async function* () {
@@ -226,7 +218,7 @@ describe("temporary worktrees", () => {
       .mockRejectedValueOnce(new Error("missing branch"))
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    const result = await createTemporaryWorktrees({
+    const result = await createTasks({
       workspaceDir,
       parentRepo: {
         name: "front",
@@ -245,7 +237,7 @@ describe("temporary worktrees", () => {
       ),
     });
     const metadata = await readWorkspaceMetadata(workspaceDir);
-    expect(metadata?.temporary_worktrees?.[0]).toMatchObject({
+    expect(metadata?.tasks?.[0]).toMatchObject({
       setup_status: "failed",
       setup_log: ".workforest/logs/front-fix-tests.log",
     });
@@ -261,7 +253,7 @@ describe("temporary worktrees", () => {
     const workspaceDir = await createWorkspaceDir();
     const targetDir = path.join(workspaceDir, "fix-tests");
     await mkdir(targetDir);
-    await appendTemporaryWorktrees(workspaceDir, [
+    await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "front",
@@ -273,9 +265,7 @@ describe("temporary worktrees", () => {
         setup_status: "ready",
       },
     ]);
-    const { removeTemporaryWorktrees } = await import(
-      "./temporary-worktrees.ts"
-    );
+    const { deleteTasks } = await import("./tasks.ts");
 
     runGitMock
       .mockResolvedValueOnce({ stdout: "", stderr: "" })
@@ -284,7 +274,7 @@ describe("temporary worktrees", () => {
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     await expect(
-      removeTemporaryWorktrees({
+      deleteTasks({
         workspaceDir,
         slugs: ["fix-tests"],
         parentRepoName: "front",
@@ -313,7 +303,7 @@ describe("temporary worktrees", () => {
     );
     await expect(
       readWorkspaceMetadata(workspaceDir),
-    ).resolves.not.toHaveProperty("temporary_worktrees");
+    ).resolves.not.toHaveProperty("tasks");
   });
 
   it("refuses destructive cleanup when a setup log ancestor is a symlink", async () => {
@@ -324,7 +314,7 @@ describe("temporary worktrees", () => {
     tempDirs.push(outsideDir);
     const outsideLog = path.join(outsideDir, "front-fix-tests.log");
     await writeFile(outsideLog, "keep\n", "utf8");
-    await appendTemporaryWorktrees(workspaceDir, [
+    await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "front",
@@ -339,12 +329,10 @@ describe("temporary worktrees", () => {
     ]);
     await mkdir(path.join(workspaceDir, "fix-tests"));
     await symlink(outsideDir, path.join(workspaceDir, ".workforest", "logs"));
-    const { removeTemporaryWorktrees } = await import(
-      "./temporary-worktrees.ts"
-    );
+    const { deleteTasks } = await import("./tasks.ts");
 
     await expect(
-      removeTemporaryWorktrees({
+      deleteTasks({
         workspaceDir,
         slugs: ["fix-tests"],
         force: true,

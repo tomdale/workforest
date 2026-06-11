@@ -3,14 +3,14 @@
 ## 1. Prepare The Primary Repo
 
 The primary repo is the integration checkout. Commit or stash local changes
-before creating temporary worktrees. Workforest refuses dirty primary repos by
+before creating tasks. Workforest refuses dirty primary repos by
 default because subagent branches start from committed `HEAD`.
 
 ## 2. Create One Worktree Per Task
 
 ```sh
 cd ~/Code/workspaces/my-feature/next.js
-wf worktree "fix-tests" "upgrade-dependencies"
+wf task create "fix-tests" "upgrade-dependencies"
 ```
 
 Expected shape:
@@ -39,18 +39,18 @@ Each subagent should get:
 ## 4. Review And Merge
 
 Inspect each worktree's diff and test output. Commit the subagent work on its
-temporary branch, then merge or cherry-pick into the primary checkout using Git.
+task branch, then merge or cherry-pick into the primary checkout using Git.
 
-## 5. Remove Temporary Worktrees
+## 5. Remove Tasks
 
 ```sh
-wf worktree rm "fix-tests"
+wf task delete "fix-tests"
 ```
 
 By default removal requires:
 
 - clean subagent worktree
-- temporary branch reachable from the current primary branch
+- task branch reachable from the current primary branch
 
 Use `--force` only when work was intentionally squash-merged, cherry-picked, or
 discarded.

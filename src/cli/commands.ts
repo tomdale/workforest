@@ -152,27 +152,9 @@ function group(options: {
 const workspaceDeleteFlags = [
   booleanFlag("dryRun", "--dry-run", "-n"),
   booleanFlag("force", "--force", "-f"),
-  booleanFlag("keepMirrors", "--keep-mirrors"),
+  booleanFlag("deleteMirrors", "--delete-mirrors"),
   booleanFlag("deleteRemoteBranches", "--delete-remote-branches", "-r"),
 ] as const;
-
-const worktreeDefault = leaf({
-  name: "",
-  path: ["worktree"],
-  summary: "Create a contextual worktree",
-  handler: "worktree.create",
-  help: { kind: "command", command: "worktree" },
-  operands: operands(1, null, "worktree operands"),
-  flags: [
-    stringFlag("dir", "--dir", "path"),
-    stringFlag("repo", "--repo", "repository"),
-    booleanFlag("dryRun", "--dry-run", "-n"),
-    booleanFlag("force", "--force", "-f"),
-  ],
-  outputModes: ["human", "report"],
-  tty: optionalStdin,
-  shellHandoff: "optional-cd",
-});
 
 const reviewDefault = leaf({
   name: "",
@@ -216,12 +198,12 @@ const skillsDefault = leaf({
   outputModes: ["report", "json"],
 });
 
-const statusDefault = leaf({
-  name: "",
-  path: ["status"],
+const workspaceStatus = leaf({
+  name: "status",
+  path: ["workspace", "status"],
   summary: "Show repository initialization status",
-  handler: "status.show",
-  help: { kind: "command", command: "status" },
+  handler: "workspace.status",
+  help: { kind: "nested", command: "workspace", subcommand: "status" },
   flags: [
     booleanFlag("json", "--json"),
     stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
@@ -250,7 +232,7 @@ export const commandRegistry: CommandRegistry = {
         name: "new",
         path: ["new"],
         summary: "Create a workspace",
-        handler: "new",
+        handler: "workspace.create",
         help: { kind: "command", command: "new" },
         operands: {
           variants: [
@@ -276,73 +258,26 @@ export const commandRegistry: CommandRegistry = {
         shellHandoff: "optional-cd",
       }),
       group({
-        name: "status",
-        path: ["status"],
-        summary: "Monitor repository initialization",
-        help: { kind: "command", command: "status" },
-        default: statusDefault,
-        children: [
-          leaf({
-            name: "cancel",
-            path: ["status", "cancel"],
-            summary: "Cancel repository initializers",
-            handler: "status.cancel",
-            help: { kind: "nested", command: "status", subcommand: "cancel" },
-            operands: operands(0, null, "repositories"),
-            flags: [
-              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
-            ],
-          }),
-          leaf({
-            name: "retry",
-            path: ["status", "retry"],
-            summary: "Retry repository initializers",
-            handler: "status.retry",
-            help: { kind: "nested", command: "status", subcommand: "retry" },
-            operands: operands(0, null, "repositories"),
-            flags: [
-              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
-            ],
-          }),
-        ],
-      }),
-      group({
         name: "worktree",
         path: ["worktree"],
-        aliases: [
-          alias("wt", {
-            help: { kind: "command", command: "wt" },
-          }),
-        ],
-        summary: "Manage contextual worktrees",
+        summary: "Manage standalone worktrees",
         help: { kind: "command", command: "worktree" },
-        default: worktreeDefault,
-        defaultOn: "unmatched",
         children: [
           leaf({
-            name: "new",
-            path: ["worktree", "new"],
-            summary: "Create a managed worktree",
-            handler: "worktree.new",
-            help: { kind: "nested", command: "worktree", subcommand: "new" },
-            operands: operands(1, 2, "worktree operands"),
-            flags: [booleanFlag("dryRun", "--dry-run", "-n")],
-            outputModes: ["human", "report"],
-            tty: optionalStdin,
-            shellHandoff: "optional-cd",
-          }),
-          leaf({
-            name: "promote",
-            path: ["worktree", "promote"],
-            summary: "Promote a managed worktree",
-            handler: "worktree.promote",
+            name: "create",
+            path: ["worktree", "create"],
+            summary: "Create a standalone worktree",
+            handler: "worktree.create",
             help: {
               kind: "nested",
               command: "worktree",
-              subcommand: "promote",
+              subcommand: "create",
             },
-            operands: operands(0, null, "templates or repositories"),
-            flags: [booleanFlag("dryRun", "--dry-run", "-n")],
+            operands: operands(2, 2, "repository and slug"),
+            flags: [
+              stringFlag("dir", "--dir", "path"),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+            ],
             outputModes: ["human", "report"],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
@@ -350,24 +285,46 @@ export const commandRegistry: CommandRegistry = {
           leaf({
             name: "list",
             path: ["worktree", "list"],
-            summary: "List contextual worktrees",
+            summary: "List standalone worktrees",
             handler: "worktree.list",
             help: { kind: "nested", command: "worktree", subcommand: "list" },
-            flags: [stringFlag("repo", "--repo", "repository")],
+            operands: operands(0, 1, "repository"),
             outputModes: ["report"],
           }),
           leaf({
             name: "delete",
             path: ["worktree", "delete"],
-            aliases: [alias("rm")],
-            summary: "Delete contextual worktrees",
+            summary: "Delete a standalone worktree",
             handler: "worktree.delete",
             help: {
               kind: "nested",
               command: "worktree",
               subcommand: "delete",
             },
-            operands: operands(0, null, "worktree names"),
+            operands: operands(1, 1, "worktree path"),
+            flags: [
+              booleanFlag("dryRun", "--dry-run", "-n"),
+              booleanFlag("force", "--force", "-f"),
+            ],
+            outputModes: ["human", "report"],
+            tty: optionalStdin,
+            shellHandoff: "optional-cd",
+          }),
+        ],
+      }),
+      group({
+        name: "task",
+        path: ["task"],
+        summary: "Manage workspace tasks",
+        help: { kind: "command", command: "task" },
+        children: [
+          leaf({
+            name: "create",
+            path: ["task", "create"],
+            summary: "Create workspace task worktrees",
+            handler: "task.create",
+            help: { kind: "nested", command: "task", subcommand: "create" },
+            operands: operands(1, null, "task names"),
             flags: [
               stringFlag("repo", "--repo", "repository"),
               booleanFlag("dryRun", "--dry-run", "-n"),
@@ -376,6 +333,30 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["human", "report"],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
+          }),
+          leaf({
+            name: "list",
+            path: ["task", "list"],
+            summary: "List workspace tasks",
+            handler: "task.list",
+            help: { kind: "nested", command: "task", subcommand: "list" },
+            flags: [stringFlag("repo", "--repo", "repository")],
+            outputModes: ["report"],
+          }),
+          leaf({
+            name: "delete",
+            path: ["task", "delete"],
+            summary: "Delete workspace tasks",
+            handler: "task.delete",
+            help: { kind: "nested", command: "task", subcommand: "delete" },
+            operands: operands(1, null, "task names"),
+            flags: [
+              stringFlag("repo", "--repo", "repository"),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+              booleanFlag("force", "--force", "-f"),
+            ],
+            outputModes: ["human", "report"],
+            tty: optionalStdin,
           }),
         ],
       }),
@@ -415,18 +396,6 @@ export const commandRegistry: CommandRegistry = {
           }),
         ],
       }),
-      leaf({
-        name: "delete",
-        path: ["delete"],
-        summary: "Delete the current tracked resource",
-        handler: "delete",
-        help: { kind: "command", command: "delete" },
-        operands: operands(0, 1, "workspace"),
-        flags: workspaceDeleteFlags,
-        outputModes: ["human", "report"],
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
       group({
         name: "workspace",
         path: ["workspace"],
@@ -434,9 +403,55 @@ export const commandRegistry: CommandRegistry = {
         help: { kind: "command", command: "workspace" },
         children: [
           leaf({
+            name: "create",
+            path: ["workspace", "create"],
+            summary: "Create a workspace",
+            handler: "workspace.create",
+            help: {
+              kind: "nested",
+              command: "workspace",
+              subcommand: "create",
+            },
+            operands: {
+              variants: [
+                {
+                  beforeDoubleDash: cardinality(0, 0),
+                  delimiter: "forbidden",
+                  when: {
+                    flag: "like",
+                    present: false,
+                    interactive: true,
+                  },
+                },
+                {
+                  beforeDoubleDash: cardinality(
+                    1,
+                    null,
+                    "templates or repositories",
+                  ),
+                  delimiter: "required",
+                  afterDoubleDash: cardinality(1, null, "work words"),
+                  when: { flag: "like", present: false },
+                },
+                {
+                  beforeDoubleDash: cardinality(0, 0),
+                  delimiter: "required",
+                  afterDoubleDash: cardinality(1, null, "work words"),
+                  when: { flag: "like", present: true },
+                },
+              ],
+            },
+            flags: [
+              stringFlag("like", "--like", "workspace"),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+            ],
+            outputModes: ["interactive", "report"],
+            tty: optionalStdin,
+            shellHandoff: "optional-cd",
+          }),
+          leaf({
             name: "delete",
             path: ["workspace", "delete"],
-            aliases: [alias("rm")],
             summary: "Delete a workspace",
             handler: "workspace.delete",
             help: {
@@ -444,109 +459,85 @@ export const commandRegistry: CommandRegistry = {
               command: "workspace",
               subcommand: "delete",
             },
-            operands: operands(0, 1, "workspace"),
+            operands: operands(1, 1, "workspace"),
             flags: workspaceDeleteFlags,
             outputModes: ["human", "report"],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
           }),
-        ],
-      }),
-      leaf({
-        name: "cd",
-        path: ["cd"],
-        summary: "Open a workspace",
-        handler: "cd",
-        help: { kind: "command", command: "cd" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(1, 1, "workspace"),
-              delimiter: "forbidden",
+          leaf({
+            name: "open",
+            path: ["workspace", "open"],
+            summary: "Open a workspace",
+            handler: "workspace.open",
+            help: {
+              kind: "nested",
+              command: "workspace",
+              subcommand: "open",
             },
-            {
-              beforeDoubleDash: cardinality(0, 0, "workspace"),
-              delimiter: "forbidden",
-              when: { interactive: true },
+            operands: {
+              variants: [
+                {
+                  beforeDoubleDash: cardinality(0, 1, "workspace"),
+                  delimiter: "forbidden",
+                  when: { flag: "search", present: false },
+                },
+                {
+                  beforeDoubleDash: cardinality(0, 0, "workspace"),
+                  delimiter: "forbidden",
+                  when: { flag: "search", present: true },
+                },
+              ],
             },
-          ],
-        },
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "find",
-        path: ["find"],
-        summary: "Fuzzy-find a workspace",
-        handler: "find",
-        help: { kind: "command", command: "find" },
-        tty: requiredStdin,
-        shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "add",
-        path: ["add"],
-        summary: "Add repositories to a workspace",
-        handler: "add",
-        help: { kind: "command", command: "add" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(0, null, "repositories"),
-              delimiter: "forbidden",
-              when: { interactive: true },
-            },
-            {
-              beforeDoubleDash: cardinality(1, null, "repositories"),
-              delimiter: "forbidden",
-              when: { interactive: false },
-            },
-          ],
-        },
-        flags: [
-          stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
-          booleanFlag("dryRun", "--dry-run", "-n"),
-        ],
-        outputModes: ["interactive", "report"],
-        tty: optionalStdin,
-      }),
-      leaf({
-        name: "fork",
-        path: ["fork"],
-        summary: "Fork the current workspace",
-        handler: "fork",
-        help: { kind: "command", command: "fork" },
-        operands: {
-          variants: [
-            {
-              beforeDoubleDash: cardinality(1, 1, "name or description"),
-              delimiter: "forbidden",
-            },
-            {
-              beforeDoubleDash: cardinality(0, 0, "name or description"),
-              delimiter: "forbidden",
-              when: { flag: "description", present: true },
-            },
-            {
-              beforeDoubleDash: cardinality(0, 0, "name or description"),
-              delimiter: "forbidden",
-              when: {
-                flag: "description",
-                present: false,
-                interactive: true,
-              },
-            },
-          ],
-        },
-        flags: [
-          stringFlag("description", "--description", "description", {
-            short: "-d",
+            flags: [booleanFlag("search", "--search")],
+            tty: optionalStdin,
+            shellHandoff: "optional-cd",
           }),
-          booleanFlag("dryRun", "--dry-run", "-n"),
+          leaf({
+            name: "list",
+            path: ["workspace", "list"],
+            summary: "List workspaces",
+            handler: "workspace.list",
+            help: {
+              kind: "nested",
+              command: "workspace",
+              subcommand: "list",
+            },
+            outputModes: ["report"],
+          }),
+          workspaceStatus,
+          leaf({
+            name: "add",
+            path: ["workspace", "add"],
+            summary: "Add repositories to a workspace",
+            handler: "workspace.add",
+            help: {
+              kind: "nested",
+              command: "workspace",
+              subcommand: "add",
+            },
+            operands: {
+              variants: [
+                {
+                  beforeDoubleDash: cardinality(0, null, "repositories"),
+                  delimiter: "forbidden",
+                  when: { interactive: true },
+                },
+                {
+                  beforeDoubleDash: cardinality(1, null, "repositories"),
+                  delimiter: "forbidden",
+                  when: { interactive: false },
+                },
+              ],
+            },
+            flags: [
+              stringFlag("workspace", "--workspace", "dir", { short: "-w" }),
+              booleanFlag("dryRun", "--dry-run", "-n"),
+            ],
+            outputModes: ["interactive", "report"],
+            tty: optionalStdin,
+          }),
         ],
-        outputModes: ["interactive", "report"],
-        tty: optionalStdin,
-        shellHandoff: "optional-cd",
       }),
       leaf({
         name: "clean",
@@ -554,24 +545,11 @@ export const commandRegistry: CommandRegistry = {
         summary: "Delete a workspace",
         handler: "clean",
         help: { kind: "command", command: "clean" },
-        operands: operands(0, 1, "workspace"),
+        operands: operands(1, 1, "workspace"),
         flags: workspaceDeleteFlags,
         outputModes: ["human", "report"],
         tty: optionalStdin,
         shellHandoff: "optional-cd",
-      }),
-      leaf({
-        name: "list",
-        path: ["list"],
-        aliases: [
-          alias("ls", {
-            help: { kind: "command", command: "ls" },
-          }),
-        ],
-        summary: "List workspaces",
-        handler: "list",
-        help: { kind: "command", command: "list" },
-        outputModes: ["report"],
       }),
       leaf({
         name: "init",

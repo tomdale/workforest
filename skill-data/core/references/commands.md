@@ -4,29 +4,34 @@
 
 ```sh
 wf new <template|repo...> -- <work>  # create a workspace
-wf status                            # monitor background repo initialization
-wf status cancel [repo...]           # cancel queued/running initialization
-wf status retry [repo...]            # retry failed/cancelled initialization
-wf list                              # list known workspaces
-wf add <repo...>                     # add repos to the current workspace
-wf fork <name>                       # fork current workspace with new branches
-wf clean [dir]                       # remove a workspace
+wf workspace create <repos...> -- <work>
+wf workspace create --like current -- <work>
+wf workspace status                 # monitor background repo initialization
+wf workspace list                   # list known workspaces
+wf workspace open [name] [--search] # open a workspace
+wf workspace add <repo...>          # add repos to the current workspace
+wf workspace delete <workspace>     # remove an explicit workspace
+wf clean <workspace>                # temporary delete shortcut
 ```
 
 `wf new` returns once repository worktrees are ready. Initializers and template
 hooks continue in detached background workers and can be inspected from anywhere
-inside the workspace with `wf status`.
+inside the workspace with `wf workspace status`.
 
-## Worktree Commands
+## Task Commands
 
 ```sh
-wf worktree <slug...>                # temp sibling worktrees inside a workspace repo
-wf worktree new <repo> <name>        # managed checkout in defaultDir/<repo>/<name>
-wf worktree new <name>               # managed sibling from managed context
-wf worktree promote [template] [repo...] # promote current managed checkout
-wf worktree list                     # list tracked temp worktrees
-wf worktree rm <slug...>             # remove tracked temp worktrees
-wf worktree <repo> <slug>            # standalone single-repo worktree
+wf task create <slug...>             # workspace task worktrees
+wf task list                         # list tracked tasks
+wf task delete <slug...>             # remove explicit tasks
+```
+
+## Standalone Worktree Commands
+
+```sh
+wf worktree create <repo> <slug>
+wf worktree list [repo]
+wf worktree delete <path>
 ```
 
 ## Template Commands

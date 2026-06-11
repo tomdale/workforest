@@ -23,9 +23,9 @@ describe("commandRegistry", () => {
 
   it("rejects alias collisions", () => {
     const registry = cloneRegistry();
-    const list = registry.root.children.find((node) => node.name === "list");
-    if (!list) throw new Error("Expected list command");
-    list.aliases = [{ name: "new", visibility: "visible" }];
+    const clean = registry.root.children.find((node) => node.name === "clean");
+    if (!clean) throw new Error("Expected clean command");
+    clean.aliases = [{ name: "new", visibility: "visible" }];
 
     expect(() => validateCommandRegistry(registry)).toThrow(
       'Duplicate command or alias "new"',
@@ -34,18 +34,24 @@ describe("commandRegistry", () => {
 
   it("rejects paths that disagree with the command tree", () => {
     const registry = cloneRegistry();
-    const list = registry.root.children.find((node) => node.name === "list");
-    if (!list) throw new Error("Expected list command");
-    list.path = ["wrong"];
+    const clean = registry.root.children.find((node) => node.name === "clean");
+    if (!clean) throw new Error("Expected clean command");
+    clean.path = ["wrong"];
 
     expect(() => validateCommandRegistry(registry)).toThrow(
-      "does not match wf list",
+      "does not match wf clean",
     );
   });
 
   it("rejects duplicate leaf flags", () => {
     const registry = cloneRegistry();
-    const add = registry.root.children.find((node) => node.name === "add");
+    const workspace = registry.root.children.find(
+      (node) => node.name === "workspace",
+    );
+    if (!workspace || workspace.kind !== "group") {
+      throw new Error("Expected workspace command");
+    }
+    const add = workspace.children.find((node) => node.name === "add");
     if (!add || add.kind !== "leaf") throw new Error("Expected add command");
     add.flags = [
       ...add.flags,

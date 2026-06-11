@@ -32,8 +32,8 @@ afterEach(async () => {
   );
 });
 
-describe("parallel wf worktree commands", () => {
-  it("creates distinct worktrees without losing metadata", async () => {
+describe("parallel wf task commands", () => {
+  it("creates distinct tasks without losing metadata", async () => {
     const fixture = await createFixture();
     const slugs = ["alpha", "beta", "gamma", "delta"];
 
@@ -43,9 +43,9 @@ describe("parallel wf worktree commands", () => {
 
     expect(results.map((result) => result.code)).toEqual([0, 0, 0, 0]);
     const metadata = await readWorkspaceMetadata(fixture.workspaceDir);
-    expect(
-      metadata?.temporary_worktrees?.map((entry) => entry.slug).sort(),
-    ).toEqual([...slugs].sort());
+    expect(metadata?.tasks?.map((entry) => entry.slug).sort()).toEqual(
+      [...slugs].sort(),
+    );
   }, 30_000);
 
   it("reports a clear conflict when two commands request the same worktree", async () => {
@@ -64,9 +64,7 @@ describe("parallel wf worktree commands", () => {
 
     const metadata = await readWorkspaceMetadata(fixture.workspaceDir);
     expect(
-      metadata?.temporary_worktrees?.filter(
-        (entry) => entry.slug === "duplicate",
-      ),
+      metadata?.tasks?.filter((entry) => entry.slug === "duplicate"),
     ).toHaveLength(1);
   }, 30_000);
 });
@@ -88,6 +86,7 @@ async function createFixture(): Promise<Fixture> {
   await runGit(["init", "-q", "-b", "main"], repoDir);
   await runGit(["config", "user.email", "test@example.com"], repoDir);
   await runGit(["config", "user.name", "Workforest Test"], repoDir);
+  await runGit(["config", "commit.gpgsign", "false"], repoDir);
   await writeFile(path.join(repoDir, "README.md"), "fixture\n", "utf8");
   await runGit(["add", "README.md"], repoDir);
   await runGit(["commit", "-q", "-m", "Initial commit"], repoDir);
@@ -132,7 +131,7 @@ function runWorktree(
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [path.resolve("bin/workforest.js"), "worktree", slug, "--force"],
+      [path.resolve("bin/workforest.js"), "task", "create", slug, "--force"],
       {
         cwd: fixture.repoDir,
         encoding: "utf8",

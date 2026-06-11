@@ -468,7 +468,7 @@ export async function stampWorkspace(
         entries: [
           ...getNextSteps(workspaceDir).map((step) => ({ title: step })),
           {
-            title: "wf status",
+            title: "wf workspace status",
             description: "Monitor background initialization",
           },
         ],
@@ -668,7 +668,7 @@ export async function stampWorkspaceInteractive(
       ...getNextSteps(workspaceDir),
       "",
       "Initialization continues in the background.",
-      "Run wf status from the workspace to check progress.",
+      "Run wf workspace status from the workspace to check progress.",
     ].join("\n"),
     "Next steps",
   );

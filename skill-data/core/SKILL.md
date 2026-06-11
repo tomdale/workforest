@@ -1,6 +1,6 @@
 ---
 name: core
-description: Core Workforest usage guide for AI agents. Use when creating, listing, adding to, forking, or cleaning Workforest workspaces; understanding workspace metadata; or deciding which specialized Workforest skill to load.
+description: Core Workforest usage guide for AI agents. Use when creating, listing, opening, adding to, deriving, or cleaning Workforest workspaces; understanding workspace metadata; or deciding which specialized Workforest skill to load.
 ---
 
 # Workforest Core
@@ -15,14 +15,12 @@ Use these commands for the usual workspace lifecycle:
 
 ```sh
 wf new vercel/next.js vercel/turbo -- "update docs build" # create a workspace
-wf status                                          # monitor background setup
-wf list                                            # list workspaces
-wf add vercel/swr                                  # add repo from inside a workspace
-wf wt new vercel/next.js fix-auth                  # managed single-repo checkout
-wf wt promote vercel/turbo                         # grow it into a workspace
-wf fork "new approach"                             # try another approach
-wf clean --dry-run                                 # preview cleanup
-wf clean --force                                   # remove workspace after review
+wf workspace status                                # monitor background setup
+wf workspace list                                  # list workspaces
+wf workspace add vercel/swr                        # add repo inside a workspace
+wf workspace create --like current -- "new approach"
+wf clean --dry-run ./update-docs-build              # preview cleanup
+wf clean --force ./update-docs-build                # remove explicit workspace
 wf repository list                                # inspect cached repositories
 ```
 
@@ -47,8 +45,8 @@ wf new vercel/next.js vercel/turbo -- "update docs build"
 cd ~/Code/workspaces/update-docs-build
 
 # Inspect what Workforest created.
-wf status
-wf list
+wf workspace status
+wf workspace list
 ls
 
 # Work in the repos using normal project commands.
@@ -59,11 +57,11 @@ pnpm test
 
 # Add another repo later if the investigation needs it.
 cd ..
-wf add vercel/swr
+wf workspace add vercel/swr
 
 # When the workspace is no longer needed, preview and clean it.
-wf clean --dry-run
-wf clean --force
+wf clean --dry-run ~/Code/workspaces/update-docs-build
+wf clean --force ~/Code/workspaces/update-docs-build
 ```
 
 Expected shape:
@@ -76,13 +74,9 @@ Expected shape:
   .workforest/workspace.json
 ```
 
-Use `wf fork "try token refresh"` from inside the workspace when the user wants a
-separate approach with the same repos but fresh branches.
-
-Use `wf wt new <repo> <name>` when the task starts in one repository but may
-need promotion later. From that checkout, `wf wt <name>` creates a sibling from
-the remote default branch, and `wf wt promote [template] [repo...]` converts the
-current checkout into a normal workspace without losing dirty changes.
+Use `wf workspace create --like current -- "try token refresh"` from inside the
+workspace when the user wants a separate approach with the same repositories
+and fresh branches.
 
 ## Safety Rules
 
@@ -95,5 +89,5 @@ current checkout into a normal workspace without losing dirty changes.
 
 ## Related Skills
 
-- Parallel subagents and temporary repo worktrees: `wf skills get parallel-worktrees`.
+- Parallel subagents and workspace tasks: `wf skills get parallel-worktrees`.
 - Setup, templates, hooks, and default files: `wf skills get setup-and-configuration`.

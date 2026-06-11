@@ -5,9 +5,14 @@ import { resolveCommand } from "./resolve-command.ts";
 
 describe("resolveCommand", () => {
   it.each([
-    [["new"], ["new"], "new"],
-    [["list"], ["list"], "list"],
-    [["worktree", "new", "repo"], ["worktree", "new"], "worktree.new"],
+    [["new"], ["new"], "workspace.create"],
+    [["workspace", "list"], ["workspace", "list"], "workspace.list"],
+    [
+      ["worktree", "create", "repo", "slug"],
+      ["worktree", "create"],
+      "worktree.create",
+    ],
+    [["task", "create", "slug"], ["task", "create"], "task.create"],
     [
       ["repository", "doctor", "repo"],
       ["repository", "doctor"],
@@ -28,11 +33,6 @@ describe("resolveCommand", () => {
   });
 
   it.each([
-    [["ls"], ["list"]],
-    [
-      ["wt", "new", "repo"],
-      ["worktree", "new"],
-    ],
     [
       ["templates", "create"],
       ["template", "new"],
@@ -60,33 +60,26 @@ describe("resolveCommand", () => {
     expect(resolution.invokedPath).not.toEqual([]);
   });
 
-  it("uses contextual default leaves without interpreting operands", () => {
+  it("uses the review default leaf without interpreting operands", () => {
     const review = resolveCommand(commandRegistry, [
       "review",
       "vercel/front#123",
     ]);
-    const worktree = resolveCommand(commandRegistry, ["worktree", "fix-auth"]);
 
     expect(review).toMatchObject({
       kind: "command",
       canonicalPath: ["review"],
       argv: ["vercel/front#123"],
     });
-    expect(worktree).toMatchObject({
-      kind: "command",
-      canonicalPath: ["worktree"],
-      argv: ["fix-auth"],
-    });
   });
 
-  it("does not register help-only worktree aliases", () => {
-    const resolution = resolveCommand(commandRegistry, ["worktree", "ls"]);
-
-    expect(resolution).toMatchObject({
-      kind: "command",
-      canonicalPath: ["worktree"],
-      argv: ["ls"],
-    });
+  it("does not register discarded worktree aliases", () => {
+    expect(() => resolveCommand(commandRegistry, ["wt", "list"])).toThrowError(
+      UsageError,
+    );
+    expect(() =>
+      resolveCommand(commandRegistry, ["worktree", "ls"]),
+    ).toThrowError(UsageError);
   });
 
   it("rejects help-only workspace aliases", () => {
@@ -99,7 +92,7 @@ describe("resolveCommand", () => {
     [[], { kind: "root" }],
     [["--help"], { kind: "root" }],
     [["worktree", "--help"], { kind: "command", command: "worktree" }],
-    [["wt", "--help"], { kind: "command", command: "wt" }],
+    [["task", "--help"], { kind: "command", command: "task" }],
     [
       ["worktree", "delete", "--help"],
       { kind: "nested", command: "worktree", subcommand: "delete" },

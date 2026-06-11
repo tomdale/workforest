@@ -29,23 +29,18 @@ Start here (for AI agents):
   wf skills get core --full
 
 Commands:
-  new <template|repo...> -- <work>  Create a workspace
-  status                       Monitor background repository initialization
-  worktree <slug...>           Create temporary worktree(s) in a workspace repo
-  worktree new <repo> <name>   Create a managed single-repo worktree
-  worktree promote             Promote a managed worktree to a workspace
-  worktree list|delete         List or delete contextual worktrees
+  workspace create             Create a workspace
+  workspace delete             Delete an explicit workspace
+  workspace open               Open or search for a workspace
+  workspace list               List workspaces
+  workspace status             Monitor repository initialization
+  workspace add                Add repositories to a workspace
+  task create|list|delete      Manage workspace task worktrees
+  worktree create|list|delete  Manage standalone worktrees
   review <target>              Create a review workspace or PR worktree
   review list|delete           List or delete PR review worktrees
-  delete                       Infer and delete current tracked resource
-  workspace delete [dir]       Delete a workspace
-  wt                           Alias for worktree
-  cd <name>                    Jump to a workspace in defaultDir
-  find                         Fuzzy-find and jump to a workspace
-  add <repo...>                Add repo(s) to an existing workspace
-  fork <name>                  Fork current workspace with new branches
-  clean [dir]                  Alias for workspace delete
-  list                         List workspaces
+  new                          Shortcut for workspace create
+  clean                        Shortcut for workspace delete
   skills list|get|path         List and retrieve bundled agent skills
   init [shell]                 Print shell integration for auto-cd and completion
   templates                    Open the template manager TUI
@@ -58,31 +53,27 @@ Clean options:
   -r, --delete-remote-branches  Delete merged remote branches (prompts if not set)
   -f, --force                  Skip confirmation prompts
   -n, --dry-run                Preview without deleting
-  --keep-mirrors               Keep cached git mirrors (default: true)
+  --delete-mirrors             Delete cached git mirrors
 
 Examples:
   wf new vercel/next.js vercel/turbo -- "update docs build"
-  wf status
-  wf status retry front
-  wf worktree "fix-tests" "upgrade-deps"
-  wf worktree new next.js "fix-auth"
-  wf worktree promote full-stack vercel/swr
+  wf workspace create --like current -- "try another approach"
+  wf workspace status
+  wf task create fix-tests upgrade-deps
+  wf task list
+  wf task delete fix-tests
+  wf worktree create next.js fix-auth --dir ../next.js-fix-auth
   wf worktree list
-  wf worktree delete "fix-tests"
+  wf worktree delete ../next.js-fix-auth
   wf review vercel/omniagent 123
   wf review delete vercel/omniagent#123 --dry-run
-  wf worktree next.js "fix-auth"
-  wf wt next.js "fix-auth" --dir ../next.js-fix-auth
   wf new --dry-run my-template -- "fixing auth"
-  wf cd fix-auth-bug                Jump into an existing workspace
-  wf find                           Fuzzy-find a workspace to open
-  wf add vercel/swr                Add a repo from inside a workspace
-  wf add vercel/swr -w ./my-ws     Add a repo to a specific workspace
-  wf fork "new approach"            Fork workspace with new branch names
+  wf workspace open fix-auth-bug
+  wf workspace open --search
+  wf workspace add vercel/swr
+  wf workspace add vercel/swr -w ./my-ws
   eval "$(wf init zsh)"            Auto-cd + zsh completion for workspace commands
-  wf list                           Show all workspaces
-  wf delete                         Infer and delete the current resource
-  wf workspace delete               Delete current workspace (self-destruct)
+  wf workspace list
   wf workspace delete ./my-workspace -r
   wf templates                      Open the template manager
   wf template new "oss-docs" vercel/next.js vercel/turbo
@@ -115,72 +106,50 @@ Examples:
   wf new
 `,
 
-  status: `Usage: wf status [options]
-       wf status cancel [repo...]
-       wf status retry [repo...]
+  worktree: `Usage: wf worktree <subcommand>
 
-Show repository initialization progress for the current workspace. In an
-interactive terminal, opens a live pane for each repository. Without repository
-arguments, cancel and retry apply to every eligible repository.
+Manage standalone repository worktrees.
 
-Options:
-  -w, --workspace <dir>  Inspect a workspace outside the current directory
-  --json                  Print machine-readable status
-  -h, --help              Show this help
-
-Examples:
-  wf status
-  wf status --json
-  wf status cancel front
-  wf status retry front
+Subcommands:
+  create <repo> <slug>  Create a standalone worktree
+  list [repo]           List standalone worktrees
+  delete <path>         Delete an explicit standalone worktree
 `,
 
-  worktree: `Usage: wf worktree <repo> <slug> [options]
-       wf worktree <slug...> [options]
-       wf worktree new <repo> <name> [options]
-       wf worktree new <name> [options]
-       wf worktree promote [template] [repo...] [options]
-       wf worktree list [options]
-       wf worktree delete [slug...] [options]
+  task: `Usage: wf task <subcommand>
 
-Create, list, or delete worktrees. Inside a workforest workspace, slug-only
-creation makes temporary worktrees tracked in workspace metadata. Managed
-single-repo worktrees live under defaultDir/<repo>/<name>; from one of those
-checkouts, slug-only creation, list, and delete operate on its siblings.
-Promotion converts the current managed checkout into a normal workspace.
-Legacy standalone repository arguments may use unique cached names.
+Manage workspace-scoped task worktrees.
 
-Options:
-  --dir <path>     Target path for standalone worktree creation
-  --repo <repo>    Workspace repo name for temporary worktree operations
-  -n, --dry-run    Preview without changing files
-  -f, --force      Skip confirmation prompts where supported
-  -h, --help       Show this help
-
-Examples:
-  wf worktree next.js fix-auth --dir ../next.js-fix-auth
-  wf worktree new next.js fix-auth
-  wf worktree promote full-stack vercel/swr
-  wf worktree fix-tests
-  wf worktree list --repo front
-  wf worktree delete fix-tests --dry-run
+Subcommands:
+  create <slug...>  Create one or more tasks
+  list              List tasks
+  delete <slug...>  Delete explicit tasks
 `,
 
-  wt: `Usage: wf wt <repo> <slug> [options]
-       wf wt <slug...> [options]
-       wf wt new <repo> <name> [options]
-       wf wt promote [template] [repo...] [options]
-       wf wt list [options]
-       wf wt delete [slug...] [options]
+  workspace: `Usage: wf workspace <subcommand>
 
-Alias for wf worktree.
+Manage workspaces.
+
+Subcommands:
+  create                         Create a workspace
+  create --like current -- <work>  Create from the current workspace
+  delete <workspace>             Delete an explicit workspace
+  open [name] [--search]         Open or search for a workspace
+  list                           List workspaces
+  status                         Show repository initialization status
+  add <repo...>                  Add repositories
+`,
+
+  clean: `Usage: wf clean [options] <workspace>
+
+Shortcut for wf workspace delete.
 
 Options:
-  --dir <path>     Target path for standalone worktree creation
-  --repo <repo>    Workspace repo name for temporary worktree operations
-  -n, --dry-run    Preview without changing files
-  -f, --force      Skip confirmation prompts where supported
-  -h, --help       Show this help
+  -r, --delete-remote-branches  Delete merged remote branches
+  --delete-mirrors             Delete cached git mirrors
+  -f, --force                  Skip confirmation prompts
+  -n, --dry-run                Preview without deleting
+  -h, --help                   Show this help
 `,
 
   review: `Usage: wf review <owner>/<repo>
@@ -208,122 +177,6 @@ Examples:
   wf review https://github.com/vercel/omniagent/pull/123
   wf review list omniagent
   wf review delete vercel/omniagent#123 --force
-`,
-
-  delete: `Usage: wf delete [options] [workspace-dir]
-
-Infer and delete the current tracked resource.
-
-From inside a temporary worktree, deletes that temporary worktree.
-From inside a review worktree, deletes that review worktree.
-From inside a standalone worktree, deletes that worktree.
-From inside a workspace, deletes that workspace.
-With a path argument, deletes that workspace path.
-
-Options:
-  -r, --delete-remote-branches  Delete merged remote branches for workspaces
-  -f, --force                   Skip confirmation prompts
-  -n, --dry-run                 Preview without deleting
-  --keep-mirrors                Keep cached git mirrors for workspaces
-  -h, --help                    Show this help
-`,
-
-  cd: `Usage: wf cd [name]
-
-Jump to an existing workspace. With no name in an interactive terminal, opens a
-workspace picker. Names resolve against defaultDir and dirPrefix.
-
-Options:
-  -h, --help       Show this help
-
-Examples:
-  wf cd fix-auth-bug
-  wf cd
-`,
-
-  find: `Usage: wf find
-
-Fuzzy-find and jump to a workspace from defaultDir.
-
-Options:
-  -h, --help       Show this help
-`,
-
-  add: `Usage: wf add [options] <repo...>
-
-Add repositories to an existing workspace. Run from inside a workspace or pass
---workspace. Repositories may be owner/repo slugs, git URLs, or unique cached
-names.
-
-Options:
-  -w, --workspace <dir>  Workspace directory to update
-  -n, --dry-run          Preview without adding repositories
-  -h, --help             Show this help
-
-Examples:
-  wf add vercel/swr
-  wf add vercel/swr -w ./my-workspace
-`,
-
-  fork: `Usage: wf fork [options] <name-or-description>
-
-Create a sibling workspace from the current workspace with new branch names.
-
-Options:
-  -d, --description <text>  Description to convert into a feature name
-  -n, --dry-run             Preview without creating a workspace
-  -h, --help                Show this help
-
-Examples:
-  wf fork new-approach
-  wf fork --description "try a different cache strategy"
-`,
-
-  workspace: `Usage: wf workspace delete [options] [dir]
-
-Manage workspaces.
-
-Subcommands:
-  delete, rm [dir]  Delete a workspace
-
-Options:
-  -h, --help        Show this help
-`,
-
-  clean: `Usage: wf clean [options] [dir]
-
-Alias for wf workspace delete.
-
-Options:
-  -r, --delete-remote-branches  Delete merged remote branches
-  -f, --force                   Skip confirmation prompts
-  -n, --dry-run                 Preview without deleting
-  --keep-mirrors                Keep cached git mirrors
-  -h, --help                    Show this help
-
-Examples:
-  wf workspace delete
-  wf workspace delete ./my-workspace --dry-run
-  wf workspace delete ./my-workspace -r
-`,
-
-  list: `Usage: wf list
-
-List workspaces in the configured defaultDir.
-
-Aliases:
-  wf ls
-
-Options:
-  -h, --help       Show this help
-`,
-
-  ls: `Usage: wf ls
-
-Alias for wf list.
-
-Options:
-  -h, --help       Show this help
 `,
 
   init: `Usage: wf init [shell]
@@ -485,19 +338,6 @@ Aliases:
 };
 
 const NESTED_COMMAND_HELP: Record<string, Record<string, string>> = {
-  status: {
-    cancel: `Usage: wf status cancel [repo...]
-
-Cancel selected background repository initializers. With no repositories,
-cancels every initializer that is currently queued or running.
-`,
-    retry: `Usage: wf status retry [repo...]
-
-Retry selected failed or cancelled repository initializers. With no
-repositories, retries every eligible initializer.
-`,
-  },
-
   review: {
     list: `Usage: wf review list [repo]
 
@@ -518,64 +358,103 @@ Options:
   },
 
   worktree: {
-    new: `Usage: wf worktree new <repo> <name> [options]
-       wf worktree new <name> [options]
+    create: `Usage: wf worktree create <repo> <slug> [options]
 
-Create a managed single-repository worktree at defaultDir/<repo>/<name>.
-The contextual form uses the current managed worktree's repository. The new
-branch starts from the remote default branch and built-in initializers run with
-the checkout as both repository and workspace context.
+Create a standalone worktree for a cached or remote repository.
 
 Options:
+  --dir <path>   Exact target path
   -n, --dry-run  Preview without changing files
   -h, --help     Show this help
 `,
-    promote: `Usage: wf worktree promote [template] [repo...] [options]
+    list: `Usage: wf worktree list [repo]
 
-Promote the current managed single-repository worktree into a normal workspace.
-The checkout moves to defaultDir/<dirPrefix><name>/<repo>, keeps its branch and
-uncommitted changes, and becomes the first workspace repository. At most one
-template may be supplied. Additional repositories use the current branch.
-
-Options:
-  -n, --dry-run  Preview without changing files
-  -h, --help     Show this help
+List standalone worktrees, optionally limited to one cached repository.
 `,
-    list: `Usage: wf worktree list [options]
+    delete: `Usage: wf worktree delete <path> [options]
 
-List temporary worktrees tracked by the current workspace, or managed sibling
-worktrees when run from a managed single-repository checkout.
-
-Options:
-  --repo <repo>  Limit results to one workspace repo
-  -h, --help     Show this help
-`,
-    delete: `Usage: wf worktree delete [slug...] [options]
-
-Delete temporary worktrees tracked by the current workspace, managed sibling
-worktrees, or standalone worktrees outside those contexts.
-When run inside a temporary worktree, the slug defaults to the current worktree.
+Delete the standalone worktree at the explicit path.
 
 Options:
-  --repo <repo>  Remove worktrees for one workspace repo
   -n, --dry-run  Preview without deleting
   -f, --force    Skip confirmation prompts
   -h, --help     Show this help
 `,
   },
 
-  workspace: {
-    delete: `Usage: wf workspace delete [options] [dir]
+  task: {
+    create: `Usage: wf task create <slug...> [options]
 
-Delete a workspace. If run inside a workspace with no dir, deletes the current
-workspace.
+Create one or more task worktrees in the current workspace.
+
+Options:
+  --repo <repo>  Owning workspace repository
+  -n, --dry-run  Preview without changing files
+  -f, --force    Allow a dirty source repository
+`,
+    list: `Usage: wf task list [options]
+
+List tasks for the current workspace repository.
+
+Options:
+  --repo <repo>  Limit results to one workspace repository
+`,
+    delete: `Usage: wf task delete <slug...> [options]
+
+Delete one or more explicit workspace tasks.
+
+Options:
+  --repo <repo>  Owning workspace repository
+  -n, --dry-run  Preview without deleting
+  -f, --force    Skip confirmation and merged-branch checks
+`,
+  },
+
+  workspace: {
+    create: `Usage: wf workspace create [options] <template|repo...> -- <work>
+       wf workspace create --like current [options] -- <work>
+
+Create a workspace from repositories, a template, or the current workspace.
+
+Options:
+  --like current  Reuse the current workspace repositories and template
+  -n, --dry-run   Preview without creating a workspace
+`,
+    delete: `Usage: wf workspace delete [options] <workspace>
+
+Delete an explicit workspace path or configured workspace name.
 
 Options:
   -r, --delete-remote-branches  Delete merged remote branches
+  --delete-mirrors             Delete cached git mirrors
   -f, --force                   Skip confirmation prompts
   -n, --dry-run                 Preview without deleting
-  --keep-mirrors                Keep cached git mirrors
   -h, --help                    Show this help
+`,
+    open: `Usage: wf workspace open [name] [--search]
+
+Open a workspace by name, choose one interactively, or fuzzy-search with
+--search.
+`,
+    list: `Usage: wf workspace list
+
+List workspaces in the configured default directory.
+`,
+    status: `Usage: wf workspace status [options]
+
+Show repository initialization progress.
+
+Options:
+  -w, --workspace <dir>  Inspect another workspace
+  --json                  Print machine-readable status
+`,
+    add: `Usage: wf workspace add [options] <repo...>
+
+Add repositories to an existing workspace.
+
+Options:
+  -w, --workspace <dir>  Workspace directory to update
+  -n, --dry-run          Preview without adding repositories
 `,
   },
 

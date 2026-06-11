@@ -245,7 +245,7 @@ describe("cli", () => {
     );
     expect(output).not.toContain("Skills ship with the CLI");
     expect(output).not.toContain("skills get parallel-worktrees");
-    expect(output).toContain("wf find");
+    expect(output).toContain("wf workspace open --search");
     expect(output).toContain("wf review");
     expect(output).toContain('eval "$(wf init zsh)"');
     expect(process.exitCode).toBeUndefined();
@@ -366,7 +366,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("resolves an unqualified registered repository for wf add", async () => {
+  it("resolves an unqualified registered repository for wf workspace add", async () => {
     const cacheDir = await createTempDir("workforest-cache-");
     const workspaceDir = await createTempDir("workforest-workspace-");
     const logs: string[] = [];
@@ -395,7 +395,7 @@ describe("cli", () => {
       logs.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "add", "--dry-run", "api"];
+    process.argv = ["node", "wf", "workspace", "add", "--dry-run", "api"];
     process.exitCode = undefined;
 
     await cli();
@@ -650,7 +650,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("writes the configured workspace path for wf cd", async () => {
+  it("writes the configured path for wf workspace open", async () => {
     const configDir = await createTempDir("workforest-config-");
     const workspaceRoot = await createTempDir("workforest-root-");
     const cdDir = await createTempDir("workforest-cd-");
@@ -679,7 +679,7 @@ describe("cli", () => {
       dirPrefix: "wf-",
     });
 
-    process.argv = ["node", "wf", "cd", "fix-auth"];
+    process.argv = ["node", "wf", "workspace", "open", "fix-auth"];
     process.exitCode = undefined;
 
     await cli();
@@ -692,16 +692,10 @@ describe("cli", () => {
   it.each([
     ["new", "Usage: wf new"],
     ["worktree", "Usage: wf worktree"],
-    ["wt", "Usage: wf wt"],
+    ["task", "Usage: wf task"],
     ["review", "Usage: wf review"],
-    ["delete", "Usage: wf delete"],
     ["workspace", "Usage: wf workspace"],
-    ["cd", "Usage: wf cd"],
-    ["find", "Usage: wf find"],
-    ["add", "Usage: wf add"],
-    ["fork", "Usage: wf fork"],
     ["clean", "Usage: wf clean"],
-    ["list", "Usage: wf list"],
     ["init", "Usage: wf init"],
     ["templates", "Usage: wf templates"],
     ["template", "Usage: wf template"],
@@ -733,15 +727,21 @@ describe("cli", () => {
   });
 
   it.each([
-    [["worktree", "new", "--help"], "Usage: wf worktree new"],
-    [["worktree", "promote", "--help"], "Usage: wf worktree promote"],
+    [["worktree", "create", "--help"], "Usage: wf worktree create"],
     [["worktree", "list", "--help"], "Usage: wf worktree list"],
     [["worktree", "delete", "--help"], "Usage: wf worktree delete"],
-    [["worktree", "rm", "--help"], "Usage: wf worktree delete"],
+    [["task", "create", "--help"], "Usage: wf task create"],
+    [["task", "list", "--help"], "Usage: wf task list"],
+    [["task", "delete", "--help"], "Usage: wf task delete"],
     [["review", "list", "--help"], "Usage: wf review list"],
     [["review", "delete", "--help"], "Usage: wf review delete"],
     [["review", "rm", "--help"], "Usage: wf review delete"],
+    [["workspace", "create", "--help"], "Usage: wf workspace create"],
     [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
+    [["workspace", "open", "--help"], "Usage: wf workspace open"],
+    [["workspace", "list", "--help"], "Usage: wf workspace list"],
+    [["workspace", "status", "--help"], "Usage: wf workspace status"],
+    [["workspace", "add", "--help"], "Usage: wf workspace add"],
     [["templates", "list", "--help"], "Usage: wf template list"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
@@ -809,7 +809,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("requires an interactive terminal for wf find", async () => {
+  it("requires an interactive terminal for workspace search", async () => {
     const errors: string[] = [];
     Object.defineProperty(process.stdin, "isTTY", {
       configurable: true,
@@ -820,18 +820,18 @@ describe("cli", () => {
       errors.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "find"];
+    process.argv = ["node", "wf", "workspace", "open", "--search"];
     process.exitCode = undefined;
 
     await cli();
 
     expect(errors.join("\n")).toContain(
-      "wf find requires an interactive terminal",
+      "wf workspace open --search requires an interactive terminal",
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it("reports missing defaultDir for wf find", async () => {
+  it("reports missing defaultDir for workspace search", async () => {
     const configDir = await createTempDir("workforest-config-");
     const writes: string[] = [];
 
@@ -846,7 +846,7 @@ describe("cli", () => {
       return true;
     });
 
-    process.argv = ["node", "wf", "find"];
+    process.argv = ["node", "wf", "workspace", "open", "--search"];
     process.exitCode = undefined;
 
     await cli();

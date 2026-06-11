@@ -714,7 +714,7 @@ function getCompletionModalContent({
       ? [
           "",
           "{gray-fg}Initialization continues in the background.{/gray-fg}",
-          "{gray-fg}Run wf status from the workspace to check progress.{/gray-fg}",
+          "{gray-fg}Run wf workspace status from the workspace to check progress.{/gray-fg}",
         ]
       : []),
     ...(setupWarnings.length > 0
@@ -754,7 +754,7 @@ function getCompletionModalMaxTextWidth({
     ...(backgroundInitialization
       ? [
           "Initialization continues in the background.",
-          "Run wf status from the workspace to check progress.",
+          "Run wf workspace status from the workspace to check progress.",
         ]
       : []),
     "press any key",

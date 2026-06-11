@@ -9,7 +9,7 @@ import {
 } from "../services/initializers/index.ts";
 import type {
   RepoConfig,
-  TemporaryWorktreeMetadata,
+  TaskMetadata,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
 } from "../types.ts";
@@ -22,10 +22,10 @@ import {
 import { isSlug } from "../utils/slug.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
-  appendTemporaryWorktrees,
-  getTemporaryWorktreeSetupLogRelativePath,
+  appendTasks,
+  getTaskSetupLogRelativePath,
   readWorkspaceMetadata,
-  removeTemporaryWorktrees as removeTemporaryWorktreeMetadata,
+  removeTasks as removeTaskMetadata,
 } from "./metadata.ts";
 import {
   appendRepoSetupLog,
@@ -33,7 +33,7 @@ import {
   startRepoSetupLog,
 } from "./setup-logs.ts";
 
-export type TemporaryWorktreeCreateResult = {
+export type TaskCreateResult = {
   slug: string;
   parentRepo: string;
   path: string;
@@ -42,12 +42,12 @@ export type TemporaryWorktreeCreateResult = {
   setupLog?: string;
 };
 
-export type TemporaryWorktreeFailure = {
+export type TaskFailure = {
   slug: string;
   error: Error;
 };
 
-export type CreateTemporaryWorktreesOptions = {
+export type CreateTasksOptions = {
   workspaceDir: string;
   parentRepo: WorkspaceRepoMetadata;
   sourceRepoDir?: string;
@@ -58,18 +58,18 @@ export type CreateTemporaryWorktreesOptions = {
   disabledInitializers?: boolean | string[];
 };
 
-export type CreateTemporaryWorktreesResult = {
-  created: TemporaryWorktreeCreateResult[];
-  failures: TemporaryWorktreeFailure[];
+export type CreateTasksResult = {
+  created: TaskCreateResult[];
+  failures: TaskFailure[];
 };
 
-export type TemporaryWorktreeListEntry = TemporaryWorktreeMetadata & {
+export type TaskListEntry = TaskMetadata & {
   absolutePath: string;
   state: "ready" | "failed" | "stale";
   merged: boolean | null;
 };
 
-export type RemoveTemporaryWorktreesOptions = {
+export type DeleteTasksOptions = {
   workspaceDir: string;
   slugs: readonly string[];
   parentRepoName?: string;
@@ -77,12 +77,12 @@ export type RemoveTemporaryWorktreesOptions = {
   dryRun?: boolean;
 };
 
-export type RemoveTemporaryWorktreesResult = {
-  removed: TemporaryWorktreeMetadata[];
+export type DeleteTasksResult = {
+  removed: TaskMetadata[];
 };
 
 type CreateTaskState =
-  | { phase: "complete"; result: TemporaryWorktreeCreateResult }
+  | { phase: "complete"; result: TaskCreateResult }
   | { phase: "failed"; slug: string; error: Error };
 
 export function workspaceRepoToRepoConfig(
@@ -95,7 +95,7 @@ export function workspaceRepoToRepoConfig(
   };
 }
 
-export async function createTemporaryWorktrees({
+export async function createTasks({
   workspaceDir,
   parentRepo,
   sourceRepoDir,
@@ -104,7 +104,7 @@ export async function createTemporaryWorktrees({
   force = false,
   dryRun = false,
   disabledInitializers,
-}: CreateTemporaryWorktreesOptions): Promise<CreateTemporaryWorktreesResult> {
+}: CreateTasksOptions): Promise<CreateTasksResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const parentRepoName = validateRepositoryComponent(
     parentRepo.name,
@@ -123,11 +123,11 @@ export async function createTemporaryWorktrees({
 
   if (!dryRun && !force && (await isGitDirty(resolvedSourceRepoDir))) {
     throw new Error(
-      `Primary repo "${parentRepo.name}" has uncommitted changes. Commit or stash them before creating subagent worktrees, or pass --force.`,
+      `Primary repo "${parentRepo.name}" has uncommitted changes. Commit or stash them before creating tasks, or pass --force.`,
     );
   }
 
-  const planned = await planTemporaryWorktrees({
+  const planned = await planTasks({
     workspaceDir: resolvedWorkspaceDir,
     metadata,
     parentRepo,
@@ -154,7 +154,7 @@ export async function createTemporaryWorktrees({
   const tasks = new Map(
     planned.map((entry) => [
       entry.slug,
-      createAndSetupTemporaryWorktree({
+      createAndSetupTask({
         workspaceDir: resolvedWorkspaceDir,
         parentRepoDir: resolvedSourceRepoDir,
         repo: repoConfig,
@@ -164,8 +164,8 @@ export async function createTemporaryWorktrees({
     ]),
   );
 
-  const created: TemporaryWorktreeCreateResult[] = [];
-  const failures: TemporaryWorktreeFailure[] = [];
+  const created: TaskCreateResult[] = [];
+  const failures: TaskFailure[] = [];
 
   for await (const { id, state } of runParallel(tasks)) {
     if (state.phase === "complete") {
@@ -177,7 +177,7 @@ export async function createTemporaryWorktrees({
   }
 
   if (created.length > 0) {
-    await appendTemporaryWorktrees(
+    await appendTasks(
       resolvedWorkspaceDir,
       created.map((result) => ({
         slug: result.slug,
@@ -196,20 +196,20 @@ export async function createTemporaryWorktrees({
   return { created, failures };
 }
 
-export async function listTemporaryWorktrees(
+export async function listTasks(
   workspaceDir: string,
   parentRepoName?: string,
-): Promise<TemporaryWorktreeListEntry[]> {
+): Promise<TaskListEntry[]> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
   if (parentRepoName) {
     validateRepositoryComponent(parentRepoName, "Repository name");
   }
-  const entries = (metadata.temporary_worktrees ?? []).filter((entry) =>
+  const entries = (metadata.tasks ?? []).filter((entry) =>
     parentRepoName ? entry.parent_repo === parentRepoName : true,
   );
 
-  const listed: TemporaryWorktreeListEntry[] = [];
+  const listed: TaskListEntry[] = [];
 
   for (const entry of entries) {
     const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.path);
@@ -229,13 +229,13 @@ export async function listTemporaryWorktrees(
   return listed;
 }
 
-export async function removeTemporaryWorktrees({
+export async function deleteTasks({
   workspaceDir,
   slugs,
   parentRepoName,
   force = false,
   dryRun = false,
-}: RemoveTemporaryWorktreesOptions): Promise<RemoveTemporaryWorktreesResult> {
+}: DeleteTasksOptions): Promise<DeleteTasksResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
   validateRequestedSlugs(slugs);
@@ -244,7 +244,7 @@ export async function removeTemporaryWorktrees({
   }
 
   const targets = resolveRemovalTargets(
-    metadata.temporary_worktrees ?? [],
+    metadata.tasks ?? [],
     slugs,
     parentRepoName,
   );
@@ -253,7 +253,7 @@ export async function removeTemporaryWorktrees({
     return { removed: targets };
   }
 
-  const removed: TemporaryWorktreeMetadata[] = [];
+  const removed: TaskMetadata[] = [];
 
   for (const entry of targets) {
     const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.slug);
@@ -272,7 +272,7 @@ export async function removeTemporaryWorktrees({
 
     if (!force && (await isGitDirty(absolutePath))) {
       throw new Error(
-        `Temporary worktree "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
+        `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
       );
     }
 
@@ -281,7 +281,7 @@ export async function removeTemporaryWorktrees({
       !(await isTemporaryBranchMerged(resolvedWorkspaceDir, entry))
     ) {
       throw new Error(
-        `Temporary branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
+        `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
       );
     }
 
@@ -295,10 +295,7 @@ export async function removeTemporaryWorktrees({
       await fs.rm(
         resolveContainedPath(
           resolvedWorkspaceDir,
-          getTemporaryWorktreeSetupLogRelativePath(
-            entry.parent_repo,
-            entry.slug,
-          ),
+          getTaskSetupLogRelativePath(entry.parent_repo, entry.slug),
         ),
         { force: true },
       );
@@ -308,13 +305,13 @@ export async function removeTemporaryWorktrees({
   }
 
   if (removed.length > 0) {
-    await removeTemporaryWorktreeMetadata(resolvedWorkspaceDir, removed);
+    await removeTaskMetadata(resolvedWorkspaceDir, removed);
   }
 
   return { removed };
 }
 
-async function* createAndSetupTemporaryWorktree({
+async function* createAndSetupTask({
   workspaceDir,
   parentRepoDir,
   repo,
@@ -324,7 +321,7 @@ async function* createAndSetupTemporaryWorktree({
   workspaceDir: string;
   parentRepoDir: string;
   repo: RepoConfig;
-  entry: TemporaryWorktreeMetadata;
+  entry: TaskMetadata;
   disabledInitializers?: boolean | string[];
 }): AsyncGenerator<CreateTaskState> {
   const targetDir = resolveContainedPath(workspaceDir, entry.path);
@@ -337,7 +334,7 @@ async function* createAndSetupTemporaryWorktree({
       cwd: parentRepoDir,
     });
 
-    const result = await runTemporaryWorktreeInitializers({
+    const result = await runTaskInitializers({
       workspaceDir,
       repo,
       slug: entry.slug,
@@ -355,7 +352,7 @@ async function* createAndSetupTemporaryWorktree({
         setupStatus: result.status,
         ...(result.logPath
           ? {
-              setupLog: getTemporaryWorktreeSetupLogRelativePath(
+              setupLog: getTaskSetupLogRelativePath(
                 entry.parent_repo,
                 entry.slug,
               ),
@@ -372,7 +369,7 @@ async function* createAndSetupTemporaryWorktree({
   }
 }
 
-async function runTemporaryWorktreeInitializers({
+async function runTaskInitializers({
   workspaceDir,
   repo,
   slug,
@@ -460,7 +457,7 @@ function formatInitializerState(state: SingleRepoInitializerState): string {
   }
 }
 
-async function planTemporaryWorktrees({
+async function planTasks({
   workspaceDir,
   metadata,
   parentRepo,
@@ -476,14 +473,14 @@ async function planTemporaryWorktrees({
   baseBranch: string;
   baseSha: string;
   branchPrefix?: string;
-}): Promise<TemporaryWorktreeMetadata[]> {
-  const existingEntries = metadata.temporary_worktrees ?? [];
+}): Promise<TaskMetadata[]> {
+  const existingEntries = metadata.tasks ?? [];
   const parentRepoDir = resolveContainedPath(
     workspaceDir,
     validateRepositoryComponent(parentRepo.name, "Repository name"),
   );
   const existingSlugs = new Set(existingEntries.map((entry) => entry.slug));
-  const planned: TemporaryWorktreeMetadata[] = [];
+  const planned: TaskMetadata[] = [];
 
   for (const slug of slugs) {
     const relativePath = slug;
@@ -491,9 +488,7 @@ async function planTemporaryWorktrees({
     const branch = buildTemporaryBranchName(baseBranch, slug, branchPrefix);
 
     if (existingSlugs.has(slug)) {
-      throw new Error(
-        `Temporary worktree "${slug}" is already tracked in this workspace.`,
-      );
+      throw new Error(`Task "${slug}" is already tracked in this workspace.`);
     }
 
     if (await pathExists(targetDir)) {
@@ -558,11 +553,11 @@ function validateRequestedSlugs(slugs: readonly string[]): void {
 }
 
 function resolveRemovalTargets(
-  entries: readonly TemporaryWorktreeMetadata[],
+  entries: readonly TaskMetadata[],
   slugs: readonly string[],
   parentRepoName: string | undefined,
-): TemporaryWorktreeMetadata[] {
-  const targets: TemporaryWorktreeMetadata[] = [];
+): TaskMetadata[] {
+  const targets: TaskMetadata[] = [];
 
   for (const slug of slugs) {
     const matches = entries.filter(
@@ -574,15 +569,13 @@ function resolveRemovalTargets(
     if (matches.length === 0) {
       throw new Error(
         parentRepoName
-          ? `No temporary worktree "${slug}" tracked for ${parentRepoName}.`
-          : `No temporary worktree "${slug}" is tracked.`,
+          ? `No task "${slug}" tracked for ${parentRepoName}.`
+          : `No task "${slug}" is tracked.`,
       );
     }
 
     if (matches.length > 1) {
-      throw new Error(
-        `Temporary worktree slug "${slug}" is ambiguous. Pass --repo <repoName>.`,
-      );
+      throw new Error(`Task "${slug}" is ambiguous. Pass --repo <repoName>.`);
     }
 
     const match = matches[0];
@@ -609,7 +602,7 @@ async function getCurrentBranch(repoDir: string): Promise<string> {
   const branch = stdout.trim();
   if (!branch) {
     throw new Error(
-      `Primary repo at ${repoDir} is on a detached HEAD. Check out a branch before creating subagent worktrees.`,
+      `Primary repo at ${repoDir} is on a detached HEAD. Check out a branch before creating tasks.`,
     );
   }
   return branch;
@@ -638,7 +631,7 @@ async function branchExists(repoDir: string, branch: string): Promise<boolean> {
 
 async function isTemporaryBranchMerged(
   workspaceDir: string,
-  entry: TemporaryWorktreeMetadata,
+  entry: TaskMetadata,
 ): Promise<boolean | null> {
   const parentRepoDir = resolveContainedPath(workspaceDir, entry.parent_repo);
   try {

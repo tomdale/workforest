@@ -96,11 +96,11 @@ describe("bin/workforest.js", () => {
 
   it.each([
     [["wat"], "Unknown command: wat"],
-    [["list", "--bogus"], 'Unknown flag "--bogus" for wf list'],
     [
-      ["status", "cancel", "--json"],
-      'Unknown flag "--json" for wf status cancel',
+      ["workspace", "list", "--bogus"],
+      'Unknown flag "--bogus" for wf workspace list',
     ],
+    [["task", "list", "--json"], 'Unknown flag "--json" for wf task list'],
     [["template", "copy", "only-one"], "Invalid operands for wf template copy"],
   ])("reports invocation errors without parser stacks for %j", async (args, message) => {
     const result = await runSubprocess(

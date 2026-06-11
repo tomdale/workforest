@@ -29,7 +29,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills) ;;
+    new|clean|workspace|template|worktree|task|review|skills) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
@@ -181,19 +181,12 @@ _workforest_complete() {
   local subcommand="\${words[2]:-}"
   commands=(
     'new:create a workspace'
-    'status:monitor background repository initialization'
-    'worktree:create or manage repo worktrees'
-    'wt:create or manage repo worktrees'
-    'review:create or manage PR review worktrees'
-    'delete:infer and delete current tracked resource'
     'workspace:manage workspaces'
-    'add:add repo(s) to a workspace'
+    'task:manage workspace tasks'
+    'worktree:manage standalone worktrees'
+    'review:create or manage PR review worktrees'
     'skills:list and retrieve bundled agent skills'
-    'fork:fork current workspace'
     'clean:remove a workspace'
-    'cd:jump to a workspace'
-    'find:fuzzy-find a workspace'
-    'list:list workspaces'
     'init:print shell integration'
     'template:manage templates'
     'templates:open template manager'
@@ -211,14 +204,17 @@ _workforest_complete() {
       ;;
     args)
       case "$subcommand" in
-        cd|clean|delete|workspace)
+        clean)
           _workforest_workspace_names
           ;;
-        status)
-          _values 'status action' cancel retry
+        workspace)
+          _values 'workspace action' create delete open list status add
           ;;
-        worktree|wt)
-          _values 'worktree action' new promote list delete rm
+        task)
+          _values 'task action' create list delete
+          ;;
+        worktree)
+          _values 'worktree action' create list delete
           ;;
       esac
       ;;
