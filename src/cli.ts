@@ -41,6 +41,7 @@ import {
   resolveRepositoryOrTemplateSpecifiers,
   resolveRepositorySpecifiers,
 } from "./repository-specifiers.ts";
+import type { ServiceEventSink } from "./services/events.ts";
 import {
   isShellAutoCdEnabled,
   normalizeShellName,
@@ -95,6 +96,7 @@ import {
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
+  type CleanupState,
   cleanupWorkspace,
   previewCleanup,
   validateWorkspace,
@@ -116,6 +118,66 @@ type TemplateAddFileEntry = {
 };
 
 type TemplateAddFileConflictAction = "overwrite" | "diff" | "skip" | "cancel";
+
+const humanServiceEventSink: ServiceEventSink = (event) => {
+  if (event.type === "output") {
+    const stream = event.stream === "stdout" ? process.stdout : process.stderr;
+    stream.write(event.data);
+    return;
+  }
+
+  log[event.level === "warning" ? "warn" : event.level](event.message);
+};
+
+function renderCleanupState(state: CleanupState, dryRun: boolean): void {
+  switch (state.phase) {
+    case "init":
+    case "remove-dir":
+      log.info(state.message);
+      break;
+    case "worktree":
+      if (state.state.status === "log") {
+        log[state.state.level](`${state.repo}: ${state.state.message}`);
+      } else if (state.state.status === "skipped") {
+        log.info(`${state.repo}: ${state.state.reason}`);
+      } else if (state.state.status === "failed") {
+        log.error(`${state.repo}: ${state.state.error.message}`);
+      }
+      break;
+    case "worktree-complete":
+      log.success(`${state.repo}: worktree removed from mirror`);
+      break;
+    case "remote-branch":
+      if (state.status === "checking") {
+        log.info(`${state.repo}: checking remote branch ${state.branch}`);
+      } else if (state.status === "deleting") {
+        log.info(`${state.repo}: deleting remote branch ${state.branch}`);
+      } else if (state.status === "deleted") {
+        log.success(`${state.repo}: deleted remote branch ${state.branch}`);
+      } else if (state.status === "skipped") {
+        log.info(`${state.repo}: skipped ${state.branch} - ${state.reason}`);
+      } else {
+        log.error(
+          `${state.repo}: failed to delete ${state.branch} - ${state.reason}`,
+        );
+      }
+      break;
+    case "complete": {
+      if (dryRun) {
+        log.info("Dry-run complete. No changes made.");
+        break;
+      }
+      const branchMessage = state.deletedBranches?.length
+        ? `, deleted ${state.deletedBranches.length} remote branch(es)`
+        : "";
+      log.success(
+        `Cleanup complete. Removed ${state.removedRepos.length} worktree(s)${branchMessage}.`,
+      );
+      break;
+    }
+  }
+}
+
 export async function cli(): Promise<void> {
   const result = await executeCli(process.argv.slice(2));
   renderCommandResult(result);
@@ -982,6 +1044,7 @@ async function runReviewOpen(repoInput: string): Promise<CommandResult> {
     const workspace = await ensureReviewWorkspace({
       target,
       reviewsDir,
+      onEvent: humanServiceEventSink,
     });
 
     await writeShellCdPath(workspace.path);
@@ -1010,7 +1073,11 @@ async function runReviewCheckout(
       context ?? undefined,
     );
     const reviewsDir = await resolveReviewsDir();
-    const metadata = await createReviewWorktree({ target, reviewsDir });
+    const metadata = await createReviewWorktree({
+      target,
+      reviewsDir,
+      onEvent: humanServiceEventSink,
+    });
 
     await writeShellCdPath(metadata.path);
     log.success(`Review worktree ready: ${metadata.path}`);
@@ -1340,6 +1407,7 @@ async function runTaskCreate(
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
         : {}),
+      onEvent: humanServiceEventSink,
     });
 
     if (dryRun) {
@@ -2492,6 +2560,7 @@ async function runCleanCommand(
     force,
     keepMirrors,
     deleteRemoteBranches,
+    onState: (state) => renderCleanupState(state, dryRun),
   });
 
   // Post-cleanup message if user was inside the workspace
@@ -2727,6 +2796,7 @@ async function runNewCommand(
     repos,
     ...(description && { description }),
     ...(templateId && { templateId }),
+    onEvent: humanServiceEventSink,
   };
 
   if (interactive) {
@@ -2843,6 +2913,7 @@ async function runAddCommand(
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
         : {}),
+      onEvent: humanServiceEventSink,
     });
 
     if (result.addedRepos.length > 0) {
@@ -2980,6 +3051,7 @@ async function runWorkspaceCreateLikeCurrent(
     repos,
     ...(description && { description }),
     ...(templateId && { templateId }),
+    onEvent: humanServiceEventSink,
   };
 
   if (interactive) {

@@ -214,6 +214,7 @@ describe("wf review", () => {
     expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
       reviewsDir,
       target: { owner: "vercel", repo: "omniagent" },
+      onEvent: expect.any(Function),
     });
     expect(process.exitCode).toBeUndefined();
   });
@@ -248,6 +249,7 @@ describe("wf review", () => {
     expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
       reviewsDir,
       target: { owner: "vercel", repo: "omniagent" },
+      onEvent: expect.any(Function),
     });
     expect(createReviewWorktreeMock).not.toHaveBeenCalled();
     await mkdir(workspaceDir, { recursive: true });
@@ -294,6 +296,7 @@ describe("wf review", () => {
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
       reviewsDir,
       target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      onEvent: expect.any(Function),
     });
     await mkdir(targetDir, { recursive: true });
     await expect(readFile(cdPathFile, "utf8")).resolves.toBe(
@@ -345,6 +348,7 @@ describe("wf review", () => {
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
       reviewsDir,
       target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      onEvent: expect.any(Function),
     });
     expect(process.exitCode).toBeUndefined();
   });
@@ -416,6 +420,7 @@ describe("wf review", () => {
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
       reviewsDir,
       target: { owner: "vercel", repo: "omniagent", prNumber: 456 },
+      onEvent: expect.any(Function),
     });
     expect(process.exitCode).toBeUndefined();
   });
@@ -468,6 +473,7 @@ describe("wf review", () => {
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
       reviewsDir,
       target: { owner: "other", repo: "repo", prNumber: 456 },
+      onEvent: expect.any(Function),
     });
     expect(process.exitCode).toBeUndefined();
   });
