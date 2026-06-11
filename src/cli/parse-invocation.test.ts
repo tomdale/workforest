@@ -7,7 +7,13 @@ import type { ResolvedCommand } from "./types.ts";
 
 describe("parseInvocation", () => {
   it("parses leaf-local boolean and string flags", () => {
-    const parsed = parse(["add", "-n", "--workspace=./demo", "vercel/front"]);
+    const parsed = parse([
+      "workspace",
+      "add",
+      "-n",
+      "--workspace=./demo",
+      "vercel/front",
+    ]);
 
     expect(parsed.flags).toEqual({
       dryRun: true,
@@ -16,137 +22,126 @@ describe("parseInvocation", () => {
     expect(parsed.beforeDoubleDash).toEqual(["vercel/front"]);
   });
 
-  it("accepts long string values as the following token", () => {
-    const parsed = parse(["dev", "simulate", "new", "--speed", "fast"]);
-
-    expect(parsed.flags).toEqual({ speed: "fast" });
-  });
-
-  it("keeps every token after -- as operand data", () => {
-    const parsed = parse([
-      "new",
-      "--dry-run",
-      "vercel/front",
-      "--",
-      "--fix",
-      "auth",
-    ]);
-
-    expect(parsed.flags).toEqual({ dryRun: true });
-    expect(parsed.beforeDoubleDash).toEqual(["vercel/front"]);
-    expect(parsed.afterDoubleDash).toEqual(["--fix", "auth"]);
-    expect(parsed.hadDoubleDash).toBe(true);
+  it("parses root shortcuts using their canonical leaf contract", () => {
+    expect(
+      parse(["new", "--dry-run", "vercel/front", "--", "fix", "auth"]),
+    ).toMatchObject({
+      flags: { dryRun: true },
+      beforeDoubleDash: ["vercel/front"],
+      afterDoubleDash: ["fix", "auth"],
+      hadDoubleDash: true,
+    });
+    expect(parse(["clean", "--force", "demo"])).toMatchObject({
+      flags: { force: true },
+      beforeDoubleDash: ["demo"],
+    });
   });
 
   it.each([
-    [["repository", "list", "--force"], 'Unknown flag "--force"'],
-    [["status", "cancel", "--json"], 'Unknown flag "--json"'],
-    [["review", "target", "--dry-run"], 'Unknown flag "--dry-run"'],
-    [["list", "--bogus"], 'Unknown flag "--bogus"'],
-    [["worktree", "new", "repo", "name", "--force"], 'Unknown flag "--force"'],
-    [["worktree", "promote", "--repo", "repo"], 'Unknown flag "--repo"'],
-    [["worktree", "list", "--force"], 'Unknown flag "--force"'],
-    [["worktree", "delete", "--dir", "path"], 'Unknown flag "--dir"'],
+    [["cache", "list", "--force"], 'Unknown flag "--force"'],
+    [["task", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
+    [
+      ["worktree", "create", "front", "fix", "--repo", "front"],
+      'Unknown flag "--repo"',
+    ],
+    [["review", "open", "front", "--force"], 'Unknown flag "--force"'],
+    [["template", "show", "base", "--json"], 'Unknown flag "--json"'],
+    [["workspace", "open", "--force"], 'Unknown flag "--force"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
   });
 
-  it("rejects missing string values", () => {
-    expect(() => parse(["add", "--workspace"])).toThrow(
+  it("rejects missing and duplicate flag values", () => {
+    expect(() => parse(["workspace", "add", "--workspace"])).toThrow(
       'Flag "--workspace" requires dir.',
     );
-    expect(() => parse(["add", "--workspace", "--help"])).toThrow(
-      'Flag "--workspace" requires dir.',
-    );
-  });
-
-  it("rejects duplicate flags", () => {
-    expect(() => parseRaw(["list"], ["--help", "-h"])).toThrow(
+    expect(() => parseRaw(["workspace", "list"], ["--help", "-h"])).toThrow(
       'Flag "-h" may only be specified once.',
     );
   });
 
   it.each([
-    [["list", "extra"], "Expected no operands"],
-    [["template", "copy", "one"], "Expected 2 templates"],
-    [["review"], "Expected 1-2 review targets"],
-    [["review", "one", "two", "three"], "Expected 1-2 review targets"],
-    [["repository", "add"], "Expected 1 or more repositories"],
-    [["worktree"], "Expected 1 or more worktree operands"],
-    [["worktree", "new"], "Expected 1-2 worktree operands"],
+    [["workspace", "list", "extra"], "Expected no operands"],
+    [["workspace", "delete"], "Expected 1 workspace"],
+    [["workspace", "delete", "one", "two"], "Expected 1 workspace"],
+    [["task", "create"], "Expected 1 or more task names"],
+    [["task", "delete"], "Expected 1 or more task names"],
     [
-      ["worktree", "new", "repo", "name", "extra"],
-      "Expected 1-2 worktree operands",
+      ["worktree", "create", "front"],
+      "Expected 2 repository and worktree name",
     ],
-    [["worktree", "list", "extra"], "Expected no operands"],
-  ])("enforces exact and variadic cardinality for %j", (argv, message) => {
+    [
+      ["worktree", "create", "front", "fix", "extra"],
+      "Expected 2 repository and worktree name",
+    ],
+    [["worktree", "delete"], "Expected 1 worktree path"],
+    [["cache", "add"], "Expected 1 or more repositories"],
+    [["cache", "delete"], "Expected 1 or more repositories"],
+    [["review", "open"], "Expected 1 repository"],
+    [["review", "checkout"], "Expected 1-2 review targets"],
+    [
+      ["review", "checkout", "one", "two", "three"],
+      "Expected 1-2 review targets",
+    ],
+    [["template", "copy", "one"], "Expected 2 templates"],
+    [["template", "delete"], "Expected 1 template"],
+    [["shell", "init", "zsh", "bash"], "Expected 0-1 shell"],
+  ])("enforces exact positional cardinality for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
   });
 
-  it("parses each worktree leaf with only its declared flags", () => {
+  it("supports explicit workspace creation modes", () => {
+    expect(parseInteractive(["workspace", "create"]).beforeDoubleDash).toEqual(
+      [],
+    );
+    expect(() => parse(["workspace", "create"])).toThrow(UsageError);
     expect(
-      parse([
-        "worktree",
-        "repo",
-        "slug",
-        "--dir",
-        "./target",
-        "--repo",
-        "front",
-        "--dry-run",
-        "--force",
-      ]).flags,
+      parse(["workspace", "create", "vercel/front", "--", "fix", "auth"])
+        .afterDoubleDash,
+    ).toEqual(["fix", "auth"]);
+    expect(parse(["workspace", "create", "--like", "current"]).flags).toEqual({
+      like: "current",
+    });
+    expect(
+      parse(["workspace", "create", "--like", "current", "fix-auth"])
+        .beforeDoubleDash,
+    ).toEqual(["fix-auth"]);
+  });
+
+  it("requires --search to be used without a workspace name", () => {
+    expect(parse(["workspace", "open", "--search"]).flags).toEqual({
+      search: true,
+    });
+    expect(parse(["workspace", "open", "demo"]).beforeDoubleDash).toEqual([
+      "demo",
+    ]);
+    expect(() => parse(["workspace", "open", "--search", "demo"])).toThrow(
+      UsageError,
+    );
+  });
+
+  it("parses task and standalone worktree flags independently", () => {
+    expect(
+      parse(["task", "create", "fix", "--repo", "front", "-n", "-f"]).flags,
     ).toEqual({
-      dir: "./target",
       repo: "front",
       dryRun: true,
       force: true,
     });
-    expect(parse(["worktree", "new", "repo", "name", "-n"]).flags).toEqual({
-      dryRun: true,
-    });
-    expect(parse(["worktree", "promote", "template", "-n"]).flags).toEqual({
-      dryRun: true,
-    });
-    expect(parse(["worktree", "list", "--repo", "front"]).flags).toEqual({
-      repo: "front",
-    });
     expect(
-      parse(["worktree", "delete", "slug", "--repo", "front", "-n", "-f"])
+      parse(["worktree", "create", "front", "fix", "--dir", "./target", "-n"])
         .flags,
     ).toEqual({
-      repo: "front",
+      dir: "./target",
       dryRun: true,
-      force: true,
     });
   });
 
-  it("supports the interactive and delimited new operand forms", () => {
-    expect(parseInteractive(["new"]).beforeDoubleDash).toEqual([]);
-    expect(() => parse(["new"])).toThrow(UsageError);
-    expect(
-      parse(["new", "vercel/front", "--", "fix", "auth"]).afterDoubleDash,
-    ).toEqual(["fix", "auth"]);
-    expect(() => parse(["new", "vercel/front"])).toThrow(UsageError);
-    expect(() => parse(["new", "--", "fix"])).toThrow(UsageError);
-  });
-
-  it.each([
-    [["cd"], ["cd", "workspace"]],
-    [["add"], ["add", "vercel/front"]],
-    [["fork"], ["fork", "fix-auth"]],
-    [
-      ["template", "new"],
-      ["template", "new", "demo", "vercel/front"],
-    ],
-  ])("enforces interactive operand alternatives for %j", (interactiveArgv, nonInteractiveArgv) => {
-    expect(() => parse(interactiveArgv)).toThrow(UsageError);
-    expect(() => parseInteractive(interactiveArgv)).not.toThrow();
-    expect(() => parse(nonInteractiveArgv)).not.toThrow();
-  });
-
-  it("allows non-interactive fork creation through --description", () => {
-    expect(() => parse(["fork", "--description", "fix auth"])).not.toThrow();
+  it("supports interactive operands only on interactive leaves", () => {
+    expect(() => parse(["workspace", "add"])).toThrow(UsageError);
+    expect(() => parseInteractive(["workspace", "add"])).not.toThrow();
+    expect(() => parse(["template", "new"])).toThrow(UsageError);
+    expect(() => parseInteractive(["template", "new"])).not.toThrow();
   });
 
   it("supports skills get names or --all, but not both", () => {

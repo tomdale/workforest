@@ -96,13 +96,21 @@ export type CommandGroup = CommandMetadata &
     kind: "group";
     children: readonly CommandNode[];
     default?: CommandLeaf;
-    defaultOn: "empty" | "unmatched";
   }>;
 
 export type CommandNode = CommandGroup | CommandLeaf;
 
+export type CommandShortcut = Readonly<{
+  name: string;
+  target: CommandPath;
+  visibility: Visibility;
+  summary: string;
+  help: HelpReference;
+}>;
+
 export type CommandRegistry = Readonly<{
   root: CommandGroup;
+  shortcuts: readonly CommandShortcut[];
 }>;
 
 export type ResolvedCommand = Readonly<{

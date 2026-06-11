@@ -6,6 +6,7 @@ import type {
   CommandPath,
   CommandRegistry,
   CommandResolution,
+  CommandShortcut,
   HelpReference,
   ResolvedCommand,
 } from "./types.ts";
@@ -18,6 +19,13 @@ export function resolveCommand(
 ): CommandResolution {
   if (argv.length === 0) {
     return helpResolution(registry.root, [], registry.root.help);
+  }
+
+  const shortcut = registry.shortcuts.find(
+    (candidate) => candidate.name === argv[0],
+  );
+  if (shortcut) {
+    return resolveShortcut(registry, shortcut, argv.slice(1));
   }
 
   let node: CommandNode = registry.root;
@@ -47,10 +55,6 @@ export function resolveCommand(
       continue;
     }
 
-    if (node.default && shouldUseDefault(node, token)) {
-      return resolvedDefault(node, invokedPath, argv.slice(index), aliasHelp);
-    }
-
     throw unknownCommandError(node.path, token);
   }
 
@@ -66,13 +70,6 @@ export function resolveCommand(
     argv: argv.slice(index),
     help: aliasHelp ?? node.help,
   };
-}
-
-function shouldUseDefault(group: CommandGroup, token: string): boolean {
-  if (token.startsWith("-") || token === "--") {
-    return true;
-  }
-  return group.defaultOn === "unmatched";
 }
 
 function resolvedDefault(
@@ -93,6 +90,50 @@ function resolvedDefault(
     argv,
     help: aliasHelp ?? leaf.help,
   };
+}
+
+function resolveShortcut(
+  registry: CommandRegistry,
+  shortcut: CommandShortcut,
+  argv: readonly string[],
+): CommandResolution {
+  const leaf = findLeaf(registry.root, shortcut.target);
+  if (!leaf) {
+    throw new Error(
+      `Shortcut ${shortcut.name} targets unknown command ${formatPath(shortcut.target)}.`,
+    );
+  }
+  if (HELP_FLAGS.has(argv[0] ?? "")) {
+    return helpResolution(leaf, [shortcut.name], shortcut.help);
+  }
+  return {
+    kind: "command",
+    leaf,
+    canonicalPath: leaf.path,
+    invokedPath: [shortcut.name],
+    argv,
+    help: shortcut.help,
+  };
+}
+
+function findLeaf(
+  root: CommandGroup,
+  path: CommandPath,
+): ResolvedCommand["leaf"] | undefined {
+  let node: CommandNode = root;
+  for (const segment of path) {
+    if (node.kind !== "group") {
+      return undefined;
+    }
+    const child: CommandNode | undefined = node.children.find(
+      (candidate) => candidate.name === segment,
+    );
+    if (!child) {
+      return undefined;
+    }
+    node = child;
+  }
+  return node.kind === "leaf" ? node : node.default;
 }
 
 function helpResolution(
