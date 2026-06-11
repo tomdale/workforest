@@ -218,15 +218,19 @@ describe("cache commands", () => {
     expect(human.stdout).toContain(`Directory: ${cacheDir}`);
     expect(list).toMatchObject({ exitCode: 0, stderr: "" });
     expect(info).toMatchObject({ exitCode: 0, stderr: "" });
-    expect(JSON.parse(list.stdout)).toEqual([
-      expect.objectContaining({
-        slug: "vercel/front",
-        mirrorPath: path.join(cacheDir, "front.git"),
-      }),
-    ]);
-    expect(JSON.parse(info.stdout)).toEqual(
-      expect.objectContaining({ slug: "vercel/front" }),
-    );
+    expect(JSON.parse(list.stdout)).toEqual({
+      ok: true,
+      data: [
+        expect.objectContaining({
+          slug: "vercel/front",
+          mirrorPath: path.join(cacheDir, "front.git"),
+        }),
+      ],
+    });
+    expect(JSON.parse(info.stdout)).toEqual({
+      ok: true,
+      data: expect.objectContaining({ slug: "vercel/front" }),
+    });
     expect(selectedPath).toEqual({
       exitCode: 0,
       stdout: `${path.join(cacheDir, "front.git")}\n`,
@@ -257,10 +261,13 @@ describe("cache commands", () => {
     expect(human).toMatchObject({ exitCode: 1, stderr: "" });
     expect(human.stdout).toContain("invalid");
     expect(json).toMatchObject({ exitCode: 1, stderr: "" });
-    expect(JSON.parse(json.stdout)).toEqual([
-      expect.objectContaining({ name: "broken", health: "invalid" }),
-      expect.objectContaining({ name: "damaged", health: "invalid" }),
-    ]);
+    expect(JSON.parse(json.stdout)).toEqual({
+      ok: true,
+      data: [
+        expect.objectContaining({ name: "broken", health: "invalid" }),
+        expect.objectContaining({ name: "damaged", health: "invalid" }),
+      ],
+    });
     expect(repair.exitCode).toBe(1);
     expect(repair.stderr).toContain(
       "broken is not a valid bare Git repository",
