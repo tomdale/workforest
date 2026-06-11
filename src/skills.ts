@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { commandHelp, nestedCommandHelp } from "./help.ts";
+import { OperationalError } from "./cli/errors.ts";
+import { failure, success } from "./cli/output.ts";
+import type { CommandResult } from "./cli/types.ts";
 import { log } from "./logger.ts";
 import { printReport } from "./terminal/report.ts";
 
@@ -30,6 +32,21 @@ export type SkillContent = {
 export type SkillsJsonResult =
   | { success: true; data: unknown }
   | { success: false; error: string };
+
+export type SkillsCommandInvocation =
+  | Readonly<{ command: "list"; json: boolean }>
+  | Readonly<{
+      command: "get";
+      names: readonly string[];
+      all: boolean;
+      full: boolean;
+      json: boolean;
+    }>
+  | Readonly<{
+      command: "path";
+      name: string | undefined;
+      json: boolean;
+    }>;
 
 export function parseSkillFrontmatter(
   content: string,
@@ -194,56 +211,35 @@ export async function getSkillContents({
   return contents;
 }
 
-export async function runSkillsCommand(argv: string[]): Promise<void> {
-  const { args, jsonMode } = parseSkillsArgs(argv);
+export async function runSkillsCommand(
+  invocation: SkillsCommandInvocation,
+): Promise<CommandResult> {
   const skillsDirs = await findSkillsDirs();
 
   if (skillsDirs.length === 0) {
     return failSkillsCommand(
       "Skills directory not found. Set WORKFOREST_SKILLS_DIR or reinstall workforest.",
-      jsonMode,
+      invocation.json,
     );
   }
 
-  const subcommand = args[0] ?? "list";
-
   try {
-    switch (subcommand) {
-      case "--help":
-      case "-h":
-        console.log(commandHelp("skills"));
-        return;
+    switch (invocation.command) {
       case "list":
-        if (hasHelpFlag(args.slice(1))) {
-          console.log(nestedCommandHelp("skills", "list"));
-          return;
-        }
-        await runSkillsList(skillsDirs, jsonMode);
-        return;
+        return await runSkillsList(skillsDirs, invocation.json);
       case "get":
-        if (hasHelpFlag(args.slice(1))) {
-          console.log(nestedCommandHelp("skills", "get"));
-          return;
-        }
-        await runSkillsGet(skillsDirs, args.slice(1), jsonMode);
-        return;
+        return await runSkillsGet(skillsDirs, invocation);
       case "path":
-        if (hasHelpFlag(args.slice(1))) {
-          console.log(nestedCommandHelp("skills", "path"));
-          return;
-        }
-        await runSkillsPath(skillsDirs, args[1], jsonMode);
-        return;
-      default:
-        return failSkillsCommand(
-          `Unknown skills subcommand: ${subcommand}`,
-          jsonMode,
+        return await runSkillsPath(
+          skillsDirs,
+          invocation.name,
+          invocation.json,
         );
     }
   } catch (error) {
     return failSkillsCommand(
       error instanceof Error ? error.message : String(error),
-      jsonMode,
+      invocation.json,
     );
   }
 }
@@ -251,25 +247,28 @@ export async function runSkillsCommand(argv: string[]): Promise<void> {
 async function runSkillsList(
   skillsDirs: readonly string[],
   jsonMode: boolean,
-): Promise<void> {
+): Promise<CommandResult> {
   const skills = (await discoverSkills(skillsDirs)).filter(
     (skill) => !skill.hidden,
   );
 
   if (jsonMode) {
-    printJson({
-      success: true,
-      data: skills.map((skill) => ({
-        name: skill.name,
-        description: skill.description,
-      })),
+    return success({
+      kind: "json",
+      value: {
+        success: true,
+        data: skills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+        })),
+      } satisfies SkillsJsonResult,
+      stream: "stdout",
     });
-    return;
   }
 
   if (skills.length === 0) {
     log.info("No skills found.");
-    return;
+    return success();
   }
 
   printReport({
@@ -286,54 +285,58 @@ async function runSkillsList(
     ],
     footer: `${skills.length} skill${skills.length === 1 ? "" : "s"}`,
   });
+  return success();
 }
 
 async function runSkillsGet(
   skillsDirs: readonly string[],
-  args: readonly string[],
-  jsonMode: boolean,
-): Promise<void> {
-  const full = args.includes("--full");
-  const all = args.includes("--all");
-  const names = args.filter((arg) => arg !== "--full" && arg !== "--all");
-  const contents = await getSkillContents({ skillsDirs, names, all, full });
+  invocation: Extract<SkillsCommandInvocation, { command: "get" }>,
+): Promise<CommandResult> {
+  const contents = await getSkillContents({
+    skillsDirs,
+    names: invocation.names,
+    all: invocation.all,
+    full: invocation.full,
+  });
 
-  if (jsonMode) {
-    printJson({ success: true, data: contents });
-    return;
+  if (invocation.json) {
+    return success({
+      kind: "json",
+      value: { success: true, data: contents } satisfies SkillsJsonResult,
+      stream: "stdout",
+    });
   }
 
-  for (let index = 0; index < contents.length; index += 1) {
-    const skill = contents[index];
-    if (!skill) continue;
-    if (index > 0) {
-      console.log("\n---\n");
-    }
-
-    printContent(skill.content);
-
-    for (const file of skill.files ?? []) {
-      console.log(`\n--- ${file.path} ---\n`);
-      printContent(file.content);
-    }
-  }
+  return success({
+    kind: "text",
+    value: renderSkillContents(contents),
+    stream: "stdout",
+    trailingNewline: false,
+  });
 }
 
 async function runSkillsPath(
   skillsDirs: readonly string[],
   name: string | undefined,
   jsonMode: boolean,
-): Promise<void> {
+): Promise<CommandResult> {
   if (!name) {
     if (jsonMode) {
-      printJson({ success: true, data: { paths: skillsDirs } });
-      return;
+      return success({
+        kind: "json",
+        value: {
+          success: true,
+          data: { paths: skillsDirs },
+        } satisfies SkillsJsonResult,
+        stream: "stdout",
+      });
     }
 
-    for (const dir of skillsDirs) {
-      console.log(dir);
-    }
-    return;
+    return success({
+      kind: "text",
+      value: skillsDirs.join("\n"),
+      stream: "stdout",
+    });
   }
 
   const skills = await discoverSkills(skillsDirs);
@@ -343,11 +346,21 @@ async function runSkillsPath(
   }
 
   if (jsonMode) {
-    printJson({ success: true, data: { name: skill.name, path: skill.dir } });
-    return;
+    return success({
+      kind: "json",
+      value: {
+        success: true,
+        data: { name: skill.name, path: skill.dir },
+      } satisfies SkillsJsonResult,
+      stream: "stdout",
+    });
   }
 
-  console.log(skill.dir);
+  return success({
+    kind: "text",
+    value: skill.dir,
+    stream: "stdout",
+  });
 }
 
 async function collectSupplementaryFiles(
@@ -419,46 +432,40 @@ async function isFile(target: string): Promise<boolean> {
   }
 }
 
-function parseSkillsArgs(argv: string[]): {
-  args: string[];
-  jsonMode: boolean;
-} {
-  const args: string[] = [];
-  let jsonMode = false;
+function failSkillsCommand(message: string, jsonMode: boolean): CommandResult {
+  if (jsonMode) {
+    return failure(1, {
+      kind: "json",
+      value: { success: false, error: message } satisfies SkillsJsonResult,
+      stream: "stdout",
+    });
+  }
 
-  for (const arg of argv) {
-    if (arg === "--json") {
-      jsonMode = true;
-    } else {
-      args.push(arg);
+  throw new OperationalError(message);
+}
+
+function renderSkillContents(contents: readonly SkillContent[]): string {
+  let output = "";
+  for (let index = 0; index < contents.length; index += 1) {
+    const skill = contents[index];
+    if (!skill) {
+      continue;
+    }
+    if (index > 0) {
+      output += "\n---\n\n";
+    }
+
+    output += withTrailingNewline(skill.content);
+    for (const file of skill.files ?? []) {
+      output += `\n--- ${file.path} ---\n\n`;
+      output += withTrailingNewline(file.content);
     }
   }
-
-  return { args, jsonMode };
+  return output;
 }
 
-function failSkillsCommand(message: string, jsonMode: boolean): void {
-  if (jsonMode) {
-    printJson({ success: false, error: message });
-  } else {
-    log.error(message);
-  }
-  process.exitCode = 1;
-}
-
-function hasHelpFlag(args: readonly string[]): boolean {
-  return args.includes("--help") || args.includes("-h");
-}
-
-function printJson(result: SkillsJsonResult): void {
-  console.log(JSON.stringify(result));
-}
-
-function printContent(content: string): void {
-  process.stdout.write(content);
-  if (!content.endsWith("\n")) {
-    process.stdout.write("\n");
-  }
+function withTrailingNewline(content: string): string {
+  return content.endsWith("\n") ? content : `${content}\n`;
 }
 
 function truncateDescription(description: string, maxLength: number): string {
