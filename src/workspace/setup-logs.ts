@@ -2,6 +2,10 @@ import { once } from "node:events";
 import { createWriteStream, promises as fs, type WriteStream } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "../utils/path-safety.ts";
 import { ensureWorkspaceMetadataDir } from "./metadata.ts";
 import type { RepoPipelineState } from "./pipeline.ts";
 
@@ -18,7 +22,11 @@ export async function getRepoSetupLogPath({
   repoName,
 }: Pick<RepoSetupLogOptions, "workspaceDir" | "repoName">): Promise<string> {
   const metadataDir = await ensureWorkspaceMetadataDir(workspaceDir);
-  return path.join(metadataDir, "logs", `${sanitizeLogName(repoName)}.log`);
+  const safeName = validateResourceName(
+    sanitizeLogName(repoName),
+    "Repository log name",
+  );
+  return resolveContainedPath(metadataDir, "logs", `${safeName}.log`);
 }
 
 export async function startRepoSetupLog(
@@ -86,8 +94,15 @@ class RepoSetupLogWriter {
   }
 }
 
-export async function removeRepoSetupLog(logPath: string): Promise<void> {
-  await fs.rm(logPath, { force: true });
+export async function removeRepoSetupLog(
+  workspaceDir: string,
+  logPath: string,
+): Promise<void> {
+  const safeLogPath = resolveContainedPath(
+    workspaceDir,
+    path.relative(path.resolve(workspaceDir), path.resolve(logPath)),
+  );
+  await fs.rm(safeLogPath, { force: true });
 }
 
 export async function readRepoSetupLogExcerpt({
@@ -158,7 +173,7 @@ export async function* withRepoSetupLog(
   } finally {
     await logWriter.close();
     if (!shouldKeepLog) {
-      await removeRepoSetupLog(logPath);
+      await removeRepoSetupLog(options.workspaceDir, logPath);
     }
   }
 }

@@ -308,4 +308,165 @@ describe("workspace metadata", () => {
       ],
     });
   });
+
+  it.each([
+    [
+      "repository name",
+      (metadata: UnsafeMetadata) => {
+        firstRepo(metadata).name = "..";
+      },
+    ],
+    [
+      "temporary worktree path",
+      (metadata: UnsafeMetadata) => {
+        firstTemporaryWorktree(metadata).path = "../outside";
+      },
+    ],
+    [
+      "temporary parent repository",
+      (metadata: UnsafeMetadata) => {
+        firstTemporaryWorktree(metadata).parent_repo = "..";
+      },
+    ],
+    [
+      "temporary setup log",
+      (metadata: UnsafeMetadata) => {
+        firstTemporaryWorktree(metadata).setup_log = "..\\sentinel.txt";
+      },
+    ],
+    [
+      "review worktree path",
+      (metadata: UnsafeMetadata) => {
+        firstReviewWorktree(metadata).path = "/tmp/outside";
+      },
+    ],
+  ])("rejects an unsafe persisted %s", async (_label, mutate) => {
+    const workspaceDir = await createWorkspaceDir();
+    const metadata = createUnsafeMetadataFixture();
+    mutate(metadata);
+    await mkdir(path.join(workspaceDir, ".workforest"));
+    await writeFile(
+      path.join(workspaceDir, ".workforest", "workspace.json"),
+      JSON.stringify(metadata),
+      "utf8",
+    );
+
+    await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow();
+  });
+
+  it("rejects unsafe values through metadata write APIs", async () => {
+    const workspaceDir = await createWorkspaceDir();
+
+    await expect(
+      writeWorkspaceMetadata(workspaceDir, {
+        featureName: "../outside",
+        repos: [],
+      }),
+    ).rejects.toThrow("Workspace feature name");
+
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "safe",
+      repos: [],
+    });
+    await expect(
+      appendWorkspaceRepos(workspaceDir, [
+        {
+          name: "..",
+          remote: "git@github.com:vercel/front.git",
+          default_branch: "main",
+          has_lockfile: false,
+        },
+      ]),
+    ).rejects.toThrow("Repository name");
+  });
 });
+
+type UnsafeMetadata = {
+  workspace: {
+    version: string;
+    created_at: string;
+    feature_name: string;
+  };
+  repos: Array<{
+    name: string;
+    remote: string;
+    default_branch: string;
+    has_lockfile: boolean;
+  }>;
+  temporary_worktrees?: Array<{
+    slug: string;
+    parent_repo: string;
+    path: string;
+    branch: string;
+    base_branch: string;
+    base_sha: string;
+    created_at: string;
+    setup_status: "ready";
+    setup_log?: string;
+  }>;
+  review_worktrees?: Array<{
+    pr_number: number;
+    path: string;
+    created_at: string;
+  }>;
+};
+
+function createUnsafeMetadataFixture(): UnsafeMetadata {
+  return {
+    workspace: {
+      version: "1",
+      created_at: "2026-05-15T00:00:00.000Z",
+      feature_name: "safe",
+    },
+    repos: [
+      {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        default_branch: "main",
+        has_lockfile: true,
+      },
+    ],
+    temporary_worktrees: [
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "fix-tests",
+        branch: "tomdale/fix-tests",
+        base_branch: "main",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+        setup_log: ".workforest/logs/front-fix-tests.log",
+      },
+    ],
+    review_worktrees: [
+      {
+        pr_number: 123,
+        path: "pr-123",
+        created_at: "2026-05-15T00:00:00.000Z",
+      },
+    ],
+  };
+}
+
+function firstRepo(metadata: UnsafeMetadata): UnsafeMetadata["repos"][number] {
+  const repo = metadata.repos[0];
+  if (!repo) throw new Error("Missing repository fixture.");
+  return repo;
+}
+
+function firstTemporaryWorktree(
+  metadata: UnsafeMetadata,
+): NonNullable<UnsafeMetadata["temporary_worktrees"]>[number] {
+  const worktree = metadata.temporary_worktrees?.[0];
+  if (!worktree) throw new Error("Missing temporary worktree fixture.");
+  return worktree;
+}
+
+function firstReviewWorktree(
+  metadata: UnsafeMetadata,
+): NonNullable<UnsafeMetadata["review_worktrees"]>[number] {
+  const worktree = metadata.review_worktrees?.[0];
+  if (!worktree) throw new Error("Missing review worktree fixture.");
+  return worktree;
+}

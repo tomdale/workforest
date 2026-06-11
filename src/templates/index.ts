@@ -2,9 +2,15 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import type { TemplateConfig } from "../types.ts";
 import { normalizeBranchPrefix } from "../utils/branch-prefix.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "../utils/path-safety.ts";
+import { isSlug } from "../utils/slug.ts";
 
 const XDG_TEMPLATES_DIR = "workforest/templates";
 const TEMPLATE_FILENAME_JSONC = "template.jsonc";
@@ -52,12 +58,13 @@ export async function listTemplates(): Promise<Template[]> {
 export async function loadTemplate(
   templateId: string,
 ): Promise<Template | null> {
+  validateTemplateName(templateId);
   const templatesDir = getTemplatesDir();
-  const templateDir = path.join(templatesDir, templateId);
+  const templateDir = resolveContainedPath(templatesDir, templateId);
 
   // Try .jsonc first, then fall back to .json for backwards compatibility
-  const jsoncPath = path.join(templateDir, TEMPLATE_FILENAME_JSONC);
-  const jsonPath = path.join(templateDir, TEMPLATE_FILENAME_JSON);
+  const jsoncPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSONC);
+  const jsonPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSON);
 
   let templatePath: string;
   if (await pathExists(jsoncPath)) {
@@ -77,6 +84,7 @@ export async function loadTemplate(
         `Invalid template config at ${templatePath}: missing required fields`,
       );
     }
+    validateTemplateConfigPaths(parsed);
 
     return {
       id: templateId,
@@ -95,9 +103,14 @@ export async function createTemplate(
   templateId: string,
   config: TemplateConfig,
 ): Promise<void> {
+  validateTemplateName(templateId);
+  validateTemplateConfigPaths(config);
   const templatesDir = getTemplatesDir();
-  const templateDir = path.join(templatesDir, templateId);
-  const templatePath = path.join(templateDir, TEMPLATE_FILENAME_JSONC);
+  const templateDir = resolveContainedPath(templatesDir, templateId);
+  const templatePath = resolveContainedPath(
+    templateDir,
+    TEMPLATE_FILENAME_JSONC,
+  );
 
   await ensureDir(templateDir);
 
@@ -105,7 +118,7 @@ export async function createTemplate(
   await fs.writeFile(templatePath, contents, "utf8");
 
   // Remove old .json file if it exists (migration to .jsonc)
-  const oldJsonPath = path.join(templateDir, TEMPLATE_FILENAME_JSON);
+  const oldJsonPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSON);
   if (await pathExists(oldJsonPath)) {
     await fs.unlink(oldJsonPath);
   }
@@ -199,8 +212,9 @@ function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
 }
 
 export async function deleteTemplate(templateId: string): Promise<void> {
+  validateTemplateName(templateId);
   const templatesDir = getTemplatesDir();
-  const templateDir = path.join(templatesDir, templateId);
+  const templateDir = resolveContainedPath(templatesDir, templateId);
 
   const exists = await pathExists(templateDir);
   if (!exists) {
@@ -208,6 +222,33 @@ export async function deleteTemplate(templateId: string): Promise<void> {
   }
 
   await fs.rm(templateDir, { recursive: true, force: true });
+}
+
+export function validateTemplateName(templateId: string): string {
+  validateResourceName(templateId, "Template name");
+  if (!isSlug(templateId)) {
+    throw new Error(
+      "Template name must be lowercase words separated by single hyphens.",
+    );
+  }
+  return templateId;
+}
+
+function validateTemplateConfigPaths(config: TemplateConfig): void {
+  for (const hook of config.hooks ?? []) {
+    const hookDirs = hook.in
+      ? Array.isArray(hook.in)
+        ? hook.in
+        : [hook.in]
+      : [];
+    for (const hookDir of hookDirs) {
+      validateRepositoryComponent(hookDir, `Hook "${hook.name}" repository`);
+    }
+
+    if (hook.if?.fileExists) {
+      resolveContainedPath("/workforest-hook-root", hook.if.fileExists);
+    }
+  }
 }
 
 function isValidTemplateConfig(value: unknown): value is TemplateConfig {

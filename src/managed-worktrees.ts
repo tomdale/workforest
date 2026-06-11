@@ -4,6 +4,7 @@ import { hasAny } from "@wf-plugin/core";
 import { getCacheDir, reposFromSlugs } from "./config.ts";
 import { log } from "./logger.ts";
 import { normalizeRemote, resolveMirrorDir } from "./repositories.ts";
+import { validateRepositoryComponent } from "./repository-components.ts";
 import { runGit } from "./services/git.ts";
 import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
 import {
@@ -14,6 +15,10 @@ import type { Template } from "./templates/index.ts";
 import type { RepoConfig } from "./types.ts";
 import { buildBranchName } from "./utils/branch-prefix.ts";
 import { pathExists } from "./utils/fs.ts";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "./utils/path-safety.ts";
 import { isSlug } from "./utils/slug.ts";
 import {
   addReposToWorkspace,
@@ -164,7 +169,9 @@ export async function createManagedWorktree({
     );
   }
 
-  const targetDir = path.join(path.resolve(defaultDir), repo.name, name);
+  const repoName = validateRepositoryComponent(repo.name, "Repository name");
+  validateResourceName(name, "Worktree name");
+  const targetDir = resolveContainedPath(defaultDir, repoName, name);
   const branchName = buildBranchName(name, branchPrefix);
   if (dryRun) {
     return {
@@ -291,11 +298,13 @@ export async function promoteManagedWorktree({
 }: PromoteManagedWorktreeOptions): Promise<PromoteManagedWorktreeResult> {
   await validatePromotionSource(context);
 
-  const workspaceDir = path.join(
-    path.resolve(defaultDir),
+  validateRepositoryComponent(context.repo.name, "Repository name");
+  const workspaceName = validateResourceName(
     `${dirPrefix}${context.name}`,
+    "Workspace name",
   );
-  const repoDir = path.join(workspaceDir, context.repo.name);
+  const workspaceDir = resolveContainedPath(defaultDir, workspaceName);
+  const repoDir = resolveContainedPath(workspaceDir, context.repo.name);
   if (await pathExists(workspaceDir)) {
     throw new Error(`Promotion destination already exists: ${workspaceDir}`);
   }

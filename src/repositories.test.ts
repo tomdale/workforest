@@ -250,4 +250,32 @@ describe("cached repository inventory", () => {
       deleteCachedRepository(repository, { force: true }),
     ).resolves.toMatchObject({ deleted: true });
   });
+
+  it("refuses to delete a mirror outside the cache root", async () => {
+    await createCacheDir();
+    const outsideDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-outside-mirror-"),
+    );
+    tempDirs.push(outsideDir);
+    const sentinel = path.join(outsideDir, "sentinel.txt");
+    await writeFile(sentinel, "keep\n", "utf8");
+
+    await expect(
+      deleteCachedRepository({
+        name: "outside",
+        slug: null,
+        remote: null,
+        mirrorPath: outsideDir,
+        directoryName: "outside.git",
+        defaultBranch: null,
+        sizeBytes: 0,
+        lastFetchedAt: null,
+        worktrees: [],
+        health: "invalid",
+        issues: [],
+      }),
+    ).rejects.toThrow("Path escapes");
+
+    await expect(stat(sentinel)).resolves.toBeDefined();
+  });
 });

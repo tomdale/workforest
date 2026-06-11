@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { validateRepositoryComponent } from "./repository-components.ts";
 import type {
   RepoConfig,
   ResolvedWorkspaceConfig,
@@ -382,9 +383,19 @@ function parseRepoSlug(token: string): RepoSlug | null {
 
   const parts = trimmed.split("/");
   if (parts.length !== 2) return null;
-  const [org, repo] = parts.map((part) => part.trim());
-  if (!org || !repo) return null;
-  return { org, repo, slug: `${org}/${repo}` };
+  try {
+    const org = validateRepositoryComponent(
+      parts[0]?.trim() ?? "",
+      "Repository owner",
+    );
+    const repo = validateRepositoryComponent(
+      parts[1]?.trim() ?? "",
+      "Repository name",
+    );
+    return { org, repo, slug: `${org}/${repo}` };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -421,9 +432,23 @@ function parseGitUrl(token: string): ParsedGitUrl | null {
   if (!repoPath) return null;
 
   // Extract repo name from path (last component, without .git)
-  const pathParts = repoPath.replace(/\.git$/i, "").split("/");
-  const name = pathParts[pathParts.length - 1];
-
+  let pathParts: string[];
+  try {
+    pathParts = repoPath
+      .replace(/\.git$/i, "")
+      .split("/")
+      .map((part) => decodeURIComponent(part));
+    if (pathParts.length < 2) return null;
+    for (const [index, part] of pathParts.entries()) {
+      validateRepositoryComponent(
+        part,
+        index === pathParts.length - 1 ? "Repository name" : "Repository owner",
+      );
+    }
+  } catch {
+    return null;
+  }
+  const name = pathParts.at(-1);
   if (!name) return null;
 
   // Normalize remote to include .git suffix for consistency

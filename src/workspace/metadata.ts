@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import type {
   ReviewWorktreeMetadata,
   TemporaryWorktreeMetadata,
@@ -9,6 +10,10 @@ import type {
   WorkspaceRepoMetadata,
 } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "../utils/path-safety.ts";
 
 const METADATA_FILENAME = ".workforest";
 const WORKSPACE_METADATA_FILENAME = "workspace.json";
@@ -219,25 +224,24 @@ export async function readWorkspaceMetadata(
 
   const contents = await fs.readFile(metadataPath, "utf8");
 
-  // Try JSON first (current format)
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(contents);
-    return parsed as WorkspaceMetadata;
+    parsed = JSON.parse(contents);
   } catch {
     // Not valid JSON, try TOML (legacy format)
-  }
+    if (looksLikeToml(contents)) {
+      throw new Error(
+        `Workspace metadata at ${metadataPath} appears to be in legacy TOML format. ` +
+          `Please convert it to JSON manually or recreate the workspace.`,
+      );
+    }
 
-  // Check if this looks like a TOML file (legacy format)
-  if (looksLikeToml(contents)) {
     throw new Error(
-      `Workspace metadata at ${metadataPath} appears to be in legacy TOML format. ` +
-        `Please convert it to JSON manually or recreate the workspace.`,
+      `Unable to parse workspace metadata at ${metadataPath}. Expected JSON format.`,
     );
   }
 
-  throw new Error(
-    `Unable to parse workspace metadata at ${metadataPath}. Expected JSON format.`,
-  );
+  return validateWorkspaceMetadata(parsed, workspaceDir, metadataPath);
 }
 
 /**
@@ -336,6 +340,7 @@ async function writeWorkspaceMetadataFile(
   workspaceDir: string,
   metadata: WorkspaceMetadata,
 ): Promise<void> {
+  validateWorkspaceMetadata(metadata, workspaceDir, "workspace metadata");
   const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
   const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
   const contents = `${JSON.stringify(metadata, null, 2)}\n`;
@@ -454,4 +459,200 @@ function looksLikeToml(content: string): boolean {
     return true;
   }
   return false;
+}
+
+function validateWorkspaceMetadata(
+  value: unknown,
+  workspaceDir: string,
+  source: string,
+): WorkspaceMetadata {
+  const metadata = requireRecord(value, source);
+  const workspace = requireRecord(metadata["workspace"], `${source}.workspace`);
+
+  requireString(workspace["version"], `${source}.workspace.version`);
+  requireString(workspace["created_at"], `${source}.workspace.created_at`);
+  validateResourceName(
+    requireString(
+      workspace["feature_name"],
+      `${source}.workspace.feature_name`,
+    ),
+    "Workspace feature name",
+  );
+  optionalString(workspace["description"], `${source}.workspace.description`);
+  const templateId = optionalString(
+    workspace["template_id"],
+    `${source}.workspace.template_id`,
+  );
+  if (templateId !== undefined) {
+    validateResourceName(templateId, "Template name");
+  }
+
+  if (workspace["type"] !== undefined && workspace["type"] !== "review") {
+    throw new Error(`${source}.workspace.type must be "review".`);
+  }
+  if (workspace["review"] !== undefined) {
+    const review = requireRecord(
+      workspace["review"],
+      `${source}.workspace.review`,
+    );
+    validateRepositoryComponent(
+      requireString(review["owner"], `${source}.workspace.review.owner`),
+      "Repository owner",
+    );
+    validateRepositoryComponent(
+      requireString(review["repo"], `${source}.workspace.review.repo`),
+      "Repository name",
+    );
+  }
+
+  const repos = requireArray(metadata["repos"], `${source}.repos`);
+  for (const [index, entry] of repos.entries()) {
+    validateWorkspaceRepoMetadata(entry, `${source}.repos[${index}]`);
+  }
+
+  if (metadata["temporary_worktrees"] !== undefined) {
+    const worktrees = requireArray(
+      metadata["temporary_worktrees"],
+      `${source}.temporary_worktrees`,
+    );
+    for (const [index, entry] of worktrees.entries()) {
+      validateTemporaryWorktreeMetadata(
+        entry,
+        workspaceDir,
+        `${source}.temporary_worktrees[${index}]`,
+      );
+    }
+  }
+
+  if (metadata["review_worktrees"] !== undefined) {
+    const worktrees = requireArray(
+      metadata["review_worktrees"],
+      `${source}.review_worktrees`,
+    );
+    for (const [index, entry] of worktrees.entries()) {
+      validateReviewWorktreeMetadata(
+        entry,
+        workspaceDir,
+        `${source}.review_worktrees[${index}]`,
+      );
+    }
+  }
+
+  return value as WorkspaceMetadata;
+}
+
+function validateWorkspaceRepoMetadata(value: unknown, source: string): void {
+  const repo = requireRecord(value, source);
+  validateRepositoryComponent(
+    requireString(repo["name"], `${source}.name`),
+    "Repository name",
+  );
+  requireString(repo["remote"], `${source}.remote`);
+  requireString(repo["default_branch"], `${source}.default_branch`);
+  requireBoolean(repo["has_lockfile"], `${source}.has_lockfile`);
+  optionalString(repo["feature_branch"], `${source}.feature_branch`);
+}
+
+function validateTemporaryWorktreeMetadata(
+  value: unknown,
+  workspaceDir: string,
+  source: string,
+): void {
+  const worktree = requireRecord(value, source);
+  validateResourceName(
+    requireString(worktree["slug"], `${source}.slug`),
+    "Task name",
+  );
+  validateRepositoryComponent(
+    requireString(worktree["parent_repo"], `${source}.parent_repo`),
+    "Repository name",
+  );
+  validateMetadataPath(
+    workspaceDir,
+    requireString(worktree["path"], `${source}.path`),
+    `${source}.path`,
+  );
+  requireString(worktree["branch"], `${source}.branch`);
+  requireString(worktree["base_branch"], `${source}.base_branch`);
+  requireString(worktree["base_sha"], `${source}.base_sha`);
+  requireString(worktree["created_at"], `${source}.created_at`);
+  if (
+    worktree["setup_status"] !== "ready" &&
+    worktree["setup_status"] !== "failed"
+  ) {
+    throw new Error(`${source}.setup_status must be "ready" or "failed".`);
+  }
+  const setupLog = optionalString(worktree["setup_log"], `${source}.setup_log`);
+  if (setupLog !== undefined) {
+    validateMetadataPath(workspaceDir, setupLog, `${source}.setup_log`);
+  }
+}
+
+function validateReviewWorktreeMetadata(
+  value: unknown,
+  workspaceDir: string,
+  source: string,
+): void {
+  const worktree = requireRecord(value, source);
+  const prNumber = worktree["pr_number"];
+  if (!Number.isSafeInteger(prNumber) || (prNumber as number) < 1) {
+    throw new Error(`${source}.pr_number must be a positive integer.`);
+  }
+  validateMetadataPath(
+    workspaceDir,
+    requireString(worktree["path"], `${source}.path`),
+    `${source}.path`,
+  );
+  optionalString(worktree["branch"], `${source}.branch`);
+  requireString(worktree["created_at"], `${source}.created_at`);
+}
+
+function validateMetadataPath(
+  workspaceDir: string,
+  value: string,
+  source: string,
+): void {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolved = resolveContainedPath(resolvedWorkspaceDir, value);
+  if (resolved === resolvedWorkspaceDir) {
+    throw new Error(`${source} must identify a path inside the workspace.`);
+  }
+}
+
+function requireRecord(
+  value: unknown,
+  source: string,
+): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${source} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown, source: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${source} must be an array.`);
+  }
+  return value;
+}
+
+function requireString(value: unknown, source: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${source} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function optionalString(value: unknown, source: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return requireString(value, source);
+}
+
+function requireBoolean(value: unknown, source: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${source} must be a boolean.`);
+  }
+  return value;
 }

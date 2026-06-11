@@ -251,6 +251,25 @@ describe("managed single-repository worktrees", { timeout: 20_000 }, () => {
     ).rejects.toThrow('Repository name "api" refers to multiple remotes');
   });
 
+  it("rejects a promotion prefix that escapes defaultDir", async () => {
+    const fixture = await createManagedFixture();
+    const context = requireManagedContext(
+      await resolveManagedWorktreeContext({
+        cwd: fixture.checkoutDir,
+        defaultDir: fixture.defaultDir,
+      }),
+    );
+
+    await expect(
+      promoteManagedWorktree({
+        context,
+        defaultDir: fixture.defaultDir,
+        dirPrefix: "../",
+        dryRun: true,
+      }),
+    ).rejects.toThrow("Workspace name");
+  });
+
   it("applies template files and hooks after promotion", async () => {
     const fixture = await createManagedFixture();
     const templateDir = path.join(fixture.rootDir, "template");

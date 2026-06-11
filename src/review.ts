@@ -3,11 +3,13 @@ import path from "node:path";
 import { getCacheDir } from "./config.ts";
 import { log } from "./logger.ts";
 import { resolveMirrorDir } from "./repositories.ts";
+import { validateRepositoryComponent } from "./repository-components.ts";
 import { runGit } from "./services/git.ts";
 import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
 import type { RepoConfig } from "./types.ts";
 import { runCommand } from "./utils/exec.ts";
 import { ensureDir, pathExists } from "./utils/fs.ts";
+import { resolveContainedPath } from "./utils/path-safety.ts";
 import {
   readWorkspaceMetadata,
   removeReviewWorktreeMetadata,
@@ -114,6 +116,7 @@ export async function createReviewWorktree({
   target,
   reviewsDir,
 }: CreateReviewWorktreeOptions): Promise<ReviewMetadata> {
+  validateReviewTarget(target);
   const repo = targetToRepoConfig(target);
   const cacheDir = getCacheDir();
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
@@ -177,11 +180,12 @@ export async function ensureReviewWorkspace({
   target,
   reviewsDir,
 }: EnsureReviewWorkspaceOptions): Promise<ReviewWorkspace> {
+  validateReviewRepoTarget(target);
   const repo = targetToRepoConfig(target);
   const cacheDir = getCacheDir();
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
   const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
-  const repoDir = path.join(workspaceDir, target.repo);
+  const repoDir = resolveContainedPath(workspaceDir, target.repo);
 
   await ensureDir(workspaceDir);
 
@@ -302,21 +306,21 @@ export async function listReviewWorktrees(
   }
 
   const repoDirs = repo
-    ? [repo]
+    ? [validateRepositoryComponent(repo, "Repository name")]
     : (await fs.readdir(resolvedReviewsDir, { withFileTypes: true }))
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name);
 
   const entries: ReviewListEntry[] = [];
   for (const repoName of repoDirs) {
-    const workspaceDir = path.join(resolvedReviewsDir, repoName);
+    const workspaceDir = resolveContainedPath(resolvedReviewsDir, repoName);
     const metadata = await readWorkspaceMetadata(workspaceDir);
     if (!metadata?.workspace.review) {
       continue;
     }
 
     for (const worktree of metadata.review_worktrees ?? []) {
-      const absolutePath = path.join(workspaceDir, worktree.path);
+      const absolutePath = resolveContainedPath(workspaceDir, worktree.path);
       entries.push({
         owner: metadata.workspace.review.owner,
         repo: metadata.workspace.review.repo,
@@ -341,6 +345,7 @@ export async function removeReviewWorktree({
   dryRun = false,
   force = false,
 }: RemoveReviewWorktreeOptions): Promise<RemoveReviewWorktreeResult> {
+  validateReviewTarget(target);
   const targetDir = getReviewWorktreePath(reviewsDir, target);
   const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
   const metadata = await readReviewWorktreeMetadata(workspaceDir, target);
@@ -451,11 +456,10 @@ function parseRepoSlug(input: string): Pick<ReviewTarget, "owner" | "repo"> {
 }
 
 function validateRepoPart(value: string, label: "owner" | "repo"): string {
-  const trimmed = value.trim().replace(/\.git$/i, "");
-  if (!/^[A-Za-z0-9_.-]+$/.test(trimmed)) {
-    throw new Error(`Invalid GitHub ${label}: ${value}`);
-  }
-  return trimmed;
+  return validateRepositoryComponent(
+    value.trim().replace(/\.git$/i, ""),
+    label === "owner" ? "GitHub owner" : "GitHub repository",
+  );
 }
 
 function parsePrNumber(input: string): number {
@@ -544,14 +548,17 @@ async function deleteBranchIfPossible(
 }
 
 function getRepoReviewsDir(reviewsDir: string, repo: string): string {
-  return path.join(path.resolve(reviewsDir), repo);
+  return resolveContainedPath(
+    path.resolve(reviewsDir),
+    validateRepositoryComponent(repo, "Repository name"),
+  );
 }
 
 function getReviewWorktreePath(
   reviewsDir: string,
   target: ReviewTarget,
 ): string {
-  return path.join(
+  return resolveContainedPath(
     getRepoReviewsDir(reviewsDir, target.repo),
     `pr-${target.prNumber}`,
   );
@@ -573,8 +580,20 @@ async function readReviewWorktreeMetadata(
     owner: metadata.workspace.review.owner,
     repo: metadata.workspace.review.repo,
     prNumber: worktree.pr_number,
-    path: path.join(workspaceDir, worktree.path),
+    path: resolveContainedPath(workspaceDir, worktree.path),
     ...(worktree.branch ? { branch: worktree.branch } : {}),
     created_at: worktree.created_at,
   };
+}
+
+function validateReviewRepoTarget(target: ReviewRepoTarget): void {
+  validateRepositoryComponent(target.owner, "GitHub owner");
+  validateRepositoryComponent(target.repo, "GitHub repository");
+}
+
+function validateReviewTarget(target: ReviewTarget): void {
+  validateReviewRepoTarget(target);
+  if (!Number.isSafeInteger(target.prNumber) || target.prNumber < 1) {
+    throw new Error(`Invalid pull request number: ${target.prNumber}`);
+  }
 }

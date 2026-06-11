@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createTemplate, loadTemplate } from "./index.ts";
+import { createTemplate, deleteTemplate, loadTemplate } from "./index.ts";
 
 const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 
@@ -93,5 +93,48 @@ describe("templates", () => {
 
     expect(contents).toContain('"branchPrefix": ""');
     expect(template?.config.branchPrefix).toBe("");
+  });
+
+  it.each([
+    ".",
+    "..",
+    "../outside",
+    "..\\outside",
+    "/absolute",
+    "C:\\tmp",
+  ])("rejects unsafe template names %j", async (templateId) => {
+    await createTemplatesHome();
+
+    await expect(loadTemplate(templateId)).rejects.toThrow();
+    await expect(
+      createTemplate(templateId, { repos: ["vercel/front"] }),
+    ).rejects.toThrow();
+    await expect(deleteTemplate(templateId)).rejects.toThrow();
+  });
+
+  it("does not delete outside the templates root", async () => {
+    const configHome = await createTemplatesHome();
+    const sentinel = path.join(configHome, "sentinel.txt");
+    await writeFile(sentinel, "keep\n", "utf8");
+
+    await expect(deleteTemplate("../../sentinel.txt")).rejects.toThrow();
+
+    await expect(readFile(sentinel, "utf8")).resolves.toBe("keep\n");
+  });
+
+  it.each([
+    { in: "../outside" },
+    { in: "owner/repo" },
+    { if: { fileExists: "../outside" } },
+    { if: { fileExists: "C:\\outside" } },
+  ])("rejects escaping template hook paths %j", async (hook) => {
+    await createTemplatesHome();
+
+    await expect(
+      createTemplate("demo", {
+        repos: ["vercel/front"],
+        hooks: [{ name: "unsafe", run: "true", ...hook }],
+      }),
+    ).rejects.toThrow();
   });
 });

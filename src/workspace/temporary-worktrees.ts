@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { log } from "../logger.ts";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import { runGit } from "../services/git.ts";
 import {
   runSingleRepoInitializersGenerator,
@@ -14,6 +15,10 @@ import type {
 } from "../types.ts";
 import { buildBranchName } from "../utils/branch-prefix.ts";
 import { pathExists } from "../utils/fs.ts";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "../utils/path-safety.ts";
 import { isSlug } from "../utils/slug.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
@@ -100,7 +105,11 @@ export async function createTemporaryWorktrees({
   disabledInitializers,
 }: CreateTemporaryWorktreesOptions): Promise<CreateTemporaryWorktreesResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const repoDir = path.join(resolvedWorkspaceDir, parentRepo.name);
+  const parentRepoName = validateRepositoryComponent(
+    parentRepo.name,
+    "Repository name",
+  );
+  const repoDir = resolveContainedPath(resolvedWorkspaceDir, parentRepoName);
   const resolvedSourceRepoDir = sourceRepoDir
     ? path.resolve(sourceRepoDir)
     : repoDir;
@@ -132,7 +141,7 @@ export async function createTemporaryWorktrees({
       created: planned.map((entry) => ({
         slug: entry.slug,
         parentRepo: entry.parent_repo,
-        path: path.join(resolvedWorkspaceDir, entry.path),
+        path: resolveContainedPath(resolvedWorkspaceDir, entry.path),
         branch: entry.branch,
         setupStatus: entry.setup_status,
       })),
@@ -192,6 +201,9 @@ export async function listTemporaryWorktrees(
 ): Promise<TemporaryWorktreeListEntry[]> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
+  if (parentRepoName) {
+    validateRepositoryComponent(parentRepoName, "Repository name");
+  }
   const entries = (metadata.temporary_worktrees ?? []).filter((entry) =>
     parentRepoName ? entry.parent_repo === parentRepoName : true,
   );
@@ -199,7 +211,7 @@ export async function listTemporaryWorktrees(
   const listed: TemporaryWorktreeListEntry[] = [];
 
   for (const entry of entries) {
-    const absolutePath = path.join(resolvedWorkspaceDir, entry.path);
+    const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.path);
     const exists = await pathExists(absolutePath);
     const merged = exists
       ? await isTemporaryBranchMerged(resolvedWorkspaceDir, entry)
@@ -226,6 +238,9 @@ export async function removeTemporaryWorktrees({
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
   validateRequestedSlugs(slugs);
+  if (parentRepoName) {
+    validateRepositoryComponent(parentRepoName, "Repository name");
+  }
 
   const targets = resolveRemovalTargets(
     metadata.temporary_worktrees ?? [],
@@ -240,8 +255,11 @@ export async function removeTemporaryWorktrees({
   const removed: TemporaryWorktreeMetadata[] = [];
 
   for (const entry of targets) {
-    const absolutePath = path.join(resolvedWorkspaceDir, entry.path);
-    const parentRepoDir = path.join(resolvedWorkspaceDir, entry.parent_repo);
+    const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.path);
+    const parentRepoDir = resolveContainedPath(
+      resolvedWorkspaceDir,
+      entry.parent_repo,
+    );
     const exists = await pathExists(absolutePath);
 
     if (!exists) {
@@ -273,7 +291,7 @@ export async function removeTemporaryWorktrees({
     await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
 
     if (entry.setup_log) {
-      await fs.rm(path.join(resolvedWorkspaceDir, entry.setup_log), {
+      await fs.rm(resolveContainedPath(resolvedWorkspaceDir, entry.setup_log), {
         force: true,
       });
     }
@@ -301,7 +319,7 @@ async function* createAndSetupTemporaryWorktree({
   entry: TemporaryWorktreeMetadata;
   disabledInitializers?: boolean | string[];
 }): AsyncGenerator<CreateTaskState> {
-  const targetDir = path.join(workspaceDir, entry.path);
+  const targetDir = resolveContainedPath(workspaceDir, entry.path);
 
   try {
     log.info(
@@ -387,7 +405,7 @@ async function runTemporaryWorktreeInitializers({
   }
 
   if (!failed) {
-    await removeRepoSetupLog(logPath);
+    await removeRepoSetupLog(workspaceDir, logPath);
     return { status: "ready" };
   }
 
@@ -447,13 +465,16 @@ async function planTemporaryWorktrees({
   branchPrefix?: string;
 }): Promise<TemporaryWorktreeMetadata[]> {
   const existingEntries = metadata.temporary_worktrees ?? [];
-  const parentRepoDir = path.join(workspaceDir, parentRepo.name);
+  const parentRepoDir = resolveContainedPath(
+    workspaceDir,
+    validateRepositoryComponent(parentRepo.name, "Repository name"),
+  );
   const existingSlugs = new Set(existingEntries.map((entry) => entry.slug));
   const planned: TemporaryWorktreeMetadata[] = [];
 
   for (const slug of slugs) {
     const relativePath = slug;
-    const targetDir = path.join(workspaceDir, relativePath);
+    const targetDir = resolveContainedPath(workspaceDir, relativePath);
     const branch = buildTemporaryBranchName(baseBranch, slug, branchPrefix);
 
     if (existingSlugs.has(slug)) {
@@ -514,6 +535,7 @@ function validateRequestedSlugs(slugs: readonly string[]): void {
         `Invalid slug "${slug}". Slugs must be lowercase words separated by hyphens.`,
       );
     }
+    validateResourceName(slug, "Task name");
 
     if (seen.has(slug)) {
       throw new Error(`Duplicate worktree slug: ${slug}`);
@@ -605,7 +627,7 @@ async function isTemporaryBranchMerged(
   workspaceDir: string,
   entry: TemporaryWorktreeMetadata,
 ): Promise<boolean | null> {
-  const parentRepoDir = path.join(workspaceDir, entry.parent_repo);
+  const parentRepoDir = resolveContainedPath(workspaceDir, entry.parent_repo);
   try {
     await runGit(["merge-base", "--is-ancestor", entry.branch, "HEAD"], {
       cwd: parentRepoDir,

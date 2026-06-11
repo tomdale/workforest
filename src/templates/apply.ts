@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { runHook } from "../services/hooks.ts";
 import { pathExists } from "../utils/fs.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import type { Template } from "./index.ts";
 
@@ -22,7 +23,7 @@ export async function copyTemplateFiles(
   template: Template,
   workspaceDir: string,
 ): Promise<void> {
-  const templateFilesDir = path.join(
+  const templateFilesDir = resolveContainedPath(
     path.dirname(template.path),
     TEMPLATE_FILES_DIR,
   );
@@ -42,8 +43,8 @@ async function copyDirectoryContents(
 
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
-    const sourcePath = path.join(sourceDir, entry.name);
-    const targetPath = path.join(targetDir, entry.name);
+    const sourcePath = resolveContainedPath(sourceDir, entry.name);
+    const targetPath = resolveContainedPath(targetDir, entry.name);
 
     if (entry.isDirectory()) {
       await copyDirectoryContents(sourcePath, targetPath);
@@ -87,7 +88,9 @@ export async function* applyTemplateGenerator({
       : repoDirs;
 
     for (const dir of dirs) {
-      const hookCwd = dir ? path.join(workspaceDir, dir) : workspaceDir;
+      const hookCwd = dir
+        ? resolveContainedPath(workspaceDir, dir)
+        : path.resolve(workspaceDir);
 
       try {
         for await (const state of runHook(hook, workspaceDir, hookCwd)) {

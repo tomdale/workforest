@@ -2,9 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { log } from "../logger.ts";
 import { resolveMirrorDir } from "../repositories.ts";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import { runGit } from "../services/git.ts";
 import type { CleanupOptions, RepoConfig } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";
 import { hasWorkspaceMetadata, readWorkspaceMetadata } from "./metadata.ts";
@@ -137,7 +139,14 @@ export async function validateWorkspace(
     if (!parsed.folders || !Array.isArray(parsed.folders)) {
       throw new Error(`Invalid workspace file: missing folders array`);
     }
-    return parsed as { folders: Array<{ path: string }> };
+    return {
+      folders: parsed.folders.map((folder, index) => ({
+        path: validateRepositoryComponent(
+          folder.path,
+          `Workspace repository at folders[${index}]`,
+        ),
+      })),
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
@@ -172,7 +181,7 @@ export async function previewCleanup(
         continue;
       }
 
-      const repoDir = path.join(resolvedDir, repo.name);
+      const repoDir = resolveContainedPath(resolvedDir, repo.name);
       if (!(await pathExists(repoDir))) {
         continue;
       }
@@ -264,7 +273,7 @@ export async function* cleanupWorkspaceGenerator(
         continue;
       }
 
-      const repoDir = path.join(resolvedDir, repo.name);
+      const repoDir = resolveContainedPath(resolvedDir, repo.name);
       if (!(await pathExists(repoDir))) {
         continue;
       }
@@ -350,10 +359,11 @@ export async function* cleanupWorkspaceGenerator(
 
   // Remove worktrees from mirrors
   for (const repoName of repos) {
+    validateRepositoryComponent(repoName, "Repository name");
     const repo = repoConfigs.get(repoName);
     const mirrorDir = repo
       ? await resolveMirrorDir(repo, cacheDir)
-      : path.join(cacheDir, `${repoName}.git`);
+      : resolveContainedPath(cacheDir, `${repoName}.git`);
 
     // Check if mirror exists
     try {
@@ -433,10 +443,11 @@ export async function* cleanupWorkspaceGenerator(
     };
 
     for (const repoName of repos) {
+      validateRepositoryComponent(repoName, "Repository name");
       const repo = repoConfigs.get(repoName);
       const mirrorDir = repo
         ? await resolveMirrorDir(repo, cacheDir)
-        : path.join(cacheDir, `${repoName}.git`);
+        : resolveContainedPath(cacheDir, `${repoName}.git`);
 
       // Check if mirror exists
       try {

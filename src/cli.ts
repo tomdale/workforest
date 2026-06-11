@@ -32,6 +32,7 @@ import {
   getTemplatesDir,
   listTemplates,
   loadTemplate,
+  validateTemplateName,
 } from "./templates/index.ts";
 import {
   printReport,
@@ -65,6 +66,10 @@ import {
   resolveBranchPrefix,
 } from "./utils/branch-prefix.ts";
 import { pathExists } from "./utils/fs.ts";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "./utils/path-safety.ts";
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
@@ -1079,7 +1084,7 @@ async function runReviewRemove(
       context ?? undefined,
     );
     const reviewsDir = await resolveReviewsDir();
-    const targetDir = path.join(
+    const targetDir = resolveContainedPath(
       reviewsDir,
       target.repo,
       `pr-${target.prNumber}`,
@@ -1146,7 +1151,10 @@ async function qualifyReviewRepositorySpecifier(
   }
 
   const compact = target.match(/^([^#]+)(#.+)$/);
-  if (compact?.[1] && compact[2] && !isRepoSlug(compact[1])) {
+  if (compact?.[1] && compact[2]) {
+    if (isRepoSlug(compact[1])) {
+      return [target];
+    }
     const [qualified] = await qualifyRepositorySpecifiers([compact[1]]);
     return [`${qualified ?? compact[1]}${compact[2]}`];
   }
@@ -1459,7 +1467,10 @@ async function runManagedWorktreeRemove(
     return;
   }
   const name = names[0] ?? context.name;
-  const targetDir = path.join(context.familyDir, name);
+  const targetDir = resolveContainedPath(
+    context.familyDir,
+    validateResourceName(name, "Worktree name"),
+  );
 
   try {
     if (!args.skipConfirmation) {
@@ -1972,7 +1983,10 @@ async function runTemporaryWorktreeRemove(args: {
               details: [
                 { label: "Repository", value: entry.parent_repo },
                 { label: "Branch", value: entry.branch },
-                { label: "Path", value: path.join(workspaceDir, entry.path) },
+                {
+                  label: "Path",
+                  value: resolveContainedPath(workspaceDir, entry.path),
+                },
               ],
             })),
           },
@@ -2422,13 +2436,12 @@ async function runTemplateNew(argv: string[]): Promise<void> {
 
     templateId = await promptText("Template name", {
       validate: (input) => {
-        if (!input.trim()) {
-          return "Template name is required";
+        try {
+          validateTemplateName(input.trim());
+          return null;
+        } catch (error) {
+          return getErrorMessage(error);
         }
-        if (!/^[a-z0-9-]+$/.test(input.trim())) {
-          return "Template name must be lowercase alphanumeric with hyphens";
-        }
-        return null;
       },
     });
   }
@@ -2634,7 +2647,13 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       return;
     }
 
-    const candidateTemplate = await loadTemplate(firstInput);
+    let candidateTemplate: Awaited<ReturnType<typeof loadTemplate>> = null;
+    try {
+      validateTemplateName(firstInput);
+      candidateTemplate = await loadTemplate(firstInput);
+    } catch {
+      // The first argument is a workspace-relative source path, not a template.
+    }
     const candidatePath = path.resolve(firstInput);
     const candidateExists = await pathExists(candidatePath);
 
@@ -2822,7 +2841,7 @@ async function resolveTemplateAddFileEntries({
     return null;
   }
 
-  const targetPath = path.join(
+  const targetPath = resolveContainedPath(
     path.dirname(templatePath),
     "files",
     relativePath,
@@ -2864,8 +2883,14 @@ async function collectTemplateAddFileDirectoryEntries(
     });
 
     for (const child of children) {
-      const childSourcePath = path.join(currentSourceDir, child.name);
-      const childTargetPath = path.join(currentTargetDir, child.name);
+      const childSourcePath = resolveContainedPath(
+        currentSourceDir,
+        child.name,
+      );
+      const childTargetPath = resolveContainedPath(
+        currentTargetDir,
+        child.name,
+      );
       const childRelativePath = path.join(
         sourceRelativePath,
         path.relative(sourceDir, childSourcePath),
@@ -3259,7 +3284,7 @@ async function runDeleteCommand(argv: string[]): Promise<void> {
       cwd,
     });
     if (currentTemporaryWorktree) {
-      const worktreeDir = path.join(
+      const worktreeDir = resolveContainedPath(
         workspaceDir,
         currentTemporaryWorktree.path,
       );
@@ -3675,7 +3700,11 @@ async function runNewCommand(argv: string[]): Promise<void> {
     ? path.resolve(expandHome(config.defaultDir))
     : process.cwd();
   const prefix = config.dirPrefix ?? "";
-  const workspaceDir = path.resolve(workspaceRoot, `${prefix}${featureName}`);
+  const workspaceName = validateResourceName(
+    `${prefix}${featureName}`,
+    "Workspace name",
+  );
+  const workspaceDir = resolveContainedPath(workspaceRoot, workspaceName);
   const branchName = buildBranchName(
     featureName,
     resolveBranchPrefix(config.branchPrefix, templateBranchPrefix),
@@ -3996,9 +4025,13 @@ async function runForkCommand(argv: string[]): Promise<void> {
   const branchName = buildBranchName(featureName, branchPrefix);
 
   // Build new workspace as a sibling of the source
-  const workspaceDir = path.join(
-    path.dirname(sourceDir),
+  const workspaceName = validateResourceName(
     `${dirPrefix}${featureName}`,
+    "Workspace name",
+  );
+  const workspaceDir = resolveContainedPath(
+    path.dirname(sourceDir),
+    workspaceName,
   );
 
   const templateId = metadata.workspace.template_id;
@@ -4266,19 +4299,6 @@ function formatTemplateHint(
 }
 
 /**
- * Validate template name format (lowercase alphanumeric with hyphens).
- */
-function validateTemplateName(input: string): string | undefined {
-  if (!input.trim()) {
-    return "Template name is required";
-  }
-  if (!/^[a-z0-9-]+$/.test(input.trim())) {
-    return "Template name must be lowercase alphanumeric with hyphens";
-  }
-  return undefined;
-}
-
-/**
  * Interactive flow to create a new template.
  * Returns the new template ID if successful, null if cancelled.
  */
@@ -4286,7 +4306,14 @@ async function wizardCreateTemplate(): Promise<string | null> {
   try {
     const templateId = await promptText("Template name", {
       placeholder: "my-template",
-      validate: (input) => validateTemplateName(input) ?? null,
+      validate: (input) => {
+        try {
+          validateTemplateName(input.trim());
+          return null;
+        } catch (error) {
+          return getErrorMessage(error);
+        }
+      },
       throwOnCancel: true,
     });
 
@@ -4445,7 +4472,14 @@ async function wizardCloneLoadedTemplate(
 ): Promise<string | null> {
   const newTemplateId = await promptText("New template name", {
     placeholder: `${sourceTemplate.id}-copy`,
-    validate: (input) => validateTemplateName(input) ?? null,
+    validate: (input) => {
+      try {
+        validateTemplateName(input);
+        return null;
+      } catch (error) {
+        return getErrorMessage(error);
+      }
+    },
     throwOnCancel: true,
   });
 
@@ -4771,7 +4805,7 @@ function resolveWorkspaceRepoNameFromCwd({
   const resolvedCwd = path.resolve(cwd);
 
   for (const repo of metadata.repos) {
-    const repoDir = path.join(resolvedWorkspaceDir, repo.name);
+    const repoDir = resolveContainedPath(resolvedWorkspaceDir, repo.name);
     if (isPathInsideOrEqual(resolvedCwd, repoDir)) {
       return repo.name;
     }
@@ -4787,7 +4821,10 @@ function resolveWorkspaceRepoNameFromCwd({
 
   if (allowTemporaryWorktree) {
     for (const entry of metadata.temporary_worktrees ?? []) {
-      const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+      const worktreeDir = resolveContainedPath(
+        resolvedWorkspaceDir,
+        entry.path,
+      );
       if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
         return entry.parent_repo;
       }
@@ -4812,14 +4849,14 @@ function resolveWorktreeSourceDirFromCwd({
   const resolvedCwd = path.resolve(cwd);
 
   for (const entry of metadata.review_worktrees ?? []) {
-    const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+    const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
     if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
       return worktreeDir;
     }
   }
 
   for (const entry of metadata.temporary_worktrees ?? []) {
-    const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+    const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
     if (
       entry.parent_repo === parentRepoName &&
       isPathInsideOrEqual(resolvedCwd, worktreeDir)
@@ -4844,7 +4881,7 @@ function resolveTemporaryWorktreeFromCwd({
   const resolvedCwd = path.resolve(cwd);
 
   return (metadata.temporary_worktrees ?? []).find((entry) => {
-    const worktreeDir = path.join(resolvedWorkspaceDir, entry.path);
+    const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
     return isPathInsideOrEqual(resolvedCwd, worktreeDir);
   });
 }
@@ -4935,7 +4972,9 @@ async function getWorkspaceModifiedAt(
   let newestTime = workspaceModifiedAt.getTime();
   const paths = [
     getMetadataPath(workspaceDir),
-    ...repoNames.map((repoName) => path.join(workspaceDir, repoName)),
+    ...repoNames.map((repoName) =>
+      resolveContainedPath(workspaceDir, repoName),
+    ),
   ];
 
   for (const candidatePath of paths) {
@@ -5006,8 +5045,11 @@ async function resolveWorkspaceByName(name: string): Promise<string | null> {
   }
 
   for (const candidateName of candidateNames) {
-    const candidatePath = path.join(workspaceRoot, candidateName);
     try {
+      const candidatePath = resolveContainedPath(
+        workspaceRoot,
+        validateResourceName(candidateName, "Workspace name"),
+      );
       const stat = await fs.stat(candidatePath);
       if (!stat.isDirectory()) {
         continue;

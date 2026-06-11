@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadWorkspaceConfig, saveWorkspaceConfig } from "./config.ts";
+import {
+  isRepoSlug,
+  loadWorkspaceConfig,
+  reposFromSlugs,
+  saveWorkspaceConfig,
+} from "./config.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
 
@@ -158,5 +163,22 @@ describe("workspace config", () => {
     await expect(loadWorkspaceConfig()).rejects.toThrow(
       "config.json.vercelLink.teamByGitHubOwner.vercel must be a string.",
     );
+  });
+});
+
+describe("repository parsing", () => {
+  it.each([
+    "owner/.",
+    "owner/..",
+    "./repo",
+    "../repo",
+    "owner\\repo",
+    "https://github.com/owner/../repo.git",
+    "https://github.com/owner/%2e%2e.git",
+    "git@github.com:owner/../repo.git",
+    "git@github.com:owner/repo\\child.git",
+  ])("rejects unsafe repository input %j", (input) => {
+    expect(isRepoSlug(input)).toBe(false);
+    expect(() => reposFromSlugs([input])).toThrow("Invalid repository");
   });
 });

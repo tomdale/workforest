@@ -1,7 +1,7 @@
-import path from "node:path";
 import type { Hook } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import { getNodeVersionPrefix } from "../utils/node-version.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import {
   runCommandGenerator,
   type TaskGenerator,
@@ -22,7 +22,7 @@ export async function* runHook(
 
   // Check condition if present (relative to cwd)
   if (hook.if?.fileExists) {
-    const filePath = path.join(cwd, hook.if.fileExists);
+    const filePath = resolveContainedPath(cwd, hook.if.fileExists);
     const conditionMet = await pathExists(filePath);
     if (!conditionMet) {
       yield {

@@ -293,6 +293,31 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("rejects a configured directory prefix that escapes defaultDir", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const workspaceRoot = await createTempDir("workforest-root-");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir: workspaceRoot,
+      dirPrefix: "../",
+    });
+    process.argv = [
+      "node",
+      "wf",
+      "new",
+      "--dry-run",
+      "vercel/front",
+      "--",
+      "fix-auth",
+    ];
+
+    await expect(cli()).rejects.toThrow("Workspace name");
+    await expect(
+      stat(path.join(path.dirname(workspaceRoot), "fix-auth")),
+    ).rejects.toThrow();
+  });
+
   it("resolves an unqualified registered repository for wf new", async () => {
     const configDir = await createTempDir("workforest-config-");
     const cacheDir = await createTempDir("workforest-cache-");

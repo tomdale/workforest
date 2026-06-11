@@ -101,6 +101,11 @@ describe("parseReviewTarget", () => {
     [["https://example.com/vercel/omniagent/pull/123"]],
     [["https://github.com/vercel/omniagent/issues/123"]],
     [["vercel/not ok", "123"]],
+    [["./omniagent", "123"]],
+    [["../omniagent", "123"]],
+    [["vercel/.", "123"]],
+    [["vercel/..", "123"]],
+    [["vercel\\omniagent", "123"]],
   ])("rejects invalid target %j", async (args) => {
     const { parseReviewTarget } = await import("./review.ts");
     expect(() => parseReviewTarget(args)).toThrow();

@@ -4,9 +4,11 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import { applyTemplateGenerator } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
 import { readWorkspaceMetadata, updateWorkspaceRepo } from "./metadata.ts";
 import {
@@ -451,7 +453,10 @@ export async function runRepoInitializationWorker({
       {
         workspaceDir,
         repoName,
-        repoDir: path.join(workspaceDir, repoName),
+        repoDir: resolveContainedPath(
+          workspaceDir,
+          validateRepositoryComponent(repoName, "Repository name"),
+        ),
       },
     );
 
@@ -684,10 +689,11 @@ export function getRepoInitializationLogPath(
 }
 
 function getRepoStatePath(workspaceDir: string, repoName: string): string {
+  const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
   return path.join(
     getInitializationDir(workspaceDir),
     "repos",
-    `${encodeURIComponent(repoName)}.json`,
+    `${encodeURIComponent(safeRepoName)}.json`,
   );
 }
 

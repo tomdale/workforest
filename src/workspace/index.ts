@@ -4,6 +4,7 @@ import { hasAny } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveMirrorDir } from "../repositories.ts";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import { getGitHubSlug } from "../services/git.ts";
 import { fetchRepoDiskUsage } from "../services/github.ts";
 import {
@@ -23,6 +24,10 @@ import type { RepoConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
 import { note, withSpinner } from "../ui/prompts/index.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
+import {
+  resolveContainedPath,
+  validateResourceName,
+} from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
@@ -130,6 +135,7 @@ export async function* stampWorkspaceGenerator({
   repos,
   templateId,
 }: StampWorkspaceOptions): AsyncGenerator<WorkspaceState> {
+  validateResourceName(featureName, "Workspace name");
   if (repos.length === 0) {
     throw new Error(
       "stampWorkspaceGenerator requires at least one repository.",
@@ -176,17 +182,20 @@ export async function* stampWorkspaceGenerator({
   // Build repo info map
   const repoInfo = new Map(
     await Promise.all(
-      repos.map(
-        async (repo) =>
-          [
-            repo.name,
-            {
-              repo,
-              mirrorDir: await resolveMirrorDir(repo, cacheDir),
-              targetDir: path.join(workspaceDir, repo.name),
-            },
-          ] as const,
-      ),
+      repos.map(async (repo) => {
+        const repoName = validateRepositoryComponent(
+          repo.name,
+          "Repository name",
+        );
+        return [
+          repoName,
+          {
+            repo: { ...repo, name: repoName },
+            mirrorDir: await resolveMirrorDir(repo, cacheDir),
+            targetDir: resolveContainedPath(workspaceDir, repoName),
+          },
+        ] as const;
+      }),
     ),
   );
 
@@ -701,7 +710,7 @@ async function* createBackgroundRepoSetupPipeline({
     {
       workspaceDir,
       repoName: repo.name,
-      repoDir: path.join(workspaceDir, repo.name),
+      repoDir: resolveContainedPath(workspaceDir, repo.name),
     },
   );
 
@@ -780,9 +789,10 @@ export async function addReposToWorkspace({
   );
 
   for (const repo of repos) {
-    if (existingNames.has(repo.name)) {
+    const repoName = validateRepositoryComponent(repo.name, "Repository name");
+    if (existingNames.has(repoName)) {
       throw new Error(
-        `Workspace already contains a repository named "${repo.name}".`,
+        `Workspace already contains a repository named "${repoName}".`,
       );
     }
 
@@ -793,7 +803,7 @@ export async function addReposToWorkspace({
       );
     }
 
-    const targetDir = path.join(workspaceDir, repo.name);
+    const targetDir = resolveContainedPath(workspaceDir, repoName);
     if (await pathExists(targetDir)) {
       throw new Error(
         `Target directory already exists: ${targetDir}\nRefusing to adopt an unmanaged checkout.`,
@@ -817,7 +827,7 @@ export async function addReposToWorkspace({
         {
           workspaceDir,
           repoName: repo.name,
-          repoDir: path.join(workspaceDir, repo.name),
+          repoDir: resolveContainedPath(workspaceDir, repo.name),
         },
       ),
     ]),
@@ -1177,6 +1187,9 @@ export async function writeVSCodeWorkspaceFile(
   repos: readonly RepoConfig[],
   { logOutput = true }: { logOutput?: boolean } = {},
 ): Promise<void> {
+  for (const repo of repos) {
+    validateRepositoryComponent(repo.name, "Repository name");
+  }
   const workspaceName = path.basename(workspaceDir) || "workforest";
   const workspaceFile = path.join(
     workspaceDir,

@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getCacheDir, reposFromSlugs } from "./config.ts";
+import { validateRepositoryComponent } from "./repository-components.ts";
 import { runGit } from "./services/git.ts";
 import type { RepoConfig } from "./types.ts";
 import { ensureDir, pathExists } from "./utils/fs.ts";
+import { resolveContainedPath } from "./utils/path-safety.ts";
 import { ensureMirrorRepoGenerator } from "./workspace/repository.ts";
 
 export type CachedRepositoryHealth = "healthy" | "attention" | "invalid";
@@ -114,8 +116,12 @@ export async function listCachedRepositories(): Promise<CachedRepository[]> {
   const entries = await fs.readdir(cacheDir, { withFileTypes: true });
   const repositories = await Promise.all(
     entries
-      .filter((entry) => entry.isDirectory() && entry.name.endsWith(".git"))
-      .map((entry) => inspectCachedRepository(path.join(cacheDir, entry.name))),
+      .filter(
+        (entry) => entry.isDirectory() && isValidCacheDirectoryName(entry.name),
+      )
+      .map((entry) =>
+        inspectCachedRepository(resolveContainedPath(cacheDir, entry.name)),
+      ),
   );
 
   return repositories.sort((left, right) =>
@@ -168,7 +174,8 @@ export async function resolveMirrorDir(
   repo: RepoConfig,
   cacheDir = getCacheDir(),
 ): Promise<string> {
-  const legacyPath = path.join(cacheDir, `${repo.name}.git`);
+  const repoName = validateRepositoryComponent(repo.name, "Repository name");
+  const legacyPath = resolveContainedPath(cacheDir, `${repoName}.git`);
   if (await pathExists(legacyPath)) {
     const legacyRemote = await readRemoteFromConfigFile(legacyPath);
     if (
@@ -182,8 +189,10 @@ export async function resolveMirrorDir(
   if (await pathExists(cacheDir)) {
     const entries = await fs.readdir(cacheDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.endsWith(".git")) continue;
-      const mirrorPath = path.join(cacheDir, entry.name);
+      if (!entry.isDirectory() || !isValidCacheDirectoryName(entry.name)) {
+        continue;
+      }
+      const mirrorPath = resolveContainedPath(cacheDir, entry.name);
       const remote = await readRemoteFromConfigFile(mirrorPath);
       if (remote && normalizeRemote(remote) === normalizeRemote(repo.remote)) {
         return mirrorPath;
@@ -197,13 +206,13 @@ export async function resolveMirrorDir(
 
   const identity = getRemoteIdentity(repo.remote);
   const qualifier = identity?.owner
-    ? `${sanitizePathSegment(identity.owner)}--${sanitizePathSegment(repo.name)}`
-    : `${sanitizePathSegment(repo.name)}-${createHash("sha256")
+    ? `${identity.owner}--${repoName}`
+    : `${repoName}-${createHash("sha256")
         .update(normalizeRemote(repo.remote))
         .digest("hex")
         .slice(0, 10)}`;
 
-  return path.join(cacheDir, `${qualifier}.git`);
+  return resolveContainedPath(cacheDir, `${qualifier}.git`);
 }
 
 export async function addCachedRepository(
@@ -280,7 +289,15 @@ export async function deleteCachedRepository(
   }
 
   if (!options.dryRun) {
-    await fs.rm(repository.mirrorPath, { recursive: true, force: true });
+    const cacheDir = getCacheDir();
+    const mirrorPath = resolveContainedPath(
+      cacheDir,
+      path.relative(
+        path.resolve(cacheDir),
+        path.resolve(repository.mirrorPath),
+      ),
+    );
+    await fs.rm(mirrorPath, { recursive: true, force: true });
   }
 
   return {
@@ -525,7 +542,7 @@ function cachedRepositoryToRepoConfig(
     );
   }
   return {
-    name: repository.name,
+    name: validateRepositoryComponent(repository.name, "Repository name"),
     remote: repository.remote,
     defaultBranch: repository.defaultBranch ?? "main",
   };
@@ -546,7 +563,14 @@ function getRemoteIdentity(
 
   const normalized = remote.replace(/[/:]+$/, "").replace(/\.git$/i, "");
   const name = normalized.split(/[/:]/).at(-1);
-  return name ? { name } : null;
+  if (!name) return null;
+  try {
+    return {
+      name: validateRepositoryComponent(name, "Repository name"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function parseGitHubRepository(
@@ -590,9 +614,11 @@ function createRegisteredRepository(
   org: string,
   repo: string,
 ): { name: string; slug: string } {
+  const owner = validateRepositoryComponent(org, "Repository owner");
+  const name = validateRepositoryComponent(repo, "Repository name");
   return {
-    name: repo,
-    slug: `${org}/${repo}`,
+    name,
+    slug: `${owner}/${name}`,
   };
 }
 
@@ -608,6 +634,12 @@ export function normalizeRemote(remote: string): string {
     .replace(/\/+$/, "");
 }
 
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-");
+function isValidCacheDirectoryName(value: string): boolean {
+  if (!value.endsWith(".git")) return false;
+  try {
+    validateRepositoryComponent(value, "Cache repository name");
+    return true;
+  } catch {
+    return false;
+  }
 }

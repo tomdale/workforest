@@ -1,12 +1,13 @@
-import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
+import { validateRepositoryComponent } from "../repository-components.ts";
 import {
   runSingleRepoInitializersGenerator,
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
 import type { RepoConfig } from "../types.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import {
   cleanupWorkspaceWorktreesGenerator,
@@ -74,9 +75,10 @@ export async function* repoPipelineGenerator({
   skipInitializers,
   beforeInitializers,
 }: RepoPipelineOptions): AsyncGenerator<RepoPipelineState> {
+  const repoName = validateRepositoryComponent(repo.name, "Repository name");
   const cacheDir = getCacheDir();
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
-  const targetDir = path.join(workspaceDir, repo.name);
+  const targetDir = resolveContainedPath(workspaceDir, repoName);
   let currentStep = "starting setup";
 
   try {
@@ -174,7 +176,10 @@ export async function* repoInitializationGenerator({
   workspaceDir,
   disabledInitializers,
 }: RepoInitializationOptions): AsyncGenerator<RepoPipelineState> {
-  const repoDir = path.join(workspaceDir, repo.name);
+  const repoDir = resolveContainedPath(
+    workspaceDir,
+    validateRepositoryComponent(repo.name, "Repository name"),
+  );
   let currentStep = "initializer:detection";
 
   try {
