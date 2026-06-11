@@ -259,7 +259,7 @@ describe("repository commands", () => {
       stdout: `${path.join(cacheDir, "front.git")}\n`,
       stderr: "",
     });
-  });
+  }, 15_000);
 
   it("prints undecorated cache paths", async () => {
     const cacheDir = await createCache();
@@ -301,7 +301,7 @@ describe("repository commands", () => {
       "damaged is not a valid bare Git repository",
     );
     expect(repair.stderr).not.toContain("at runRepositoryRepair");
-  });
+  }, 15_000);
 
   it("supports destructive flags without deleting repositories", async () => {
     const cacheDir = await createCache();

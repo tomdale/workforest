@@ -790,10 +790,6 @@ async function runVersionCommand(): Promise<CommandResult> {
   });
 }
 
-function hasHelpFlag(argv: readonly string[]): boolean {
-  return argv.includes("--help") || argv.includes("-h");
-}
-
 async function runListCommand(): Promise<CommandResult> {
   const { config } = await loadWorkspaceConfig();
 
