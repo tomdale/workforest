@@ -54,6 +54,12 @@ export function renderCommandReference(
       "",
       "All syntax is generated from the CLI command registry. Use `wf`; `workforest` remains an executable alias.",
       "",
+      "## Conventions",
+      "",
+      "Exit codes: `0` success, `2` usage error (invalid arguments or flags), `1` operational failure.",
+      "",
+      'Commands whose options include `--json` emit a machine-readable envelope: `{ "ok": true, "data": ... }` on success, or `{ "ok": false, "error": { "kind": "operational" | "usage", "message": ... } }` on failure.',
+      "",
       ...commands,
       ...shortcutSection,
     ].join("\n"),
@@ -186,6 +192,7 @@ function renderCommandNode(node: CommandNode): string[] {
     `## \`${formatCommand(node.path)}\``,
     "",
     `${node.summary.replace(/\.$/, "")}.`,
+    ...(node.description ? ["", node.description] : []),
     "",
     "```text",
     `${formatCommand(node.path)} ${node.default ? "[subcommand]" : "<subcommand>"}`,
@@ -198,13 +205,44 @@ function renderCommandNode(node: CommandNode): string[] {
 }
 
 function renderLeaf(leaf: CommandLeaf, headingLevel: number): string[] {
+  const description = leaf.description ? [leaf.description, ""] : [];
+  const argumentRows = collectOperands(leaf);
+  const argumentsSection =
+    argumentRows.length === 0
+      ? []
+      : [
+          "Arguments:",
+          "",
+          ...argumentRows.map(
+            (arg) => `- \`${arg.label}\` — ${arg.description}`,
+          ),
+          "",
+        ];
   const options =
     leaf.flags.length === 0
       ? []
       : [
           "Options:",
           "",
-          ...leaf.flags.map((flag) => `- ${formatFlagReference(flag)}`),
+          ...leaf.flags.map((flag) => {
+            const reference = formatFlagReference(flag);
+            return flag.description
+              ? `- ${reference} — ${flag.description}`
+              : `- ${reference}`;
+          }),
+          "",
+        ];
+  const examples =
+    leaf.examples.length === 0
+      ? []
+      : [
+          "Examples:",
+          "",
+          ...leaf.examples.map((example) =>
+            example.description
+              ? `- \`${example.command}\` — ${example.description}`
+              : `- \`${example.command}\``,
+          ),
           "",
         ];
 
@@ -213,14 +251,35 @@ function renderLeaf(leaf: CommandLeaf, headingLevel: number): string[] {
     "",
     `${leaf.summary.replace(/\.$/, "")}.`,
     "",
+    ...description,
     "```text",
     ...commandUsageLines(leaf),
     "```",
     "",
+    ...argumentsSection,
     ...options,
+    ...examples,
     ...renderAliases(leaf),
     "",
   ];
+}
+
+/**
+ * Distinct described operands across all variants, in first-seen order, so each
+ * positional argument is documented once even when several variants share it.
+ */
+function collectOperands(
+  leaf: CommandLeaf,
+): readonly Readonly<{ label: string; description: string }>[] {
+  const described = new Map<string, string>();
+  for (const variant of leaf.operands.variants) {
+    for (const card of [variant.beforeDoubleDash, variant.afterDoubleDash]) {
+      if (card?.description && !described.has(card.label)) {
+        described.set(card.label, card.description);
+      }
+    }
+  }
+  return [...described].map(([label, description]) => ({ label, description }));
 }
 
 function renderShortcut(

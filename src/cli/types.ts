@@ -44,6 +44,8 @@ export type Cardinality = Readonly<{
   max: number | null;
   label: string;
   usage?: string;
+  /** Explanation of this operand for the Arguments help section. */
+  description?: string;
 }>;
 
 export type OperandVariant = Readonly<{
@@ -68,6 +70,14 @@ export type FlagDefinition = Readonly<{
   kind: "boolean" | "string";
   valueName?: string;
   required?: boolean;
+  /** One-sentence explanation of the flag's effect for help output. */
+  description?: string;
+}>;
+
+/** A copy-pasteable invocation plus the outcome it achieves. */
+export type CommandExample = Readonly<{
+  command: string;
+  description?: string;
 }>;
 
 type CommandMetadata = Readonly<{
@@ -76,6 +86,8 @@ type CommandMetadata = Readonly<{
   aliases: readonly AliasDefinition[];
   visibility: Visibility;
   summary: string;
+  /** Prose contract shown below the summary in help output. */
+  description?: string;
   help: HelpReference;
 }>;
 
@@ -84,6 +96,7 @@ export type CommandLeaf = CommandMetadata &
     kind: "leaf";
     operands: OperandSpec;
     flags: readonly FlagDefinition[];
+    examples: readonly CommandExample[];
     outputModes: readonly OutputMode[];
     tty: TtyRequirement;
     shellHandoff: ShellHandoff;

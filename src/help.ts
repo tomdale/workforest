@@ -2,6 +2,7 @@ import chalk from "chalk";
 import { commandRegistry } from "./cli/commands.ts";
 import type {
   Cardinality,
+  CommandExample,
   CommandGroup,
   CommandLeaf,
   CommandNode,
@@ -137,10 +138,11 @@ function groupHelp(group: CommandGroup): string {
     key: nodeDisplayName(child),
     description: child.summary,
   }));
+  const description = group.description ? ` ${group.description}` : "";
 
   return renderHelp(`Usage: ${formatCommand(group.path)} ${subcommand}
 
-${group.summary}.
+${group.summary}.${description}
 
 Subcommands:
 ${formatRows(children)}
@@ -149,6 +151,8 @@ ${formatRows(children)}
 
 function leafHelp(leaf: CommandLeaf, path: readonly string[]): string {
   const usage = formatUsage(commandUsageLines(leaf, path));
+  const description = leaf.description ? ` ${leaf.description}` : "";
+  const argumentsSection = formatArgumentsSection(collectOperands(leaf));
   const options =
     leaf.flags.length === 0
       ? ""
@@ -158,14 +162,72 @@ Options:
 ${formatRows(
   leaf.flags.map((flag) => ({
     key: formatFlag(flag),
-    description: flag.required ? "Required." : "Optional.",
+    description: flagDescription(flag),
   })),
 )}`;
+  const examples = formatExamplesSection(leaf.examples);
 
   return renderHelp(`${usage}
 
-${leaf.summary}.${options}
+${leaf.summary}.${description}${argumentsSection}${options}${examples}
 `);
+}
+
+function flagDescription(flag: FlagDefinition): string {
+  if (flag.description) {
+    return flag.description;
+  }
+  return flag.required ? "Required." : "Optional.";
+}
+
+/**
+ * Collects the distinct described operands across all variants, in first-seen
+ * order, so the Arguments section explains each positional argument once even
+ * when it appears in several operand variants.
+ */
+function collectOperands(
+  leaf: CommandLeaf,
+): readonly Readonly<{ label: string; description: string }>[] {
+  const described = new Map<string, string>();
+  for (const variant of leaf.operands.variants) {
+    for (const card of [variant.beforeDoubleDash, variant.afterDoubleDash]) {
+      if (card?.description && !described.has(card.label)) {
+        described.set(card.label, card.description);
+      }
+    }
+  }
+  return [...described].map(([label, description]) => ({ label, description }));
+}
+
+function formatArgumentsSection(
+  args: readonly Readonly<{ label: string; description: string }>[],
+): string {
+  if (args.length === 0) {
+    return "";
+  }
+  return `
+
+Arguments:
+${formatRows(
+  args.map((arg) => ({ key: `<${arg.label}>`, description: arg.description })),
+)}`;
+}
+
+function formatExamplesSection(examples: readonly CommandExample[]): string {
+  if (examples.length === 0) {
+    return "";
+  }
+  const body = examples
+    .map((example) =>
+      example.description
+        ? `  ${example.command}\n      ${example.description}`
+        : `  ${example.command}`,
+    )
+    .join("\n");
+  return `
+
+Examples:
+${body}`;
 }
 
 function shortcutHelp(
@@ -186,7 +248,7 @@ Options:
 ${formatRows(
   target.flags.map((flag) => ({
     key: formatFlag(flag),
-    description: flag.required ? "Required." : "Optional.",
+    description: flagDescription(flag),
   })),
 )}`;
 
@@ -307,11 +369,16 @@ export function renderHelp(content: string): string {
         return `${indent}${styleRowKey(key, section)}${gap}${styleDescription(description)}`;
       }
 
-      if (
-        line.startsWith("  ") &&
-        ["Examples", "Start here (for AI agents)"].includes(section)
-      ) {
-        return `${line.slice(0, 2)}${styleExample(line.slice(2))}`;
+      if (["Examples", "Start here (for AI agents)"].includes(section)) {
+        const indented = line.match(/^(\s+)(\S.*)$/);
+        if (indented) {
+          const [, indent = "", rest = ""] = indented;
+          // Command lines are indented two spaces; example outcome prose is
+          // indented deeper and reads as a sentence, not a command.
+          return indent.length >= 4
+            ? `${indent}${styleDescription(rest)}`
+            : `${indent}${styleExample(rest)}`;
+        }
       }
 
       const metadata = line.match(/^([A-Z][^:]+:)(\s+)(.+)$/);
