@@ -185,6 +185,11 @@ async function runInvocation(
     return runTemplateInvocation(invocation);
   }
 
+  if (invocation.command.leaf.handler.startsWith("repository.")) {
+    const { runRepositoryInvocation } = await import("./repository-cli.ts");
+    return runRepositoryInvocation(invocation);
+  }
+
   return runLegacyHandler(async () => {
     const argv = [...invocation.command.argv];
     const invokedRoot =
@@ -247,32 +252,6 @@ async function runInvocation(
       case "init":
         await runInitCommand(argv);
         return;
-      case "repository.default": {
-        const { runRepositoriesCommand, runRepositoryCommand } = await import(
-          "./repository-cli.ts"
-        );
-        if (invokedRoot === "repositories" || invokedRoot === "repos") {
-          await runRepositoriesCommand(argv);
-        } else {
-          await runRepositoryCommand(argv, invokedRoot);
-        }
-        return;
-      }
-      case "repository.list":
-      case "repository.info":
-      case "repository.path":
-      case "repository.add":
-      case "repository.update":
-      case "repository.doctor":
-      case "repository.repair":
-      case "repository.delete":
-      case "repository.clean": {
-        const { runRepositoryCommand } = await import("./repository-cli.ts");
-        const subcommand =
-          invocation.command.leaf.handler.split(".")[1] ?? "list";
-        await runRepositoryCommand([subcommand, ...argv], invokedRoot);
-        return;
-      }
       case "config.show":
         await runConfigCommand(
           invocation.command.canonicalPath.length === 1

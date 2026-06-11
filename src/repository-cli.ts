@@ -1,6 +1,11 @@
-import arg from "arg";
+import { OperationalError } from "./cli/errors.ts";
+import { failure, success } from "./cli/output.ts";
+import type {
+  CommandResult,
+  ParsedInvocation,
+  RenderModel,
+} from "./cli/types.ts";
 import { getCacheDir } from "./config.ts";
-import { commandHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import {
   addCachedRepository,
@@ -23,141 +28,63 @@ import {
   withSpinner,
 } from "./ui/prompts/index.ts";
 
-export async function runRepositoryCommand(
-  argv: string[],
-  command = "repository",
-): Promise<void> {
-  const subcommand = argv[0];
-  const subArgv = argv.slice(1);
+export async function runRepositoryInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const operands = [...invocation.beforeDoubleDash];
 
-  switch (subcommand) {
-    case "--help":
-    case "-h":
-      console.log(commandHelp(command));
-      return;
-    case undefined:
-      if (isInteractive()) {
-        await runRepositoryManagerCommand();
-      } else {
-        await runRepositoryList([]);
-      }
-      return;
-    case "list":
-    case "ls":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "list"));
-        return;
-      }
-      await runRepositoryList(subArgv);
-      return;
-    case "info":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "info"));
-        return;
-      }
-      await runRepositoryInfo(subArgv);
-      return;
-    case "path":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "path"));
-        return;
-      }
-      await runRepositoryPath(subArgv);
-      return;
-    case "add":
-    case "cache":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "add"));
-        return;
-      }
-      await runRepositoryAdd(subArgv);
-      return;
-    case "update":
-    case "fetch":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "update"));
-        return;
-      }
-      await runRepositoryUpdate(subArgv);
-      return;
-    case "doctor":
-    case "check":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "doctor"));
-        return;
-      }
-      await runRepositoryDoctor(subArgv);
-      return;
-    case "repair":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "repair"));
-        return;
-      }
-      await runRepositoryRepair(subArgv);
-      return;
-    case "delete":
-    case "remove":
-    case "rm":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "delete"));
-        return;
-      }
-      await runRepositoryDelete(subArgv);
-      return;
-    case "clean":
-    case "prune":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("repository", "clean"));
-        return;
-      }
-      await runRepositoryClean(subArgv);
-      return;
-    default:
-      log.error(`Unknown repository subcommand: ${subcommand}`);
-      log.info(
-        "Available: list, info, path, add, update, doctor, repair, delete, clean",
+  switch (invocation.command.leaf.handler) {
+    case "repository.default":
+      return isInteractive()
+        ? runRepositoryManagerCommand()
+        : runRepositoryList(false);
+    case "repository.list":
+      return runRepositoryList(flag(invocation, "json"));
+    case "repository.info":
+      return runRepositoryInfo(
+        requiredOperand(operands, 0),
+        flag(invocation, "json"),
       );
-      process.exitCode = 1;
+    case "repository.path":
+      return runRepositoryPath(operands[0]);
+    case "repository.add":
+      return runRepositoryAdd(operands);
+    case "repository.update":
+      return runRepositoryUpdate(operands);
+    case "repository.doctor":
+      return runRepositoryDoctor(operands, flag(invocation, "json"));
+    case "repository.repair":
+      return runRepositoryRepair(operands);
+    case "repository.delete":
+      return runRepositoryDelete(operands, {
+        dryRun: flag(invocation, "dryRun"),
+        force: flag(invocation, "force"),
+      });
+    case "repository.clean":
+      return runRepositoryClean({
+        dryRun: flag(invocation, "dryRun"),
+        force: flag(invocation, "force"),
+      });
+    default:
+      throw new Error(
+        `Unsupported repository handler: ${invocation.command.leaf.handler}`,
+      );
   }
 }
 
-export async function runRepositoriesCommand(argv: string[]): Promise<void> {
-  if (argv[0] === "--help" || argv[0] === "-h") {
-    console.log(commandHelp("repositories"));
-    return;
-  }
-  if (argv.length > 0) {
-    await runRepositoryCommand(argv);
-    return;
-  }
-  if (isInteractive()) {
-    await runRepositoryManagerCommand();
-  } else {
-    await runRepositoryList([]);
-  }
-}
-
-async function runRepositoryList(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--json": Boolean,
-    },
-    { argv },
-  );
-  if (args._.length > 0) {
-    fail("Usage: wf repository list [--json]");
-    return;
-  }
-
+async function runRepositoryList(json: boolean): Promise<CommandResult> {
   const repositories = await listCachedRepositories();
-  if (args["--json"]) {
-    console.log(JSON.stringify(repositories.map(toJson), null, 2));
-    return;
+  if (json) {
+    return result({
+      kind: "json",
+      value: repositories.map(toJson),
+      stream: "stdout",
+    });
   }
   if (repositories.length === 0) {
     log.info("No cached repositories.");
     log.info(`Cache directory: ${getCacheDir()}`);
-    return;
+    return success();
   }
 
   printReport({
@@ -186,56 +113,52 @@ async function runRepositoryList(argv: string[]): Promise<void> {
       `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}, ${formatByteSize(totalSize(repositories))}`,
     ].join("\n"),
   });
+  return success();
 }
 
-async function runRepositoryInfo(argv: string[]): Promise<void> {
-  const args = arg({ "--json": Boolean }, { argv });
-  if (args._.length !== 1) {
-    fail("Usage: wf repository info <repo> [--json]");
-    return;
-  }
-
-  const repository = await requireRepository(args._[0] ?? "");
-  if (!repository) return;
-  if (args["--json"]) {
-    console.log(JSON.stringify(toJson(repository), null, 2));
-    return;
+async function runRepositoryInfo(
+  selector: string,
+  json: boolean,
+): Promise<CommandResult> {
+  const repository = await requireRepository(selector);
+  if (json) {
+    return result({
+      kind: "json",
+      value: toJson(repository),
+      stream: "stdout",
+    });
   }
 
   printRepositoryInfo(repository);
+  return success();
 }
 
-async function runRepositoryPath(argv: string[]): Promise<void> {
-  if (argv.length > 1) {
-    fail("Usage: wf repository path [repo]");
-    return;
-  }
-  if (argv.length === 0) {
-    console.log(getCacheDir());
-    return;
-  }
-
-  const repository = await requireRepository(argv[0] ?? "");
-  if (repository) console.log(repository.mirrorPath);
+async function runRepositoryPath(
+  selector: string | undefined,
+): Promise<CommandResult> {
+  const value = selector
+    ? (await requireRepository(selector)).mirrorPath
+    : getCacheDir();
+  return result({
+    kind: "text",
+    value,
+    stream: "stdout",
+  });
 }
 
-async function runRepositoryAdd(argv: string[]): Promise<void> {
-  if (argv.length === 0) {
-    fail("Usage: wf repository add <repo...>");
-    return;
-  }
-
+async function runRepositoryAdd(
+  operands: readonly string[],
+): Promise<CommandResult> {
   let inputs: string[];
   try {
-    inputs = await qualifyRepositorySpecifiers(argv);
+    inputs = await qualifyRepositorySpecifiers(operands);
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    throw operationalError(error);
   }
 
+  let failed = false;
   for (const [index, input] of inputs.entries()) {
-    const displayInput = argv[index] ?? input;
+    const displayInput = operands[index] ?? input;
     try {
       const repository = await runWithOptionalSpinner(
         `Caching ${displayInput}`,
@@ -247,19 +170,22 @@ async function runRepositoryAdd(argv: string[]): Promise<void> {
       );
     } catch (error) {
       log.error(`${displayInput}: ${getErrorMessage(error)}`);
-      process.exitCode = 1;
+      failed = true;
     }
   }
+  return statusResult(failed);
 }
 
-async function runRepositoryUpdate(argv: string[]): Promise<void> {
-  const repositories = await resolveRepositorySelection(argv);
-  if (!repositories) return;
+async function runRepositoryUpdate(
+  selectors: readonly string[],
+): Promise<CommandResult> {
+  const repositories = await resolveRepositorySelection(selectors);
   if (repositories.length === 0) {
     log.info("No cached repositories to update.");
-    return;
+    return success();
   }
 
+  let failed = false;
   for (const repository of repositories) {
     const name = repositoryDisplayName(repository);
     try {
@@ -270,18 +196,30 @@ async function runRepositoryUpdate(argv: string[]): Promise<void> {
       );
     } catch (error) {
       log.error(`${name}: ${getErrorMessage(error)}`);
-      process.exitCode = 1;
+      failed = true;
     }
   }
+  return statusResult(failed);
 }
 
-async function runRepositoryDoctor(argv: string[]): Promise<void> {
-  const args = arg({ "--json": Boolean }, { argv });
-  const repositories = await resolveRepositorySelection(args._);
-  if (!repositories) return;
+async function runRepositoryDoctor(
+  selectors: readonly string[],
+  json: boolean,
+): Promise<CommandResult> {
+  const repositories = await resolveRepositorySelection(selectors);
+  const unhealthy = repositories.some(
+    (repository) => repository.health !== "healthy",
+  );
 
-  if (args["--json"]) {
-    console.log(JSON.stringify(repositories.map(toJson), null, 2));
+  if (json) {
+    return result(
+      {
+        kind: "json",
+        value: repositories.map(toJson),
+        stream: "stdout",
+      },
+      unhealthy ? 1 : 0,
+    );
   } else if (repositories.length === 0) {
     log.info("No cached repositories.");
   } else {
@@ -302,20 +240,19 @@ async function runRepositoryDoctor(argv: string[]): Promise<void> {
       footer: `${repositories.filter((repository) => repository.health !== "healthy").length} need attention`,
     });
   }
-
-  if (repositories.some((repository) => repository.health !== "healthy")) {
-    process.exitCode = 1;
-  }
+  return statusResult(unhealthy);
 }
 
-async function runRepositoryRepair(argv: string[]): Promise<void> {
-  const repositories = await resolveRepositorySelection(argv);
-  if (!repositories) return;
+async function runRepositoryRepair(
+  selectors: readonly string[],
+): Promise<CommandResult> {
+  const repositories = await resolveRepositorySelection(selectors);
   if (repositories.length === 0) {
     log.info("No cached repositories to repair.");
-    return;
+    return success();
   }
 
+  let failed = false;
   for (const repository of repositories) {
     const name = repositoryDisplayName(repository);
     try {
@@ -326,116 +263,85 @@ async function runRepositoryRepair(argv: string[]): Promise<void> {
       );
       if (repaired.health !== "healthy") {
         log.warn(`${name}: ${repaired.issues.join("; ")}`);
-        process.exitCode = 1;
+        failed = true;
       }
     } catch (error) {
       log.error(`${name}: ${getErrorMessage(error)}`);
-      process.exitCode = 1;
+      failed = true;
     }
   }
+  return statusResult(failed);
 }
 
-async function runRepositoryDelete(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "-n": "--dry-run",
-      "-f": "--force",
-    },
-    { argv },
-  );
-  if (args._.length === 0) {
-    fail("Usage: wf repository delete <repo...> [--dry-run] [--force]");
-    return;
-  }
-
-  const repositories = await resolveRepositorySelection(args._);
-  if (!repositories) return;
+async function runRepositoryDelete(
+  selectors: readonly string[],
+  options: Readonly<{ dryRun: boolean; force: boolean }>,
+): Promise<CommandResult> {
+  const repositories = await resolveRepositorySelection(selectors);
   const activeRepositories = repositories.filter(
     (repository) => activeWorktreeCount(repository) > 0,
   );
-  if (activeRepositories.length > 0 && !args["--force"]) {
-    log.error(
+  if (activeRepositories.length > 0 && !options.force) {
+    throw new OperationalError(
       `Cannot delete cached repositories with active worktrees: ${activeRepositories.map(repositoryDisplayName).join(", ")}. Delete those worktrees first or pass --force.`,
     );
-    process.exitCode = 1;
-    return;
   }
-  if (
-    !(await confirmDeletion(
-      repositories,
-      args["--force"] ?? false,
-      args["--dry-run"] ?? false,
-    ))
-  ) {
-    return;
+  if (!(await confirmDeletion(repositories, options.force, options.dryRun))) {
+    return success();
   }
 
+  let failed = false;
   for (const repository of repositories) {
     try {
       await deleteCachedRepository(repository, {
-        dryRun: args["--dry-run"] ?? false,
-        force: args["--force"] ?? false,
+        dryRun: options.dryRun,
+        force: options.force,
       });
-      const verb = args["--dry-run"] ? "Would delete" : "Deleted";
+      const verb = options.dryRun ? "Would delete" : "Deleted";
       log.success(`${verb} ${repositoryDisplayName(repository)}`);
     } catch (error) {
       log.error(getErrorMessage(error));
-      process.exitCode = 1;
+      failed = true;
     }
   }
+  return statusResult(failed);
 }
 
-async function runRepositoryClean(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "-n": "--dry-run",
-      "-f": "--force",
-    },
-    { argv },
-  );
-  if (args._.length > 0) {
-    fail("Usage: wf repository clean [--dry-run] [--force]");
-    return;
-  }
-
+async function runRepositoryClean(
+  options: Readonly<{ dryRun: boolean; force: boolean }>,
+): Promise<CommandResult> {
   const repositories = (await listCachedRepositories()).filter(
     (repository) => activeWorktreeCount(repository) === 0,
   );
   if (repositories.length === 0) {
     log.info("No unused cached repositories.");
-    return;
+    return success();
   }
-  if (
-    !(await confirmDeletion(
-      repositories,
-      args["--force"] ?? false,
-      args["--dry-run"] ?? false,
-    ))
-  ) {
-    return;
+  if (!(await confirmDeletion(repositories, options.force, options.dryRun))) {
+    return success();
   }
 
-  const results = await cleanCachedRepositories({
-    dryRun: args["--dry-run"] ?? false,
-    force: args["--force"] ?? false,
-  });
-  const verb = args["--dry-run"] ? "Would delete" : "Deleted";
-  log.success(
-    `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(totalSize(results.map((result) => result.repository)))})`,
-  );
+  try {
+    const results = await cleanCachedRepositories({
+      dryRun: options.dryRun,
+      force: options.force,
+    });
+    const verb = options.dryRun ? "Would delete" : "Deleted";
+    log.success(
+      `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(totalSize(results.map((result) => result.repository)))})`,
+    );
+    return success();
+  } catch (error) {
+    throw operationalError(error);
+  }
 }
 
-async function runRepositoryManagerCommand(): Promise<void> {
+async function runRepositoryManagerCommand(): Promise<CommandResult> {
   const { shouldUseRepositoryManager } = await import(
     "./ui/repository-manager.ts"
   );
   if (!shouldUseRepositoryManager()) {
-    await runRepositoryList([]);
-    return;
+    return runRepositoryList(false);
   }
 
   let initialMirrorPath: string | undefined;
@@ -450,14 +356,14 @@ async function runRepositoryManagerCommand(): Promise<void> {
 
     switch (action.type) {
       case "quit":
-        return;
+        return success();
       case "reload":
         continue;
       case "add": {
         const input = await promptText(
           "Repository (cached name, owner/repo, or git URL)",
         );
-        await runRepositoryAdd([input]);
+        await runManagerOperation(() => runRepositoryAdd([input]));
         initialMirrorPath = (await resolveCachedRepository(input))?.mirrorPath;
         continue;
       }
@@ -466,22 +372,33 @@ async function runRepositoryManagerCommand(): Promise<void> {
           (candidate) => candidate.mirrorPath === action.mirrorPath,
         );
         if (repository) printRepositoryInfo(repository);
-        return;
+        return success();
       }
       case "update":
         initialMirrorPath = action.mirrorPath;
-        await runRepositoryUpdate([action.mirrorPath]);
+        await runManagerOperation(() =>
+          runRepositoryUpdate([action.mirrorPath]),
+        );
         continue;
       case "repair":
         initialMirrorPath = action.mirrorPath;
-        await runRepositoryRepair([action.mirrorPath]);
+        await runManagerOperation(() =>
+          runRepositoryRepair([action.mirrorPath]),
+        );
         continue;
       case "delete":
-        await runRepositoryDelete([action.mirrorPath]);
+        await runManagerOperation(() =>
+          runRepositoryDelete([action.mirrorPath], {
+            dryRun: false,
+            force: false,
+          }),
+        );
         initialMirrorPath = undefined;
         continue;
       case "clean":
-        await runRepositoryClean([]);
+        await runManagerOperation(() =>
+          runRepositoryClean({ dryRun: false, force: false }),
+        );
         initialMirrorPath = undefined;
         continue;
     }
@@ -489,8 +406,8 @@ async function runRepositoryManagerCommand(): Promise<void> {
 }
 
 async function resolveRepositorySelection(
-  selectors: string[],
-): Promise<CachedRepository[] | null> {
+  selectors: readonly string[],
+): Promise<CachedRepository[]> {
   const repositories = await listCachedRepositories();
   if (selectors.length === 0) return repositories;
 
@@ -499,25 +416,23 @@ async function resolveRepositorySelection(
     try {
       const repository = await resolveCachedRepository(selector, repositories);
       if (!repository) {
-        log.error(`Cached repository not found: ${selector}`);
-        process.exitCode = 1;
-        return null;
+        throw new OperationalError(`Cached repository not found: ${selector}`);
       }
       selected.set(repository.mirrorPath, repository);
     } catch (error) {
-      log.error(getErrorMessage(error));
-      process.exitCode = 1;
-      return null;
+      throw operationalError(error);
     }
   }
   return [...selected.values()];
 }
 
-async function requireRepository(
-  selector: string,
-): Promise<CachedRepository | null> {
+async function requireRepository(selector: string): Promise<CachedRepository> {
   const repositories = await resolveRepositorySelection([selector]);
-  return repositories?.[0] ?? null;
+  const repository = repositories[0];
+  if (!repository) {
+    throw new OperationalError(`Cached repository not found: ${selector}`);
+  }
+  return repository;
 }
 
 async function confirmDeletion(
@@ -527,9 +442,9 @@ async function confirmDeletion(
 ): Promise<boolean> {
   if (dryRun || force) return true;
   if (!isInteractive()) {
-    log.error("Cannot confirm in non-interactive mode. Use --force.");
-    process.exitCode = 1;
-    return false;
+    throw new OperationalError(
+      "Cannot confirm in non-interactive mode. Use --force.",
+    );
   }
 
   const size = formatByteSize(totalSize(repositories));
@@ -627,13 +542,46 @@ function formatDate(date: Date | null): string {
   return date ? date.toLocaleString() : "unknown";
 }
 
-function hasHelpFlag(argv: readonly string[]): boolean {
-  return argv.includes("--help") || argv.includes("-h");
+function flag(invocation: ParsedInvocation, name: string): boolean {
+  return invocation.flags[name] === true;
 }
 
-function fail(message: string): void {
-  log.error(message);
-  process.exitCode = 1;
+function requiredOperand(operands: readonly string[], index: number): string {
+  const operand = operands[index];
+  if (operand === undefined) {
+    throw new Error(
+      "The CLI kernel accepted an invalid repository invocation.",
+    );
+  }
+  return operand;
+}
+
+function result(render: RenderModel, exitCode: 0 | 1 = 0): CommandResult {
+  return exitCode === 0 ? success(render) : failure(exitCode, render);
+}
+
+function statusResult(failed: boolean): CommandResult {
+  return failed ? failure(1, { kind: "none" }) : success();
+}
+
+function operationalError(error: unknown): OperationalError {
+  return error instanceof OperationalError
+    ? error
+    : new OperationalError(getErrorMessage(error), { cause: error });
+}
+
+async function runManagerOperation(
+  operation: () => Promise<CommandResult>,
+): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    if (error instanceof OperationalError) {
+      log.error(error.message);
+      return;
+    }
+    throw error;
+  }
 }
 
 function getErrorMessage(error: unknown): string {
