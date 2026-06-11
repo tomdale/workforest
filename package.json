@@ -67,7 +67,6 @@
   },
   "files": [
     "dist",
-    "packages",
     "bin",
     "skills",
     "skill-data"

@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { commandRegistry } from "./cli/commands.ts";
 import {
   listPackedFiles,
   type PackedPackageFixture,
@@ -22,6 +23,15 @@ const PACKAGE_NAMES = [
   "@wf-plugin/turbo",
   "@wf-plugin/vercel",
 ] as const;
+
+const ROOT_HELP_COMMANDS = [
+  ...commandRegistry.root.children
+    .filter((command) => command.visibility === "visible")
+    .map((command) => command.name),
+  ...commandRegistry.shortcuts
+    .filter((shortcut) => shortcut.visibility === "visible")
+    .map((shortcut) => shortcut.name),
+].sort();
 
 let fixture: PackedPackageFixture;
 
@@ -45,7 +55,7 @@ describe("packed package", () => {
       );
       expect(files).toContain("package/dist/index.mjs");
       expect(files).toContain("package/dist/index.d.mts");
-      expect(files.some((file) => file.startsWith("package/src/"))).toBe(false);
+      expect(files.some(containsSourceDirectory)).toBe(false);
     }
   });
 
@@ -58,7 +68,10 @@ describe("packed package", () => {
     expect(files).toContain("package/dist/index.d.mts");
     expect(files).toContain("package/bin/workforest.js");
     expect(files).toContain("package/skill-data/core/SKILL.md");
-    expect(files.some((file) => file.startsWith("package/src/"))).toBe(false);
+    expect(files.some(containsSourceDirectory)).toBe(false);
+    expect(files.some((file) => file.startsWith("package/packages/"))).toBe(
+      false,
+    );
   });
 
   it("publishes valid runtime, declaration, and bin targets", async () => {
@@ -124,7 +137,7 @@ describe("packed package", () => {
     expect(help.stdout).toContain("Start here (for AI agents):");
     expect(help.stderr).not.toContain("Running local copy");
 
-    const version = await runSubprocess(bin, ["--version"], {
+    const version = await runSubprocess(bin, ["version"], {
       cwd,
       env: fixture.env,
       timeout: 10_000,
@@ -135,23 +148,64 @@ describe("packed package", () => {
       stderr: "",
     });
 
-    const newHelp = await runSubprocess(bin, ["new", "--help"], {
+    for (const command of ROOT_HELP_COMMANDS) {
+      const commandHelp = await runSubprocess(bin, [command, "--help"], {
+        cwd,
+        env: fixture.env,
+        timeout: 10_000,
+      });
+      expect(commandHelp, `${binName} ${command} --help`).toMatchObject({
+        exitCode: 0,
+        stderr: "",
+      });
+      expect(commandHelp.stdout).toContain(`wf ${command}`);
+    }
+  }, 60_000);
+
+  it.each([
+    "wf",
+    "workforest",
+  ] as const)("renders expected %s errors without stack traces", async (binName) => {
+    const cwd = path.join(fixture.rootDir, `errors-${binName}`);
+    await mkdir(cwd);
+    const bin = fixture.bins[binName];
+
+    const usage = await runSubprocess(bin, ["unknown-command"], {
       cwd,
       env: fixture.env,
       timeout: 10_000,
     });
-    expect(newHelp.exitCode).toBe(0);
-    expect(newHelp.stdout).toContain("Usage: wf new");
-    expect(newHelp.stderr).toBe("");
+    expect(usage).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: "Unknown command: unknown-command\n",
+    });
+
+    const operational = await runSubprocess(bin, ["skills", "get", "missing"], {
+      cwd,
+      env: fixture.env,
+      timeout: 10_000,
+    });
+    expect(operational).toEqual({
+      exitCode: 1,
+      stdout: "",
+      stderr: "Skill not found: missing\n",
+    });
+
+    for (const result of [usage, operational]) {
+      expect(result.stderr).not.toMatch(/\n\s+at /);
+    }
   });
 
-  it("supports runtime imports and declaration resolution", async () => {
+  it("supports every runtime and declaration export", async () => {
+    const moduleSpecifiers = await exportedModuleSpecifiers(fixture);
     const runtime = await runSubprocess(
       process.execPath,
       [
         "--input-type=module",
         "--eval",
-        'import("workforest").then(({ cli }) => console.log(typeof cli))',
+        `Promise.all(${JSON.stringify(moduleSpecifiers)}.map((specifier) => import(specifier)))
+          .then((modules) => console.log(typeof modules[0].cli))`,
       ],
       {
         cwd: fixture.consumerDir,
@@ -165,37 +219,13 @@ describe("packed package", () => {
       stderr: "",
     });
 
-    const pluginImports = await runSubprocess(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        `Promise.all([
-          import("@wf-plugin/core"),
-          import("@wf-plugin/package-managers"),
-          import("@wf-plugin/package-managers/initializers/pnpm-install"),
-          import("@wf-plugin/turbo"),
-          import("@wf-plugin/turbo/initializers/turbo-link"),
-          import("@wf-plugin/vercel"),
-          import("@wf-plugin/vercel/initializers/vercel-link")
-        ]).then(() => console.log("ok"))`,
-      ],
-      {
-        cwd: fixture.consumerDir,
-        env: fixture.env,
-        timeout: 10_000,
-      },
-    );
-    expect(pluginImports).toEqual({
-      exitCode: 0,
-      stdout: "ok\n",
-      stderr: "",
-    });
-
     await writeFile(
       path.join(fixture.consumerDir, "import-workforest.ts"),
       [
         'import { cli } from "workforest";',
+        ...moduleSpecifiers
+          .filter((specifier) => specifier !== "workforest")
+          .map((specifier) => `import "${specifier}";`),
         "const run: () => Promise<void> = cli;",
         "void run;",
         "",
@@ -235,7 +265,30 @@ describe("packed package", () => {
     });
   });
 
-  it("falls back to dist only when the source entry is absent", async () => {
+  it("loads dist when the source entry is absent", async () => {
+    const packageDir = fixture.installedPackageDir;
+    await expect(
+      access(path.join(packageDir, "src", "cli.ts")),
+    ).rejects.toThrow();
+
+    const result = await runSubprocess(
+      process.execPath,
+      [path.join(packageDir, "bin", "workforest.js"), "version"],
+      {
+        cwd: packageDir,
+        env: fixture.env,
+        timeout: 10_000,
+      },
+    );
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: "workforest 0.0.1\n",
+      stderr: "",
+    });
+  });
+
+  it("does not hide source-load failures behind the dist fallback", async () => {
     const destination = path.join(fixture.rootDir, "source-error");
     const packageDir = await fixture.extractRootPackage(destination);
     await mkdir(path.join(packageDir, "src"));
@@ -275,4 +328,48 @@ function requiredTarball(
     throw new Error(`Missing tarball for ${name}`);
   }
   return tarball;
+}
+
+function containsSourceDirectory(file: string): boolean {
+  return file.split("/").includes("src");
+}
+
+async function exportedModuleSpecifiers(
+  packedFixture: PackedPackageFixture,
+): Promise<string[]> {
+  const specifiers: string[] = [];
+
+  for (const packageName of PACKAGE_NAMES) {
+    const manifestPath = path.join(
+      packedFixture.consumerDir,
+      "node_modules",
+      ...packageName.split("/"),
+      "package.json",
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      exports: Record<string, string | { import?: string; types?: string }>;
+    };
+
+    for (const [exportName, target] of Object.entries(manifest.exports)) {
+      if (
+        typeof target === "string" ||
+        typeof target.import !== "string" ||
+        typeof target.types !== "string"
+      ) {
+        continue;
+      }
+
+      await Promise.all([
+        access(path.resolve(path.dirname(manifestPath), target.import)),
+        access(path.resolve(path.dirname(manifestPath), target.types)),
+      ]);
+      specifiers.push(
+        exportName === "."
+          ? packageName
+          : `${packageName}/${exportName.replace(/^\.\//, "")}`,
+      );
+    }
+  }
+
+  return specifiers;
 }
