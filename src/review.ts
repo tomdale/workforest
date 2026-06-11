@@ -124,7 +124,7 @@ export async function createReviewWorktree({
   const cacheDir = getCacheDir();
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
   const workspace = await ensureReviewWorkspace({
-    target,
+    target: { owner: target.owner, repo: target.repo },
     reviewsDir,
     ...(onEvent ? { onEvent } : {}),
   });
