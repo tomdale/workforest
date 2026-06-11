@@ -152,7 +152,7 @@ wf worktree <subcommand>
 Create a standalone worktree.
 
 ```text
-wf worktree create [options] <repository and worktree name>
+wf worktree create [options] <repository> <worktree name>
 ```
 
 Options:
@@ -312,7 +312,7 @@ wf review open <repository>
 Check out a pull request worktree.
 
 ```text
-wf review checkout <review targets>
+wf review checkout <review target> [pull request]
 ```
 
 ## `wf template`
@@ -360,8 +360,8 @@ wf template manage
 Create a template.
 
 ```text
-wf template new [options] [template and repositories...]
-wf template new [options] <template and repositories...>
+wf template new [options] [template] [repositories...]
+wf template new [options] <template> <repositories...>
 ```
 
 Options:
@@ -393,7 +393,7 @@ Options:
 Copy a template.
 
 ```text
-wf template copy <templates>
+wf template copy <source template> <destination template>
 ```
 
 ### `wf template delete`

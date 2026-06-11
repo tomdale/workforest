@@ -24,15 +24,14 @@ npm install -g workforest
 The package installs both `wf` and `workforest`. Usage text uses the shorter
 `wf` executable.
 
-Install the shell integration once to enable command handoff and zsh workspace
+Install the shell integration once to enable command handoff and generated
 completion:
 
 ```sh
 eval "$(wf shell init zsh)"
 ```
 
-Use `bash` instead of `zsh` for Bash. Bash receives command handoff but does not
-currently include generated completion.
+Use `bash` instead of `zsh` for Bash.
 
 ## Quick Start
 

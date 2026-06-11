@@ -43,6 +43,7 @@ export type Cardinality = Readonly<{
   min: number;
   max: number | null;
   label: string;
+  usage?: string;
 }>;
 
 export type OperandVariant = Readonly<{

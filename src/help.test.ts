@@ -99,9 +99,17 @@ describe("registry-derived help", () => {
       commandPathHelp(commandRegistry, ["task", "create"]) ?? "",
     );
 
-    expect(fixed).toContain("<repository and worktree name>");
-    expect(fixed).not.toContain("<repository and worktree name...>");
+    expect(fixed).toContain("<repository> <worktree name>");
     expect(unbounded).toContain("<task names...>");
+  });
+
+  it("renders explicit usage fragments for distinct operands", () => {
+    expect(
+      stripAnsi(commandPathHelp(commandRegistry, ["review", "checkout"]) ?? ""),
+    ).toContain("<review target> [pull request]");
+    expect(
+      stripAnsi(commandPathHelp(commandRegistry, ["template", "copy"]) ?? ""),
+    ).toContain("<source template> <destination template>");
   });
 });
 

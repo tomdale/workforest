@@ -59,19 +59,21 @@ function cardinality(
   min: number,
   max: number | null,
   label = "operands",
+  usage?: string,
 ): Cardinality {
-  return { min, max, label };
+  return { min, max, label, ...(usage ? { usage } : {}) };
 }
 
 function operands(
   min: number,
   max: number | null,
   label = "operands",
+  usage?: string,
 ): OperandSpec {
   return {
     variants: [
       {
-        beforeDoubleDash: cardinality(min, max, label),
+        beforeDoubleDash: cardinality(min, max, label, usage),
         delimiter: "forbidden",
       },
     ],
@@ -380,7 +382,12 @@ export const commandRegistry: CommandRegistry = {
             summary: "Create a standalone worktree",
             handler: "worktree.create",
             help: nestedHelp("worktree", "create"),
-            operands: operands(2, 2, "repository and worktree name"),
+            operands: operands(
+              2,
+              2,
+              "repository and worktree name",
+              "<repository> <worktree name>",
+            ),
             flags: [
               stringFlag("dir", "--dir", "path"),
               booleanFlag("dryRun", "--dry-run", "-n"),
@@ -545,7 +552,12 @@ export const commandRegistry: CommandRegistry = {
             summary: "Check out a pull request worktree",
             handler: "review.checkout",
             help: nestedHelp("review", "checkout"),
-            operands: operands(1, 2, "review targets"),
+            operands: operands(
+              1,
+              2,
+              "review targets",
+              "<review target> [pull request]",
+            ),
             outputModes: ["human", "report"],
             tty: optionalStdin,
             shellHandoff: "optional-cd",
@@ -607,6 +619,7 @@ export const commandRegistry: CommandRegistry = {
                     0,
                     null,
                     "template and repositories",
+                    "[template] [repositories...]",
                   ),
                   delimiter: "forbidden",
                   when: { interactive: true },
@@ -616,6 +629,7 @@ export const commandRegistry: CommandRegistry = {
                     2,
                     null,
                     "template and repositories",
+                    "<template> <repositories...>",
                   ),
                   delimiter: "forbidden",
                   when: { interactive: false },
@@ -659,7 +673,12 @@ export const commandRegistry: CommandRegistry = {
             summary: "Copy a template",
             handler: "template.copy",
             help: nestedHelp("template", "copy"),
-            operands: operands(2, 2, "templates"),
+            operands: operands(
+              2,
+              2,
+              "templates",
+              "<source template> <destination template>",
+            ),
           }),
           leaf({
             name: "delete",
@@ -963,6 +982,16 @@ function validateCardinality(
       (!Number.isInteger(value.max) || value.max < value.min))
   ) {
     throw new Error(`Invalid operand cardinality for ${formatPath(path)}.`);
+  }
+  if (value.label.trim() === "") {
+    throw new Error(
+      `Operand cardinality needs a label for ${formatPath(path)}.`,
+    );
+  }
+  if (value.usage !== undefined && value.usage.trim() === "") {
+    throw new Error(
+      `Operand cardinality usage cannot be empty for ${formatPath(path)}.`,
+    );
   }
 }
 

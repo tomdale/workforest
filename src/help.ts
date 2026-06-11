@@ -262,6 +262,9 @@ function formatFlag(flag: FlagDefinition): string {
 }
 
 function formatCardinality(cardinality: Cardinality): string {
+  if (cardinality.usage !== undefined) {
+    return cardinality.usage;
+  }
   if (cardinality.min === 0 && cardinality.max === 0) {
     return "";
   }
