@@ -43,6 +43,10 @@ describe("parseInvocation", () => {
     [["status", "cancel", "--json"], 'Unknown flag "--json"'],
     [["review", "target", "--dry-run"], 'Unknown flag "--dry-run"'],
     [["list", "--bogus"], 'Unknown flag "--bogus"'],
+    [["worktree", "new", "repo", "name", "--force"], 'Unknown flag "--force"'],
+    [["worktree", "promote", "--repo", "repo"], 'Unknown flag "--repo"'],
+    [["worktree", "list", "--force"], 'Unknown flag "--force"'],
+    [["worktree", "delete", "--dir", "path"], 'Unknown flag "--dir"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
   });
@@ -68,8 +72,53 @@ describe("parseInvocation", () => {
     [["review"], "Expected 1-2 review targets"],
     [["review", "one", "two", "three"], "Expected 1-2 review targets"],
     [["repository", "add"], "Expected 1 or more repositories"],
+    [["worktree"], "Expected 1 or more worktree operands"],
+    [["worktree", "new"], "Expected 1-2 worktree operands"],
+    [
+      ["worktree", "new", "repo", "name", "extra"],
+      "Expected 1-2 worktree operands",
+    ],
+    [["worktree", "list", "extra"], "Expected no operands"],
   ])("enforces exact and variadic cardinality for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
+  });
+
+  it("parses each worktree leaf with only its declared flags", () => {
+    expect(
+      parse([
+        "worktree",
+        "repo",
+        "slug",
+        "--dir",
+        "./target",
+        "--repo",
+        "front",
+        "--dry-run",
+        "--force",
+      ]).flags,
+    ).toEqual({
+      dir: "./target",
+      repo: "front",
+      dryRun: true,
+      force: true,
+    });
+    expect(parse(["worktree", "new", "repo", "name", "-n"]).flags).toEqual({
+      dryRun: true,
+    });
+    expect(parse(["worktree", "promote", "template", "-n"]).flags).toEqual({
+      dryRun: true,
+    });
+    expect(parse(["worktree", "list", "--repo", "front"]).flags).toEqual({
+      repo: "front",
+    });
+    expect(
+      parse(["worktree", "delete", "slug", "--repo", "front", "-n", "-f"])
+        .flags,
+    ).toEqual({
+      repo: "front",
+      dryRun: true,
+      force: true,
+    });
   });
 
   it("supports the interactive and delimited new operand forms", () => {

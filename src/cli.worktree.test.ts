@@ -10,6 +10,9 @@ import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 const {
   createSingleWorktreeMock,
   createManagedWorktreeMock,
+  listManagedWorktreesMock,
+  removeManagedWorktreeMock,
+  promoteManagedWorktreeMock,
   resolveManagedWorktreeContextMock,
   resolveStandaloneWorktreeMock,
   removeStandaloneWorktreeMock,
@@ -22,6 +25,9 @@ const {
 } = vi.hoisted(() => ({
   createSingleWorktreeMock: vi.fn(),
   createManagedWorktreeMock: vi.fn(),
+  listManagedWorktreesMock: vi.fn(),
+  removeManagedWorktreeMock: vi.fn(),
+  promoteManagedWorktreeMock: vi.fn(),
   resolveManagedWorktreeContextMock: vi.fn(),
   resolveStandaloneWorktreeMock: vi.fn(),
   removeStandaloneWorktreeMock: vi.fn(),
@@ -68,6 +74,24 @@ async function createCachedMirror(
   });
 }
 
+function managedContext(defaultDir: string) {
+  const checkoutPath = path.join(defaultDir, "front", "fix-auth");
+  return {
+    repo: {
+      name: "front",
+      remote: "git@github.com:vercel/front.git",
+      defaultBranch: "main",
+    },
+    mirrorDir: path.join(defaultDir, "cache", "front.git"),
+    familyDir: path.join(defaultDir, "front"),
+    checkoutPath,
+    name: "fix-auth",
+    branch: "tomdale/fix-auth",
+    detached: false,
+    locked: false,
+  };
+}
+
 async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
   vi.doMock("./worktree.ts", () => ({
     createSingleWorktree: createSingleWorktreeMock,
@@ -76,6 +100,9 @@ async function importCliWithWorktreeMock(): Promise<typeof import("./cli.ts")> {
   }));
   vi.doMock("./managed-worktrees.ts", () => ({
     createManagedWorktree: createManagedWorktreeMock,
+    listManagedWorktrees: listManagedWorktreesMock,
+    removeManagedWorktree: removeManagedWorktreeMock,
+    promoteManagedWorktree: promoteManagedWorktreeMock,
     resolveManagedWorktreeContext: resolveManagedWorktreeContextMock,
   }));
   vi.doMock("./workspace/temporary-worktrees.ts", () => ({
@@ -107,6 +134,9 @@ afterEach(async () => {
   vi.unmock("./ui/prompts/index.ts");
   createSingleWorktreeMock.mockReset();
   createManagedWorktreeMock.mockReset();
+  listManagedWorktreesMock.mockReset();
+  removeManagedWorktreeMock.mockReset();
+  promoteManagedWorktreeMock.mockReset();
   resolveManagedWorktreeContextMock.mockReset();
   resolveStandaloneWorktreeMock.mockReset();
   removeStandaloneWorktreeMock.mockReset();
@@ -144,6 +174,53 @@ afterEach(async () => {
 });
 
 describe("wf worktree", () => {
+  it.each([
+    ["root", ["worktree", "--help"]],
+    ["root alias", ["wt", "--help"]],
+    ["new", ["worktree", "new", "--help"]],
+    ["promote", ["worktree", "promote", "--help"]],
+    ["list", ["worktree", "list", "--help"]],
+    ["delete", ["worktree", "delete", "--help"]],
+    ["delete alias", ["wt", "rm", "--help"]],
+  ])("renders %s help on stdout with exit 0", async (_name, argv) => {
+    const { executeCli } = await importCliWithWorktreeMock();
+
+    const result = await executeCli(argv);
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      render: {
+        kind: "text",
+        stream: "stdout",
+      },
+    });
+  });
+
+  it.each([
+    ["missing create operands", ["worktree"]],
+    ["missing new operands", ["worktree", "new"]],
+    ["surplus new operands", ["worktree", "new", "repo", "name", "extra"]],
+    ["inapplicable promote flag", ["worktree", "promote", "--repo", "front"]],
+    ["surplus list operands", ["worktree", "list", "extra"]],
+    ["inapplicable delete flag", ["worktree", "delete", "--dir", "target"]],
+    ["unknown create flag", ["worktree", "fix-auth", "--bogus"]],
+  ])("returns exit 2 without a stack for %s", async (_name, argv) => {
+    const { executeCli } = await importCliWithWorktreeMock();
+
+    const result = await executeCli(argv);
+
+    expect(result).toMatchObject({
+      exitCode: 2,
+      render: {
+        kind: "text",
+        stream: "stderr",
+      },
+    });
+    if (result.render.kind === "text") {
+      expect(result.render.value).not.toMatch(/\n\s+at /);
+    }
+  });
+
   it("creates a managed worktree under defaultDir", async () => {
     const configDir = await createTempDir("workforest-config-");
     const defaultDir = await createTempDir("workforest-default-");
@@ -294,6 +371,166 @@ describe("wf worktree", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("retains a managed worktree and exits 1 when setup fails", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const defaultDir = await createTempDir("workforest-default-");
+    const targetDir = path.join(defaultDir, "front", "fix-auth");
+    const errors: string[] = [];
+    const logs: string[] = [];
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir,
+    });
+    createManagedWorktreeMock.mockResolvedValue({
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      name: "fix-auth",
+      branchName: "fix-auth",
+      targetDir,
+      dryRun: false,
+      setupStatus: "failed",
+      setupError: new Error("pnpm install failed"),
+    });
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = [
+      "node",
+      "wf",
+      "worktree",
+      "new",
+      "vercel/front",
+      "fix-auth",
+    ];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain(
+      "Worktree created, but setup failed: pnpm install failed",
+    );
+    expect(logs.join("\n")).toContain(`Worktree retained at ${targetDir}`);
+  });
+
+  it("lists managed worktrees from managed context", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const defaultDir = await createTempDir("workforest-default-");
+    const context = managedContext(defaultDir);
+    const logs: string[] = [];
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(context.checkoutPath, { recursive: true });
+    process.chdir(context.checkoutPath);
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir,
+    });
+    resolveManagedWorktreeContextMock.mockResolvedValue(context);
+    listManagedWorktreesMock.mockResolvedValue([
+      {
+        name: "experiment",
+        path: path.join(context.familyDir, "experiment"),
+        branch: "tomdale/experiment",
+        detached: false,
+        locked: false,
+      },
+    ]);
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "list"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(listManagedWorktreesMock).toHaveBeenCalledWith(context);
+    expect(logs.join("\n")).toContain("experiment");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("deletes a managed worktree through the runtime rm alias", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const defaultDir = await createTempDir("workforest-default-");
+    const context = managedContext(defaultDir);
+    const removedPath = path.join(context.familyDir, "experiment");
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(context.checkoutPath, { recursive: true });
+    process.chdir(context.checkoutPath);
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir,
+    });
+    resolveManagedWorktreeContextMock.mockResolvedValue(context);
+    removeManagedWorktreeMock.mockResolvedValue({
+      name: "experiment",
+      path: removedPath,
+      branch: "tomdale/experiment",
+      detached: false,
+      locked: false,
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "wt", "rm", "experiment", "--force"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(removeManagedWorktreeMock).toHaveBeenCalledWith({
+      context,
+      name: "experiment",
+      dryRun: false,
+      force: true,
+    });
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("promotes a managed worktree through the typed leaf", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const defaultDir = await createTempDir("workforest-default-");
+    const context = managedContext(defaultDir);
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(context.checkoutPath, { recursive: true });
+    process.chdir(context.checkoutPath);
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir,
+      dirPrefix: "task-",
+    });
+    resolveManagedWorktreeContextMock.mockResolvedValue(context);
+    promoteManagedWorktreeMock.mockResolvedValue({
+      workspaceDir: path.join(defaultDir, "task-fix-auth"),
+      repoDir: path.join(defaultDir, "task-fix-auth", "front"),
+      repos: [context.repo],
+      addedRepos: [],
+      failures: [],
+      dryRun: true,
+    });
+
+    const { cli } = await importCliWithWorktreeMock();
+    process.argv = ["node", "wf", "worktree", "promote", "--dry-run"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promoteManagedWorktreeMock).toHaveBeenCalledWith({
+      context,
+      defaultDir: path.resolve(defaultDir),
+      dirPrefix: "task-",
+      template: null,
+      repos: [],
+      dryRun: true,
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("infers the owner for a cached standalone repository", async () => {
     const configDir = await createTempDir("workforest-config-");
     const cacheDir = await createTempDir("workforest-cache-");
@@ -406,8 +643,8 @@ describe("wf worktree", () => {
 
     await cli();
 
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toContain("Usage: wf worktree");
+    expect(process.exitCode).toBe(2);
+    expect(errors.join("\n")).toContain("Invalid operands for wf worktree");
 
     errors.length = 0;
     process.argv = ["node", "wf", "worktree", "vercel/front", "not a slug"];
@@ -431,8 +668,100 @@ describe("wf worktree", () => {
 
     await cli();
 
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toContain("Usage: wf worktree");
+    expect(process.exitCode).toBe(2);
+    expect(errors.join("\n")).toContain("Invalid operands for wf worktree");
+    expect(errors.join("\n")).not.toContain("at run");
+  });
+
+  it("rejects context-inapplicable flags with exit 2 and no stack", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const repoDir = path.join(workspaceDir, "front");
+    const defaultDir = await createTempDir("workforest-default-");
+    const context = managedContext(defaultDir);
+    const errors: string[] = [];
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(context.checkoutPath, { recursive: true });
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir,
+    });
+    const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "my-feature",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    resolveManagedWorktreeContextMock.mockResolvedValue(context);
+
+    const { cli } = await importCliWithWorktreeMock();
+
+    process.chdir(repoDir);
+    process.argv = ["node", "wf", "worktree", "fix-tests", "--dir", "./target"];
+    process.exitCode = undefined;
+    await cli();
+    expect(process.exitCode).toBe(2);
+    expect(errors.at(-1)).toContain(
+      "--dir is only supported for standalone worktrees.",
+    );
+
+    process.chdir(context.checkoutPath);
+    process.argv = ["node", "wf", "wt", "experiment", "--force"];
+    process.exitCode = undefined;
+    await cli();
+    expect(process.exitCode).toBe(2);
+    expect(errors.at(-1)).toContain(
+      "--force is only supported for workspace temporary worktrees.",
+    );
+
+    process.argv = ["node", "wf", "worktree", "list", "--repo", "front"];
+    process.exitCode = undefined;
+    await cli();
+    expect(process.exitCode).toBe(2);
+    expect(errors.at(-1)).toContain(
+      "--repo is only supported for workspace temporary worktrees.",
+    );
+
+    process.argv = [
+      "node",
+      "wf",
+      "worktree",
+      "delete",
+      "one",
+      "two",
+      "--force",
+    ];
+    process.exitCode = undefined;
+    await cli();
+    expect(process.exitCode).toBe(2);
+    expect(errors.at(-1)).toContain("Invalid operands for wf worktree delete");
+    expect(removeManagedWorktreeMock).not.toHaveBeenCalled();
+
+    process.argv = [
+      "node",
+      "wf",
+      "worktree",
+      "vercel/front",
+      "fix-auth",
+      "--repo",
+      "front",
+    ];
+    process.exitCode = undefined;
+    await cli();
+    expect(process.exitCode).toBe(2);
+    expect(errors.at(-1)).toContain(
+      "--repo is only supported for workspace temporary worktrees.",
+    );
+    expect(errors.join("\n")).not.toMatch(/\n\s+at /);
   });
 
   it("routes wt to worktree creation and writes the shell cd target", async () => {
