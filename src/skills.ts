@@ -1,13 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  readEnvironmentVariable,
+  WORKFOREST_ENVIRONMENT_VARIABLES,
+} from "./environment.ts";
 import { commandHelp, nestedCommandHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import { printReport } from "./terminal/report.ts";
 
 const SKILL_DIR_NAMES = ["skills", "skill-data"] as const;
 const SUPPLEMENTARY_DIR_NAMES = ["references", "templates"] as const;
-const SKILLS_DIR_ENV = "WORKFOREST_SKILLS_DIR";
 
 export type SkillInfo = {
   name: string;
@@ -88,7 +91,9 @@ export function parseSkillFrontmatter(
 }
 
 export async function findSkillsDirs(): Promise<string[]> {
-  const override = process.env[SKILLS_DIR_ENV];
+  const override = readEnvironmentVariable(
+    WORKFOREST_ENVIRONMENT_VARIABLES.skillsDir,
+  );
   if (override) {
     return (await isDirectory(override)) ? [path.resolve(override)] : [];
   }

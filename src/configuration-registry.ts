@@ -1,0 +1,283 @@
+import type {
+  VercelLinkConfig,
+  VercelRepoOverride,
+  WorkspaceConfig,
+} from "./types.ts";
+import { normalizeBranchPrefix } from "./utils/branch-prefix.ts";
+
+export type ConfigurationFieldDefinition = Readonly<{
+  key: keyof WorkspaceConfig;
+  type: string;
+  description: string;
+  defaultBehavior: string;
+  example: unknown;
+  children?: readonly ConfigurationChildFieldDefinition[];
+  normalize: (
+    value: unknown,
+    pathLabel: string,
+  ) => Readonly<Partial<WorkspaceConfig>>;
+}>;
+
+export type ConfigurationChildFieldDefinition = Readonly<{
+  key: string;
+  type: string;
+  description: string;
+  defaultBehavior: string;
+}>;
+
+export const DEFAULT_WORKSPACE_CONFIG: Required<
+  Pick<WorkspaceConfig, "dirPrefix" | "branchPrefix">
+> = {
+  dirPrefix: "",
+  branchPrefix: "",
+};
+
+/*
+ * The global config schema owns both normalization and reference metadata.
+ * Keeping those together prevents accepted values and generated documentation
+ * from drifting as fields are added or renamed.
+ */
+export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
+  {
+    key: "defaultDir",
+    type: "string (path)",
+    description: "Directory under which normal workspaces are created.",
+    defaultBehavior:
+      "Unset. Commands that require a configured workspace root report an error or prompt for one.",
+    example: "~/Code/workspaces",
+    normalize: (value) => optionalStringField("defaultDir", value),
+  },
+  {
+    key: "reviewsDir",
+    type: "string (path)",
+    description:
+      "Directory under which pull request review worktrees are created.",
+    defaultBehavior:
+      "Unset. The first interactive review suggests a reviews directory beside defaultDir, or ~/Code/reviews.",
+    example: "~/Code/reviews",
+    normalize: (value) => optionalStringField("reviewsDir", value),
+  },
+  {
+    key: "dirPrefix",
+    type: "string",
+    description: "Prefix added to generated workspace directory names.",
+    defaultBehavior: 'The empty string ("").',
+    example: "workspace-",
+    normalize: (value) => ({
+      dirPrefix: normalizeString(value) ?? DEFAULT_WORKSPACE_CONFIG.dirPrefix,
+    }),
+  },
+  {
+    key: "branchPrefix",
+    type: "string",
+    description:
+      "Global prefix added to generated feature branches. A missing trailing slash is added automatically.",
+    defaultBehavior: 'The empty string ("").',
+    example: "feature/",
+    normalize: (value) => ({
+      branchPrefix:
+        normalizeBranchPrefix(normalizeString(value)) ??
+        DEFAULT_WORKSPACE_CONFIG.branchPrefix,
+    }),
+  },
+  {
+    key: "vercelLink",
+    type: "object",
+    description: "Controls automatic Vercel project linking by repository.",
+    defaultBehavior:
+      "Unset. Built-in owner mappings still apply for vercel and vercel-labs.",
+    example: {
+      teamByGitHubOwner: {
+        vercel: "vercel",
+        "vercel-labs": "vercel-labs",
+      },
+      repoOverrides: {
+        "vercel/omniagent": {
+          team: "vercel",
+        },
+        "vercel/internal-only": {
+          disabled: true,
+        },
+      },
+    },
+    children: [
+      {
+        key: "teamByGitHubOwner",
+        type: "object<string, string>",
+        description:
+          "Maps a GitHub owner to the Vercel team used for repositories from that owner.",
+        defaultBehavior:
+          "No custom mappings. Built-in mappings cover vercel and vercel-labs.",
+      },
+      {
+        key: "repoOverrides",
+        type: "object<string, { team?: string; disabled?: boolean }>",
+        description:
+          "Overrides the Vercel team or disables automatic linking for an owner/repository slug.",
+        defaultBehavior: "No per-repository overrides.",
+      },
+      {
+        key: "repoOverrides.<owner/repository>.team",
+        type: "string",
+        description: "Selects a Vercel team for one repository.",
+        defaultBehavior: "Uses the owner mapping when one exists.",
+      },
+      {
+        key: "repoOverrides.<owner/repository>.disabled",
+        type: "boolean",
+        description: "Disables automatic Vercel linking for one repository.",
+        defaultBehavior: "false.",
+      },
+    ],
+    normalize: (value, pathLabel) => {
+      const vercelLink = normalizeVercelLinkConfig(value, pathLabel);
+      return vercelLink === undefined ? {} : { vercelLink };
+    },
+  },
+] as const;
+
+export const CONFIGURATION_EXAMPLE: WorkspaceConfig = Object.fromEntries(
+  CONFIGURATION_REGISTRY.map((field) => [field.key, field.example]),
+) as WorkspaceConfig;
+
+export function normalizeWorkspaceConfig(
+  value: unknown,
+  configPath: string,
+): WorkspaceConfig {
+  if (value === null || typeof value !== "object") {
+    throw new Error(`Workspace config at ${configPath} must be a JSON object.`);
+  }
+
+  const source = value as Record<string, unknown>;
+  const result: WorkspaceConfig = {};
+
+  for (const field of CONFIGURATION_REGISTRY) {
+    Object.assign(
+      result,
+      field.normalize(source[field.key], `${configPath}.${field.key}`),
+    );
+  }
+
+  return result;
+}
+
+function optionalStringField(
+  key: "defaultDir" | "reviewsDir",
+  value: unknown,
+): Readonly<Partial<WorkspaceConfig>> {
+  const normalized = normalizeString(value);
+  return normalized === undefined
+    ? {}
+    : ({ [key]: normalized } as Partial<WorkspaceConfig>);
+}
+
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeVercelLinkConfig(
+  value: unknown,
+  pathLabel: string,
+): VercelLinkConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  const teamByGitHubOwner = normalizeStringRecord(
+    config["teamByGitHubOwner"],
+    `${pathLabel}.teamByGitHubOwner`,
+  );
+  const repoOverrides = normalizeRepoOverrides(
+    config["repoOverrides"],
+    `${pathLabel}.repoOverrides`,
+  );
+
+  const result: VercelLinkConfig = {};
+  if (teamByGitHubOwner && Object.keys(teamByGitHubOwner).length > 0) {
+    result.teamByGitHubOwner = teamByGitHubOwner;
+  }
+  if (repoOverrides && Object.keys(repoOverrides).length > 0) {
+    result.repoOverrides = repoOverrides;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeStringRecord(
+  value: unknown,
+  pathLabel: string,
+): Record<string, string> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.trim();
+    const normalizedValue = normalizeString(entry);
+    if (!normalizedKey) {
+      throw new Error(`${pathLabel} contains an empty key.`);
+    }
+    if (normalizedValue === undefined) {
+      throw new Error(`${pathLabel}.${normalizedKey} must be a string.`);
+    }
+    result[normalizedKey] = normalizedValue;
+  }
+
+  return result;
+}
+
+function normalizeRepoOverrides(
+  value: unknown,
+  pathLabel: string,
+): Record<string, VercelRepoOverride> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const result: Record<string, VercelRepoOverride> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) {
+      throw new Error(`${pathLabel} contains an empty key.`);
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`${pathLabel}.${normalizedKey} must be an object.`);
+    }
+
+    const override = entry as Record<string, unknown>;
+    const team = normalizeString(override["team"]);
+    const disabledValue = override["disabled"];
+    if (disabledValue !== undefined && typeof disabledValue !== "boolean") {
+      throw new Error(
+        `${pathLabel}.${normalizedKey}.disabled must be a boolean.`,
+      );
+    }
+    if (override["team"] !== undefined && team === undefined) {
+      throw new Error(`${pathLabel}.${normalizedKey}.team must be a string.`);
+    }
+
+    const normalizedOverride: VercelRepoOverride = {};
+    if (team !== undefined) {
+      normalizedOverride.team = team;
+    }
+    if (disabledValue !== undefined) {
+      normalizedOverride.disabled = disabledValue;
+    }
+    result[normalizedKey] = normalizedOverride;
+  }
+
+  return result;
+}

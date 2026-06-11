@@ -2,6 +2,11 @@ import path from "node:path";
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
 import stringWidth from "string-width";
 import {
+  isEnvironmentVariableSet,
+  STANDARD_ENVIRONMENT_VARIABLES,
+  WORKFOREST_ENVIRONMENT_VARIABLES,
+} from "../environment.ts";
+import {
   type CachedRepository,
   formatByteSize,
   repositoryDisplayName,
@@ -43,7 +48,12 @@ const FOOTER_HEIGHT = 1;
 
 export function shouldUseRepositoryManager(): boolean {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
-  if (process.env["CI"] || process.env["WORKFOREST_NO_TUI"]) return false;
+  if (
+    isEnvironmentVariableSet(STANDARD_ENVIRONMENT_VARIABLES.ci) ||
+    isEnvironmentVariableSet(WORKFOREST_ENVIRONMENT_VARIABLES.noTui)
+  ) {
+    return false;
+  }
   return (
     (process.stdout.columns ?? 80) >= MIN_COLUMNS &&
     (process.stdout.rows ?? 24) >= MIN_ROWS

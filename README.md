@@ -482,7 +482,7 @@ remain available, including `wf template list`, `wf template info <name>`,
 
 ## Configuration
 
-Global settings live in `~/.config/workforest/config.json`:
+Global settings live in `~/.workforest/config.json` by default:
 
 ```jsonc
 {

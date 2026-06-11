@@ -2,6 +2,10 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
+import {
+  readEnvironmentVariable,
+  STANDARD_ENVIRONMENT_VARIABLES,
+} from "../environment.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { TemplateConfig } from "../types.ts";
 import { normalizeBranchPrefix } from "../utils/branch-prefix.ts";
@@ -24,7 +28,8 @@ export type Template = {
 
 export function getTemplatesDir(): string {
   const xdgHome =
-    process.env["XDG_CONFIG_HOME"] ?? path.join(os.homedir(), ".config");
+    readEnvironmentVariable(STANDARD_ENVIRONMENT_VARIABLES.xdgConfigHome) ??
+    path.join(os.homedir(), ".config");
   return path.join(xdgHome, XDG_TEMPLATES_DIR);
 }
 

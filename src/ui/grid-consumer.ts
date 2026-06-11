@@ -5,6 +5,11 @@ import {
 } from "@unblessed/node";
 import stringWidth from "string-width";
 import {
+  isEnvironmentVariableSet,
+  STANDARD_ENVIRONMENT_VARIABLES,
+  WORKFOREST_ENVIRONMENT_VARIABLES,
+} from "../environment.ts";
+import {
   CommandStreamAdapter,
   escapeBlessedTags,
 } from "../terminal/command-stream-adapter.ts";
@@ -165,7 +170,12 @@ export function shouldUseGrid(repoCount?: number): boolean {
   if (!process.stdout.isTTY) return false;
   const { columns, rows } = process.stdout;
   if ((columns ?? 80) < 60 || (rows ?? 24) < 15) return false;
-  if (process.env["CI"] || process.env["WORKFOREST_NO_TUI"]) return false;
+  if (
+    isEnvironmentVariableSet(STANDARD_ENVIRONMENT_VARIABLES.ci) ||
+    isEnvironmentVariableSet(WORKFOREST_ENVIRONMENT_VARIABLES.noTui)
+  ) {
+    return false;
+  }
   return true;
 }
 
