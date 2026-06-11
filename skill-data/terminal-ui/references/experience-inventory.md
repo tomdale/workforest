@@ -41,13 +41,12 @@ Status values:
 | External editor handoff | `wf config edit` | Status line, inherited editor session, completion status | Canonical |
 | Template directory jump | `wf template open` | Shell auto-cd handoff or explicit `cd` status line | Canonical |
 | Spinner fallback for setup | Small terminal, CI, too many repos, or `WORKFOREST_NO_TUI` | Prompt spinner and generator consumers | Canonical |
-| Dev simulator | `wf dev simulate new|confetti` | `src/dev-simulator.ts` | Canonical |
 
 ## Static Human-Readable Experiences
 
 | Experience | Entry point | Status |
 | --- | --- | --- |
-| Top-level, scoped, nested, and simulator help | `wf --help`, `<command> --help`, nested `--help` | Canonical |
+| Top-level, scoped, and nested help | `wf --help`, `<command> --help`, nested `--help` | Canonical |
 | Version | `wf version` | Canonical |
 | Workspace list | `wf workspace list` | Canonical |
 | Config report | `wf config show` | Canonical |
@@ -98,19 +97,9 @@ pnpm typecheck
 pnpm lint
 ```
 
-Exercise rich interfaces in a fixed PTY:
-
-```sh
-tmux new-session -d -s wf-ui -x 120 -y 40
-tmux send-keys -t wf-ui 'pnpm exec tsx bin/workforest.js dev simulate new --speed fast' Enter
-tmux capture-pane -t wf-ui -p
-tmux kill-session -t wf-ui
-```
-
 Exercise fallbacks and raw contracts:
 
 ```sh
-WORKFOREST_NO_TUI=1 pnpm exec tsx bin/workforest.js dev simulate new --speed fast
 pnpm exec tsx bin/workforest.js skills list --json
 pnpm exec tsx bin/workforest.js shell init zsh
 ```
