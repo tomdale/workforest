@@ -973,7 +973,9 @@ async function runTaskCreateInvocation(
 ): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    throw new OperationalError("Run wf task create from inside a workspace.");
+    throw new OperationalError(
+      "Run wf task create from inside a workspace. A task is a temporary worktree inside an existing workspace, and --repo selects which of the workspace's repositories to branch from — it does not name a workspace to create one in.\nFor a worktree outside a workspace, use: wf worktree create <repository> <name>",
+    );
   }
 
   return runTaskCreate(
