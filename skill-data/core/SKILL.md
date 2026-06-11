@@ -18,6 +18,8 @@ wf new vercel/next.js vercel/turbo -- "update docs build" # create a workspace
 wf status                                          # monitor background setup
 wf list                                            # list workspaces
 wf add vercel/swr                                  # add repo from inside a workspace
+wf wt new vercel/next.js fix-auth                  # managed single-repo checkout
+wf wt promote vercel/turbo                         # grow it into a workspace
 wf fork "new approach"                             # try another approach
 wf clean --dry-run                                 # preview cleanup
 wf clean --force                                   # remove workspace after review
@@ -76,6 +78,11 @@ Expected shape:
 
 Use `wf fork "try token refresh"` from inside the workspace when the user wants a
 separate approach with the same repos but fresh branches.
+
+Use `wf wt new <repo> <name>` when the task starts in one repository but may
+need promotion later. From that checkout, `wf wt <name>` creates a sibling from
+the remote default branch, and `wf wt promote [template] [repo...]` converts the
+current checkout into a normal workspace without losing dirty changes.
 
 ## Safety Rules
 

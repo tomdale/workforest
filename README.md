@@ -59,6 +59,12 @@ wf add vercel/docs
 # Create temporary sibling worktrees for parallel agents from inside a repo
 wf wt fix-tests upgrade-dependencies
 
+# Create a managed single-repo worktree under defaultDir/front/fix-auth
+wf wt new vercel/front fix-auth
+
+# Promote it into a normal multi-repo workspace later
+wf wt promote full-stack vercel/docs
+
 # List and remove temporary worktrees after merging their branches
 wf wt list
 wf wt rm fix-tests
@@ -184,6 +190,46 @@ From a workspace root, pass the parent repo explicitly:
 wf worktree --repo omniagent fix-tests
 wf worktree rm --repo omniagent fix-tests
 ```
+
+### Managed Single-Repo Worktrees
+
+For a single-repository checkout that can grow into a workspace later, use the
+managed layout:
+
+```bash
+wf worktree new vercel/front fix-auth
+# ~/Code/workspaces/front/fix-auth
+# branch: tomdale/fix-auth
+```
+
+Managed worktrees require `defaultDir`. The name must be a slug, the branch uses
+the configured `branchPrefix`, and creation starts from the repository's remote
+default branch. Built-in initializers run with the checkout as both repository
+and workspace context, but Workforest does not create workspace metadata or a
+VS Code workspace file yet.
+
+From inside a managed checkout, create and manage siblings contextually:
+
+```bash
+wf wt new experiment
+wf wt experiment
+wf wt list
+wf wt delete experiment
+```
+
+Promote the current checkout when the work expands:
+
+```bash
+wf wt promote
+wf wt promote full-stack vercel/docs
+```
+
+Promotion moves only the current checkout to
+`<defaultDir>/<dirPrefix><name>/<repo>`, preserving its branch, dirty files, and
+siblings. It creates normal workspace metadata and a VS Code workspace file,
+then adds template and explicit repositories on the current branch. Template
+files and hooks apply during promotion; initializers run only for newly added
+repositories.
 
 ### Standalone Single-Repo Worktrees
 
@@ -504,7 +550,9 @@ wf status                       Monitor background repository initialization
 wf status cancel [repo...]      Cancel queued or running initialization
 wf status retry [repo...]       Retry failed or cancelled initialization
 wf worktree <slug...>           Create temporary worktree(s) in a workspace repo
-wf worktree list                List temporary worktrees
+wf worktree new <repo> <name>   Create a managed single-repo worktree
+wf worktree promote [args...]   Promote the current managed worktree
+wf worktree list                List contextual worktrees
 wf worktree rm <slug...>        Remove temporary worktrees
 wf worktree <repo> <slug>       Create a standalone repo worktree
 wf wt                           Alias for worktree

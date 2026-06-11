@@ -21,6 +21,9 @@ inside the workspace with `wf status`.
 
 ```sh
 wf worktree <slug...>                # temp sibling worktrees inside a workspace repo
+wf worktree new <repo> <name>        # managed checkout in defaultDir/<repo>/<name>
+wf worktree new <name>               # managed sibling from managed context
+wf worktree promote [template] [repo...] # promote current managed checkout
 wf worktree list                     # list tracked temp worktrees
 wf worktree rm <slug...>             # remove tracked temp worktrees
 wf worktree <repo> <slug>            # standalone single-repo worktree

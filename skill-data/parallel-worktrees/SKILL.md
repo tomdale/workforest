@@ -10,7 +10,7 @@ repo without stepping on each other.
 
 ## Create Worktrees
 
-Run from inside the primary repo checkout:
+Run from inside a repository in a normal Workforest workspace:
 
 ```sh
 wf worktree "fix-tests" "upgrade-dependencies"
@@ -18,6 +18,17 @@ wf worktree "fix-tests" "upgrade-dependencies"
 
 Workforest creates sibling directories like `repo-fix-tests`, branches from the
 primary repo's committed `HEAD`, and runs built-in repo setup initializers.
+
+Managed single-repo checkouts use a different contextual workflow:
+
+```sh
+wf worktree new "fix-tests"
+# shorthand: wf worktree "fix-tests"
+```
+
+Those siblings live under `defaultDir/<repo>/<name>` and start from the remote
+default branch. Use `wf worktree promote` when one should become a normal
+workspace.
 
 From a workspace root, pass the parent repo:
 
