@@ -1,3 +1,12 @@
+import { commandRegistry } from "./cli/commands.ts";
+import type {
+  CommandGroup,
+  CommandLeaf,
+  CommandNode,
+  CommandRegistry,
+  CommandShortcut,
+  FlagDefinition,
+} from "./cli/types.ts";
 import {
   CONFIGURATION_EXAMPLE,
   CONFIGURATION_REGISTRY,
@@ -6,6 +15,7 @@ import {
   ENVIRONMENT_VARIABLE_REGISTRY,
   type EnvironmentVariableAudience,
 } from "./environment.ts";
+import { commandUsageLines } from "./help.ts";
 
 const GENERATED_NOTICE =
   "<!-- Generated from the executable registry. Do not edit directly. -->";
@@ -14,6 +24,41 @@ export const CONFIGURATION_REFERENCE_PATH =
   "skill-data/setup-and-configuration/references/configuration.md";
 export const ENVIRONMENT_REFERENCE_PATH =
   "skill-data/setup-and-configuration/references/environment-variables.md";
+export const COMMAND_REFERENCE_PATH = "skill-data/core/references/commands.md";
+
+export function renderCommandReference(
+  registry: CommandRegistry = commandRegistry,
+): string {
+  const commands = registry.root.children
+    .filter(isVisible)
+    .flatMap(renderCommandNode);
+  const shortcuts = registry.shortcuts.filter(isVisible);
+  const shortcutSection =
+    shortcuts.length === 0
+      ? []
+      : [
+          "## Shortcuts",
+          "",
+          "Shortcuts preserve the published command surface while using the same parser and handler as their canonical commands.",
+          "",
+          ...shortcuts.flatMap((shortcut) =>
+            renderShortcut(registry, shortcut),
+          ),
+        ];
+
+  return normalizeGeneratedMarkdown(
+    [
+      "# Workforest Command Reference",
+      "",
+      GENERATED_NOTICE,
+      "",
+      "All syntax is generated from the CLI command registry. Use `wf`; `workforest` remains an executable alias.",
+      "",
+      ...commands,
+      ...shortcutSection,
+    ].join("\n"),
+  );
+}
 
 export function renderConfigurationReference(): string {
   const fields = CONFIGURATION_REGISTRY.flatMap((field) => {
@@ -121,4 +166,133 @@ export function renderEnvironmentReference(): string {
     "",
     ...renderedSections,
   ].join("\n");
+}
+
+function renderCommandNode(node: CommandNode): string[] {
+  if (node.kind === "leaf") {
+    return renderLeaf(node, 2);
+  }
+
+  const defaultBehavior = node.default
+    ? ["", `Without a subcommand: ${node.default.summary.replace(/\.$/, "")}.`]
+    : [];
+  const children = node.children
+    .filter(isVisible)
+    .flatMap((child) =>
+      child.kind === "leaf" ? renderLeaf(child, 3) : renderCommandNode(child),
+    );
+
+  return [
+    `## \`${formatCommand(node.path)}\``,
+    "",
+    `${node.summary.replace(/\.$/, "")}.`,
+    "",
+    "```text",
+    `${formatCommand(node.path)} ${node.default ? "[subcommand]" : "<subcommand>"}`,
+    "```",
+    ...defaultBehavior,
+    ...renderAliases(node),
+    "",
+    ...children,
+  ];
+}
+
+function renderLeaf(leaf: CommandLeaf, headingLevel: number): string[] {
+  const options =
+    leaf.flags.length === 0
+      ? []
+      : [
+          "Options:",
+          "",
+          ...leaf.flags.map((flag) => `- ${formatFlagReference(flag)}`),
+          "",
+        ];
+
+  return [
+    `${"#".repeat(headingLevel)} \`${formatCommand(leaf.path)}\``,
+    "",
+    `${leaf.summary.replace(/\.$/, "")}.`,
+    "",
+    "```text",
+    ...commandUsageLines(leaf),
+    "```",
+    "",
+    ...options,
+    ...renderAliases(leaf),
+    "",
+  ];
+}
+
+function renderShortcut(
+  registry: CommandRegistry,
+  shortcut: CommandShortcut,
+): string[] {
+  const target = findLeaf(registry.root, shortcut.target);
+  if (!target) {
+    throw new Error(
+      `Shortcut ${shortcut.name} targets a missing command: ${formatCommand(shortcut.target)}`,
+    );
+  }
+
+  return [
+    `### \`wf ${shortcut.name}\``,
+    "",
+    `Shortcut for \`${formatCommand(shortcut.target)}\`.`,
+    "",
+    "```text",
+    ...commandUsageLines(target, [shortcut.name]),
+    "```",
+    "",
+  ];
+}
+
+function renderAliases(node: CommandNode): string[] {
+  const aliases = node.aliases
+    .filter(isVisible)
+    .map((alias) => `\`${alias.name}\``);
+  return aliases.length === 0 ? [] : ["", `Aliases: ${aliases.join(", ")}.`];
+}
+
+function findLeaf(
+  root: CommandGroup,
+  path: readonly string[],
+): CommandLeaf | null {
+  let node: CommandNode = root;
+  for (const segment of path) {
+    if (node.kind !== "group") {
+      return null;
+    }
+    const child: CommandNode | undefined = node.children.find(
+      (candidate) => candidate.name === segment,
+    );
+    if (!child) {
+      return null;
+    }
+    node = child;
+  }
+  return node.kind === "leaf" ? node : (node.default ?? null);
+}
+
+function formatFlagReference(flag: FlagDefinition): string {
+  const names = [flag.short, flag.long].filter(Boolean).map((name) => {
+    if (name === flag.long && flag.kind === "string") {
+      return `\`${name} <${flag.valueName}>\``;
+    }
+    return `\`${name}\``;
+  });
+  return `${names.join(", ")}${flag.required ? " (required)" : ""}`;
+}
+
+function formatCommand(path: readonly string[]): string {
+  return path.length === 0 ? "wf" : `wf ${path.join(" ")}`;
+}
+
+function isVisible(
+  value: CommandNode | CommandShortcut | CommandNode["aliases"][number],
+): boolean {
+  return value.visibility === "visible";
+}
+
+function normalizeGeneratedMarkdown(value: string): string {
+  return `${value.trimEnd().replace(/\n{3,}/g, "\n\n")}\n`;
 }
