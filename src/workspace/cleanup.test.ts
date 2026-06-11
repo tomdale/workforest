@@ -43,7 +43,12 @@ vi.mock("./repository.ts", () => ({
   cleanupWorkspaceWorktreesGenerator: cleanupWorkspaceWorktreesGeneratorMock,
 }));
 
-import { cleanupWorkspaceGenerator, previewCleanup } from "./cleanup.ts";
+import {
+  type CleanupState,
+  cleanupWorkspace,
+  cleanupWorkspaceGenerator,
+  previewCleanup,
+} from "./cleanup.ts";
 
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const states: T[] = [];
@@ -75,7 +80,7 @@ beforeEach(() => {
         has_lockfile: true,
       },
     ],
-    temporary_worktrees: [
+    tasks: [
       {
         slug: "fix-tests",
         parent_repo: "api",
@@ -123,11 +128,39 @@ describe("cleanupWorkspaceGenerator", () => {
     });
   });
 
-  it("includes temporary worktrees in cleanup previews", async () => {
+  it("includes tasks in cleanup previews", async () => {
     await expect(previewCleanup("/tmp/workspace/demo")).resolves.toMatchObject({
       workspaceDir: "/tmp/workspace/demo",
       repos: ["api"],
-      temporaryWorktrees: ["api-fix-tests"],
+      tasks: ["api-fix-tests"],
     });
+  });
+
+  it("returns cleanup data and emits states without writing output", async () => {
+    const states: CleanupState[] = [];
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await expect(
+      cleanupWorkspace("/tmp/workspace/demo", {
+        dryRun: true,
+        onState: (state) => {
+          states.push(state);
+        },
+      }),
+    ).resolves.toEqual({
+      dryRun: true,
+      removedRepos: ["api"],
+      deletedBranches: [],
+    });
+
+    expect(states.at(-1)).toEqual({
+      phase: "complete",
+      removedRepos: ["api"],
+    });
+    expect(consoleLog).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

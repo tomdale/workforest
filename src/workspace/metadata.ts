@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type {
   ReviewWorktreeMetadata,
-  TemporaryWorktreeMetadata,
+  TaskMetadata,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
 } from "../types.ts";
@@ -163,43 +163,35 @@ export async function updateWorkspaceRepo(
   });
 }
 
-export async function appendTemporaryWorktrees(
+export async function appendTasks(
   workspaceDir: string,
-  worktrees: readonly TemporaryWorktreeMetadata[],
+  tasks: readonly TaskMetadata[],
 ): Promise<WorkspaceMetadata> {
   return mutateWorkspaceMetadata(workspaceDir, (metadata) => ({
     ...metadata,
-    temporary_worktrees: [
-      ...(metadata.temporary_worktrees ?? []),
-      ...worktrees,
-    ],
+    tasks: [...(metadata.tasks ?? []), ...tasks],
   }));
 }
 
-export async function removeTemporaryWorktrees(
+export async function removeTasks(
   workspaceDir: string,
-  entriesToRemove: readonly Pick<
-    TemporaryWorktreeMetadata,
-    "parent_repo" | "slug"
-  >[],
+  entriesToRemove: readonly Pick<TaskMetadata, "parent_repo" | "slug">[],
 ): Promise<WorkspaceMetadata> {
   return mutateWorkspaceMetadata(workspaceDir, (metadata) => {
     const removeKeys = new Set(
       entriesToRemove.map((entry) => `${entry.parent_repo}\0${entry.slug}`),
     );
-    const temporaryWorktrees = (metadata.temporary_worktrees ?? []).filter(
+    const tasks = (metadata.tasks ?? []).filter(
       (entry) => !removeKeys.has(`${entry.parent_repo}\0${entry.slug}`),
     );
 
     const nextMetadata: WorkspaceMetadata = {
       ...metadata,
-      ...(temporaryWorktrees.length > 0
-        ? { temporary_worktrees: temporaryWorktrees }
-        : {}),
+      ...(tasks.length > 0 ? { tasks } : {}),
     };
 
-    if (temporaryWorktrees.length === 0) {
-      delete nextMetadata.temporary_worktrees;
+    if (tasks.length === 0) {
+      delete nextMetadata.tasks;
     }
 
     return nextMetadata;
@@ -565,17 +557,10 @@ function validateWorkspaceMetadata(
     validateWorkspaceRepoMetadata(entry, `${source}.repos[${index}]`);
   }
 
-  if (metadata["temporary_worktrees"] !== undefined) {
-    const worktrees = requireArray(
-      metadata["temporary_worktrees"],
-      `${source}.temporary_worktrees`,
-    );
-    for (const [index, entry] of worktrees.entries()) {
-      validateTemporaryWorktreeMetadata(
-        entry,
-        workspaceDir,
-        `${source}.temporary_worktrees[${index}]`,
-      );
+  if (metadata["tasks"] !== undefined) {
+    const tasks = requireArray(metadata["tasks"], `${source}.tasks`);
+    for (const [index, entry] of tasks.entries()) {
+      validateTaskMetadata(entry, workspaceDir, `${source}.tasks[${index}]`);
     }
   }
 
@@ -608,7 +593,7 @@ function validateWorkspaceRepoMetadata(value: unknown, source: string): void {
   optionalString(repo["feature_branch"], `${source}.feature_branch`);
 }
 
-function validateTemporaryWorktreeMetadata(
+function validateTaskMetadata(
   value: unknown,
   workspaceDir: string,
   source: string,
@@ -639,10 +624,7 @@ function validateTemporaryWorktreeMetadata(
   }
   const setupLog = optionalString(worktree["setup_log"], `${source}.setup_log`);
   if (setupLog !== undefined) {
-    const expectedSetupLog = getTemporaryWorktreeSetupLogRelativePath(
-      parentRepo,
-      slug,
-    );
+    const expectedSetupLog = getTaskSetupLogRelativePath(parentRepo, slug);
     if (setupLog !== expectedSetupLog) {
       throw new Error(
         `${source}.setup_log must be exactly "${expectedSetupLog}".`,
@@ -688,7 +670,7 @@ async function validateWorkspaceMetadataFilesystemPaths(
   metadata: WorkspaceMetadata,
   workspaceDir: string,
 ): Promise<void> {
-  for (const worktree of metadata.temporary_worktrees ?? []) {
+  for (const worktree of metadata.tasks ?? []) {
     await assertContainedPathWithoutSymlinks(
       workspaceDir,
       resolveContainedPath(workspaceDir, worktree.path),
@@ -709,7 +691,7 @@ async function validateWorkspaceMetadataFilesystemPaths(
   }
 }
 
-export function getTemporaryWorktreeSetupLogRelativePath(
+export function getTaskSetupLogRelativePath(
   parentRepo: string,
   slug: string,
 ): string {

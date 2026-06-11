@@ -1,13 +1,87 @@
 import { describe, expect, it } from "vitest";
 import { commandRegistry, validateCommandRegistry } from "./commands.ts";
-import type { CommandLeaf, CommandRegistry } from "./types.ts";
+import type {
+  CommandGroup,
+  CommandLeaf,
+  CommandNode,
+  CommandRegistry,
+} from "./types.ts";
 
 describe("commandRegistry", () => {
-  it("defines the complete registry metadata for every leaf", () => {
-    const leaves = collectLeaves(commandRegistry);
+  it("defines the exact visible command tree", () => {
+    expect(visibleTree(commandRegistry.root)).toEqual({
+      workspace: ["create", "delete", "open", "list", "status", "add"],
+      task: ["create", "list", "delete"],
+      worktree: ["create", "list", "delete"],
+      cache: [
+        "list",
+        "info",
+        "path",
+        "add",
+        "update",
+        "doctor",
+        "repair",
+        "delete",
+        "prune",
+        "manage",
+      ],
+      review: ["open", "checkout"],
+      template: [
+        "list",
+        "open",
+        "show",
+        "manage",
+        "new",
+        "edit",
+        "add-file",
+        "copy",
+        "delete",
+      ],
+      shell: ["init"],
+      config: ["show", "init", "edit"],
+      skills: ["list", "get", "path"],
+      version: null,
+    });
+  });
 
-    expect(leaves.length).toBeGreaterThan(30);
-    for (const leaf of leaves) {
+  it("defines only the published root shortcuts", () => {
+    expect(commandRegistry.shortcuts).toEqual([
+      expect.objectContaining({
+        name: "new",
+        target: ["workspace", "create"],
+      }),
+      expect.objectContaining({
+        name: "clean",
+        target: ["workspace", "delete"],
+      }),
+    ]);
+    expect(
+      collectNodes(commandRegistry.root).flatMap((node) => node.aliases),
+    ).toEqual([]);
+  });
+
+  it("uses explicit resource leaves without contextual defaults", () => {
+    for (const name of [
+      "workspace",
+      "task",
+      "worktree",
+      "cache",
+      "review",
+      "template",
+      "shell",
+    ]) {
+      expect(findGroup(commandRegistry.root, name).default).toBeUndefined();
+    }
+    expect(findGroup(commandRegistry.root, "config").default?.handler).toBe(
+      "config.show",
+    );
+    expect(findGroup(commandRegistry.root, "skills").default?.handler).toBe(
+      "skills.list",
+    );
+  });
+
+  it("defines complete metadata for every leaf", () => {
+    for (const leaf of collectLeaves(commandRegistry)) {
       expect(leaf.summary).not.toBe("");
       expect(leaf.handler).not.toBe("");
       expect(leaf.operands.variants.length).toBeGreaterThan(0);
@@ -21,32 +95,33 @@ describe("commandRegistry", () => {
     expect(() => validateCommandRegistry(commandRegistry)).not.toThrow();
   });
 
-  it("rejects alias collisions", () => {
-    const registry = cloneRegistry();
-    const list = registry.root.children.find((node) => node.name === "list");
-    if (!list) throw new Error("Expected list command");
-    list.aliases = [{ name: "new", visibility: "visible" }];
+  it("rejects shortcut collisions and unknown targets", () => {
+    const collision = cloneRegistry();
+    firstShortcut(collision).name = "workspace";
+    expect(() => validateCommandRegistry(collision)).toThrow(
+      'Duplicate command or alias "workspace"',
+    );
 
-    expect(() => validateCommandRegistry(registry)).toThrow(
-      'Duplicate command or alias "new"',
+    const unknownTarget = cloneRegistry();
+    firstShortcut(unknownTarget).target = ["workspace", "missing"];
+    expect(() => validateCommandRegistry(unknownTarget)).toThrow(
+      "targets unknown command wf workspace missing",
     );
   });
 
   it("rejects paths that disagree with the command tree", () => {
     const registry = cloneRegistry();
-    const list = registry.root.children.find((node) => node.name === "list");
-    if (!list) throw new Error("Expected list command");
-    list.path = ["wrong"];
+    findMutableNode(registry.root, ["workspace", "list"]).path = ["wrong"];
 
     expect(() => validateCommandRegistry(registry)).toThrow(
-      "does not match wf list",
+      "does not match wf workspace list",
     );
   });
 
   it("rejects duplicate leaf flags", () => {
     const registry = cloneRegistry();
-    const add = registry.root.children.find((node) => node.name === "add");
-    if (!add || add.kind !== "leaf") throw new Error("Expected add command");
+    const add = findMutableNode(registry.root, ["workspace", "add"]);
+    if (add.kind !== "leaf") throw new Error("Expected add command");
     add.flags = [
       ...add.flags,
       { name: "other", long: "--workspace", kind: "boolean" },
@@ -58,9 +133,44 @@ describe("commandRegistry", () => {
   });
 });
 
+function visibleTree(root: CommandGroup) {
+  return Object.fromEntries(
+    root.children
+      .filter((node) => node.visibility === "visible")
+      .map((node) => [
+        node.name,
+        node.kind === "group"
+          ? node.children
+              .filter((child) => child.visibility === "visible")
+              .map((child) => child.name)
+          : null,
+      ]),
+  );
+}
+
+function findGroup(root: CommandGroup, name: string): CommandGroup {
+  const node = root.children.find((child) => child.name === name);
+  if (!node || node.kind !== "group") {
+    throw new Error(`Expected ${name} group`);
+  }
+  return node;
+}
+
+function collectNodes(root: CommandGroup): CommandNode[] {
+  const nodes: CommandNode[] = [];
+  const visit = (node: CommandNode) => {
+    nodes.push(node);
+    if (node.kind === "group") {
+      node.children.forEach(visit);
+    }
+  };
+  root.children.forEach(visit);
+  return nodes;
+}
+
 function collectLeaves(registry: CommandRegistry) {
   const leaves: CommandLeaf[] = [];
-  const visit = (node: CommandRegistry["root"]["children"][number]) => {
+  const visit = (node: CommandNode) => {
     if (node.kind === "leaf") {
       leaves.push(node);
       return;
@@ -68,13 +178,9 @@ function collectLeaves(registry: CommandRegistry) {
     if (node.default) {
       leaves.push(node.default);
     }
-    for (const child of node.children) {
-      visit(child);
-    }
+    node.children.forEach(visit);
   };
-  for (const child of registry.root.children) {
-    visit(child);
-  }
+  registry.root.children.forEach(visit);
   return leaves;
 }
 
@@ -82,9 +188,35 @@ function cloneRegistry(): MutableCommandRegistry {
   return structuredClone(commandRegistry) as MutableCommandRegistry;
 }
 
-type MutableCommandRegistry = {
-  -readonly [Key in keyof CommandRegistry]: Mutable<CommandRegistry[Key]>;
-};
+function firstShortcut(registry: MutableCommandRegistry) {
+  const shortcut = registry.shortcuts[0];
+  if (!shortcut) {
+    throw new Error("Expected a root shortcut");
+  }
+  return shortcut;
+}
+
+function findMutableNode(
+  root: Mutable<CommandGroup>,
+  path: readonly string[],
+): Mutable<CommandNode> {
+  let node: Mutable<CommandNode> = root;
+  for (const segment of path) {
+    if (node.kind !== "group") {
+      throw new Error(`Expected group before ${segment}`);
+    }
+    const child: Mutable<CommandNode> | undefined = node.children.find(
+      (candidate) => candidate.name === segment,
+    );
+    if (!child) {
+      throw new Error(`Missing ${segment}`);
+    }
+    node = child;
+  }
+  return node;
+}
+
+type MutableCommandRegistry = Mutable<CommandRegistry>;
 
 type Mutable<Value> = Value extends readonly (infer Item)[]
   ? Mutable<Item>[]

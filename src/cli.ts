@@ -3,13 +3,21 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import arg from "arg";
 import { commandRegistry } from "./cli/commands.ts";
-import { isArgumentParserError, UsageError } from "./cli/errors.ts";
+import {
+  isArgumentParserError,
+  OperationalError,
+  UsageError,
+} from "./cli/errors.ts";
 import {
   applyExitCode,
   errorResult,
+  failure,
+  humanOutput,
+  jsonSuccess,
   renderCommandResult,
+  reportOutput,
+  shellOutput,
   success,
 } from "./cli/output.ts";
 import { parseInvocation } from "./cli/parse-invocation.ts";
@@ -24,13 +32,7 @@ import {
   loadWorkspaceConfig,
   saveWorkspaceConfig,
 } from "./config.ts";
-import {
-  commandHelp,
-  devSimulationHelp,
-  help,
-  nestedCommandHelp,
-  renderHelp,
-} from "./help.ts";
+import { commandHelp, help, nestedCommandHelp, renderHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import { RegisteredRepositoryNameCollisionError } from "./repositories.ts";
 import {
@@ -39,7 +41,7 @@ import {
   resolveRepositoryOrTemplateSpecifiers,
   resolveRepositorySpecifiers,
 } from "./repository-specifiers.ts";
-import { runGit } from "./services/git.ts";
+import type { ServiceEventSink } from "./services/events.ts";
 import {
   isShellAutoCdEnabled,
   normalizeShellName,
@@ -59,10 +61,10 @@ import {
   printReport,
   type ReportField,
   type ReportSection,
+  renderReport,
 } from "./terminal/report.ts";
 import type {
   RepoConfig,
-  TemporaryWorktreeMetadata,
   WorkspaceConfig,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
@@ -94,6 +96,7 @@ import {
 import { generateSlugFromDescription, isSlug } from "./utils/slug.ts";
 import {
   type CleanupPreview,
+  type CleanupState,
   cleanupWorkspace,
   previewCleanup,
   validateWorkspace,
@@ -115,7 +118,65 @@ type TemplateAddFileEntry = {
 };
 
 type TemplateAddFileConflictAction = "overwrite" | "diff" | "skip" | "cancel";
-type DeleteWorkspaceWorktreeAction = "worktree" | "workspace" | "cancel";
+
+const humanServiceEventSink: ServiceEventSink = (event) => {
+  if (event.type === "output") {
+    const stream = event.stream === "stdout" ? process.stdout : process.stderr;
+    stream.write(event.data);
+    return;
+  }
+
+  log[event.level === "warning" ? "warn" : event.level](event.message);
+};
+
+function renderCleanupState(state: CleanupState, dryRun: boolean): void {
+  switch (state.phase) {
+    case "init":
+    case "remove-dir":
+      log.info(state.message);
+      break;
+    case "worktree":
+      if (state.state.status === "log") {
+        log[state.state.level](`${state.repo}: ${state.state.message}`);
+      } else if (state.state.status === "skipped") {
+        log.info(`${state.repo}: ${state.state.reason}`);
+      } else if (state.state.status === "failed") {
+        log.error(`${state.repo}: ${state.state.error.message}`);
+      }
+      break;
+    case "worktree-complete":
+      log.success(`${state.repo}: worktree removed from mirror`);
+      break;
+    case "remote-branch":
+      if (state.status === "checking") {
+        log.info(`${state.repo}: checking remote branch ${state.branch}`);
+      } else if (state.status === "deleting") {
+        log.info(`${state.repo}: deleting remote branch ${state.branch}`);
+      } else if (state.status === "deleted") {
+        log.success(`${state.repo}: deleted remote branch ${state.branch}`);
+      } else if (state.status === "skipped") {
+        log.info(`${state.repo}: skipped ${state.branch} - ${state.reason}`);
+      } else {
+        log.error(
+          `${state.repo}: failed to delete ${state.branch} - ${state.reason}`,
+        );
+      }
+      break;
+    case "complete": {
+      if (dryRun) {
+        log.info("Dry-run complete. No changes made.");
+        break;
+      }
+      const branchMessage = state.deletedBranches?.length
+        ? `, deleted ${state.deletedBranches.length} remote branch(es)`
+        : "";
+      log.success(
+        `Cleanup complete. Removed ${state.removedRepos.length} worktree(s)${branchMessage}.`,
+      );
+      break;
+    }
+  }
+}
 
 export async function cli(): Promise<void> {
   const result = await executeCli(process.argv.slice(2));
@@ -126,6 +187,8 @@ export async function cli(): Promise<void> {
 export async function executeCli(
   argv: readonly string[],
 ): Promise<CommandResult> {
+  const errorOutputMode = requestsJsonOutput(argv) ? "json" : "human";
+
   try {
     const resolution = resolveCommand(commandRegistry, argv);
     if (resolution.kind === "help") {
@@ -156,9 +219,11 @@ export async function executeCli(
     return await runInvocation(invocation);
   } catch (error) {
     if (isArgumentParserError(error)) {
-      return errorResult(new UsageError(error.message)) ?? success();
+      return (
+        errorResult(new UsageError(error.message), errorOutputMode) ?? success()
+      );
     }
-    const result = errorResult(error);
+    const result = errorResult(error, errorOutputMode);
     if (result) {
       return result;
     }
@@ -169,193 +234,173 @@ export async function executeCli(
 async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
-  return runLegacyHandler(async () => {
-    const argv = [...invocation.command.argv];
-    const invokedRoot =
-      invocation.command.invokedPath[0] ??
-      invocation.command.canonicalPath[0] ??
-      "";
-
-    switch (invocation.command.leaf.handler) {
-      case "new":
-        await runNewCommand(argv);
-        return;
-      case "status.show":
-        await runStatusCommand(argv);
-        return;
-      case "status.cancel":
-        await runStatusCommand(["cancel", ...argv]);
-        return;
-      case "status.retry":
-        await runStatusCommand(["retry", ...argv]);
-        return;
-      case "worktree.create":
-        await runWorktreeCommand(argv, invokedRoot);
-        return;
-      case "worktree.new":
-        await runWorktreeCommand(["new", ...argv], invokedRoot);
-        return;
-      case "worktree.promote":
-        await runWorktreeCommand(["promote", ...argv], invokedRoot);
-        return;
-      case "worktree.list":
-        await runWorktreeCommand(["list", ...argv], invokedRoot);
-        return;
-      case "worktree.delete":
-        await runWorktreeCommand(["delete", ...argv], invokedRoot);
-        return;
-      case "review.create":
-        await runReviewCommand(argv);
-        return;
-      case "review.list":
-        await runReviewCommand(["list", ...argv]);
-        return;
-      case "review.delete":
-        await runReviewCommand(["delete", ...argv]);
-        return;
-      case "delete":
-        await runDeleteCommand(argv);
-        return;
-      case "workspace.delete":
-        await runWorkspaceCommand(["delete", ...argv]);
-        return;
-      case "cd":
-        await runCdCommand(argv);
-        return;
-      case "find":
-        await runFindCommand(argv);
-        return;
-      case "add":
-        await runAddCommand(argv);
-        return;
-      case "fork":
-        await runForkCommand(argv);
-        return;
-      case "clean":
-        await runCleanCommand(argv);
-        return;
-      case "list":
-        await runListCommand(argv, invokedRoot);
-        return;
-      case "init":
-        await runInitCommand(argv);
-        return;
-      case "template.default":
-        if (invokedRoot === "templates") {
-          await runTemplatesCommand(argv);
-        } else {
-          await runTemplateCommand(argv);
-        }
-        return;
-      case "template.list":
-        await runTemplateCommand(["list", ...argv]);
-        return;
-      case "template.show":
-        await runTemplateCommand(["show", ...argv]);
-        return;
-      case "template.info":
-        await runTemplateCommand(["info", ...argv]);
-        return;
-      case "template.new":
-        await runTemplateCommand(["new", ...argv]);
-        return;
-      case "template.edit":
-        await runTemplateCommand(["edit", ...argv]);
-        return;
-      case "template.add-file":
-        await runTemplateCommand(["add-file", ...argv]);
-        return;
-      case "template.copy":
-        await runTemplateCommand(["copy", ...argv]);
-        return;
-      case "template.delete":
-        await runTemplateCommand(["delete", ...argv]);
-        return;
-      case "repository.default": {
-        const { runRepositoriesCommand, runRepositoryCommand } = await import(
-          "./repository-cli.ts"
-        );
-        if (invokedRoot === "repositories" || invokedRoot === "repos") {
-          await runRepositoriesCommand(argv);
-        } else {
-          await runRepositoryCommand(argv, invokedRoot);
-        }
-        return;
+  switch (invocation.command.leaf.handler) {
+    case "review.open":
+    case "review.checkout":
+      return runReviewInvocation(invocation);
+    case "workspace.create":
+      return runTypedCommand(() => runWorkspaceCreateCommand(invocation));
+    case "workspace.status":
+      return runTypedCommand(() => runStatusCommand(invocation));
+    case "workspace.delete":
+    case "clean":
+      return runTypedCommand(() => runCleanCommand(invocation));
+    case "workspace.open":
+      return runTypedCommand(() => runWorkspaceOpenCommand(invocation));
+    case "workspace.add":
+      return runTypedCommand(() => runAddCommand(invocation));
+    case "workspace.list":
+      return runTypedCommand(runListCommand);
+    case "shell.init":
+      return runShellInitCommand(invocation.beforeDoubleDash[0]);
+    case "config.show":
+      return runConfigShow();
+    case "config.init":
+      return runConfigInit();
+    case "config.edit":
+      return runConfigEdit();
+    case "skills.list":
+    case "skills.get":
+    case "skills.path": {
+      const { runSkillsCommand } = await import("./skills.ts");
+      switch (invocation.command.leaf.handler) {
+        case "skills.list":
+          return runSkillsCommand({
+            command: "list",
+            json: invocation.flags["json"] === true,
+          });
+        case "skills.get":
+          return runSkillsCommand({
+            command: "get",
+            names: invocation.beforeDoubleDash,
+            all: invocation.flags["all"] === true,
+            full: invocation.flags["full"] === true,
+            json: invocation.flags["json"] === true,
+          });
+        case "skills.path":
+          return runSkillsCommand({
+            command: "path",
+            name: invocation.beforeDoubleDash[0],
+            json: invocation.flags["json"] === true,
+          });
       }
-      case "repository.list":
-      case "repository.info":
-      case "repository.path":
-      case "repository.add":
-      case "repository.update":
-      case "repository.doctor":
-      case "repository.repair":
-      case "repository.delete":
-      case "repository.clean": {
-        const { runRepositoryCommand } = await import("./repository-cli.ts");
-        const subcommand =
-          invocation.command.leaf.handler.split(".")[1] ?? "list";
-        await runRepositoryCommand([subcommand, ...argv], invokedRoot);
-        return;
-      }
-      case "config.show":
-        await runConfigCommand(
-          invocation.command.canonicalPath.length === 1
-            ? argv
-            : ["show", ...argv],
-        );
-        return;
-      case "config.init":
-        await runConfigCommand(["init", ...argv]);
-        return;
-      case "config.edit":
-        await runConfigCommand(["edit", ...argv]);
-        return;
-      case "skills.list":
-      case "skills.get":
-      case "skills.path": {
-        const { runSkillsCommand } = await import("./skills.ts");
-        const subcommand =
-          invocation.command.leaf.handler.split(".")[1] ?? "list";
-        const commandArgv =
-          invocation.command.canonicalPath.length === 1
-            ? argv
-            : [subcommand, ...argv];
-        await runSkillsCommand(commandArgv);
-        return;
-      }
-      case "dev.simulate.new":
-      case "dev.simulate.confetti": {
-        const { runDevCommand } = await import("./dev-simulator.ts");
-        const flow = invocation.command.leaf.handler.split(".")[2] ?? "new";
-        await runDevCommand(["simulate", flow, ...argv]);
-        return;
-      }
-      case "version":
-        await runVersionCommand(argv);
-        return;
-      case "initialize-repo":
-        await runInitializeRepoWorkerCommand(argv);
-        return;
-      default:
-        throw new Error(
-          `No CLI handler registered for ${invocation.command.leaf.handler}.`,
-        );
+      throw new Error(
+        `Unsupported skills handler: ${invocation.command.leaf.handler}`,
+      );
     }
-  });
+    case "version":
+      return runVersionCommand();
+    case "initialize-repo":
+      return runInitializeRepoWorkerCommand(invocation);
+  }
+
+  if (invocation.command.leaf.handler.startsWith("template.")) {
+    return runTemplateInvocation(invocation);
+  }
+
+  if (invocation.command.leaf.handler.startsWith("cache.")) {
+    const { runCacheInvocation } = await import("./repository-cli.ts");
+    return runCacheInvocation(invocation);
+  }
+
+  if (invocation.command.leaf.handler.startsWith("worktree.")) {
+    return runWorktreeInvocation(invocation);
+  }
+
+  if (invocation.command.leaf.handler.startsWith("task.")) {
+    return runTaskInvocation(invocation);
+  }
+
+  throw new Error(
+    `No CLI handler registered for ${invocation.command.leaf.handler}.`,
+  );
 }
 
-async function runLegacyHandler(
-  handler: () => Promise<void>,
+async function runWorktreeInvocation(
+  invocation: ParsedInvocation,
 ): Promise<CommandResult> {
-  const previousExitCode = process.exitCode;
-  process.exitCode = undefined;
   try {
-    await handler();
-    const exitCode = process.exitCode === 2 ? 2 : process.exitCode ? 1 : 0;
-    return { exitCode, render: { kind: "none" } };
-  } finally {
-    process.exitCode = previousExitCode;
+    switch (invocation.command.leaf.handler) {
+      case "worktree.create":
+        return await runWorktreeCreateInvocation(invocation);
+      case "worktree.list":
+        return await runWorktreeListInvocation(invocation);
+      case "worktree.delete":
+        return await runWorktreeDeleteInvocation(invocation);
+      default:
+        throw new Error(
+          `No worktree handler registered for ${invocation.command.leaf.handler}.`,
+        );
+    }
+  } catch (error) {
+    throw operationalError(error);
   }
+}
+
+async function runTaskInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  try {
+    switch (invocation.command.leaf.handler) {
+      case "task.create":
+        return await runTaskCreateInvocation(invocation);
+      case "task.list":
+        return await runTaskListInvocation(invocation);
+      case "task.delete":
+        return await runTaskDeleteInvocation(invocation);
+      default:
+        throw new Error(
+          `No task handler registered for ${invocation.command.leaf.handler}.`,
+        );
+    }
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+async function runTypedCommand(
+  handler: () => Promise<CommandResult>,
+): Promise<CommandResult> {
+  try {
+    return await handler();
+  } catch (error) {
+    if (error instanceof UsageError || error instanceof OperationalError) {
+      throw error;
+    }
+    throw new OperationalError(getErrorMessage(error), { cause: error });
+  }
+}
+
+function commandFailure(error?: unknown): CommandResult {
+  return failure(
+    1,
+    error === undefined
+      ? { kind: "none" }
+      : humanOutput(getErrorMessage(error), { stream: "stderr" }),
+  );
+}
+
+function requestsJsonOutput(argv: readonly string[]): boolean {
+  const delimiter = argv.indexOf("--");
+  const flags = delimiter === -1 ? argv : argv.slice(0, delimiter);
+  return flags.some(
+    (token) => token === "--json" || token.startsWith("--json="),
+  );
+}
+
+function booleanInvocationFlag(
+  invocation: ParsedInvocation,
+  name: string,
+): boolean {
+  return invocation.flags[name] === true;
+}
+
+function stringInvocationFlag(
+  invocation: ParsedInvocation,
+  name: string,
+): string | undefined {
+  const value = invocation.flags[name];
+  return typeof value === "string" ? value : undefined;
 }
 
 async function renderHelpReference(
@@ -372,8 +417,6 @@ async function renderHelpReference(
     case "nested":
       rendered = nestedCommandHelp(reference.command, reference.subcommand);
       break;
-    case "dev-simulation":
-      return devSimulationHelp(reference.flow);
   }
 
   return (
@@ -384,21 +427,16 @@ No additional help is available for this internal command.`)
   );
 }
 
-async function runInitializeRepoWorkerCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--workspace": String,
-      "--repo": String,
-      "--run-id": String,
-    },
-    { argv },
-  );
-  const workspaceDir = args["--workspace"];
-  const repoName = args["--repo"];
-  const runId = args["--run-id"];
+async function runInitializeRepoWorkerCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const workspaceDir = stringInvocationFlag(invocation, "workspace");
+  const repoName = stringInvocationFlag(invocation, "repo");
+  const runId = stringInvocationFlag(invocation, "runId");
   if (!workspaceDir || !repoName || !runId) {
-    process.exitCode = 2;
-    return;
+    throw new UsageError(
+      "Internal repository initialization requires --workspace, --repo, and --run-id.",
+    );
   }
 
   const { runRepoInitializationWorker } = await import(
@@ -406,38 +444,23 @@ async function runInitializeRepoWorkerCommand(argv: string[]): Promise<void> {
   );
   try {
     await runRepoInitializationWorker({ workspaceDir, repoName, runId });
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw new OperationalError(getErrorMessage(error), { cause: error });
   }
 }
 
-async function runStatusCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--json": Boolean,
-      "--workspace": String,
-      "-h": "--help",
-      "-w": "--workspace",
-    },
-    { argv },
-  );
-  if (args["--help"]) {
-    const subcommandHelp = args._[0]
-      ? nestedCommandHelp("status", args._[0])
-      : null;
-    console.log(subcommandHelp ?? commandHelp("status"));
-    return;
-  }
-
-  const workspaceDir = args["--workspace"]
-    ? path.resolve(expandHome(args["--workspace"]))
+async function runStatusCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const workspaceFlag = stringInvocationFlag(invocation, "workspace");
+  const workspaceDir = workspaceFlag
+    ? path.resolve(expandHome(workspaceFlag))
     : await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    log.error("Run wf status from inside a workforest workspace.");
-    process.exitCode = 1;
-    return;
+    throw new OperationalError(
+      "Run wf workspace status from inside a workforest workspace.",
+    );
   }
 
   const {
@@ -449,14 +472,18 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   } = await import("./workspace/initialization.ts");
   const states = await readRepoInitializationStates(workspaceDir);
   if (states.length === 0) {
-    log.info("This workspace has no recorded background initialization.");
-    return;
+    return booleanInvocationFlag(invocation, "json")
+      ? jsonSuccess({ workspace: null, repos: [] })
+      : success(
+          humanOutput(
+            "This workspace has no recorded background initialization.",
+          ),
+        );
   }
   await finalizeWorkspaceInitialization(workspaceDir);
 
-  const subcommand = args._[0];
-  if (subcommand === "cancel") {
-    const requested = args._.slice(1);
+  if (invocation.command.leaf.handler === "status.cancel") {
+    const requested = invocation.beforeDoubleDash;
     const repoNames =
       requested.length > 0
         ? requested
@@ -468,7 +495,7 @@ async function runStatusCommand(argv: string[]): Promise<void> {
             .map((state) => state.repo);
     if (repoNames.length === 0) {
       log.info("No running repository initializers to cancel.");
-      return;
+      return success();
     }
     try {
       const cancelled = await cancelRepoInitializations(
@@ -479,14 +506,13 @@ async function runStatusCommand(argv: string[]): Promise<void> {
         log.success(`${state.repo}: initialization cancelled`);
       }
     } catch (error) {
-      log.error(getErrorMessage(error));
-      process.exitCode = 1;
+      throw new OperationalError(getErrorMessage(error), { cause: error });
     }
-    return;
+    return success();
   }
 
-  if (subcommand === "retry") {
-    const requested = args._.slice(1);
+  if (invocation.command.leaf.handler === "status.retry") {
+    const requested = invocation.beforeDoubleDash;
     const repoNames =
       requested.length > 0
         ? requested
@@ -498,7 +524,7 @@ async function runStatusCommand(argv: string[]): Promise<void> {
             .map((state) => state.repo);
     if (repoNames.length === 0) {
       log.info("No failed or cancelled repository initializers to retry.");
-      return;
+      return success();
     }
     try {
       const retried = await retryRepoInitializations(workspaceDir, repoNames);
@@ -508,32 +534,17 @@ async function runStatusCommand(argv: string[]): Promise<void> {
         );
       }
     } catch (error) {
-      log.error(getErrorMessage(error));
-      process.exitCode = 1;
+      throw new OperationalError(getErrorMessage(error), { cause: error });
     }
-    return;
-  }
-
-  if (subcommand !== undefined) {
-    log.error(`Unknown status subcommand: ${subcommand}`);
-    log.info("Available: cancel, retry");
-    process.exitCode = 1;
-    return;
+    return success();
   }
 
   const workspaceState = await readWorkspaceInitializationState(workspaceDir);
-  if (args["--json"]) {
-    console.log(
-      JSON.stringify(
-        {
-          workspace: workspaceState,
-          repos: states,
-        },
-        null,
-        2,
-      ),
-    );
-    return;
+  if (booleanInvocationFlag(invocation, "json")) {
+    return jsonSuccess({
+      workspace: workspaceState,
+      repos: states,
+    });
   }
 
   const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
@@ -545,129 +556,82 @@ async function runStatusCommand(argv: string[]): Promise<void> {
       workspaceDir,
       states.map((state) => state.repo),
     );
-    return;
+    return success();
   }
 
-  printReport({
-    title: "Repository initialization",
-    sections: [
-      {
-        fields: [
+  return success(
+    reportOutput(
+      renderReport({
+        title: "Repository initialization",
+        sections: [
           {
-            label: "Workspace",
-            value: workspaceState?.status ?? "unknown",
+            fields: [
+              {
+                label: "Workspace",
+                value: workspaceState?.status ?? "unknown",
+              },
+              ...(workspaceState?.message
+                ? [{ label: "Summary", value: workspaceState.message }]
+                : []),
+              ...(workspaceState?.error
+                ? [{ label: "Error", value: workspaceState.error }]
+                : []),
+              ...(workspaceState?.current_hook
+                ? [{ label: "Hook", value: workspaceState.current_hook }]
+                : []),
+              ...(workspaceState?.warnings?.length
+                ? [
+                    {
+                      label: "Warnings",
+                      value: workspaceState.warnings.join("\n"),
+                    },
+                  ]
+                : []),
+            ],
           },
-          ...(workspaceState?.message
-            ? [{ label: "Summary", value: workspaceState.message }]
-            : []),
-          ...(workspaceState?.error
-            ? [{ label: "Error", value: workspaceState.error }]
-            : []),
-          ...(workspaceState?.current_hook
-            ? [{ label: "Hook", value: workspaceState.current_hook }]
-            : []),
-          ...(workspaceState?.warnings?.length
-            ? [
-                {
-                  label: "Warnings",
-                  value: workspaceState.warnings.join("\n"),
-                },
-              ]
-            : []),
+          {
+            entries: states.map((state) => ({
+              title: state.repo,
+              description: state.status,
+              details: [
+                ...(state.step ? [{ label: "Step", value: state.step }] : []),
+                ...(state.message
+                  ? [{ label: "Message", value: state.message }]
+                  : []),
+                { label: "Attempt", value: String(state.attempt) },
+              ],
+            })),
+          },
         ],
-      },
-      {
-        entries: states.map((state) => ({
-          title: state.repo,
-          description: state.status,
-          details: [
-            ...(state.step ? [{ label: "Step", value: state.step }] : []),
-            ...(state.message
-              ? [{ label: "Message", value: state.message }]
-              : []),
-            { label: "Attempt", value: String(state.attempt) },
-          ],
-        })),
-      },
-    ],
-    footer: `Workspace: ${workspaceDir}`,
-  });
-}
-
-async function runConfigCommand(argv: string[]): Promise<void> {
-  const subcommand = argv[0];
-
-  switch (subcommand) {
-    case "--help":
-    case "-h":
-      console.log(commandHelp("config"));
-      break;
-    case "edit":
-      if (hasHelpFlag(argv.slice(1))) {
-        console.log(nestedCommandHelp("config", "edit"));
-        return;
-      }
-      await runConfigEdit();
-      break;
-    case "init":
-      if (hasHelpFlag(argv.slice(1))) {
-        console.log(nestedCommandHelp("config", "init"));
-        return;
-      }
-      await runConfigInit();
-      break;
-    case "show":
-      if (hasHelpFlag(argv.slice(1))) {
-        console.log(nestedCommandHelp("config", "show"));
-        return;
-      }
-      await runConfigShow();
-      break;
-    case undefined:
-      await runConfigShow();
-      break;
-    default:
-      log.error(`Unknown config subcommand: ${subcommand}`);
-      log.info("Available: show, edit, init");
-      process.exitCode = 1;
-  }
-}
-
-async function runInitCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
+        footer: `Workspace: ${workspaceDir}`,
+      }),
+    ),
   );
+}
 
-  if (args["--help"]) {
-    console.log(commandHelp("init"));
-    return;
-  }
-
-  const requestedShell = args._[0] ?? process.env["SHELL"];
+async function runShellInitCommand(
+  requestedShell: string | undefined,
+): Promise<CommandResult> {
+  requestedShell ??= process.env["SHELL"];
   const shell = normalizeShellName(requestedShell);
 
   if (!shell) {
-    log.error("Unsupported shell. Use 'wf init zsh' or 'wf init bash'.");
-    process.exitCode = 1;
-    return;
+    throw new UsageError(
+      "Unsupported shell. Use 'wf shell init zsh' or 'wf shell init bash'.",
+    );
   }
 
-  console.log(renderShellInit(shell));
+  return success(shellOutput(renderShellInit(shell)));
 }
 
-async function runConfigInit(): Promise<void> {
+async function runConfigInit(): Promise<CommandResult> {
   if (!isInteractive()) {
-    log.error("Config init requires an interactive terminal.");
-    log.info("Use 'wf config edit' to edit the config file directly.");
-    process.exitCode = 1;
-    return;
+    throw new OperationalError(
+      "Config init requires an interactive terminal.\nUse 'wf config edit' to edit the config file directly.",
+    );
   }
 
-  const { path: configPath, config } = await loadWorkspaceConfig();
+  const { path: configPath, config } = await loadWorkspaceConfigForCommand();
 
   intro("Configure workforest");
 
@@ -720,15 +684,16 @@ async function runConfigInit(): Promise<void> {
   const shouldSave = await promptConfirm("Save configuration?", true);
   if (!shouldSave) {
     outro("Configuration unchanged");
-    return;
+    return success();
   }
 
-  await saveWorkspaceConfig(configPath, newConfig);
+  await saveWorkspaceConfigForCommand(configPath, newConfig);
   outro(`Config saved to ${configPath}`);
+  return success();
 }
 
-async function runConfigShow(): Promise<void> {
-  const { path: configPath, config } = await loadWorkspaceConfig();
+async function runConfigShow(): Promise<CommandResult> {
+  const { path: configPath, config } = await loadWorkspaceConfigForCommand();
 
   const ownerMappings = Object.entries(
     config.vercelLink?.teamByGitHubOwner ?? {},
@@ -808,11 +773,11 @@ async function runConfigShow(): Promise<void> {
     ],
     footer: `Config: ${configPath}`,
   });
+  return success();
 }
 
-async function runConfigEdit(): Promise<void> {
-  const { spawn } = await import("node:child_process");
-  const { path: configPath } = await loadWorkspaceConfig();
+async function runConfigEdit(): Promise<CommandResult> {
+  const { path: configPath } = await loadWorkspaceConfigForCommand();
 
   // Get editor from environment
   const editor = process.env["EDITOR"] || process.env["VISUAL"] || "vi";
@@ -829,63 +794,51 @@ async function runConfigEdit(): Promise<void> {
         log.success("Config file closed.");
         resolve();
       } else {
-        reject(new Error(`Editor exited with code ${code}`));
+        reject(new OperationalError(`Editor exited with code ${code}`));
       }
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      reject(new OperationalError(`Could not open editor: ${error.message}`));
+    });
+  });
+  return success();
+}
+
+async function loadWorkspaceConfigForCommand(): Promise<
+  Awaited<ReturnType<typeof loadWorkspaceConfig>>
+> {
+  try {
+    return await loadWorkspaceConfig();
+  } catch (error) {
+    throw new OperationalError(getErrorMessage(error), { cause: error });
+  }
+}
+
+async function saveWorkspaceConfigForCommand(
+  configPath: string,
+  config: WorkspaceConfig,
+): Promise<void> {
+  try {
+    await saveWorkspaceConfig(configPath, config);
+  } catch (error) {
+    throw new OperationalError(getErrorMessage(error), { cause: error });
+  }
+}
+
+async function runVersionCommand(): Promise<CommandResult> {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const packageJsonPath = path.join(__dirname, "..", "package.json");
+  const packageJson = JSON.parse(
+    await fs.readFile(packageJsonPath, "utf8"),
+  ) as { version: string };
+  return success({
+    kind: "text",
+    value: `workforest ${packageJson.version}`,
+    stream: "stdout",
   });
 }
 
-async function runVersionCommand(argv: string[] = []): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("version"));
-    return;
-  }
-
-  if (args._.length > 0) {
-    log.error("Usage: wf version");
-    process.exitCode = 1;
-    return;
-  }
-
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const packageJsonPath = path.join(__dirname, "..", "package.json");
-  const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-  console.log(`workforest ${packageJson.version}`);
-}
-
-function hasHelpFlag(argv: readonly string[]): boolean {
-  return argv.includes("--help") || argv.includes("-h");
-}
-
-async function runListCommand(argv: string[], command = "list"): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp(command));
-    return;
-  }
-
-  if (args._.length > 0) {
-    log.error("Usage: wf list");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runListCommand(): Promise<CommandResult> {
   const { config } = await loadWorkspaceConfig();
 
   if (!config.defaultDir) {
@@ -893,8 +846,7 @@ async function runListCommand(argv: string[], command = "list"): Promise<void> {
       "No defaultDir configured. Set it in your config to list workspaces.",
     );
     log.info("Run: wf config edit");
-    process.exitCode = 1;
-    return;
+    return commandFailure();
   }
 
   const workspaceRoot = path.resolve(expandHome(config.defaultDir));
@@ -904,9 +856,7 @@ async function runListCommand(argv: string[], command = "list"): Promise<void> {
   try {
     entries = await fs.readdir(workspaceRoot);
   } catch {
-    log.error(`Directory not found: ${workspaceRoot}`);
-    process.exitCode = 1;
-    return;
+    return commandFailure(`Directory not found: ${workspaceRoot}`);
   }
 
   // Find workspaces (directories with .workforest metadata)
@@ -951,7 +901,7 @@ async function runListCommand(argv: string[], command = "list"): Promise<void> {
 
   if (workspaces.length === 0) {
     log.info(`No workspaces found in ${workspaceRoot}`);
-    return;
+    return success();
   }
 
   printReport({
@@ -989,276 +939,132 @@ async function runListCommand(argv: string[], command = "list"): Promise<void> {
       `${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"}`,
     ].join("\n"),
   });
+  return success();
 }
 
-async function runWorktreeCommand(
-  argv: string[],
-  command = "worktree",
-): Promise<void> {
-  const args = arg(
+async function runWorktreeCreateInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runStandaloneWorktreeCreate({
+    operands: [...invocation.beforeDoubleDash],
+    dir: stringFlag(invocation, "dir"),
+    dryRun: booleanFlag(invocation, "dryRun"),
+  });
+}
+
+async function runWorktreeListInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runStandaloneWorktreeList(invocation.beforeDoubleDash[0]);
+}
+
+async function runWorktreeDeleteInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runStandaloneWorktreeRemove({
+    target: invocation.beforeDoubleDash[0] ?? "",
+    dryRun: booleanFlag(invocation, "dryRun"),
+    force: booleanFlag(invocation, "force"),
+  });
+}
+
+async function runTaskCreateInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    throw new OperationalError("Run wf task create from inside a workspace.");
+  }
+
+  return runTaskCreate(
     {
-      "--help": Boolean,
-      "--dir": String,
-      "--repo": String,
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "-h": "--help",
-      "-n": "--dry-run",
-      "-f": "--force",
+      slugs: [...invocation.beforeDoubleDash],
+      repo: stringFlag(invocation, "repo"),
+      dryRun: booleanFlag(invocation, "dryRun"),
+      force: booleanFlag(invocation, "force"),
     },
-    { argv },
+    workspaceDir,
   );
-
-  if (args["--help"]) {
-    const subcommandHelp = args._[0]
-      ? nestedCommandHelp("worktree", args._[0])
-      : null;
-    console.log(subcommandHelp ?? commandHelp(command));
-    return;
-  }
-
-  const subcommand = args._[0];
-  if (subcommand === "list") {
-    const workspaceDir = await detectWorkspaceFromCwd();
-    if (workspaceDir) {
-      await runTemporaryWorktreeList(args);
-      return;
-    }
-
-    const managedContext = await resolveManagedWorktreeContextFromCwd();
-    if (managedContext) {
-      await runManagedWorktreeList(managedContext, args);
-      return;
-    }
-
-    log.error("Not inside a workspace or managed single-repository worktree.");
-    process.exitCode = 1;
-    return;
-  }
-
-  if (subcommand === "delete" || subcommand === "rm") {
-    const workspaceDir = await detectWorkspaceFromCwd();
-    if (workspaceDir) {
-      await runTemporaryWorktreeRemove(args);
-      return;
-    }
-
-    const managedContext = await resolveManagedWorktreeContextFromCwd();
-    if (managedContext) {
-      await runManagedWorktreeRemove(managedContext, args);
-      return;
-    }
-
-    await runStandaloneWorktreeRemove(args);
-    return;
-  }
-
-  if (subcommand === "new") {
-    const managedContext = await resolveManagedWorktreeContextFromCwd();
-    if (managedContext) {
-      await runManagedWorktreeCreate(args, managedContext);
-    } else {
-      await runManagedWorktreeCreate(args);
-    }
-    return;
-  }
-
-  if (subcommand === "promote") {
-    await runManagedWorktreePromote(args);
-    return;
-  }
-
-  if (subcommand && !isRepoSlug(subcommand)) {
-    const workspaceDir = await detectWorkspaceFromCwd();
-    if (workspaceDir) {
-      await runTemporaryWorktreeCreate(args, workspaceDir);
-      return;
-    }
-
-    if (args._.length === 1) {
-      const managedContext = await resolveManagedWorktreeContextFromCwd();
-      if (managedContext) {
-        await runManagedWorktreeCreate(args, managedContext);
-        return;
-      }
-    }
-  }
-
-  await runStandaloneWorktreeCreate(args);
 }
 
-async function runReviewCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "-h": "--help",
-      "-n": "--dry-run",
-      "-f": "--force",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    const subcommandHelp = args._[0]
-      ? nestedCommandHelp("review", args._[0])
-      : null;
-    console.log(subcommandHelp ?? commandHelp("review"));
-    return;
-  }
-
-  const subcommand = args._[0];
-  if (subcommand === "list" || subcommand === "ls") {
-    await runReviewList(args._.slice(1));
-    return;
-  }
-
-  if (
-    subcommand === "delete" ||
-    subcommand === "rm" ||
-    subcommand === "remove"
-  ) {
-    await runReviewRemove(args._.slice(1), {
-      dryRun: args["--dry-run"] ?? false,
-      force: args["--force"] ?? false,
-    });
-    return;
-  }
-
-  if (args["--dry-run"] || args["--force"]) {
-    log.error("--dry-run and --force are only supported for wf review delete.");
-    process.exitCode = 1;
-    return;
-  }
-
-  await runReviewCreate(args._);
+async function runTaskListInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runTaskList({
+    repo: stringFlag(invocation, "repo"),
+  });
 }
 
-async function runReviewCreate(targetArgs: string[]): Promise<void> {
+async function runTaskDeleteInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runTaskDelete({
+    names: [...invocation.beforeDoubleDash],
+    repo: stringFlag(invocation, "repo"),
+    dryRun: booleanFlag(invocation, "dryRun"),
+    force: booleanFlag(invocation, "force"),
+  });
+}
+
+function booleanFlag(invocation: ParsedInvocation, name: string): boolean {
+  return invocation.flags[name] === true;
+}
+
+function stringFlag(
+  invocation: ParsedInvocation,
+  name: string,
+): string | undefined {
+  const value = invocation.flags[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+async function runReviewInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  switch (invocation.command.leaf.handler) {
+    case "review.open":
+      return runReviewOpen(invocation.beforeDoubleDash[0] ?? "");
+    case "review.checkout":
+      return runReviewCheckout(invocation.beforeDoubleDash);
+    default:
+      throw new Error(
+        `Unsupported review handler: ${invocation.command.leaf.handler}`,
+      );
+  }
+}
+
+async function runReviewOpen(repoInput: string): Promise<CommandResult> {
   try {
-    const resolvedTargetArgs =
-      await qualifyReviewRepositorySpecifier(targetArgs);
-    const {
-      createReviewWorktree,
-      ensureReviewWorkspace,
-      parseReviewRepoTarget,
-      resolveReviewTarget,
-    } = await import("./review.ts");
-    if (resolvedTargetArgs.length === 1) {
-      let repoTarget: ReturnType<typeof parseReviewRepoTarget> | undefined;
-      try {
-        repoTarget = parseReviewRepoTarget(resolvedTargetArgs);
-      } catch {
-        // Fall through to PR target parsing so compact targets and URLs keep
-        // their existing behavior and error messages.
-      }
-
-      if (repoTarget) {
-        const reviewsDir = await resolveReviewsDir();
-        const workspace = await ensureReviewWorkspace({
-          target: repoTarget,
-          reviewsDir,
-        });
-
-        await writeShellCdPath(workspace.path);
-        log.success(`Review workspace ready: ${workspace.path}`);
-        if (!isShellAutoCdEnabled()) {
-          log.info(`Run: cd ${workspace.path}`);
-        }
-        return;
-      }
-    }
-
-    const context = await resolveCurrentReviewWorkspaceContext();
-    const target = resolveReviewTarget(
-      resolvedTargetArgs,
-      context ?? undefined,
+    const [qualifiedRepo] = await qualifyReviewRepositorySpecifier([repoInput]);
+    const { ensureReviewWorkspace, parseReviewRepoTarget } = await import(
+      "./review.ts"
     );
+    const target = parseReviewRepoTarget([qualifiedRepo ?? repoInput]);
     const reviewsDir = await resolveReviewsDir();
-    const metadata = await createReviewWorktree({ target, reviewsDir });
-
-    await writeShellCdPath(metadata.path);
-    log.success(`Review worktree ready: ${metadata.path}`);
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${metadata.path}`);
-    }
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-  }
-}
-
-async function runReviewList(targetArgs: string[]): Promise<void> {
-  if (targetArgs.length > 1) {
-    log.error("Usage: wf review list [repo]");
-    process.exitCode = 1;
-    return;
-  }
-
-  try {
-    const { listReviewWorktrees } = await import("./review.ts");
-    const reviewsDir = await resolveReviewsDir();
-    const repoInput = targetArgs[0];
-    const repoParts = repoInput?.split("/");
-    const repo =
-      repoParts && repoParts.length === 2
-        ? repoParts[1]
-        : repoParts?.length === 1
-          ? repoParts[0]
-          : undefined;
-    if (repoInput && !repo) {
-      log.error(`Invalid repo name: ${repoInput}`);
-      process.exitCode = 1;
-      return;
-    }
-    if (repo && !/^[A-Za-z0-9_.-]+$/.test(repo)) {
-      log.error(`Invalid repo name: ${repoInput}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    const entries = await listReviewWorktrees(reviewsDir, repo);
-    if (entries.length === 0) {
-      log.info("No review worktrees found.");
-      return;
-    }
-
-    printReport({
-      title: "Review worktrees",
-      sections: [
-        {
-          entries: entries.map((entry) => ({
-            title: `${entry.owner}/${entry.repo}#${entry.prNumber}`,
-            details: [
-              { label: "Status", value: entry.state },
-              ...(entry.branch
-                ? [{ label: "Branch", value: entry.branch }]
-                : []),
-              { label: "Path", value: entry.path },
-            ],
-          })),
-        },
-      ],
-      footer: [
-        `Directory: ${reviewsDir}`,
-        `${entries.length} review worktree${entries.length === 1 ? "" : "s"}`,
-      ].join("\n"),
+    const workspace = await ensureReviewWorkspace({
+      target,
+      reviewsDir,
+      onEvent: humanServiceEventSink,
     });
+
+    await writeShellCdPath(workspace.path);
+    log.success(`Review workspace ready: ${workspace.path}`);
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${workspace.path}`);
+    }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw toOperationalError(error);
   }
 }
 
-async function runReviewRemove(
-  targetArgs: string[],
-  options: { dryRun: boolean; force: boolean; skipConfirmation?: boolean },
-): Promise<void> {
+async function runReviewCheckout(
+  targetArgs: readonly string[],
+): Promise<CommandResult> {
   try {
     const resolvedTargetArgs =
       await qualifyReviewRepositorySpecifier(targetArgs);
-    const { removeReviewWorktree, resolveReviewTarget } = await import(
+    const { createReviewWorktree, resolveReviewTarget } = await import(
       "./review.ts"
     );
     const context = await resolveCurrentReviewWorkspaceContext();
@@ -1267,44 +1073,20 @@ async function runReviewRemove(
       context ?? undefined,
     );
     const reviewsDir = await resolveReviewsDir();
-    const targetDir = resolveContainedPath(
-      reviewsDir,
-      target.repo,
-      `pr-${target.prNumber}`,
-    );
-    if (!options.skipConfirmation) {
-      const confirmed = await confirmDelete({
-        dryRun: options.dryRun,
-        force: options.force,
-        description: `review worktree "${target.owner}/${target.repo}#${target.prNumber}"`,
-        targetPath: targetDir,
-      });
-      if (!confirmed) return;
-    }
-
-    const result = await removeReviewWorktree({
+    const metadata = await createReviewWorktree({
       target,
       reviewsDir,
-      dryRun: options.dryRun,
-      force: options.force,
+      onEvent: humanServiceEventSink,
     });
-    if (result.dryRun) {
-      showDryRunReport({
-        fields: [
-          {
-            label: "Review worktree",
-            value: `${target.owner}/${target.repo}#${target.prNumber}`,
-          },
-          ...(result.branch ? [{ label: "Branch", value: result.branch }] : []),
-          { label: "Path", value: result.path },
-        ],
-      });
-    } else {
-      log.success(`Removed ${target.repo}#${target.prNumber}: ${result.path}`);
+
+    await writeShellCdPath(metadata.path);
+    log.success(`Review worktree ready: ${metadata.path}`);
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${metadata.path}`);
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw toOperationalError(error);
   }
 }
 
@@ -1400,34 +1182,28 @@ function deriveDefaultReviewsDir(defaultDir: string | undefined): string {
       : derived;
 }
 
-async function runStandaloneWorktreeCreate(args: {
-  _: string[];
-  "--dir"?: string;
-  "--dry-run"?: boolean;
-}): Promise<void> {
-  let [repoInput, slug, extra] = args._;
-  if (repoInput && !slug && !isRepoSlug(repoInput)) {
-    slug = repoInput;
-    repoInput = await inferRepoInputFromCwd();
-  }
-
-  if (!repoInput || !slug || extra) {
-    log.error("Usage: wf worktree <repo> <slug> [--dir <path>] [--dry-run]");
-    process.exitCode = 1;
-    return;
+async function runStandaloneWorktreeCreate({
+  operands,
+  dir,
+  dryRun,
+}: {
+  operands: string[];
+  dir: string | undefined;
+  dryRun: boolean;
+}): Promise<CommandResult> {
+  const [repoInput, slug] = operands;
+  if (!repoInput || !slug) {
+    throw new UsageError(
+      "wf worktree create requires a repository and worktree slug.",
+    );
   }
 
   if (!isSlug(slug)) {
-    log.error(
+    throw new OperationalError(
       `Invalid slug "${slug}". Slugs must be lowercase words separated by hyphens.`,
     );
-    process.exitCode = 1;
-    return;
   }
 
-  let repo: RepoConfig;
-  let branchName: string;
-  let targetDir: string;
   try {
     const repos = await resolveRepositorySpecifiers([repoInput]);
     if (repos.length !== 1) {
@@ -1438,409 +1214,126 @@ async function runStandaloneWorktreeCreate(args: {
     if (!resolvedRepo) {
       throw new Error("Exactly one repository is required.");
     }
-    repo = resolvedRepo;
 
     const { config } = await loadWorkspaceConfig();
-    branchName = buildBranchName(slug, config.branchPrefix);
-    targetDir = args["--dir"]
-      ? path.resolve(expandHome(args["--dir"]))
+    const branchName = buildBranchName(slug, config.branchPrefix);
+    const targetDir = dir
+      ? path.resolve(expandHome(dir))
       : path.resolve(process.cwd(), slug);
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
-  }
 
-  if (args["--dry-run"]) {
-    showDryRunReport({
-      fields: [
-        { label: "Repository", value: repo.name },
-        { label: "Remote", value: repo.remote },
-        { label: "Branch", value: branchName },
-        { label: "Target", value: targetDir },
-      ],
-    });
-    return;
-  }
+    if (dryRun) {
+      showDryRunReport({
+        fields: [
+          { label: "Repository", value: resolvedRepo.name },
+          { label: "Remote", value: resolvedRepo.remote },
+          { label: "Branch", value: branchName },
+          { label: "Target", value: targetDir },
+        ],
+      });
+      return success();
+    }
 
-  try {
     const { createSingleWorktree } = await import("./worktree.ts");
-    await createSingleWorktree({ repo, branchName, targetDir });
+    await createSingleWorktree({
+      repo: resolvedRepo,
+      branchName,
+      targetDir,
+    });
     await writeShellCdPath(targetDir);
     log.success(`Worktree ready: ${targetDir}`);
     if (!isShellAutoCdEnabled()) {
       log.info(`Run: cd ${targetDir}`);
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw operationalError(error);
   }
 }
 
-async function runManagedWorktreeCreate(
-  args: {
-    _: string[];
-    "--dir"?: string;
-    "--repo"?: string;
-    "--dry-run"?: boolean;
-  },
-  contextual?: import("./managed-worktrees.ts").ManagedWorktreeContext,
-): Promise<void> {
-  if (args["--dir"]) {
-    log.error("--dir is only supported for standalone worktrees.");
-    process.exitCode = 1;
-    return;
-  }
-  if (args["--repo"]) {
-    log.error("--repo is only supported for workspace temporary worktrees.");
-    process.exitCode = 1;
-    return;
-  }
-
-  const selections = args._[0] === "new" ? args._.slice(1) : args._;
-  if (
-    selections.length === 0 ||
-    selections.length > 2 ||
-    (selections.length === 1 && !contextual)
-  ) {
-    log.error("Usage: wf worktree new <repo> <name>");
-    log.error("       wf worktree new <name>  # from a managed worktree");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runStandaloneWorktreeList(
+  repositorySelector: string | undefined,
+): Promise<CommandResult> {
   try {
-    const { config, path: configPath } = await loadWorkspaceConfig();
-    if (!config.defaultDir) {
-      throw new Error(
-        `No defaultDir configured. Run 'wf config init' or set defaultDir in ${configPath}.`,
-      );
+    const { listCachedRepositories, resolveCachedRepository } = await import(
+      "./repositories.ts"
+    );
+    const repositories = await listCachedRepositories();
+    const selected = repositorySelector
+      ? [await resolveCachedRepository(repositorySelector, repositories)]
+      : repositories;
+    if (repositorySelector && !selected[0]) {
+      throw new Error(`Cached repository not found: ${repositorySelector}`);
     }
 
-    const name = selections.at(-1);
-    if (!name) {
-      throw new Error("A worktree name is required.");
-    }
-
-    let repo: RepoConfig;
-    if (selections.length === 1) {
-      if (!contextual) {
-        throw new Error(
-          "Contextual creation requires a managed single-repository worktree.",
-        );
-      }
-      repo = contextual.repo;
-    } else {
-      const [repoInput] = selections;
-      const repos = await resolveRepositorySpecifiers([repoInput ?? ""]);
-      const resolvedRepo = repos[0];
-      if (!resolvedRepo || repos.length !== 1) {
-        throw new Error("Exactly one repository is required.");
-      }
-      repo = resolvedRepo;
-    }
-
-    const { createManagedWorktree } = await import("./managed-worktrees.ts");
-    const result = await createManagedWorktree({
-      repo,
-      name,
-      defaultDir: path.resolve(expandHome(config.defaultDir)),
-      ...(config.branchPrefix !== undefined
-        ? { branchPrefix: config.branchPrefix }
-        : {}),
-      dryRun: args["--dry-run"] ?? false,
-    });
-
-    if (result.dryRun) {
-      showDryRunReport({
-        fields: [
-          { label: "Repository", value: result.repo.name },
-          { label: "Remote", value: result.repo.remote },
-          { label: "Branch", value: result.branchName },
-          { label: "Target", value: result.targetDir },
-        ],
-      });
-      return;
-    }
-
-    await writeShellCdPath(result.targetDir);
-    if (result.setupStatus === "failed") {
-      log.error(
-        `Worktree created, but setup failed: ${result.setupError?.message ?? "unknown error"}`,
-      );
-      log.info(`Worktree retained at ${result.targetDir}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    log.success(`Worktree ready: ${result.targetDir}`);
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${result.targetDir}`);
-    }
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-  }
-}
-
-async function runManagedWorktreeList(
-  context: import("./managed-worktrees.ts").ManagedWorktreeContext,
-  args: { _: string[]; "--repo"?: string },
-): Promise<void> {
-  if (args._.length > 1 || args["--repo"]) {
-    log.error("Usage: wf worktree list");
-    process.exitCode = 1;
-    return;
-  }
-
-  try {
-    const { listManagedWorktrees } = await import("./managed-worktrees.ts");
-    const entries = await listManagedWorktrees(context);
+    const entries = selected.flatMap((repository) =>
+      repository
+        ? repository.worktrees.map((worktree) => ({
+            repository: repository.slug ?? repository.name,
+            ...worktree,
+          }))
+        : [],
+    );
     if (entries.length === 0) {
-      log.info("No managed worktrees found.");
-      return;
+      log.info("No standalone worktrees found.");
+      return success();
     }
 
     printReport({
-      title: `${context.repo.name} worktrees`,
+      title: "Standalone worktrees",
       sections: [
         {
           entries: entries.map((entry) => ({
-            title: entry.name,
+            title: entry.path,
+            description: entry.repository,
             details: [
               {
                 label: "Branch",
-                value:
-                  entry.branch ?? (entry.detached ? "detached" : "unknown"),
+                value: entry.detached
+                  ? "detached"
+                  : (entry.branch ?? "unknown"),
               },
-              ...(entry.locked ? [{ label: "Locked", value: "yes" }] : []),
-              { label: "Path", value: entry.path },
+              { label: "Exists", value: entry.exists ? "yes" : "no" },
+              ...(entry.prunable ? [{ label: "Prunable", value: "yes" }] : []),
             ],
           })),
         },
       ],
-      footer: `Directory: ${context.familyDir}`,
     });
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw operationalError(error);
   }
 }
 
-async function runManagedWorktreeRemove(
-  context: import("./managed-worktrees.ts").ManagedWorktreeContext,
-  args: {
-    _: string[];
-    "--repo"?: string;
-    "--dry-run"?: boolean;
-    "--force"?: boolean;
-    skipConfirmation?: boolean;
-  },
-): Promise<void> {
-  if (args["--repo"]) {
-    log.error("--repo is only supported for workspace temporary worktrees.");
-    process.exitCode = 1;
-    return;
-  }
-
-  const names = args._.slice(1);
-  if (names.length > 1) {
-    log.error("Usage: wf worktree delete [name] [--dry-run] [--force]");
-    process.exitCode = 1;
-    return;
-  }
-  const name = names[0] ?? context.name;
-  const targetDir = resolveContainedPath(
-    context.familyDir,
-    validateResourceName(name, "Worktree name"),
-  );
-
-  try {
-    if (!args.skipConfirmation) {
-      const confirmed = await confirmDelete({
-        dryRun: args["--dry-run"] ?? false,
-        force: args["--force"] ?? false,
-        description: `managed worktree "${name}"`,
-        targetPath: targetDir,
-      });
-      if (!confirmed) return;
-    }
-
-    const { removeManagedWorktree } = await import("./managed-worktrees.ts");
-    const removed = await removeManagedWorktree({
-      context,
-      name,
-      dryRun: args["--dry-run"] ?? false,
-      force: args["--force"] ?? false,
-    });
-    if (args["--dry-run"]) {
-      showDryRunReport({
-        fields: [
-          { label: "Worktree", value: removed.name },
-          ...(removed.branch
-            ? [{ label: "Branch", value: removed.branch }]
-            : []),
-          { label: "Path", value: removed.path },
-        ],
-      });
-      return;
-    }
-
-    log.success(`Deleted managed worktree: ${removed.path}`);
-    if (path.resolve(removed.path) === path.resolve(context.checkoutPath)) {
-      await writeShellCdPath(context.familyDir);
-    }
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-  }
-}
-
-async function runManagedWorktreePromote(args: {
-  _: string[];
-  "--dir"?: string;
-  "--repo"?: string;
-  "--dry-run"?: boolean;
-}): Promise<void> {
-  if (args["--dir"] || args["--repo"]) {
-    log.error("--dir and --repo are not supported for worktree promotion.");
-    process.exitCode = 1;
-    return;
-  }
-
-  try {
-    const { config, path: configPath } = await loadWorkspaceConfig();
-    if (!config.defaultDir) {
-      throw new Error(
-        `No defaultDir configured. Run 'wf config init' or set defaultDir in ${configPath}.`,
-      );
-    }
-    const defaultDir = path.resolve(expandHome(config.defaultDir));
-    const { resolveManagedWorktreeContext, promoteManagedWorktree } =
-      await import("./managed-worktrees.ts");
-    const context = await resolveManagedWorktreeContext({
-      cwd: process.cwd(),
-      defaultDir,
-    });
-    if (!context) {
-      throw new Error(
-        "Run wf worktree promote from inside a managed single-repository worktree.",
-      );
-    }
-
-    let template: Awaited<ReturnType<typeof loadTemplate>> = null;
-    const repoSelections: string[] = [];
-    for (const selection of args._.slice(1)) {
-      const candidate = isRepoSlug(selection)
-        ? null
-        : await loadTemplate(selection);
-      if (candidate) {
-        if (template) {
-          throw new Error("Promotion accepts at most one template.");
-        }
-        template = candidate;
-      } else {
-        repoSelections.push(selection);
-      }
-    }
-
-    const templateConfig = template
-      ? await qualifyTemplateRepositories(template.config)
-      : null;
-    const repos = await resolveRepositorySpecifiers([
-      ...(templateConfig?.repos ?? []),
-      ...repoSelections,
-    ]);
-    const resolvedTemplate =
-      template && templateConfig
-        ? { ...template, config: templateConfig }
-        : template;
-    const result = await promoteManagedWorktree({
-      context,
-      defaultDir,
-      ...(config.dirPrefix !== undefined
-        ? { dirPrefix: config.dirPrefix }
-        : {}),
-      template: resolvedTemplate,
-      repos,
-      dryRun: args["--dry-run"] ?? false,
-    });
-
-    if (result.dryRun) {
-      showDryRunReport({
-        fields: [
-          { label: "Workspace", value: result.workspaceDir },
-          { label: "Repository", value: result.repoDir },
-          { label: "Branch", value: context.branch ?? "detached" },
-          ...(resolvedTemplate
-            ? [{ label: "Template", value: resolvedTemplate.id }]
-            : []),
-        ],
-        sections: [repositoryReportSection("Repositories", result.repos)],
-      });
-      return;
-    }
-
-    await writeShellCdPath(result.repoDir);
-    log.success(`Promoted worktree to workspace: ${result.workspaceDir}`);
-    if (result.failures.length > 0) {
-      for (const failure of result.failures) {
-        log.error(failure);
-      }
-      log.info(
-        `The promoted workspace remains available at ${result.workspaceDir}`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${result.repoDir}`);
-    }
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-  }
-}
-
-async function inferRepoInputFromCwd(): Promise<string | undefined> {
-  try {
-    const { stdout } = await runGit(["config", "--get", "remote.origin.url"], {
-      cwd: process.cwd(),
-    });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function runStandaloneWorktreeRemove(args: {
-  _: string[];
-  "--dry-run"?: boolean;
-  "--force"?: boolean;
+async function runStandaloneWorktreeRemove({
+  target,
+  dryRun,
+  force,
+  skipConfirmation = false,
+}: {
+  target: string;
+  dryRun: boolean;
+  force: boolean;
   skipConfirmation?: boolean;
-}): Promise<void> {
-  const targetArg = args._[1];
-  const targetDir =
-    targetArg && targetArg !== path.basename(process.cwd())
-      ? path.resolve(expandHome(targetArg))
-      : process.cwd();
+}): Promise<CommandResult> {
+  const targetDir = path.resolve(expandHome(target));
 
   try {
     const { removeStandaloneWorktree } = await import("./worktree.ts");
-    if (!args.skipConfirmation) {
+    if (!skipConfirmation) {
       const confirmed = await confirmDelete({
-        dryRun: args["--dry-run"] ?? false,
-        force: args["--force"] ?? false,
+        dryRun,
+        force,
         description: "standalone worktree",
         targetPath: targetDir,
       });
-      if (!confirmed) return;
+      if (!confirmed) return success();
     }
 
     const result = await removeStandaloneWorktree({
       targetDir,
-      dryRun: args["--dry-run"] ?? false,
-      force: args["--force"] ?? false,
+      dryRun,
+      force,
     });
     if (result.dryRun) {
       showDryRunReport({
@@ -1853,98 +1346,71 @@ async function runStandaloneWorktreeRemove(args: {
       log.success(`Deleted worktree: ${result.path}`);
       await writeShellCdPath(path.dirname(result.path));
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw operationalError(error);
   }
 }
 
-async function runTemporaryWorktreeCreate(
-  args: {
-    _: string[];
-    "--dir"?: string;
-    "--repo"?: string;
-    "--dry-run"?: boolean;
-    "--force"?: boolean;
+async function runTaskCreate(
+  {
+    slugs,
+    repo,
+    dryRun,
+    force,
+  }: {
+    slugs: string[];
+    repo: string | undefined;
+    dryRun: boolean;
+    force: boolean;
   },
   workspaceDir: string,
-): Promise<void> {
-  if (args["--dir"]) {
-    log.error("--dir is only supported for standalone worktrees.");
-    process.exitCode = 1;
-    return;
-  }
-
-  const slugs = args._;
-  if (slugs.length === 0) {
-    log.error("Usage: wf worktree <slug...> [--repo <repo>] [--dry-run]");
-    process.exitCode = 1;
-    return;
-  }
-
-  let metadata: WorkspaceMetadata | null;
+): Promise<CommandResult> {
   try {
-    metadata = await readWorkspaceMetadata(workspaceDir);
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
-  }
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+    if (!metadata) {
+      throw new Error(`Could not read workspace metadata from ${workspaceDir}`);
+    }
 
-  if (!metadata) {
-    log.error(`Could not read workspace metadata from ${workspaceDir}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  let parentRepo: WorkspaceRepoMetadata;
-  try {
-    parentRepo = resolveWorkspaceRepoForWorktreeCommand({
+    const parentRepo = resolveWorkspaceRepoForWorktreeCommand({
       workspaceDir,
       metadata,
-      repoName: args["--repo"],
+      repoName: repo,
       cwd: process.cwd(),
-      allowTemporaryWorktree: true,
+      allowTask: true,
     });
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
-  }
 
-  const template = metadata.workspace.template_id
-    ? await loadTemplate(metadata.workspace.template_id)
-    : null;
-  const { config: workspaceConfig } = await loadWorkspaceConfig();
-  const branchPrefix = resolveBranchPrefix(
-    workspaceConfig.branchPrefix,
-    template?.config.branchPrefix,
-  );
-
-  try {
-    const { createTemporaryWorktrees } = await import(
-      "./workspace/temporary-worktrees.ts"
+    const template = metadata.workspace.template_id
+      ? await loadTemplate(metadata.workspace.template_id)
+      : null;
+    const { config: workspaceConfig } = await loadWorkspaceConfig();
+    const branchPrefix = resolveBranchPrefix(
+      workspaceConfig.branchPrefix,
+      template?.config.branchPrefix,
     );
+
+    const { createTasks } = await import("./workspace/tasks.ts");
     const sourceRepoDir = resolveWorktreeSourceDirFromCwd({
       workspaceDir,
       metadata,
       parentRepoName: parentRepo.name,
       cwd: process.cwd(),
     });
-    const result = await createTemporaryWorktrees({
+    const result = await createTasks({
       workspaceDir,
       parentRepo,
       ...(sourceRepoDir ? { sourceRepoDir } : {}),
       slugs,
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
-      dryRun: args["--dry-run"] ?? false,
-      force: args["--force"] ?? false,
+      dryRun,
+      force,
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
         : {}),
+      onEvent: humanServiceEventSink,
     });
 
-    if (args["--dry-run"]) {
+    if (dryRun) {
       showDryRunReport({
         sections: [
           {
@@ -1959,7 +1425,7 @@ async function runTemporaryWorktreeCreate(
           },
         ],
       });
-      return;
+      return success();
     }
 
     for (const worktree of result.created) {
@@ -1988,176 +1454,136 @@ async function runTemporaryWorktreeCreate(
       result.failures.length > 0 ||
       result.created.some((w) => w.setupStatus === "failed")
     ) {
-      process.exitCode = 1;
+      return failure(1, { kind: "none" });
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw operationalError(error);
   }
 }
 
-async function runTemporaryWorktreeList(args: {
-  _: string[];
-  "--repo"?: string;
-}): Promise<void> {
-  const extra = args._.slice(1);
-  if (extra.length > 0) {
-    log.error("Usage: wf worktree list [--repo <repo>]");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTaskList({
+  repo,
+}: {
+  repo?: string | undefined;
+}): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    log.error("Not inside a workspace.");
-    process.exitCode = 1;
-    return;
+    throw new OperationalError("Not inside a workspace.");
   }
 
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-  if (!metadata) {
-    log.error(`Could not read workspace metadata from ${workspaceDir}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  let parentRepoName: string | undefined;
   try {
-    parentRepoName =
-      args["--repo"] ??
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+    if (!metadata) {
+      throw new Error(`Could not read workspace metadata from ${workspaceDir}`);
+    }
+
+    const parentRepoName =
+      repo ??
       resolveWorkspaceRepoNameFromCwd({
         workspaceDir,
         metadata,
         cwd: process.cwd(),
-        allowTemporaryWorktree: true,
+        allowTask: true,
       });
+
+    const { listTasks } = await import("./workspace/tasks.ts");
+    const entries = await listTasks(workspaceDir, parentRepoName);
+
+    if (entries.length === 0) {
+      log.info("No tasks found.");
+      return success();
+    }
+
+    printReport({
+      title: "Tasks",
+      sections: [
+        {
+          entries: entries.map((entry) => ({
+            title: entry.slug,
+            details: [
+              { label: "Repository", value: entry.parent_repo },
+              { label: "Branch", value: entry.branch },
+              { label: "Status", value: entry.state },
+              {
+                label: "Merged",
+                value:
+                  entry.merged === null
+                    ? "unknown"
+                    : entry.merged
+                      ? "yes"
+                      : "no",
+              },
+              { label: "Path", value: entry.absolutePath },
+            ],
+          })),
+        },
+      ],
+      footer: [
+        `Workspace: ${workspaceDir}`,
+        `${entries.length} task${entries.length === 1 ? "" : "s"}`,
+      ].join("\n"),
+    });
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    throw operationalError(error);
   }
-
-  const { listTemporaryWorktrees } = await import(
-    "./workspace/temporary-worktrees.ts"
-  );
-  const entries = await listTemporaryWorktrees(workspaceDir, parentRepoName);
-
-  if (entries.length === 0) {
-    log.info("No temporary worktrees found.");
-    return;
-  }
-
-  printReport({
-    title: "Temporary worktrees",
-    sections: [
-      {
-        entries: entries.map((entry) => ({
-          title: entry.slug,
-          details: [
-            { label: "Repository", value: entry.parent_repo },
-            { label: "Branch", value: entry.branch },
-            { label: "Status", value: entry.state },
-            {
-              label: "Merged",
-              value:
-                entry.merged === null ? "unknown" : entry.merged ? "yes" : "no",
-            },
-            { label: "Path", value: entry.absolutePath },
-          ],
-        })),
-      },
-    ],
-    footer: [
-      `Workspace: ${workspaceDir}`,
-      `${entries.length} temporary worktree${entries.length === 1 ? "" : "s"}`,
-    ].join("\n"),
-  });
 }
 
-async function runTemporaryWorktreeRemove(args: {
-  _: string[];
-  "--repo"?: string;
-  "--dry-run"?: boolean;
-  "--force"?: boolean;
+async function runTaskDelete({
+  names,
+  repo,
+  dryRun,
+  force,
+  skipConfirmation = false,
+}: {
+  names: string[];
+  repo?: string | undefined;
+  dryRun: boolean;
+  force: boolean;
   skipConfirmation?: boolean;
-}): Promise<void> {
-  let slugs = args._.slice(1);
-
+}): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    log.error("Not inside a workspace.");
-    process.exitCode = 1;
-    return;
+    throw new OperationalError("Not inside a workspace.");
   }
 
-  const metadata = await readWorkspaceMetadata(workspaceDir);
-  if (!metadata) {
-    log.error(`Could not read workspace metadata from ${workspaceDir}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  let parentRepoName: string | undefined;
   try {
-    const currentTemporaryWorktree = resolveTemporaryWorktreeFromCwd({
-      workspaceDir,
-      metadata,
-      cwd: process.cwd(),
-    });
-
-    if (slugs.length === 0) {
-      if (!currentTemporaryWorktree) {
-        log.error(
-          "Usage: wf worktree delete [slug...] [--repo <repo>] [--dry-run]",
-        );
-        process.exitCode = 1;
-        return;
-      }
-
-      slugs = [currentTemporaryWorktree.slug];
-      parentRepoName = currentTemporaryWorktree.parent_repo;
-    } else {
-      parentRepoName =
-        args["--repo"] ??
-        resolveWorkspaceRepoNameFromCwd({
-          workspaceDir,
-          metadata,
-          cwd: process.cwd(),
-          allowTemporaryWorktree: true,
-        });
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+    if (!metadata) {
+      throw new Error(`Could not read workspace metadata from ${workspaceDir}`);
     }
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
-  }
 
-  try {
-    const { removeTemporaryWorktrees } = await import(
-      "./workspace/temporary-worktrees.ts"
-    );
-    if (!args.skipConfirmation) {
+    const parentRepoName =
+      repo ??
+      resolveWorkspaceRepoNameFromCwd({
+        workspaceDir,
+        metadata,
+        cwd: process.cwd(),
+        allowTask: true,
+      });
+
+    const { deleteTasks } = await import("./workspace/tasks.ts");
+    if (!skipConfirmation) {
       const confirmed = await confirmDelete({
-        dryRun: args["--dry-run"] ?? false,
-        force: args["--force"] ?? false,
+        dryRun,
+        force,
         description:
-          slugs.length === 1
-            ? `temporary worktree "${slugs[0]}"`
-            : `${slugs.length} temporary worktrees`,
+          names.length === 1 ? `task "${names[0]}"` : `${names.length} tasks`,
         targetPath: workspaceDir,
       });
-      if (!confirmed) return;
+      if (!confirmed) return success();
     }
 
-    const result = await removeTemporaryWorktrees({
+    const result = await deleteTasks({
       workspaceDir,
-      slugs,
-      dryRun: args["--dry-run"] ?? false,
-      force: args["--force"] ?? false,
+      slugs: names,
+      dryRun,
+      force,
       ...(parentRepoName ? { parentRepoName } : {}),
     });
 
-    if (args["--dry-run"]) {
+    if (dryRun) {
       showDryRunReport({
         sections: [
           {
@@ -2180,35 +1606,39 @@ async function runTemporaryWorktreeRemove(args: {
         log.success(`Removed ${entry.slug}`);
       }
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw operationalError(error);
   }
 }
 
-async function runCdCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("cd"));
-    return;
-  }
-
+async function runWorkspaceOpenCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
   const interactive = isInteractive();
   let workspaceDir: string | null = null;
 
   try {
-    if (args._[0]) {
-      workspaceDir = await resolveWorkspaceByName(args._[0]);
+    const workspaceName = invocation.beforeDoubleDash[0];
+    if (booleanInvocationFlag(invocation, "search")) {
+      if (!interactive) {
+        throw new OperationalError(
+          "wf workspace open --search requires an interactive terminal.",
+        );
+      }
+      const selected = await selectWorkspaceFuzzy("Find workspace");
+      if (selected === undefined) {
+        return commandFailure();
+      }
+      if (selected === null) {
+        cancel("Cancelled");
+        return success();
+      }
+      workspaceDir = selected;
+    } else if (workspaceName) {
+      workspaceDir = await resolveWorkspaceByName(workspaceName);
       if (!workspaceDir) {
-        process.exitCode = 1;
-        return;
+        return commandFailure();
       }
     } else if (interactive) {
       workspaceDir = await selectWorkspaceInteractive(
@@ -2216,12 +1646,12 @@ async function runCdCommand(argv: string[]): Promise<void> {
       );
       if (!workspaceDir) {
         cancel("Cancelled");
-        return;
+        return success();
       }
     } else {
-      log.error("Missing workspace name. Usage: wf cd <name>");
-      process.exitCode = 1;
-      return;
+      throw new UsageError(
+        "Missing workspace name. Usage: wf workspace open <name>",
+      );
     }
 
     await writeShellCdPath(workspaceDir);
@@ -2234,170 +1664,63 @@ async function runCdCommand(argv: string[]): Promise<void> {
         log.info(message);
       }
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    if (error instanceof UsageError) {
+      throw error;
+    }
+    return commandFailure(error);
   }
 }
 
-async function runFindCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "-h": "--help",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("find"));
-    return;
-  }
-
-  if (args._.length > 0) {
-    log.error("Usage: wf find");
-    process.exitCode = 1;
-    return;
-  }
-
-  if (!isInteractive()) {
-    log.error("wf find requires an interactive terminal");
-    process.exitCode = 1;
-    return;
-  }
-
-  try {
-    const workspaceDir = await selectWorkspaceFuzzy("Find workspace");
-    if (workspaceDir === undefined) {
-      process.exitCode = 1;
-      return;
-    }
-
-    if (workspaceDir === null) {
-      cancel("Cancelled");
-      return;
-    }
-
-    await writeShellCdPath(workspaceDir);
-
-    if (!isShellAutoCdEnabled()) {
-      promptLog.info(`Run: cd ${workspaceDir}`);
-    }
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-  }
-}
-
-async function runTemplateCommand(argv: string[]): Promise<void> {
-  const subcommand = argv[0];
-  const subArgv = argv.slice(1);
-
-  switch (subcommand) {
-    case "--help":
-    case "-h":
-      console.log(commandHelp("template"));
-      break;
-    case "list":
-    case "ls":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "list"));
-        return;
-      }
-      await runTemplateList();
-      break;
-    case undefined:
-      if (isInteractive()) {
-        await runTemplateManagerCommand();
-      } else {
-        await runTemplateList();
-      }
-      break;
-    case "show":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "show"));
-        return;
-      }
-      await runTemplateShow(subArgv);
-      break;
-    case "info":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "info"));
-        return;
-      }
-      await runTemplateInfo(subArgv);
-      break;
-    case "new":
-    case "create":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "new"));
-        return;
-      }
-      await runTemplateNew(subArgv);
-      break;
-    case "delete":
-    case "rm":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "delete"));
-        return;
-      }
-      await runTemplateDelete(subArgv);
-      break;
-    case "edit":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "edit"));
-        return;
-      }
-      await runTemplateEdit(subArgv);
-      break;
-    case "add-file":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "add-file"));
-        return;
-      }
-      await runTemplateAddFile(subArgv);
-      break;
-    case "copy":
-    case "cp":
-      if (hasHelpFlag(subArgv)) {
-        console.log(nestedCommandHelp("template", "copy"));
-        return;
-      }
-      await runTemplateCopy(subArgv);
-      break;
-    default:
-      log.error(`Unknown template subcommand: ${subcommand}`);
-      log.info(
-        "Available: list, show, info, new, edit, add-file, delete, copy",
+async function runTemplateInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  switch (invocation.command.leaf.handler) {
+    case "template.manage":
+      return runTemplateManagerCommand();
+    case "template.list":
+      return runTemplateList();
+    case "template.open":
+      return runTemplateOpen(invocation.beforeDoubleDash[0] ?? "");
+    case "template.show":
+      return runTemplateShow(invocation.beforeDoubleDash[0] ?? "");
+    case "template.new":
+      return runTemplateNew(invocation);
+    case "template.edit":
+      return runTemplateEdit(invocation.beforeDoubleDash[0] ?? "");
+    case "template.add-file":
+      return runTemplateAddFile(invocation);
+    case "template.copy":
+      return runTemplateCopy(
+        invocation.beforeDoubleDash[0] ?? "",
+        invocation.beforeDoubleDash[1] ?? "",
       );
-      process.exitCode = 1;
+    case "template.delete":
+      return runTemplateDelete(
+        invocation.beforeDoubleDash[0] ?? "",
+        invocation.flags["force"] === true,
+      );
+    default:
+      throw new Error(
+        `No template handler registered for ${invocation.command.leaf.handler}.`,
+      );
   }
 }
 
-async function runTemplatesCommand(argv: string[]): Promise<void> {
-  if (argv[0] === "--help" || argv[0] === "-h") {
-    console.log(commandHelp("templates"));
-    return;
-  }
-
-  if (argv.length > 0) {
-    await runTemplateCommand(argv);
-    return;
-  }
-
-  if (isInteractive()) {
-    await runTemplateManagerCommand();
-  } else {
-    await runTemplateList();
-  }
+function templateSuccess(): CommandResult {
+  return success();
 }
 
-async function runTemplateManagerCommand(): Promise<void> {
+function templateFailure(): CommandResult {
+  return failure(1, { kind: "none" });
+}
+
+async function runTemplateManagerCommand(): Promise<CommandResult> {
   const { shouldUseTemplateManager } = await import("./ui/template-manager.ts");
 
   if (!shouldUseTemplateManager()) {
-    await runTemplateList();
-    return;
+    return runTemplateList();
   }
 
   let initialTemplateId: string | undefined;
@@ -2421,7 +1744,7 @@ async function runTemplateManagerCommand(): Promise<void> {
 
     switch (action.type) {
       case "quit":
-        return;
+        return templateSuccess();
       case "reload":
         continue;
       case "create": {
@@ -2448,22 +1771,25 @@ async function runTemplateManagerCommand(): Promise<void> {
       }
       case "delete":
         initialTemplateId = undefined;
-        await runTemplateDelete([action.templateId]);
+        if (
+          (await runTemplateDelete(action.templateId, false)).exitCode !== 0
+        ) {
+          return templateFailure();
+        }
         continue;
       case "show":
-        await runTemplateShow([action.templateId]);
-        return;
+        return runTemplateOpen(action.templateId);
     }
   }
 }
 
-async function runTemplateList(): Promise<void> {
+async function runTemplateList(): Promise<CommandResult> {
   const templates = await listTemplates();
 
   if (templates.length === 0) {
     log.info("No templates configured.");
     log.info(`Templates directory: ${getTemplatesDir()}`);
-    return;
+    return templateSuccess();
   }
 
   printReport({
@@ -2489,17 +1815,10 @@ async function runTemplateList(): Promise<void> {
       `${templates.length} template${templates.length === 1 ? "" : "s"}`,
     ].join("\n"),
   });
+  return templateSuccess();
 }
 
-async function runTemplateShow(argv: string[]): Promise<void> {
-  const templateId = argv[0];
-
-  if (!templateId) {
-    log.error("Missing template name. Usage: workforest template show <name>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateOpen(templateId: string): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
@@ -2507,8 +1826,7 @@ async function runTemplateShow(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const templateDir = path.dirname(template.path);
@@ -2517,17 +1835,10 @@ async function runTemplateShow(argv: string[]): Promise<void> {
   if (!isShellAutoCdEnabled()) {
     log.info(`Run: cd ${templateDir}`);
   }
+  return templateSuccess();
 }
 
-async function runTemplateInfo(argv: string[]): Promise<void> {
-  const templateId = argv[0];
-
-  if (!templateId) {
-    log.error("Missing template name. Usage: workforest template info <name>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateShow(templateId: string): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
@@ -2535,8 +1846,7 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   let workspaceBranchPrefix: string | undefined;
@@ -2593,30 +1903,16 @@ async function runTemplateInfo(argv: string[]): Promise<void> {
     ],
     footer: `Config: ${template.path}`,
   });
+  return templateSuccess();
 }
 
-async function runTemplateNew(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--description": String,
-      "-d": "--description",
-    },
-    { argv, permissive: true },
-  );
-
-  // First positional arg is template name, rest are repos
-  let templateId = args._[0];
-  let repos = args._.slice(1);
+async function runTemplateNew(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  let templateId = invocation.beforeDoubleDash[0];
+  let repos = invocation.beforeDoubleDash.slice(1);
 
   if (!templateId) {
-    if (!isInteractive()) {
-      log.error(
-        "Missing template name. Usage: workforest template new <name> [repo...]",
-      );
-      process.exitCode = 1;
-      return;
-    }
-
     templateId = await promptText("Template name", {
       validate: (input) => {
         try {
@@ -2633,20 +1929,11 @@ async function runTemplateNew(argv: string[]): Promise<void> {
   const existing = await loadTemplate(templateId);
   if (existing) {
     log.error(`Template "${templateId}" already exists.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // If no repos provided via args, prompt for them
   if (repos.length === 0) {
-    if (!isInteractive()) {
-      log.error(
-        "Missing repositories. Usage: workforest template new <name> <repo...>",
-      );
-      process.exitCode = 1;
-      return;
-    }
-
     const reposInput = await promptText(
       "Repositories (cached name, org/repo, or git URL; comma-separated)",
       {
@@ -2669,12 +1956,14 @@ async function runTemplateNew(argv: string[]): Promise<void> {
     repos = await qualifyRepositorySpecifiers(repos);
   } catch (error) {
     log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Get description from flag or prompt
-  let description = args["--description"];
+  let description =
+    typeof invocation.flags["description"] === "string"
+      ? invocation.flags["description"]
+      : undefined;
   if (description === undefined && isInteractive()) {
     description = await promptText("Description", {
       placeholder: "(optional)",
@@ -2689,68 +1978,44 @@ async function runTemplateNew(argv: string[]): Promise<void> {
 
   log.success(`Template "${templateId}" created.`);
   log.info(`Location: ${getTemplatesDir()}/${templateId}/template.jsonc`);
+  return templateSuccess();
 }
 
-async function runTemplateDelete(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--force": Boolean,
-      "-f": "--force",
-    },
-    { argv },
-  );
-
-  const templateId = args._[0];
-
-  if (!templateId) {
-    log.error(
-      "Missing template name. Usage: workforest template delete <name>",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateDelete(
+  templateId: string,
+  force: boolean,
+): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Confirm deletion unless --force is passed
-  if (!args["--force"]) {
+  if (!force) {
     if (!isInteractive()) {
       log.error(
         "Cannot confirm deletion in non-interactive mode. Use --force.",
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     const confirmed = await promptConfirm(`Delete template "${templateId}"?`);
     if (!confirmed) {
       log.info("Deletion cancelled.");
-      return;
+      return templateSuccess();
     }
   }
 
   await deleteTemplate(templateId);
   log.success(`Template "${templateId}" deleted.`);
+  return templateSuccess();
 }
 
-async function runTemplateEdit(argv: string[]): Promise<void> {
-  const templateId = argv[0];
-
-  if (!templateId) {
-    log.error("Missing template name. Usage: workforest template edit <name>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateEdit(templateId: string): Promise<CommandResult> {
   if (!isInteractive()) {
     log.error("Template editing requires an interactive terminal.");
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const template = await loadTemplate(templateId);
@@ -2760,8 +2025,7 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const { config: workspaceConfig } = await loadWorkspaceConfig();
@@ -2779,36 +2043,25 @@ async function runTemplateEdit(argv: string[]): Promise<void> {
       log.success(`Template "${templateId}" saved.`);
     },
   });
+  return templateSuccess();
 }
 
-async function runTemplateAddFile(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--template": String,
-      "-t": "--template",
-    },
-    { argv },
-  );
-
-  let sourceInputs = args._;
-  if (sourceInputs.length === 0) {
-    log.error(
-      "Usage: workforest template add-file [--template <name>] <path...>",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateAddFile(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  let sourceInputs = [...invocation.beforeDoubleDash];
   const workspaceDir = await detectWorkspaceFromCwd();
-  let templateId = args["--template"];
+  let templateId =
+    typeof invocation.flags["template"] === "string"
+      ? invocation.flags["template"]
+      : undefined;
   let resolvedTemplate: Awaited<ReturnType<typeof loadTemplate>> | null = null;
   if (!workspaceDir && !templateId) {
     templateId = sourceInputs[0];
     sourceInputs = sourceInputs.slice(1);
     if (!templateId || sourceInputs.length === 0) {
       log.error("Usage: workforest template add-file <template> <path...>");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
   }
 
@@ -2817,8 +2070,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
   if (!templateId) {
     if (!workspaceDir) {
       log.error("Not inside a workspace.");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     const firstInput = sourceInputs[0];
@@ -2826,8 +2078,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       log.error(
         "Usage: workforest template add-file [--template <name>] <path...>",
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     let candidateTemplate: Awaited<ReturnType<typeof loadTemplate>> = null;
@@ -2844,8 +2095,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       log.error(
         `Ambiguous add-file argument "${firstInput}": it matches both a template and an existing file or directory.`,
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     if (candidateTemplate) {
@@ -2854,23 +2104,20 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       sourceInputs = sourceInputs.slice(1);
       if (sourceInputs.length === 0) {
         log.error("Usage: workforest template add-file <template> <path...>");
-        process.exitCode = 1;
-        return;
+        return templateFailure();
       }
     } else if (!candidateExists) {
       log.error(
         `Could not resolve add-file argument "${firstInput}" as either a template or an existing file or directory.`,
       );
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
   }
 
   if (!templateId) {
     if (!workspaceDir) {
       log.error("Not inside a workspace.");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     let metadata: WorkspaceMetadata | null;
@@ -2878,14 +2125,12 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       metadata = await readWorkspaceMetadata(workspaceDir);
     } catch (error) {
       log.error(getErrorMessage(error));
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     if (!metadata?.workspace.template_id) {
       log.error("Current workspace was not created from a template.");
-      process.exitCode = 1;
-      return;
+      return templateFailure();
     }
 
     templateId = metadata.workspace.template_id;
@@ -2894,8 +2139,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
   const template = resolvedTemplate ?? (await loadTemplate(templateId));
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   const entries: TemplateAddFileEntry[] = [];
@@ -2906,7 +2150,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       templatePath: template.path,
     });
     if (!resolved) {
-      return;
+      return templateFailure();
     }
     entries.push(...resolved);
   }
@@ -2924,8 +2168,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
         const targetStat = await fs.stat(entry.targetPath);
         if (!targetStat.isDirectory()) {
           log.error(`Template path already exists: ${entry.targetPath}`);
-          process.exitCode = 1;
-          return;
+          return templateFailure();
         }
       }
       continue;
@@ -2935,8 +2178,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       const targetStat = await fs.stat(entry.targetPath);
       if (!targetStat.isFile()) {
         log.error(`Template path already exists: ${entry.targetPath}`);
-        process.exitCode = 1;
-        return;
+        return templateFailure();
       }
 
       const diff = await runNoIndexDiff(entry.targetPath, entry.sourcePath);
@@ -2953,8 +2195,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
 
       if (action === "cancel") {
         log.info("Cancelled.");
-        process.exitCode = 1;
-        return;
+        return templateFailure();
       }
 
       if (action === "skip") {
@@ -2985,6 +2226,7 @@ async function runTemplateAddFile(argv: string[]): Promise<void> {
       ? entries[0]?.relativePath
       : `${sourceInputs.length} paths`;
   log.success(`Added ${sourceSummary} to template "${template.id}".${suffix}`);
+  return templateSuccess();
 }
 
 async function resolveTemplateAddFileEntries({
@@ -3005,7 +2247,6 @@ async function resolveTemplateAddFileEntries({
     path.isAbsolute(relativePath)
   ) {
     log.error(`File must be inside ${sourceRoot}: ${sourcePath}`);
-    process.exitCode = 1;
     return null;
   }
 
@@ -3014,13 +2255,11 @@ async function resolveTemplateAddFileEntries({
     sourceStat = await fs.stat(sourcePath);
   } catch {
     log.error(`File not found: ${sourcePath}`);
-    process.exitCode = 1;
     return null;
   }
 
   if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
     log.error(`Not a file or directory: ${sourcePath}`);
-    process.exitCode = 1;
     return null;
   }
 
@@ -3111,7 +2350,6 @@ async function resolveTemplateAddFileConflict(
 ): Promise<Exclude<TemplateAddFileConflictAction, "diff">> {
   if (!isInteractive()) {
     log.error(`Template file already exists: ${entry.targetPath}`);
-    process.exitCode = 1;
     return "cancel";
   }
 
@@ -3191,16 +2429,10 @@ function runNoIndexDiff(oldPath: string, newPath: string): Promise<string> {
   });
 }
 
-async function runTemplateCopy(argv: string[]): Promise<void> {
-  const sourceId = argv[0];
-  const destId = argv[1];
-
-  if (!sourceId || !destId) {
-    log.error("Usage: workforest template copy <source> <destination>");
-    process.exitCode = 1;
-    return;
-  }
-
+async function runTemplateCopy(
+  sourceId: string,
+  destId: string,
+): Promise<CommandResult> {
   // Load source template
   const sourceTemplate = await loadTemplate(sourceId);
   if (!sourceTemplate) {
@@ -3209,94 +2441,50 @@ async function runTemplateCopy(argv: string[]): Promise<void> {
     if (templates.length > 0) {
       log.info(`Available: ${templates.map((t) => t.id).join(", ")}`);
     }
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Check destination doesn't exist
   const destTemplate = await loadTemplate(destId);
   if (destTemplate) {
     log.error(`Template "${destId}" already exists.`);
-    process.exitCode = 1;
-    return;
+    return templateFailure();
   }
 
   // Create the copy
   await createTemplate(destId, sourceTemplate.config);
   log.success(`Template "${sourceId}" copied to "${destId}".`);
+  return templateSuccess();
 }
 
-async function runCleanCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "--keep-mirrors": Boolean,
-      "--delete-remote-branches": Boolean,
-      "-h": "--help",
-      "-n": "--dry-run",
-      "-f": "--force",
-      "-r": "--delete-remote-branches",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("clean"));
-    return;
-  }
-
+async function runCleanCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
   const interactive = isInteractive();
   const initialCwd = process.cwd();
-  let workspaceDir = args._[0];
-  let isInsideWorkspace = false;
-
-  // Determine workspace directory
-  if (!workspaceDir) {
-    // First: check if we're inside a workspace (self-destruct mode)
-    const detectedWorkspace = await detectWorkspaceFromCwd();
-
-    if (detectedWorkspace) {
-      workspaceDir = detectedWorkspace;
-      isInsideWorkspace = true;
-    } else if (interactive) {
-      // Not in a workspace, offer interactive selection
-      const selected = await selectWorkspaceInteractive(
-        "Select workspace to clean",
-      );
-      if (!selected) {
-        cancel("Cancelled");
-        return;
-      }
-      workspaceDir = selected;
-    } else {
-      log.error("No workspace path specified and not inside a workspace.");
-      process.exitCode = 1;
-      return;
-    }
+  const workspaceOperand = invocation.beforeDoubleDash[0];
+  if (!workspaceOperand) {
+    throw new UsageError("wf workspace delete requires a workspace.");
   }
+  const directPath = path.resolve(expandHome(workspaceOperand));
+  const workspaceDir = (await hasWorkspaceMetadata(directPath))
+    ? directPath
+    : ((await resolveWorkspaceByName(workspaceOperand)) ?? directPath);
+  const isInsideWorkspace = isPathInsideOrEqual(initialCwd, workspaceDir);
 
-  // Check if user is inside the workspace (even if they specified a path)
-  if (!isInsideWorkspace) {
-    const resolvedWorkspace = path.resolve(workspaceDir);
-    const cwd = initialCwd;
-    isInsideWorkspace =
-      cwd === resolvedWorkspace || cwd.startsWith(`${resolvedWorkspace}/`);
-  }
-
-  const dryRun = args["--dry-run"] ?? false;
-  const force = args["--force"] ?? false;
-  const keepMirrors = args["--keep-mirrors"] ?? true;
-  let deleteRemoteBranches = args["--delete-remote-branches"] ?? false;
+  const dryRun = booleanInvocationFlag(invocation, "dryRun");
+  const force = booleanInvocationFlag(invocation, "force");
+  const keepMirrors = !booleanInvocationFlag(invocation, "deleteMirrors");
+  let deleteRemoteBranches = booleanInvocationFlag(
+    invocation,
+    "deleteRemoteBranches",
+  );
 
   // Validate workspace first
   try {
     await validateWorkspace(workspaceDir);
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    return commandFailure(error);
   }
 
   // Get preview with remote branch check (always check to potentially prompt)
@@ -3319,11 +2507,11 @@ async function runCleanCommand(argv: string[]): Promise<void> {
           fields: [
             { label: "Directory", value: preview.workspaceDir },
             { label: "Repositories", value: preview.repos.join(", ") },
-            ...(preview.temporaryWorktrees?.length
+            ...(preview.tasks?.length
               ? [
                   {
-                    label: "Temporary worktrees",
-                    value: preview.temporaryWorktrees.join(", "),
+                    label: "Tasks",
+                    value: preview.tasks.join(", "),
                   },
                 ]
               : []),
@@ -3344,7 +2532,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       description: "workspace",
       targetPath: preview.workspaceDir,
     });
-    if (!confirmed) return;
+    if (!confirmed) return success();
   }
 
   if (!force && !dryRun && preview.remoteBranches?.length) {
@@ -3372,6 +2560,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
     force,
     keepMirrors,
     deleteRemoteBranches,
+    onState: (state) => renderCleanupState(state, dryRun),
   });
 
   // Post-cleanup message if user was inside the workspace
@@ -3386,248 +2575,7 @@ async function runCleanCommand(argv: string[]): Promise<void> {
       log.info(`Workspace deleted. Run: cd ${parentDir}`);
     }
   }
-}
-
-async function runWorkspaceCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "--keep-mirrors": Boolean,
-      "--delete-remote-branches": Boolean,
-      "-h": "--help",
-      "-n": "--dry-run",
-      "-f": "--force",
-      "-r": "--delete-remote-branches",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    const subcommandHelp = args._[0]
-      ? nestedCommandHelp("workspace", args._[0])
-      : null;
-    console.log(subcommandHelp ?? commandHelp("workspace"));
-    return;
-  }
-
-  const subcommand = args._[0];
-  if (subcommand === "delete" || subcommand === "rm") {
-    await runCleanCommand(argv.slice(1));
-    return;
-  }
-
-  log.error("Usage: wf workspace delete [options] [dir]");
-  process.exitCode = 1;
-}
-
-async function runDeleteCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--dry-run": Boolean,
-      "--force": Boolean,
-      "--keep-mirrors": Boolean,
-      "--delete-remote-branches": Boolean,
-      "-h": "--help",
-      "-n": "--dry-run",
-      "-f": "--force",
-      "-r": "--delete-remote-branches",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("delete"));
-    return;
-  }
-
-  if (args._.length > 0) {
-    await runCleanCommand(argv);
-    return;
-  }
-
-  const cwd = process.cwd();
-  const dryRun = args["--dry-run"] ?? false;
-  const force = args["--force"] ?? false;
-
-  const workspaceDir = await detectWorkspaceFromCwd();
-  if (workspaceDir) {
-    const metadata = await readWorkspaceMetadata(workspaceDir);
-    if (!metadata) {
-      log.error(`Could not read workspace metadata from ${workspaceDir}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    const currentTemporaryWorktree = resolveTemporaryWorktreeFromCwd({
-      workspaceDir,
-      metadata,
-      cwd,
-    });
-    if (currentTemporaryWorktree) {
-      const worktreeDir = resolveContainedPath(
-        workspaceDir,
-        currentTemporaryWorktree.path,
-      );
-      const confirmed = await confirmDelete({
-        dryRun,
-        force,
-        description: `temporary worktree "${currentTemporaryWorktree.slug}"`,
-        targetPath: worktreeDir,
-      });
-      if (!confirmed) return;
-
-      await runTemporaryWorktreeRemove({
-        _: ["delete"],
-        "--dry-run": dryRun,
-        "--force": force,
-        skipConfirmation: true,
-      });
-      return;
-    }
-  }
-
-  const managedContext = await resolveManagedWorktreeContextFromCwd();
-  if (managedContext) {
-    const confirmed = await confirmDelete({
-      dryRun,
-      force,
-      description: `managed worktree "${managedContext.name}"`,
-      targetPath: managedContext.checkoutPath,
-    });
-    if (!confirmed) return;
-
-    await runManagedWorktreeRemove(managedContext, {
-      _: ["delete"],
-      "--dry-run": dryRun,
-      "--force": force,
-      skipConfirmation: true,
-    });
-    return;
-  }
-
-  const standaloneWorktree = await resolveStandaloneWorktreeFromCwd(cwd);
-  const exactReview = standaloneWorktree
-    ? await resolveReviewWorktreeFromCwd(standaloneWorktree.path, {
-        exact: true,
-      })
-    : null;
-
-  if (exactReview) {
-    const confirmed = await confirmDelete({
-      dryRun,
-      force,
-      description: `review worktree "${exactReview.owner}/${exactReview.repo}#${exactReview.prNumber}"`,
-      targetPath: exactReview.path,
-    });
-    if (!confirmed) return;
-
-    await runReviewRemove(
-      [`${exactReview.owner}/${exactReview.repo}#${exactReview.prNumber}`],
-      {
-        dryRun,
-        force,
-        skipConfirmation: true,
-      },
-    );
-    return;
-  }
-
-  if (standaloneWorktree) {
-    if (workspaceDir) {
-      if (!isInteractive()) {
-        log.error(
-          "Could not infer what to delete. Run wf worktree delete or wf workspace delete explicitly.",
-        );
-        process.exitCode = 1;
-        return;
-      }
-
-      const action = await promptSelect<DeleteWorkspaceWorktreeAction>(
-        "Delete what?",
-        {
-          options: [
-            {
-              label: "Worktree",
-              description: standaloneWorktree.path,
-              value: "worktree",
-            },
-            {
-              label: "Workspace",
-              description: workspaceDir,
-              value: "workspace",
-            },
-            { label: "Cancel", value: "cancel" },
-          ],
-        },
-      );
-
-      if (action === "cancel") return;
-      if (action === "workspace") {
-        await runCleanCommand(argv);
-        return;
-      }
-
-      await runStandaloneWorktreeRemove({
-        _: ["delete", standaloneWorktree.path],
-        "--dry-run": dryRun,
-        "--force": force,
-        skipConfirmation: true,
-      });
-      return;
-    }
-
-    const confirmed = await confirmDelete({
-      dryRun,
-      force,
-      description: "standalone worktree",
-      targetPath: standaloneWorktree.path,
-    });
-    if (!confirmed) return;
-
-    await runStandaloneWorktreeRemove({
-      _: ["delete", standaloneWorktree.path],
-      "--dry-run": dryRun,
-      "--force": force,
-      skipConfirmation: true,
-    });
-    return;
-  }
-
-  const currentReview = await resolveReviewWorktreeFromCwd(cwd);
-  if (currentReview) {
-    const confirmed = await confirmDelete({
-      dryRun,
-      force,
-      description: `review worktree "${currentReview.owner}/${currentReview.repo}#${currentReview.prNumber}"`,
-      targetPath: currentReview.path,
-    });
-    if (!confirmed) return;
-
-    await runReviewRemove(
-      [
-        `${currentReview.owner}/${currentReview.repo}#${currentReview.prNumber}`,
-      ],
-      {
-        dryRun,
-        force,
-        skipConfirmation: true,
-      },
-    );
-    return;
-  }
-
-  if (workspaceDir) {
-    await runCleanCommand(argv);
-    return;
-  }
-
-  log.error(
-    "Could not infer what to delete. Run from inside a workspace, temporary worktree, or review worktree.",
-  );
-  process.exitCode = 1;
+  return success();
 }
 
 async function confirmDelete({
@@ -3646,106 +2594,44 @@ async function confirmDelete({
   }
 
   if (!isInteractive()) {
-    log.error("Cannot confirm in non-interactive mode. Use --force.");
-    process.exitCode = 1;
-    return false;
+    throw new OperationalError(
+      "Cannot confirm in non-interactive mode. Use --force.",
+    );
   }
 
   const suffix = targetPath ? ` at ${targetPath}` : "";
   return promptConfirm(`Delete ${description}${suffix}?`, false);
 }
 
-async function resolveReviewWorktreeFromCwd(
-  cwd: string,
-  options: { exact?: boolean } = {},
-): Promise<
-  | {
-      owner: string;
-      repo: string;
-      prNumber: number;
-      path: string;
+function operationalError(error: unknown): UsageError | OperationalError {
+  return error instanceof UsageError || error instanceof OperationalError
+    ? error
+    : new OperationalError(getErrorMessage(error), {
+        cause: error,
+      });
+}
+
+async function runWorkspaceCreateCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const like = stringInvocationFlag(invocation, "like");
+  if (like !== undefined) {
+    if (like !== "current") {
+      throw new UsageError(
+        `Unsupported --like value "${like}". Expected "current".`,
+      );
     }
-  | undefined
-> {
-  const { config } = await loadWorkspaceConfig();
-  if (!config.reviewsDir) {
-    return undefined;
+    return runWorkspaceCreateLikeCurrent(invocation);
   }
 
-  const reviewsDir = path.resolve(expandHome(config.reviewsDir));
-  const { listReviewWorktrees } = await import("./review.ts");
-  const entries = await listReviewWorktrees(reviewsDir);
-  const resolvedCwd = path.resolve(cwd);
-  return entries.find((entry) =>
-    options.exact
-      ? path.resolve(entry.path) === resolvedCwd
-      : isPathInsideOrEqual(resolvedCwd, entry.path),
-  );
+  return runNewCommand(invocation);
 }
 
-async function resolveStandaloneWorktreeFromCwd(
-  cwd: string,
-): Promise<{ path: string; branch?: string } | null> {
-  const { resolveStandaloneWorktree } = await import("./worktree.ts");
-  return resolveStandaloneWorktree(cwd);
-}
-
-async function resolveManagedWorktreeContextFromCwd(): Promise<
-  import("./managed-worktrees.ts").ManagedWorktreeContext | null
-> {
-  const { config } = await loadWorkspaceConfig();
-  if (!config.defaultDir) return null;
-
-  const { resolveManagedWorktreeContext } = await import(
-    "./managed-worktrees.ts"
-  );
-  return resolveManagedWorktreeContext({
-    cwd: process.cwd(),
-    defaultDir: path.resolve(expandHome(config.defaultDir)),
-  });
-}
-
-function logNewUsage(): void {
-  log.info("Usage: wf new <template|repo...> -- <name-or-description>");
-  log.info("Example: wf new my-template -- fixing auth bug");
-  log.info("Example: wf new vercel/next.js vercel/turbo -- testing feature");
-}
-
-async function runNewCommand(argv: string[]): Promise<void> {
-  const delimiterIndex = argv.indexOf("--");
-  const beforeDelimiter =
-    delimiterIndex === -1 ? argv : argv.slice(0, delimiterIndex);
-  const afterDelimiter =
-    delimiterIndex === -1 ? [] : argv.slice(delimiterIndex + 1);
-  let args: {
-    _: string[];
-    "--help"?: boolean;
-    "--dry-run"?: boolean;
-  };
-  try {
-    args = arg(
-      {
-        "--help": Boolean,
-        "--dry-run": Boolean,
-        "-h": "--help",
-        "-n": "--dry-run",
-      },
-      { argv: beforeDelimiter },
-    );
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    logNewUsage();
-    process.exitCode = 1;
-    return;
-  }
-
-  if (args["--help"]) {
-    console.log(commandHelp("new"));
-    return;
-  }
-
+async function runNewCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
   const interactive = isInteractive();
-  let selections = args._;
+  let selections = [...invocation.beforeDoubleDash];
   let featureName: string | undefined;
   let description: string | undefined;
   let templateBranchPrefix: string | undefined;
@@ -3756,71 +2642,49 @@ async function runNewCommand(argv: string[]): Promise<void> {
     ({ config } = await loadWorkspaceConfig());
   } catch (error) {
     if (interactive) cancel("Configuration error");
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    return commandFailure(error);
   }
 
-  if (delimiterIndex === -1) {
-    if (args._.length === 0) {
-      if (!interactive) {
-        log.error("Missing name/description and repositories.");
-        logNewUsage();
-        process.exitCode = 1;
-        return;
-      }
-
-      const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
-      if (shouldUseGrid()) {
-        const { runNewWizard } = await import("./ui/new-wizard.ts");
-        const templates = await listTemplates();
-        let wizardResult: Awaited<ReturnType<typeof runNewWizard>>;
-        try {
-          wizardResult = await runNewWizard({
-            config,
-            templates,
-            handleTemplateManagement,
-          });
-        } catch (error) {
-          if (error instanceof CancelError) {
-            cancel("Cancelled");
-            return;
-          }
-          throw error;
+  if (!invocation.hadDoubleDash) {
+    const { shouldUseGrid } = await import("./ui/grid-consumer.ts");
+    if (shouldUseGrid()) {
+      const { runNewWizard } = await import("./ui/new-wizard.ts");
+      const templates = await listTemplates();
+      let wizardResult: Awaited<ReturnType<typeof runNewWizard>>;
+      try {
+        wizardResult = await runNewWizard({
+          config,
+          templates,
+          handleTemplateManagement,
+        });
+      } catch (error) {
+        if (error instanceof CancelError) {
+          cancel("Cancelled");
+          return success();
         }
-        selections = wizardResult.templateId
-          ? [wizardResult.templateId]
-          : wizardResult.repoSlugs;
-        featureName = wizardResult.featureName;
-        description = wizardResult.description;
-        templateBranchPrefix = wizardResult.templateBranchPrefix;
-      } else {
-        // Fallback: existing sequential prompts
-        intro("Create a new workspace");
-        const selected = await promptForTemplateOrRepos();
-        if (!selected) return;
-        selections = selected;
+        throw error;
       }
+      selections = wizardResult.templateId
+        ? [wizardResult.templateId]
+        : wizardResult.repoSlugs;
+      featureName = wizardResult.featureName;
+      description = wizardResult.description;
+      templateBranchPrefix = wizardResult.templateBranchPrefix;
     } else {
-      log.error('Missing "--" delimiter before name or description.');
-      logNewUsage();
-      process.exitCode = 1;
-      return;
+      // Fallback: existing sequential prompts
+      intro("Create a new workspace");
+      const selected = await promptForTemplateOrRepos();
+      if (!selected) return success();
+      selections = selected;
     }
   } else {
-    const workText = afterDelimiter.join(" ").trim();
+    const workText = invocation.afterDoubleDash.join(" ").trim();
     if (!workText) {
-      log.error('Missing name or description after "--".');
-      logNewUsage();
-      process.exitCode = 1;
-      return;
+      throw new UsageError('Missing name or description after "--".');
     }
 
     if (selections.length === 0) {
-      log.error('Missing template or repositories before "--".');
-      logNewUsage();
-      process.exitCode = 1;
-      return;
+      throw new UsageError('Missing template or repositories before "--".');
     }
 
     if (isSlug(workText)) {
@@ -3856,24 +2720,19 @@ async function runNewCommand(argv: string[]): Promise<void> {
     if (interactive) cancel("Failed to resolve repositories");
     if (error instanceof RegisteredRepositoryNameCollisionError) {
       log.warn(getErrorMessage(error));
-    } else {
-      log.error(getErrorMessage(error));
+      return commandFailure();
     }
-    process.exitCode = 1;
-    return;
+    return commandFailure(error);
   }
 
   // Get feature name (skip if delimiter or wizard already provided it)
   if (!featureName) {
     if (!interactive) {
-      log.error("Missing name or description.");
-      logNewUsage();
-      process.exitCode = 1;
-      return;
+      throw new UsageError("Missing name or description.");
     }
 
     const result = await promptForFeatureName();
-    if (!result) return;
+    if (!result) return success();
     featureName = result.featureName;
     description = result.description;
   }
@@ -3894,7 +2753,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
   );
 
   // Dry-run mode
-  if (args["--dry-run"]) {
+  if (booleanInvocationFlag(invocation, "dryRun")) {
     if (interactive) {
       note(
         [
@@ -3926,7 +2785,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
         sections: [repositoryReportSection("Repositories", repos)],
       });
     }
-    return;
+    return success();
   }
 
   // Stamp workspace
@@ -3937,6 +2796,7 @@ async function runNewCommand(argv: string[]): Promise<void> {
     repos,
     ...(description && { description }),
     ...(templateId && { templateId }),
+    onEvent: humanServiceEventSink,
   };
 
   if (interactive) {
@@ -3952,35 +2812,18 @@ async function runNewCommand(argv: string[]): Promise<void> {
     await writeShellCdPath(workspaceDir);
     log.info("Happy shipping!");
   }
+  return success();
 }
 
-async function runAddCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--workspace": String,
-      "--dry-run": Boolean,
-      "-h": "--help",
-      "-w": "--workspace",
-      "-n": "--dry-run",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("add"));
-    return;
-  }
-
+async function runAddCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
   const interactive = isInteractive();
-  let selections = args._;
+  let selections = [...invocation.beforeDoubleDash];
 
   if (selections.length === 0) {
     if (!interactive) {
-      log.error("No repositories specified.");
-      log.info("Usage: wf add <repo...> [--workspace <dir>]");
-      process.exitCode = 1;
-      return;
+      throw new UsageError("No repositories specified.");
     }
 
     const repos = await promptText("Repositories to add", {
@@ -3997,47 +2840,42 @@ async function runAddCommand(argv: string[]): Promise<void> {
       .filter(Boolean);
   }
 
-  const workspaceDir = args["--workspace"]
-    ? path.resolve(expandHome(args["--workspace"]))
+  const workspaceFlag = stringInvocationFlag(invocation, "workspace");
+  const workspaceDir = workspaceFlag
+    ? path.resolve(expandHome(workspaceFlag))
     : await detectWorkspaceFromCwd();
 
   if (!workspaceDir) {
-    log.error(
+    return commandFailure(
       "Not inside a workspace. Run this command from a workspace or pass --workspace <dir>.",
     );
-    process.exitCode = 1;
-    return;
   }
 
   let metadata: Awaited<ReturnType<typeof readWorkspaceMetadata>>;
   try {
     metadata = await readWorkspaceMetadata(workspaceDir);
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    return commandFailure(error);
   }
 
   if (!metadata) {
-    log.error(`Could not read workspace metadata from ${workspaceDir}`);
-    process.exitCode = 1;
-    return;
+    return commandFailure(
+      `Could not read workspace metadata from ${workspaceDir}`,
+    );
   }
 
   let repos: RepoConfig[];
   try {
     repos = await resolveRepositorySpecifiers(selections);
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
-    return;
+    return commandFailure(error);
   }
 
   const branchName =
     metadata.repos.find((repo) => repo.feature_branch)?.feature_branch ??
     metadata.workspace.feature_name;
 
-  if (args["--dry-run"]) {
+  if (booleanInvocationFlag(invocation, "dryRun")) {
     if (interactive) {
       note(
         [
@@ -4059,7 +2897,7 @@ async function runAddCommand(argv: string[]): Promise<void> {
         sections: [repositoryReportSection("Repositories to add", repos)],
       });
     }
-    return;
+    return success();
   }
 
   const template = metadata.workspace.template_id
@@ -4075,6 +2913,7 @@ async function runAddCommand(argv: string[]): Promise<void> {
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
         : {}),
+      onEvent: humanServiceEventSink,
     });
 
     if (result.addedRepos.length > 0) {
@@ -4084,112 +2923,59 @@ async function runAddCommand(argv: string[]): Promise<void> {
     }
 
     if (result.failedRepos.length > 0) {
-      process.exitCode = 1;
       log.error(
         `Failed to add ${result.failedRepos.length} repo${result.failedRepos.length === 1 ? "" : "s"}.`,
       );
-      return;
+      return commandFailure();
     }
 
     if (interactive) {
       outro("Workspace updated");
     }
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    return commandFailure(error);
   }
 }
 
-async function runForkCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--help": Boolean,
-      "--description": String,
-      "--dry-run": Boolean,
-      "-h": "--help",
-      "-d": "--description",
-      "-n": "--dry-run",
-    },
-    { argv },
-  );
-
-  if (args["--help"]) {
-    console.log(commandHelp("fork"));
-    return;
-  }
-
+async function runWorkspaceCreateLikeCurrent(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
   const interactive = isInteractive();
 
   // Must be inside a workspace
   const sourceDir = await detectWorkspaceFromCwd();
   if (!sourceDir) {
-    log.error(
+    return commandFailure(
       "Not inside a workspace. Run this command from within an existing workspace.",
     );
-    process.exitCode = 1;
-    return;
   }
 
   const metadata = await readWorkspaceMetadata(sourceDir);
   if (!metadata) {
-    log.error(`Could not read workspace metadata from ${sourceDir}`);
-    process.exitCode = 1;
-    return;
+    return commandFailure(
+      `Could not read workspace metadata from ${sourceDir}`,
+    );
   }
 
-  if (interactive && args._.length === 0) {
-    intro("Fork workspace");
-  }
-
-  // Get feature name from positional arg, --description, or interactive prompt
   let featureName: string;
   let description: string | undefined;
-
-  if (args._.length > 0) {
-    const input = args._[0];
-    if (input === undefined) {
-      throw new Error("Expected a feature name.");
-    }
-    if (isSlug(input)) {
-      featureName = input;
+  const input = invocation.afterDoubleDash.join(" ").trim();
+  if (isSlug(input)) {
+    featureName = input;
+  } else {
+    description = input;
+    if (interactive) {
+      const generated = await withSpinner(
+        "Generating feature name...",
+        () => generateSlugFromDescription(input),
+        "Feature name ready",
+      );
+      featureName = generated ?? sanitizeToSlug(input);
     } else {
-      description = input;
       const generated = await generateSlugFromDescription(input);
       featureName = generated ?? sanitizeToSlug(input);
     }
-  } else if (args["--description"]) {
-    const input = args["--description"];
-    if (isSlug(input)) {
-      featureName = input;
-    } else {
-      description = input;
-      if (interactive) {
-        const generated = await withSpinner(
-          "Generating feature name...",
-          () => generateSlugFromDescription(input),
-          "Feature name ready",
-        );
-        featureName = generated ?? sanitizeToSlug(input);
-      } else {
-        const generated = await generateSlugFromDescription(input);
-        featureName = generated ?? sanitizeToSlug(input);
-      }
-    }
-  } else {
-    if (!interactive) {
-      log.error(
-        "Missing name or --description argument (required in non-interactive mode).",
-      );
-      log.info("Usage: wf fork <name>");
-      log.info("Example: wf fork new-approach");
-      process.exitCode = 1;
-      return;
-    }
-
-    const result = await promptForFeatureName();
-    if (!result) return;
-    featureName = result.featureName;
-    description = result.description;
   }
 
   // Reconstruct RepoConfig[] from metadata
@@ -4220,7 +3006,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
   const templateId = metadata.workspace.template_id;
 
   // Dry-run mode
-  if (args["--dry-run"]) {
+  if (booleanInvocationFlag(invocation, "dryRun")) {
     if (interactive) {
       note(
         [
@@ -4254,7 +3040,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
         sections: [repositoryReportSection("Repositories", repos)],
       });
     }
-    return;
+    return success();
   }
 
   // Stamp workspace
@@ -4265,6 +3051,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
     repos,
     ...(description && { description }),
     ...(templateId && { templateId }),
+    onEvent: humanServiceEventSink,
   };
 
   if (interactive) {
@@ -4277,6 +3064,7 @@ async function runForkCommand(argv: string[]): Promise<void> {
     await writeShellCdPath(workspaceDir);
     log.info("Happy shipping!");
   }
+  return success();
 }
 
 /**
@@ -4904,6 +3692,12 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function toOperationalError(error: unknown): OperationalError {
+  return error instanceof OperationalError
+    ? error
+    : new OperationalError(getErrorMessage(error), { cause: error });
+}
+
 /**
  * Detect if the current working directory is inside a workforest workspace.
  * Walks up the directory tree looking for .workforest metadata.
@@ -4931,13 +3725,13 @@ function resolveWorkspaceRepoForWorktreeCommand({
   metadata,
   repoName,
   cwd,
-  allowTemporaryWorktree,
+  allowTask,
 }: {
   workspaceDir: string;
   metadata: WorkspaceMetadata;
   repoName: string | undefined;
   cwd: string;
-  allowTemporaryWorktree: boolean;
+  allowTask: boolean;
 }): WorkspaceRepoMetadata {
   if (repoName) {
     const repo = metadata.repos.find(
@@ -4953,7 +3747,7 @@ function resolveWorkspaceRepoForWorktreeCommand({
     workspaceDir,
     metadata,
     cwd,
-    allowTemporaryWorktree,
+    allowTask,
   });
 
   if (!resolvedRepoName) {
@@ -4977,12 +3771,12 @@ function resolveWorkspaceRepoNameFromCwd({
   workspaceDir,
   metadata,
   cwd,
-  allowTemporaryWorktree,
+  allowTask,
 }: {
   workspaceDir: string;
   metadata: WorkspaceMetadata;
   cwd: string;
-  allowTemporaryWorktree: boolean;
+  allowTask: boolean;
 }): string | undefined {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const resolvedCwd = path.resolve(cwd);
@@ -5002,8 +3796,8 @@ function resolveWorkspaceRepoNameFromCwd({
     return metadata.repos[0]?.name;
   }
 
-  if (allowTemporaryWorktree) {
-    for (const entry of metadata.temporary_worktrees ?? []) {
+  if (allowTask) {
+    for (const entry of metadata.tasks ?? []) {
       const worktreeDir = resolveContainedPath(
         resolvedWorkspaceDir,
         entry.path,
@@ -5038,7 +3832,7 @@ function resolveWorktreeSourceDirFromCwd({
     }
   }
 
-  for (const entry of metadata.temporary_worktrees ?? []) {
+  for (const entry of metadata.tasks ?? []) {
     const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
     if (
       entry.parent_repo === parentRepoName &&
@@ -5049,24 +3843,6 @@ function resolveWorktreeSourceDirFromCwd({
   }
 
   return undefined;
-}
-
-function resolveTemporaryWorktreeFromCwd({
-  workspaceDir,
-  metadata,
-  cwd,
-}: {
-  workspaceDir: string;
-  metadata: WorkspaceMetadata;
-  cwd: string;
-}): TemporaryWorktreeMetadata | undefined {
-  const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const resolvedCwd = path.resolve(cwd);
-
-  return (metadata.temporary_worktrees ?? []).find((entry) => {
-    const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
-    return isPathInsideOrEqual(resolvedCwd, worktreeDir);
-  });
 }
 
 function isPathInsideOrEqual(child: string, parent: string): boolean {
@@ -5342,8 +4118,8 @@ function showCleanupPreview(preview: CleanupPreview): void {
     `Repositories: ${preview.repos.join(", ")}`,
   ];
 
-  if (preview.temporaryWorktrees && preview.temporaryWorktrees.length > 0) {
-    lines.push(`Temporary worktrees: ${preview.temporaryWorktrees.join(", ")}`);
+  if (preview.tasks && preview.tasks.length > 0) {
+    lines.push(`Tasks: ${preview.tasks.join(", ")}`);
   }
 
   if (preview.remoteBranches && preview.remoteBranches.length > 0) {

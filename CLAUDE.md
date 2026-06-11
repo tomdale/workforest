@@ -15,8 +15,8 @@ pnpm biome check .      # Lint and format check
 pnpm biome check --write .  # Auto-fix lint/format issues
 
 # Run CLI during development
-node bin/workforest.js new <template|org/repo...> -- <name-or-description>
-node bin/workforest.js template list
+node bin/workforest.js workspace create <template|org/repo...> -- <name-or-description>
+node bin/workforest.js template manage
 ```
 
 ## Architecture
@@ -67,8 +67,9 @@ This silently bypasses large parts of the CLI:
 - Custom prompts (`src/ui/prompts/`) require raw mode on stdin and skip without a TTY
 - Any code path gated on `process.stdout.isTTY` is invisible to automated tests
 
-**After any change that touches the TUI, prompt flow, or `wf new` end-to-end path,
-smoke-test in a real terminal using tmux:**
+**After any change that touches the TUI, prompt flow, or
+`wf workspace create` end-to-end path, smoke-test in a real terminal using
+tmux:**
 
 ```bash
 # Spin up a PTY session that exercises the full interactive path

@@ -32,7 +32,7 @@ describe("bin/workforest.js", () => {
         ["--help"],
         ["worktree", "--help"],
         ["worktree", "delete", "--help"],
-        ["dev", "simulate", "new", "--help"],
+        ["workspace", "create", "--help"],
       ].map((args) =>
         execFileAsync(
           process.execPath,
@@ -90,16 +90,15 @@ describe("bin/workforest.js", () => {
     );
 
     expect(JSON.parse(result.stdout)).toEqual(
-      expect.objectContaining({ success: true }),
+      expect.objectContaining({ ok: true }),
     );
   });
 
   it.each([
     [["wat"], "Unknown command: wat"],
-    [["list", "--bogus"], 'Unknown flag "--bogus" for wf list'],
     [
-      ["status", "cancel", "--json"],
-      'Unknown flag "--json" for wf status cancel',
+      ["workspace", "list", "--bogus"],
+      'Unknown flag "--bogus" for wf workspace list',
     ],
     [["template", "copy", "only-one"], "Invalid operands for wf template copy"],
   ])("reports invocation errors without parser stacks for %j", async (args, message) => {
@@ -114,5 +113,25 @@ describe("bin/workforest.js", () => {
     expect(result.stderr).not.toContain("ArgError");
     expect(result.stderr).not.toContain("at parse");
     expect(result.stderr).not.toContain("node_modules/arg");
+  });
+
+  it("renders JSON invocation errors as valid envelopes", async () => {
+    const result = await runSubprocess(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), "task", "list", "--json"],
+      { timeout: 10_000 },
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      error: {
+        kind: "usage",
+        message: 'Unknown flag "--json" for wf task list.',
+      },
+    });
+    expect(result.stdout).not.toContain("Running local copy");
+    expect(result.stderr).not.toContain("ArgError");
+    expect(result.stderr).not.toContain("at parse");
   });
 });

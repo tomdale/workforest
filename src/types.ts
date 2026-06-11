@@ -77,7 +77,7 @@ export type WorkspaceMetadata = {
     };
   };
   repos: WorkspaceRepoMetadata[];
-  temporary_worktrees?: TemporaryWorktreeMetadata[];
+  tasks?: TaskMetadata[];
   review_worktrees?: ReviewWorktreeMetadata[];
 };
 
@@ -89,7 +89,7 @@ export type WorkspaceRepoMetadata = {
   feature_branch?: string;
 };
 
-export type TemporaryWorktreeMetadata = {
+export type TaskMetadata = {
   slug: string;
   parent_repo: string;
   path: string;

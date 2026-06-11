@@ -1,23 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { commandRegistry } from "./commands.ts";
-import { UsageError } from "./errors.ts";
 import { resolveCommand } from "./resolve-command.ts";
 
 describe("resolveCommand", () => {
   it.each([
-    [["new"], ["new"], "new"],
-    [["list"], ["list"], "list"],
-    [["worktree", "new", "repo"], ["worktree", "new"], "worktree.new"],
+    [["workspace", "create"], ["workspace", "create"], "workspace.create"],
     [
-      ["repository", "doctor", "repo"],
-      ["repository", "doctor"],
-      "repository.doctor",
+      ["workspace", "delete", "demo"],
+      ["workspace", "delete"],
+      "workspace.delete",
     ],
+    [["task", "create", "fix-auth"], ["task", "create"], "task.create"],
     [
-      ["dev", "simulate", "new", "--speed", "fast"],
-      ["dev", "simulate", "new"],
-      "dev.simulate.new",
+      ["worktree", "create", "front", "fix-auth"],
+      ["worktree", "create"],
+      "worktree.create",
     ],
+    [["cache", "doctor", "front"], ["cache", "doctor"], "cache.doctor"],
+    [["review", "checkout", "123"], ["review", "checkout"], "review.checkout"],
+    [["template", "manage"], ["template", "manage"], "template.manage"],
+    [["shell", "init", "zsh"], ["shell", "init"], "shell.init"],
+    [["config"], ["config"], "config.show"],
+    [["skills"], ["skills"], "skills.list"],
+    [["version"], ["version"], "version"],
   ])("resolves canonical command %j", (argv, canonicalPath, handler) => {
     const resolution = resolveCommand(commandRegistry, argv);
 
@@ -28,86 +33,29 @@ describe("resolveCommand", () => {
   });
 
   it.each([
-    [["ls"], ["list"]],
-    [
-      ["wt", "new", "repo"],
-      ["worktree", "new"],
-    ],
-    [
-      ["templates", "create"],
-      ["template", "new"],
-    ],
-    [
-      ["repos", "check"],
-      ["repository", "doctor"],
-    ],
-    [
-      ["review", "remove", "123"],
-      ["review", "delete"],
-    ],
-    [
-      ["dev", "sim", "confetti"],
-      ["dev", "simulate", "confetti"],
-    ],
-    [["--version"], ["version"]],
-    [["-V"], ["version"]],
-  ])("canonicalizes aliases for %j", (argv, canonicalPath) => {
+    [["new"], ["workspace", "create"], "workspace.create"],
+    [["clean", "demo"], ["workspace", "delete"], "workspace.delete"],
+  ])("canonicalizes root shortcut %j", (argv, canonicalPath, handler) => {
     const resolution = resolveCommand(commandRegistry, argv);
-
-    expect(resolution.kind).toBe("command");
-    if (resolution.kind !== "command") return;
-    expect(resolution.canonicalPath).toEqual(canonicalPath);
-    expect(resolution.invokedPath).not.toEqual([]);
-  });
-
-  it("uses contextual default leaves without interpreting operands", () => {
-    const review = resolveCommand(commandRegistry, [
-      "review",
-      "vercel/front#123",
-    ]);
-    const worktree = resolveCommand(commandRegistry, ["worktree", "fix-auth"]);
-
-    expect(review).toMatchObject({
-      kind: "command",
-      canonicalPath: ["review"],
-      argv: ["vercel/front#123"],
-    });
-    expect(worktree).toMatchObject({
-      kind: "command",
-      canonicalPath: ["worktree"],
-      argv: ["fix-auth"],
-    });
-  });
-
-  it("does not register help-only worktree aliases", () => {
-    const resolution = resolveCommand(commandRegistry, ["worktree", "ls"]);
 
     expect(resolution).toMatchObject({
       kind: "command",
-      canonicalPath: ["worktree"],
-      argv: ["ls"],
+      canonicalPath,
+      invokedPath: [argv[0]],
+      leaf: { handler },
     });
-  });
-
-  it("rejects help-only workspace aliases", () => {
-    expect(() =>
-      resolveCommand(commandRegistry, ["workspace", "remove"]),
-    ).toThrowError(UsageError);
   });
 
   it.each([
     [[], { kind: "root" }],
     [["--help"], { kind: "root" }],
-    [["worktree", "--help"], { kind: "command", command: "worktree" }],
-    [["wt", "--help"], { kind: "command", command: "wt" }],
+    [["workspace", "--help"], { kind: "command", command: "workspace" }],
     [
-      ["worktree", "delete", "--help"],
-      { kind: "nested", command: "worktree", subcommand: "delete" },
+      ["workspace", "create", "--help"],
+      { kind: "nested", command: "workspace", subcommand: "create" },
     ],
-    [
-      ["dev", "simulate", "--help"],
-      { kind: "dev-simulation", flow: "simulate" },
-    ],
+    [["new", "--help"], { kind: "command", command: "new" }],
+    [["clean", "--help"], { kind: "command", command: "clean" }],
   ])("resolves help for %j", (argv, help) => {
     expect(resolveCommand(commandRegistry, argv)).toMatchObject({
       kind: "help",
@@ -115,27 +63,40 @@ describe("resolveCommand", () => {
     });
   });
 
-  it("stops group traversal at flags and delimiters", () => {
-    expect(
-      resolveCommand(commandRegistry, ["review", "--force"]),
-    ).toMatchObject({
-      kind: "command",
-      canonicalPath: ["review"],
-      argv: ["--force"],
-    });
-    expect(resolveCommand(commandRegistry, ["review", "--"])).toMatchObject({
-      kind: "command",
-      canonicalPath: ["review"],
-      argv: ["--"],
+  it.each([
+    "workspace",
+    "task",
+    "worktree",
+    "cache",
+    "review",
+    "template",
+    "shell",
+  ])("shows scoped help for the bare %s namespace", (command) => {
+    expect(resolveCommand(commandRegistry, [command])).toMatchObject({
+      kind: "help",
+      canonicalPath: [command],
+      help: { kind: "command", command },
     });
   });
 
-  it("rejects unknown root and non-contextual subcommands", () => {
+  it("requires explicit leaves for resource groups", () => {
+    expect(() =>
+      resolveCommand(commandRegistry, ["workspace", "demo"]),
+    ).toThrow("Unknown wf workspace subcommand: demo");
+    expect(() => resolveCommand(commandRegistry, ["task", "--force"])).toThrow(
+      "Unknown wf task subcommand: --force",
+    );
+    expect(() => resolveCommand(commandRegistry, ["review", "123"])).toThrow(
+      "Unknown wf review subcommand: 123",
+    );
+  });
+
+  it("rejects unknown root and scoped commands", () => {
     expect(() => resolveCommand(commandRegistry, ["wat"])).toThrow(
       "Unknown command: wat",
     );
-    expect(() =>
-      resolveCommand(commandRegistry, ["repository", "wat"]),
-    ).toThrow("Unknown wf repository subcommand: wat");
+    expect(() => resolveCommand(commandRegistry, ["cache", "inspect"])).toThrow(
+      "Unknown wf cache subcommand: inspect",
+    );
   });
 });

@@ -20,7 +20,7 @@ export type RepositoryManagerAction =
   | { type: "quit" }
   | { type: "reload" }
   | { type: "add" }
-  | { type: "clean" }
+  | { type: "prune" }
   | { type: "info"; mirrorPath: string }
   | { type: "update"; mirrorPath: string }
   | { type: "repair"; mirrorPath: string }
@@ -76,7 +76,7 @@ export function runRepositoryManager({
     const screen = new Screen({
       smartCSR: true,
       fullUnicode: true,
-      title: "wf repositories",
+      title: "wf cache manage",
     });
     const initialLayout = repositoryManagerLayout(
       Number(screen.width),
@@ -446,7 +446,7 @@ export function runRepositoryManager({
             shortcutRow(["/", "search repositories", "enter/i", "info"]),
             shortcutRow(["a", "add", "u", "update"]),
             shortcutRow(["r", "repair", "d", "delete"]),
-            shortcutRow(["x", "clean unused"]),
+            shortcutRow(["x", "prune unused"]),
             shortcutRow(["R", "reload", "?", "close help"]),
             shortcutRow(["q", "quit"]),
           ],
@@ -466,7 +466,7 @@ export function runRepositoryManager({
           ? "j/k move  / search  enter info  ? help  q quit"
           : width < 130
             ? "j/k move  / search  enter info  u update  r repair  d delete  ? help  q quit"
-            : "j/k navigate  enter info  a add  u update  r repair  d delete  x clean  / search  ? help  q quit";
+            : "j/k navigate  enter info  a add  u update  r repair  d delete  x prune  / search  ? help  q quit";
       footerBox.setContent(
         `{white-fg}${mode}{/white-fg}  ${shortcuts}${status}`,
       );
@@ -586,7 +586,7 @@ export function runRepositoryManager({
         } else if (ch === "d") {
           runSelectedAction("delete");
         } else if (ch === "x") {
-          finish({ type: "clean" });
+          finish({ type: "prune" });
         } else if (ch === "R") {
           finish({ type: "reload" });
         } else if (ch === "?") {
