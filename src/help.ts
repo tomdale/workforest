@@ -154,10 +154,6 @@ Subcommands:
 
 Print the workforest version.
 `,
-  dev: `Usage: wf dev simulate <flow> [options]
-
-Development-only synthetic UI flows.
-`,
 };
 
 const NESTED_COMMAND_HELP: Record<string, Record<string, string>> = {
@@ -378,29 +374,6 @@ Print the skills directory or one skill directory.
   },
 };
 
-type DevSimulationFlow = "simulate" | "new" | "confetti";
-
-const DEV_SIMULATION_HELP: Record<DevSimulationFlow, string> = {
-  simulate: `Usage: wf dev simulate <flow> [options]
-
-Flows:
-  new       Run the synthetic workspace creation UI
-  confetti  Show the completion confetti modal
-`,
-  new: `Usage: wf dev simulate new [options]
-
-Options:
-  --fail-repo <name>  Mark one synthetic repository setup as failed
-  --speed <speed>     fast, normal, or slow
-`,
-  confetti: `Usage: wf dev simulate confetti [options]
-
-Options:
-  --workspace <path>  Workspace path to show
-  --repos <names>     Comma-separated repository names
-`,
-};
-
 export function commandHelp(command: string): string | null {
   const content = COMMAND_HELP[command];
   return content ? renderHelp(content) : null;
@@ -412,10 +385,6 @@ export function nestedCommandHelp(
 ): string | null {
   const content = NESTED_COMMAND_HELP[command]?.[subcommand];
   return content ? renderHelp(content) : null;
-}
-
-export function devSimulationHelp(flow: DevSimulationFlow): string {
-  return renderHelp(DEV_SIMULATION_HELP[flow]);
 }
 
 export function renderHelp(content: string): string {

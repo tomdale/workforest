@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { initializeWorkspaceInitialization } from "./workspace/initialization.ts";
@@ -132,6 +133,33 @@ describe("workspace CLI conformance", () => {
         },
       },
     });
+    const output = renderResult(result);
+    expect(output).toEqual({
+      stdout: expect.stringContaining('"ok":true'),
+      stderr: "",
+    });
+    expect(JSON.parse(output.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        workspace: { status: "creating" },
+        repos: [{ repo: "front", status: "pending" }],
+      },
+    });
+  });
+
+  it("returns workspace status JSON errors on stdout", async () => {
+    const result = await executeCli(["workspace", "status", "--json"]);
+    const output = renderResult(result);
+
+    expect(result.exitCode).toBe(1);
+    expect(output.stderr).toBe("");
+    expect(JSON.parse(output.stdout)).toEqual({
+      ok: false,
+      error: {
+        kind: "operational",
+        message: "Run wf workspace status from inside a workforest workspace.",
+      },
+    });
   });
 
   it.each([
@@ -207,6 +235,23 @@ async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), `${prefix}-`));
   tempDirs.push(dir);
   return dir;
+}
+
+function renderResult(result: Awaited<ReturnType<typeof executeCli>>): {
+  stdout: string;
+  stderr: string;
+} {
+  let stdout = "";
+  let stderr = "";
+  renderCommandResult(result, {
+    stdout(value) {
+      stdout += value;
+    },
+    stderr(value) {
+      stderr += value;
+    },
+  });
+  return { stdout, stderr };
 }
 
 async function configureWorkspaceRoot(): Promise<{

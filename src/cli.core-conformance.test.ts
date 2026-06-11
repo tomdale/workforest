@@ -93,7 +93,7 @@ describe("core command family conformance", () => {
     expect(bareConfig.stdout).toContain("Workspace configuration");
     expect(bareSkills).toEqual(listedSkills);
     expect(JSON.parse(bareSkills.stdout)).toEqual({
-      success: true,
+      ok: true,
       data: [{ name: "core", description: "Core command guide" }],
     });
   });
@@ -127,8 +127,11 @@ describe("core command family conformance", () => {
 
     expect(result).toMatchObject({ exitCode: 1, stderr: "" });
     expect(JSON.parse(result.stdout)).toEqual({
-      success: false,
-      error: "Skill not found: missing",
+      ok: false,
+      error: {
+        kind: "operational",
+        message: "Skill not found: missing",
+      },
     });
   });
 
@@ -158,7 +161,11 @@ describe("core command family conformance", () => {
     [["skills", "get", "--bogus"], 'Unknown flag "--bogus" for wf skills get'],
     [["skills", "path", "--full"], 'Unknown flag "--full" for wf skills path'],
   ])("rejects unknown or inapplicable flags for %j", async (argv, message) => {
-    await expectUsageError(argv, message);
+    if (argv.includes("--json")) {
+      await expectJsonUsageError(argv, message);
+    } else {
+      await expectUsageError(argv, message);
+    }
   });
 
   it("reports valid non-interactive config init as an operational failure", async () => {
@@ -295,6 +302,23 @@ async function expectUsageError(
   expect(result.stderr).not.toContain("ArgError");
   expect(result.stderr).not.toContain("node_modules/arg");
   expect(result.stderr).not.toContain("at parseInvocation");
+}
+
+async function expectJsonUsageError(
+  argv: readonly string[],
+  message: string,
+): Promise<void> {
+  const result = await runCommand(argv);
+
+  expect(result.exitCode).toBe(2);
+  expect(result.stderr).toBe("");
+  expect(JSON.parse(result.stdout)).toEqual({
+    ok: false,
+    error: {
+      kind: "usage",
+      message: expect.stringContaining(message),
+    },
+  });
 }
 
 function restoreEnv(name: string, value: string | undefined): void {

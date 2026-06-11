@@ -194,8 +194,21 @@ describe("cache commands", () => {
     const result = await runCommand(argv);
 
     expect(result.exitCode).toBe(2);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toMatch(/Unknown flag|may only be specified once/);
+    if (argv.includes("--json")) {
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: false,
+        error: {
+          kind: "usage",
+          message: expect.stringMatching(
+            /Unknown flag|may only be specified once/,
+          ),
+        },
+      });
+    } else {
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toMatch(/Unknown flag|may only be specified once/);
+    }
     expect(result.stderr).not.toContain("node_modules/arg");
   });
 

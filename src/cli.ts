@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import arg from "arg";
 import { commandRegistry } from "./cli/commands.ts";
 import {
   isArgumentParserError,
@@ -14,7 +13,11 @@ import {
   applyExitCode,
   errorResult,
   failure,
+  humanOutput,
+  jsonSuccess,
   renderCommandResult,
+  reportOutput,
+  shellOutput,
   success,
 } from "./cli/output.ts";
 import { parseInvocation } from "./cli/parse-invocation.ts";
@@ -29,13 +32,7 @@ import {
   loadWorkspaceConfig,
   saveWorkspaceConfig,
 } from "./config.ts";
-import {
-  commandHelp,
-  devSimulationHelp,
-  help,
-  nestedCommandHelp,
-  renderHelp,
-} from "./help.ts";
+import { commandHelp, help, nestedCommandHelp, renderHelp } from "./help.ts";
 import { log } from "./logger.ts";
 import { RegisteredRepositoryNameCollisionError } from "./repositories.ts";
 import {
@@ -63,6 +60,7 @@ import {
   printReport,
   type ReportField,
   type ReportSection,
+  renderReport,
 } from "./terminal/report.ts";
 import type {
   RepoConfig,
@@ -127,6 +125,8 @@ export async function cli(): Promise<void> {
 export async function executeCli(
   argv: readonly string[],
 ): Promise<CommandResult> {
+  const errorOutputMode = requestsJsonOutput(argv) ? "json" : "human";
+
   try {
     const resolution = resolveCommand(commandRegistry, argv);
     if (resolution.kind === "help") {
@@ -157,9 +157,11 @@ export async function executeCli(
     return await runInvocation(invocation);
   } catch (error) {
     if (isArgumentParserError(error)) {
-      return errorResult(new UsageError(error.message)) ?? success();
+      return (
+        errorResult(new UsageError(error.message), errorOutputMode) ?? success()
+      );
     }
-    const result = errorResult(error);
+    const result = errorResult(error, errorOutputMode);
     if (result) {
       return result;
     }
@@ -226,6 +228,8 @@ async function runInvocation(
     }
     case "version":
       return runVersionCommand();
+    case "initialize-repo":
+      return runInitializeRepoWorkerCommand(invocation);
   }
 
   if (invocation.command.leaf.handler.startsWith("template.")) {
@@ -245,26 +249,9 @@ async function runInvocation(
     return runTaskInvocation(invocation);
   }
 
-  return runLegacyHandler(async () => {
-    const argv = [...invocation.command.argv];
-
-    switch (invocation.command.leaf.handler) {
-      case "dev.simulate.new":
-      case "dev.simulate.confetti": {
-        const { runDevCommand } = await import("./dev-simulator.ts");
-        const flow = invocation.command.leaf.handler.split(".")[2] ?? "new";
-        await runDevCommand(["simulate", flow, ...argv]);
-        return;
-      }
-      case "initialize-repo":
-        await runInitializeRepoWorkerCommand(argv);
-        return;
-      default:
-        throw new Error(
-          `No CLI handler registered for ${invocation.command.leaf.handler}.`,
-        );
-    }
-  });
+  throw new Error(
+    `No CLI handler registered for ${invocation.command.leaf.handler}.`,
+  );
 }
 
 async function runWorktreeInvocation(
@@ -322,25 +309,21 @@ async function runTypedCommand(
   }
 }
 
-async function runLegacyHandler(
-  handler: () => Promise<void>,
-): Promise<CommandResult> {
-  const previousExitCode = process.exitCode;
-  process.exitCode = undefined;
-  try {
-    await handler();
-    const exitCode = process.exitCode === 2 ? 2 : process.exitCode ? 1 : 0;
-    return { exitCode, render: { kind: "none" } };
-  } finally {
-    process.exitCode = previousExitCode;
-  }
+function commandFailure(error?: unknown): CommandResult {
+  return failure(
+    1,
+    error === undefined
+      ? { kind: "none" }
+      : humanOutput(getErrorMessage(error), { stream: "stderr" }),
+  );
 }
 
-function commandFailure(error?: unknown): CommandResult {
-  if (error !== undefined) {
-    log.error(getErrorMessage(error));
-  }
-  return failure(1, { kind: "none" });
+function requestsJsonOutput(argv: readonly string[]): boolean {
+  const delimiter = argv.indexOf("--");
+  const flags = delimiter === -1 ? argv : argv.slice(0, delimiter);
+  return flags.some(
+    (token) => token === "--json" || token.startsWith("--json="),
+  );
 }
 
 function booleanInvocationFlag(
@@ -372,8 +355,6 @@ async function renderHelpReference(
     case "nested":
       rendered = nestedCommandHelp(reference.command, reference.subcommand);
       break;
-    case "dev-simulation":
-      return devSimulationHelp(reference.flow);
   }
 
   return (
@@ -384,21 +365,16 @@ No additional help is available for this internal command.`)
   );
 }
 
-async function runInitializeRepoWorkerCommand(argv: string[]): Promise<void> {
-  const args = arg(
-    {
-      "--workspace": String,
-      "--repo": String,
-      "--run-id": String,
-    },
-    { argv },
-  );
-  const workspaceDir = args["--workspace"];
-  const repoName = args["--repo"];
-  const runId = args["--run-id"];
+async function runInitializeRepoWorkerCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const workspaceDir = stringInvocationFlag(invocation, "workspace");
+  const repoName = stringInvocationFlag(invocation, "repo");
+  const runId = stringInvocationFlag(invocation, "runId");
   if (!workspaceDir || !repoName || !runId) {
-    process.exitCode = 2;
-    return;
+    throw new UsageError(
+      "Internal repository initialization requires --workspace, --repo, and --run-id.",
+    );
   }
 
   const { runRepoInitializationWorker } = await import(
@@ -406,9 +382,9 @@ async function runInitializeRepoWorkerCommand(argv: string[]): Promise<void> {
   );
   try {
     await runRepoInitializationWorker({ workspaceDir, repoName, runId });
+    return success();
   } catch (error) {
-    log.error(getErrorMessage(error));
-    process.exitCode = 1;
+    throw new OperationalError(getErrorMessage(error), { cause: error });
   }
 }
 
@@ -420,7 +396,7 @@ async function runStatusCommand(
     ? path.resolve(expandHome(workspaceFlag))
     : await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    return commandFailure(
+    throw new OperationalError(
       "Run wf workspace status from inside a workforest workspace.",
     );
   }
@@ -434,8 +410,13 @@ async function runStatusCommand(
   } = await import("./workspace/initialization.ts");
   const states = await readRepoInitializationStates(workspaceDir);
   if (states.length === 0) {
-    log.info("This workspace has no recorded background initialization.");
-    return success();
+    return booleanInvocationFlag(invocation, "json")
+      ? jsonSuccess({ workspace: null, repos: [] })
+      : success(
+          humanOutput(
+            "This workspace has no recorded background initialization.",
+          ),
+        );
   }
   await finalizeWorkspaceInitialization(workspaceDir);
 
@@ -463,7 +444,7 @@ async function runStatusCommand(
         log.success(`${state.repo}: initialization cancelled`);
       }
     } catch (error) {
-      return commandFailure(error);
+      throw new OperationalError(getErrorMessage(error), { cause: error });
     }
     return success();
   }
@@ -491,20 +472,16 @@ async function runStatusCommand(
         );
       }
     } catch (error) {
-      return commandFailure(error);
+      throw new OperationalError(getErrorMessage(error), { cause: error });
     }
     return success();
   }
 
   const workspaceState = await readWorkspaceInitializationState(workspaceDir);
   if (booleanInvocationFlag(invocation, "json")) {
-    return success({
-      kind: "json",
-      value: {
-        workspace: workspaceState,
-        repos: states,
-      },
-      stream: "stdout",
+    return jsonSuccess({
+      workspace: workspaceState,
+      repos: states,
     });
   }
 
@@ -520,51 +497,54 @@ async function runStatusCommand(
     return success();
   }
 
-  printReport({
-    title: "Repository initialization",
-    sections: [
-      {
-        fields: [
+  return success(
+    reportOutput(
+      renderReport({
+        title: "Repository initialization",
+        sections: [
           {
-            label: "Workspace",
-            value: workspaceState?.status ?? "unknown",
+            fields: [
+              {
+                label: "Workspace",
+                value: workspaceState?.status ?? "unknown",
+              },
+              ...(workspaceState?.message
+                ? [{ label: "Summary", value: workspaceState.message }]
+                : []),
+              ...(workspaceState?.error
+                ? [{ label: "Error", value: workspaceState.error }]
+                : []),
+              ...(workspaceState?.current_hook
+                ? [{ label: "Hook", value: workspaceState.current_hook }]
+                : []),
+              ...(workspaceState?.warnings?.length
+                ? [
+                    {
+                      label: "Warnings",
+                      value: workspaceState.warnings.join("\n"),
+                    },
+                  ]
+                : []),
+            ],
           },
-          ...(workspaceState?.message
-            ? [{ label: "Summary", value: workspaceState.message }]
-            : []),
-          ...(workspaceState?.error
-            ? [{ label: "Error", value: workspaceState.error }]
-            : []),
-          ...(workspaceState?.current_hook
-            ? [{ label: "Hook", value: workspaceState.current_hook }]
-            : []),
-          ...(workspaceState?.warnings?.length
-            ? [
-                {
-                  label: "Warnings",
-                  value: workspaceState.warnings.join("\n"),
-                },
-              ]
-            : []),
+          {
+            entries: states.map((state) => ({
+              title: state.repo,
+              description: state.status,
+              details: [
+                ...(state.step ? [{ label: "Step", value: state.step }] : []),
+                ...(state.message
+                  ? [{ label: "Message", value: state.message }]
+                  : []),
+                { label: "Attempt", value: String(state.attempt) },
+              ],
+            })),
+          },
         ],
-      },
-      {
-        entries: states.map((state) => ({
-          title: state.repo,
-          description: state.status,
-          details: [
-            ...(state.step ? [{ label: "Step", value: state.step }] : []),
-            ...(state.message
-              ? [{ label: "Message", value: state.message }]
-              : []),
-            { label: "Attempt", value: String(state.attempt) },
-          ],
-        })),
-      },
-    ],
-    footer: `Workspace: ${workspaceDir}`,
-  });
-  return success();
+        footer: `Workspace: ${workspaceDir}`,
+      }),
+    ),
+  );
 }
 
 async function runShellInitCommand(
@@ -579,11 +559,7 @@ async function runShellInitCommand(
     );
   }
 
-  return success({
-    kind: "text",
-    value: renderShellInit(shell),
-    stream: "stdout",
-  });
+  return success(shellOutput(renderShellInit(shell)));
 }
 
 async function runConfigInit(): Promise<CommandResult> {
@@ -1278,7 +1254,7 @@ async function runStandaloneWorktreeRemove({
   try {
     const { removeStandaloneWorktree } = await import("./worktree.ts");
     if (!skipConfirmation) {
-      const confirmed = await confirmWorktreeDelete({
+      const confirmed = await confirmDelete({
         dryRun,
         force,
         description: "standalone worktree",
@@ -1521,7 +1497,7 @@ async function runTaskDelete({
 
     const { deleteTasks } = await import("./workspace/tasks.ts");
     if (!skipConfirmation) {
-      const confirmed = await confirmWorktreeDelete({
+      const confirmed = await confirmDelete({
         dryRun,
         force,
         description:
@@ -2534,31 +2510,6 @@ async function runCleanCommand(
 }
 
 async function confirmDelete({
-  dryRun,
-  force,
-  description,
-  targetPath,
-}: {
-  dryRun: boolean;
-  force: boolean;
-  description: string;
-  targetPath?: string;
-}): Promise<boolean> {
-  if (dryRun || force) {
-    return true;
-  }
-
-  if (!isInteractive()) {
-    throw new OperationalError(
-      "Cannot confirm in non-interactive mode. Use --force.",
-    );
-  }
-
-  const suffix = targetPath ? ` at ${targetPath}` : "";
-  return promptConfirm(`Delete ${description}${suffix}?`, false);
-}
-
-async function confirmWorktreeDelete({
   dryRun,
   force,
   description,
