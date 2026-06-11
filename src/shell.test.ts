@@ -44,7 +44,7 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills",
+      "new|clean|workspace|task|worktree|review|template",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
@@ -53,17 +53,16 @@ describe("shell integration", () => {
     expect(script).toContain("compdef _workforest_complete wf workforest");
     expect(script).toContain("__workforest_workspace_root()");
     expect(script).toContain('local subcommand="$' + '{words[2]:-}"');
-    expect(script).toContain("cd|clean|delete|workspace)");
-    expect(script).toContain("find:fuzzy-find a workspace");
-    expect(script).toContain("review:create or manage PR review worktrees");
+    expect(script).toContain("review:open review repositories");
+    expect(script).toContain("_values 'review action' open checkout");
     expect(script).toContain(
-      "_values 'worktree action' new promote list delete rm",
-    );
-    expect(script).toContain(
-      "delete:infer and delete current tracked resource",
+      "_values 'cache action' manage list info path add update doctor repair delete prune",
     );
     expect(script).toContain("skills:list and retrieve bundled agent skills");
-    expect(script).toContain("templates:open template manager");
+    expect(script).toContain(
+      "_values 'template action' manage list open show new edit add-file copy delete",
+    );
+    expect(script).toContain("_values 'shell action' init");
     expect(script).toContain("_workforest_workspace_names");
     expect(script).not.toContain("CURRENT == 3");
   });

@@ -39,9 +39,9 @@ describe("parseInvocation", () => {
   });
 
   it.each([
-    [["repository", "list", "--force"], 'Unknown flag "--force"'],
+    [["cache", "list", "--force"], 'Unknown flag "--force"'],
     [["status", "cancel", "--json"], 'Unknown flag "--json"'],
-    [["review", "target", "--dry-run"], 'Unknown flag "--dry-run"'],
+    [["review", "checkout", "target", "--dry-run"], 'Unknown flag "--dry-run"'],
     [["list", "--bogus"], 'Unknown flag "--bogus"'],
     [["worktree", "new", "repo", "name", "--force"], 'Unknown flag "--force"'],
     [["worktree", "promote", "--repo", "repo"], 'Unknown flag "--repo"'],
@@ -69,9 +69,13 @@ describe("parseInvocation", () => {
   it.each([
     [["list", "extra"], "Expected no operands"],
     [["template", "copy", "one"], "Expected 2 templates"],
-    [["review"], "Expected 1-2 review targets"],
-    [["review", "one", "two", "three"], "Expected 1-2 review targets"],
-    [["repository", "add"], "Expected 1 or more repositories"],
+    [["review", "open"], "Expected 1 repository"],
+    [
+      ["review", "checkout", "one", "two", "three"],
+      "Expected 1-2 review targets",
+    ],
+    [["cache", "add"], "Expected 1 or more repositories"],
+    [["shell", "init", "zsh", "extra"], "Expected 0-1 shell"],
     [["worktree"], "Expected 1 or more worktree operands"],
     [["worktree", "new"], "Expected 1-2 worktree operands"],
     [

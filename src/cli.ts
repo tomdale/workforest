@@ -175,9 +175,8 @@ async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
-    case "review.create":
-    case "review.list":
-    case "review.delete":
+    case "review.open":
+    case "review.checkout":
       return runReviewInvocation(invocation);
     case "new":
       return runTypedCommand(() => runNewCommand(invocation));
@@ -200,8 +199,8 @@ async function runInvocation(
       return runTypedCommand(() => runForkCommand(invocation));
     case "list":
       return runTypedCommand(runListCommand);
-    case "init":
-      return runInitCommand(invocation.beforeDoubleDash[0]);
+    case "shell.init":
+      return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":
       return runConfigShow();
     case "config.init":
@@ -245,9 +244,9 @@ async function runInvocation(
     return runTemplateInvocation(invocation);
   }
 
-  if (invocation.command.leaf.handler.startsWith("repository.")) {
-    const { runRepositoryInvocation } = await import("./repository-cli.ts");
-    return runRepositoryInvocation(invocation);
+  if (invocation.command.leaf.handler.startsWith("cache.")) {
+    const { runCacheInvocation } = await import("./repository-cli.ts");
+    return runCacheInvocation(invocation);
   }
 
   if (invocation.command.leaf.handler.startsWith("worktree.")) {
@@ -557,15 +556,15 @@ async function runStatusCommand(
   return success();
 }
 
-async function runInitCommand(
+async function runShellInitCommand(
   requestedShell: string | undefined,
 ): Promise<CommandResult> {
   requestedShell ??= process.env["SHELL"];
   const shell = normalizeShellName(requestedShell);
 
   if (!shell) {
-    throw new OperationalError(
-      "Unsupported shell. Use 'wf init zsh' or 'wf init bash'.",
+    throw new UsageError(
+      "Unsupported shell. Use 'wf shell init zsh' or 'wf shell init bash'.",
     );
   }
 
@@ -1080,15 +1079,10 @@ async function runReviewInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
-    case "review.create":
-      return runReviewCreate(invocation.beforeDoubleDash);
-    case "review.list":
-      return runReviewList(invocation.beforeDoubleDash);
-    case "review.delete":
-      return runReviewRemove(invocation.beforeDoubleDash, {
-        dryRun: invocation.flags["dryRun"] === true,
-        force: invocation.flags["force"] === true,
-      });
+    case "review.open":
+      return runReviewOpen(invocation.beforeDoubleDash[0] ?? "");
+    case "review.checkout":
+      return runReviewCheckout(invocation.beforeDoubleDash);
     default:
       throw new Error(
         `Unsupported review handler: ${invocation.command.leaf.handler}`,
@@ -1096,43 +1090,39 @@ async function runReviewInvocation(
   }
 }
 
-async function runReviewCreate(
+async function runReviewOpen(repoInput: string): Promise<CommandResult> {
+  try {
+    const [qualifiedRepo] = await qualifyReviewRepositorySpecifier([repoInput]);
+    const { ensureReviewWorkspace, parseReviewRepoTarget } = await import(
+      "./review.ts"
+    );
+    const target = parseReviewRepoTarget([qualifiedRepo ?? repoInput]);
+    const reviewsDir = await resolveReviewsDir();
+    const workspace = await ensureReviewWorkspace({
+      target,
+      reviewsDir,
+    });
+
+    await writeShellCdPath(workspace.path);
+    log.success(`Review workspace ready: ${workspace.path}`);
+    if (!isShellAutoCdEnabled()) {
+      log.info(`Run: cd ${workspace.path}`);
+    }
+    return success();
+  } catch (error) {
+    throw toOperationalError(error);
+  }
+}
+
+async function runReviewCheckout(
   targetArgs: readonly string[],
 ): Promise<CommandResult> {
   try {
     const resolvedTargetArgs =
       await qualifyReviewRepositorySpecifier(targetArgs);
-    const {
-      createReviewWorktree,
-      ensureReviewWorkspace,
-      parseReviewRepoTarget,
-      resolveReviewTarget,
-    } = await import("./review.ts");
-    if (resolvedTargetArgs.length === 1) {
-      let repoTarget: ReturnType<typeof parseReviewRepoTarget> | undefined;
-      try {
-        repoTarget = parseReviewRepoTarget(resolvedTargetArgs);
-      } catch {
-        // Fall through to PR target parsing so compact targets and URLs keep
-        // their existing behavior and error messages.
-      }
-
-      if (repoTarget) {
-        const reviewsDir = await resolveReviewsDir();
-        const workspace = await ensureReviewWorkspace({
-          target: repoTarget,
-          reviewsDir,
-        });
-
-        await writeShellCdPath(workspace.path);
-        log.success(`Review workspace ready: ${workspace.path}`);
-        if (!isShellAutoCdEnabled()) {
-          log.info(`Run: cd ${workspace.path}`);
-        }
-        return success();
-      }
-    }
-
+    const { createReviewWorktree, resolveReviewTarget } = await import(
+      "./review.ts"
+    );
     const context = await resolveCurrentReviewWorkspaceContext();
     const target = resolveReviewTarget(
       resolvedTargetArgs,
@@ -1146,60 +1136,6 @@ async function runReviewCreate(
     if (!isShellAutoCdEnabled()) {
       log.info(`Run: cd ${metadata.path}`);
     }
-    return success();
-  } catch (error) {
-    throw toOperationalError(error);
-  }
-}
-
-async function runReviewList(
-  targetArgs: readonly string[],
-): Promise<CommandResult> {
-  try {
-    const { listReviewWorktrees } = await import("./review.ts");
-    const reviewsDir = await resolveReviewsDir();
-    const repoInput = targetArgs[0];
-    const repoParts = repoInput?.split("/");
-    const repo =
-      repoParts && repoParts.length === 2
-        ? repoParts[1]
-        : repoParts?.length === 1
-          ? repoParts[0]
-          : undefined;
-    if (repoInput && !repo) {
-      throw new OperationalError(`Invalid repo name: ${repoInput}`);
-    }
-    if (repo && !/^[A-Za-z0-9_.-]+$/.test(repo)) {
-      throw new OperationalError(`Invalid repo name: ${repoInput}`);
-    }
-
-    const entries = await listReviewWorktrees(reviewsDir, repo);
-    if (entries.length === 0) {
-      log.info("No review worktrees found.");
-      return success();
-    }
-
-    printReport({
-      title: "Review worktrees",
-      sections: [
-        {
-          entries: entries.map((entry) => ({
-            title: `${entry.owner}/${entry.repo}#${entry.prNumber}`,
-            details: [
-              { label: "Status", value: entry.state },
-              ...(entry.branch
-                ? [{ label: "Branch", value: entry.branch }]
-                : []),
-              { label: "Path", value: entry.path },
-            ],
-          })),
-        },
-      ],
-      footer: [
-        `Directory: ${reviewsDir}`,
-        `${entries.length} review worktree${entries.length === 1 ? "" : "s"}`,
-      ].join("\n"),
-    });
     return success();
   } catch (error) {
     throw toOperationalError(error);
@@ -2167,14 +2103,14 @@ async function runTemplateInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
-    case "template.default":
-      return isInteractive() ? runTemplateManagerCommand() : runTemplateList();
+    case "template.manage":
+      return runTemplateManagerCommand();
     case "template.list":
       return runTemplateList();
+    case "template.open":
+      return runTemplateOpen(invocation.beforeDoubleDash[0] ?? "");
     case "template.show":
       return runTemplateShow(invocation.beforeDoubleDash[0] ?? "");
-    case "template.info":
-      return runTemplateInfo(invocation.beforeDoubleDash[0] ?? "");
     case "template.new":
       return runTemplateNew(invocation);
     case "template.edit":
@@ -2268,7 +2204,7 @@ async function runTemplateManagerCommand(): Promise<CommandResult> {
         }
         continue;
       case "show":
-        return runTemplateShow(action.templateId);
+        return runTemplateOpen(action.templateId);
     }
   }
 }
@@ -2308,7 +2244,7 @@ async function runTemplateList(): Promise<CommandResult> {
   return templateSuccess();
 }
 
-async function runTemplateShow(templateId: string): Promise<CommandResult> {
+async function runTemplateOpen(templateId: string): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);
@@ -2328,7 +2264,7 @@ async function runTemplateShow(templateId: string): Promise<CommandResult> {
   return templateSuccess();
 }
 
-async function runTemplateInfo(templateId: string): Promise<CommandResult> {
+async function runTemplateShow(templateId: string): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
     log.error(`Template "${templateId}" not found.`);

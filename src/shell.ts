@@ -29,7 +29,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    new|fork|clean|delete|workspace|cd|find|template|templates|worktree|wt|review|skills) ;;
+    new|clean|workspace|task|worktree|review|template) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
@@ -181,23 +181,16 @@ _workforest_complete() {
   local subcommand="\${words[2]:-}"
   commands=(
     'new:create a workspace'
-    'status:monitor background repository initialization'
-    'worktree:create or manage repo worktrees'
-    'wt:create or manage repo worktrees'
-    'review:create or manage PR review worktrees'
-    'delete:infer and delete current tracked resource'
     'workspace:manage workspaces'
-    'add:add repo(s) to a workspace'
-    'skills:list and retrieve bundled agent skills'
-    'fork:fork current workspace'
-    'clean:remove a workspace'
-    'cd:jump to a workspace'
-    'find:fuzzy-find a workspace'
-    'list:list workspaces'
-    'init:print shell integration'
+    'task:manage temporary workspace worktrees'
+    'worktree:manage standalone repository worktrees'
+    'cache:manage cached repositories'
+    'review:open review repositories and check out pull requests'
     'template:manage templates'
-    'templates:open template manager'
+    'shell:configure shell integration'
     'config:manage configuration'
+    'skills:list and retrieve bundled agent skills'
+    'clean:remove a workspace'
     'version:show version'
   )
 
@@ -211,14 +204,29 @@ _workforest_complete() {
       ;;
     args)
       case "$subcommand" in
-        cd|clean|delete|workspace)
+        clean)
           _workforest_workspace_names
           ;;
-        status)
-          _values 'status action' cancel retry
+        workspace)
+          _values 'workspace action' create delete open list status add
           ;;
-        worktree|wt)
-          _values 'worktree action' new promote list delete rm
+        task)
+          _values 'task action' create list delete
+          ;;
+        worktree)
+          _values 'worktree action' create list delete
+          ;;
+        cache)
+          _values 'cache action' manage list info path add update doctor repair delete prune
+          ;;
+        review)
+          _values 'review action' open checkout
+          ;;
+        template)
+          _values 'template action' manage list open show new edit add-file copy delete
+          ;;
+        shell)
+          _values 'shell action' init
           ;;
       esac
       ;;

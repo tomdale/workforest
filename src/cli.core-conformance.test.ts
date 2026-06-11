@@ -53,7 +53,8 @@ afterAll(async () => {
 describe("core command family conformance", () => {
   it.each([
     [["version", "--help"], "Usage: wf version"],
-    [["init", "--help"], "Usage: wf init"],
+    [["shell", "--help"], "Usage: wf shell"],
+    [["shell", "init", "--help"], "Usage: wf shell init"],
     [["config", "--help"], "Usage: wf config"],
     [["config", "show", "--help"], "Usage: wf config show"],
     [["config", "init", "--help"], "Usage: wf config init"],
@@ -103,8 +104,8 @@ describe("core command family conformance", () => {
     });
   });
 
-  it("renders init shell source without stderr decoration", async () => {
-    const result = await runCommand(["init", "bash"]);
+  it("renders shell init source without stderr decoration", async () => {
+    const result = await runCommand(["shell", "init", "bash"]);
 
     expect(result).toMatchObject({ exitCode: 0, stderr: "" });
     expect(result.stdout).toMatch(
@@ -139,7 +140,7 @@ describe("core command family conformance", () => {
 
   it.each([
     [["version", "extra"], "Invalid operands for wf version"],
-    [["init", "bash", "extra"], "Invalid operands for wf init"],
+    [["shell", "init", "bash", "extra"], "Invalid operands for wf shell init"],
     [["config", "show", "extra"], "Invalid operands for wf config show"],
     [["config", "init", "extra"], "Invalid operands for wf config init"],
     [["config", "edit", "extra"], "Invalid operands for wf config edit"],
@@ -155,7 +156,7 @@ describe("core command family conformance", () => {
 
   it.each([
     [["version", "--json"], 'Unknown flag "--json" for wf version'],
-    [["init", "--json"], 'Unknown flag "--json" for wf init'],
+    [["shell", "init", "--json"], 'Unknown flag "--json" for wf shell init'],
     [["config", "show", "--json"], 'Unknown flag "--json" for wf config show'],
     [["config", "init", "--json"], 'Unknown flag "--json" for wf config init'],
     [["config", "edit", "--json"], 'Unknown flag "--json" for wf config edit'],
@@ -208,13 +209,14 @@ describe("core command family conformance", () => {
     expect(result.stderr).not.toContain("\n    at ");
   });
 
-  it("reports unsupported shells as operational failures", async () => {
-    const result = await runCommand(["init", "fish"]);
+  it("reports unsupported shells as usage failures", async () => {
+    const result = await runCommand(["shell", "init", "fish"]);
 
     expect(result).toEqual({
-      exitCode: 1,
+      exitCode: 2,
       stdout: "",
-      stderr: "Unsupported shell. Use 'wf init zsh' or 'wf init bash'.\n",
+      stderr:
+        "Unsupported shell. Use 'wf shell init zsh' or 'wf shell init bash'.\n",
     });
   });
 
