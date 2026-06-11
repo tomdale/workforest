@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getCacheDir } from "./config.ts";
-import { log } from "./logger.ts";
 import { resolveMirrorDir } from "./repositories.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
+import { emitServiceEvent, type ServiceEventSink } from "./services/events.ts";
 import { runGit } from "./services/git.ts";
 import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
 import type { RepoConfig } from "./types.ts";
@@ -40,11 +40,13 @@ export type ReviewListEntry = ReviewMetadata & {
 export type CreateReviewWorktreeOptions = {
   target: ReviewTarget;
   reviewsDir: string;
+  onEvent?: ServiceEventSink;
 };
 
 export type EnsureReviewWorkspaceOptions = {
   target: ReviewRepoTarget;
   reviewsDir: string;
+  onEvent?: ServiceEventSink;
 };
 
 export type ReviewWorkspace = ReviewRepoTarget & {
@@ -115,6 +117,7 @@ export function parseReviewRepoTarget(
 export async function createReviewWorktree({
   target,
   reviewsDir,
+  onEvent,
 }: CreateReviewWorktreeOptions): Promise<ReviewMetadata> {
   validateReviewTarget(target);
   const repo = targetToRepoConfig(target);
@@ -123,6 +126,7 @@ export async function createReviewWorktree({
   const workspace = await ensureReviewWorkspace({
     target,
     reviewsDir,
+    ...(onEvent ? { onEvent } : {}),
   });
   const repoReviewsDir = workspace.path;
   const targetDir = getReviewWorktreePath(reviewsDir, target);
@@ -145,8 +149,10 @@ export async function createReviewWorktree({
   try {
     await runCommand("gh", ["pr", "checkout", String(target.prNumber)], {
       cwd: targetDir,
-      onStdout: (chunk) => process.stdout.write(chunk),
-      onStderr: (chunk) => process.stderr.write(chunk),
+      onStdout: (data) =>
+        emitServiceEvent(onEvent, { type: "output", stream: "stdout", data }),
+      onStderr: (data) =>
+        emitServiceEvent(onEvent, { type: "output", stream: "stderr", data }),
     });
   } catch (error) {
     await cleanupFailedReviewWorktree(mirrorDir, targetDir);
@@ -157,6 +163,7 @@ export async function createReviewWorktree({
     repo,
     repoDir: targetDir,
     workspaceDir: repoReviewsDir,
+    ...(onEvent ? { onEvent } : {}),
   });
 
   const branch = await getCurrentBranch(targetDir);
@@ -179,6 +186,7 @@ export async function createReviewWorktree({
 export async function ensureReviewWorkspace({
   target,
   reviewsDir,
+  onEvent,
 }: EnsureReviewWorkspaceOptions): Promise<ReviewWorkspace> {
   validateReviewRepoTarget(target);
   const repo = targetToRepoConfig(target);
@@ -191,7 +199,11 @@ export async function ensureReviewWorkspace({
 
   for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
     if (state.status === "log") {
-      log[state.level](state.message);
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: state.level === "warn" ? "warning" : state.level,
+        message: state.message,
+      });
     }
   }
 
@@ -209,6 +221,7 @@ export async function ensureReviewWorkspace({
       repo,
       repoDir,
       workspaceDir,
+      ...(onEvent ? { onEvent } : {}),
     });
   }
 
@@ -262,33 +275,59 @@ async function runReviewInitializers({
   repo,
   repoDir,
   workspaceDir,
+  onEvent,
 }: {
   repo: RepoConfig;
   repoDir: string;
   workspaceDir: string;
+  onEvent?: ServiceEventSink;
 }): Promise<void> {
   for await (const state of runSingleRepoInitializersGenerator({
     context: { repo, repoDir, workspaceDir },
   })) {
     switch (state.phase) {
       case "detecting":
-        log.info("Detecting repo setup");
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "info",
+          message: "Detecting repo setup",
+        });
         break;
       case "running":
         if (state.state.status === "log") {
-          log[state.state.level](state.state.message);
+          emitServiceEvent(onEvent, {
+            type: "message",
+            level: state.state.level === "warn" ? "warning" : state.state.level,
+            message: state.state.message,
+          });
         } else if (state.state.status === "running" && state.state.message) {
-          log.info(`${state.initializerName}: ${state.state.message}`);
+          emitServiceEvent(onEvent, {
+            type: "message",
+            level: "info",
+            message: `${state.initializerName}: ${state.state.message}`,
+          });
         } else if (state.state.status === "output") {
-          process.stdout.write(state.state.data);
+          emitServiceEvent(onEvent, {
+            type: "output",
+            stream: "stdout",
+            data: state.state.data,
+          });
         } else if (state.state.status === "skipped") {
-          log.info(`${state.initializerName}: ${state.state.reason}`);
+          emitServiceEvent(onEvent, {
+            type: "message",
+            level: "info",
+            message: `${state.initializerName}: ${state.state.reason}`,
+          });
         } else if (state.state.status === "failed") {
           throw state.state.error;
         }
         break;
       case "skipped":
-        log.info(`${state.initializerId}: ${state.reason}`);
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "info",
+          message: `${state.initializerId}: ${state.reason}`,
+        });
         break;
       case "complete":
         break;

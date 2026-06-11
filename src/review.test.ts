@@ -232,9 +232,17 @@ describe("review worktrees", () => {
     runCommandMock.mockResolvedValue({ stdout: "", stderr: "" });
 
     const { createReviewWorktree } = await importReviewWithMocks();
+    const events: import("./services/events.ts").ServiceEvent[] = [];
+    const stdoutWrite = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrWrite = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     const result = await createReviewWorktree({
       reviewsDir,
       target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      onEvent: (event) => events.push(event),
     });
 
     const targetDir = path.join(reviewsDir, "omniagent", "pr-123");
@@ -248,16 +256,20 @@ describe("review worktrees", () => {
       expect.objectContaining({ cwd: targetDir }),
     );
     const checkoutOptions = runCommandMock.mock.calls[0]?.[2];
-    const stdoutWrite = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
-    const stderrWrite = vi
-      .spyOn(process.stderr, "write")
-      .mockImplementation(() => true);
     checkoutOptions?.onStdout?.("checkout output\n");
     checkoutOptions?.onStderr?.("checkout warning\n");
-    expect(stdoutWrite).toHaveBeenCalledWith("checkout output\n");
-    expect(stderrWrite).toHaveBeenCalledWith("checkout warning\n");
+    expect(events).toContainEqual({
+      type: "output",
+      stream: "stdout",
+      data: "checkout output\n",
+    });
+    expect(events).toContainEqual({
+      type: "output",
+      stream: "stderr",
+      data: "checkout warning\n",
+    });
+    expect(stdoutWrite).not.toHaveBeenCalled();
+    expect(stderrWrite).not.toHaveBeenCalled();
     expect(runSingleRepoInitializersGeneratorMock).toHaveBeenCalledWith({
       context: {
         repo: {

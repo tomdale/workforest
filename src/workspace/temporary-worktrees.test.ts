@@ -77,6 +77,8 @@ describe("temporary worktrees", () => {
       .mockRejectedValueOnce(new Error("missing branch"))
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
+    const events: import("../services/events.ts").ServiceEvent[] = [];
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const result = await createTemporaryWorktrees({
       workspaceDir,
       parentRepo: {
@@ -86,6 +88,7 @@ describe("temporary worktrees", () => {
         has_lockfile: true,
       },
       slugs: ["fix-tests"],
+      onEvent: (event) => events.push(event),
     });
 
     expect(result.created).toEqual([
@@ -108,6 +111,12 @@ describe("temporary worktrees", () => {
       ],
       { cwd: path.join(workspaceDir, "front") },
     );
+    expect(events).toContainEqual({
+      type: "message",
+      level: "info",
+      message: "fix-tests: creating fix-tests on tomdale/fix-tests",
+    });
+    expect(consoleLog).not.toHaveBeenCalled();
 
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
       temporary_worktrees: [

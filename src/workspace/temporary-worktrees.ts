@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { log } from "../logger.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
+import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
 import {
   runSingleRepoInitializersGenerator,
@@ -56,6 +56,7 @@ export type CreateTemporaryWorktreesOptions = {
   force?: boolean;
   dryRun?: boolean;
   disabledInitializers?: boolean | string[];
+  onEvent?: ServiceEventSink;
 };
 
 export type CreateTemporaryWorktreesResult = {
@@ -104,6 +105,7 @@ export async function createTemporaryWorktrees({
   force = false,
   dryRun = false,
   disabledInitializers,
+  onEvent,
 }: CreateTemporaryWorktreesOptions): Promise<CreateTemporaryWorktreesResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const parentRepoName = validateRepositoryComponent(
@@ -160,6 +162,7 @@ export async function createTemporaryWorktrees({
         repo: repoConfig,
         entry,
         ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+        ...(onEvent ? { onEvent } : {}),
       }),
     ]),
   );
@@ -320,19 +323,23 @@ async function* createAndSetupTemporaryWorktree({
   repo,
   entry,
   disabledInitializers,
+  onEvent,
 }: {
   workspaceDir: string;
   parentRepoDir: string;
   repo: RepoConfig;
   entry: TemporaryWorktreeMetadata;
   disabledInitializers?: boolean | string[];
+  onEvent?: ServiceEventSink;
 }): AsyncGenerator<CreateTaskState> {
   const targetDir = resolveContainedPath(workspaceDir, entry.path);
 
   try {
-    log.info(
-      `${entry.slug}: creating ${path.basename(targetDir)} on ${entry.branch}`,
-    );
+    emitServiceEvent(onEvent, {
+      type: "message",
+      level: "info",
+      message: `${entry.slug}: creating ${path.basename(targetDir)} on ${entry.branch}`,
+    });
     await runGit(["worktree", "add", "-b", entry.branch, targetDir, "HEAD"], {
       cwd: parentRepoDir,
     });
@@ -343,6 +350,7 @@ async function* createAndSetupTemporaryWorktree({
       slug: entry.slug,
       targetDir,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+      ...(onEvent ? { onEvent } : {}),
     });
 
     yield {
@@ -378,12 +386,14 @@ async function runTemporaryWorktreeInitializers({
   slug,
   targetDir,
   disabledInitializers,
+  onEvent,
 }: {
   workspaceDir: string;
   repo: RepoConfig;
   slug: string;
   targetDir: string;
   disabledInitializers?: boolean | string[];
+  onEvent?: ServiceEventSink;
 }): Promise<{ status: "ready" | "failed"; logPath?: string }> {
   const logPath = await startRepoSetupLog({
     workspaceDir,
@@ -405,14 +415,24 @@ async function runTemporaryWorktreeInitializers({
     if (state.phase === "running") {
       const task = state.state;
       if (task.status === "running" && task.message) {
-        log.info(
-          `${repo.name}-${slug}: ${state.initializerName} - ${task.message}`,
-        );
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "info",
+          message: `${repo.name}-${slug}: ${state.initializerName} - ${task.message}`,
+        });
       } else if (task.status === "completed") {
-        log.success(`${repo.name}-${slug}: ${state.initializerName} complete`);
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "success",
+          message: `${repo.name}-${slug}: ${state.initializerName} complete`,
+        });
       } else if (task.status === "failed") {
         failed = true;
-        log.error(`${repo.name}-${slug}: ${state.initializerName} failed`);
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "error",
+          message: `${repo.name}-${slug}: ${state.initializerName} failed`,
+        });
       }
     }
   }
