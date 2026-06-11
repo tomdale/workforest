@@ -15,7 +15,7 @@ import {
   ENVIRONMENT_VARIABLE_REGISTRY,
   type EnvironmentVariableAudience,
 } from "./environment.ts";
-import { commandUsageLines } from "./help.ts";
+import { CONCEPTS, commandUsageLines, ROOT_OVERVIEW } from "./help.ts";
 
 const GENERATED_NOTICE =
   "<!-- Generated from the executable registry. Do not edit directly. -->";
@@ -53,6 +53,12 @@ export function renderCommandReference(
       GENERATED_NOTICE,
       "",
       "All syntax is generated from the CLI command registry. Use `wf`; `workforest` remains an executable alias.",
+      "",
+      "## Concepts",
+      "",
+      ROOT_OVERVIEW,
+      "",
+      ...CONCEPTS.map(({ term, summary }) => `- **${term}** — ${summary}.`),
       "",
       "## Conventions",
       "",

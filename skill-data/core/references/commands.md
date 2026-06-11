@@ -4,6 +4,17 @@
 
 All syntax is generated from the CLI command registry. Use `wf`; `workforest` remains an executable alias.
 
+## Concepts
+
+workforest creates isolated git workspaces from cached repository mirrors, so you can run several tasks — or whole sets of repositories — side by side, each on its own branch, without juggling branches in a single checkout.
+
+- **workspace** — A directory of git worktrees, one per repository, branched and set up together.
+- **task** — A short-lived extra worktree inside a workspace, on its own branch.
+- **standalone worktree** — One repository's worktree on its own, not tied to a workspace (wf worktree).
+- **template** — A saved repository set, plus hooks and files, to create workspaces from.
+- **cached mirror** — A local bare clone each worktree is built from, kept for fast offline setup.
+- **review workspace** — A workspace for reviewing someone's pull request (wf review).
+
 ## Conventions
 
 Exit codes: `0` success, `2` usage error (invalid arguments or flags), `1` operational failure.

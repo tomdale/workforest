@@ -7,7 +7,13 @@ import type {
   CommandNode,
   CommandRegistry,
 } from "./cli/types.ts";
-import { commandPathHelp, commandUsageLines, rootHelp } from "./help.ts";
+import {
+  CONCEPTS,
+  commandPathHelp,
+  commandUsageLines,
+  ROOT_OVERVIEW,
+  rootHelp,
+} from "./help.ts";
 
 const ROOT_CONTEXT = {
   configPath: "/config/config.json",
@@ -37,6 +43,20 @@ describe("registry-derived help", () => {
     expect(output).not.toContain("_initialize-repo");
     expect(output).not.toContain("Usage: workforest");
     expect(output).toContain("Usage: wf <command> [options]");
+  });
+
+  it("explains what workforest is and defines its core concepts", () => {
+    const output = stripAnsi(rootHelp(commandRegistry, ROOT_CONTEXT));
+
+    expect(output).toContain("Concepts:");
+    // The overview wraps, so check a distinctive fragment rather than the whole
+    // sentence, which is broken across lines.
+    expect(output).toContain("isolated git workspaces");
+    expect(ROOT_OVERVIEW).toContain("isolated git workspaces");
+    for (const { term, summary } of CONCEPTS) {
+      expect(output).toContain(term);
+      expect(output).toContain(summary);
+    }
   });
 
   it("renders scoped subcommands, operands, and flags from the registry", () => {

@@ -20,6 +20,44 @@ export type RootHelpContext = Readonly<{
   templates: readonly string[];
 }>;
 
+/** One-line definitions of workforest's core nouns, shared by the root help
+ * page and the generated command reference so both stay in sync. */
+export const CONCEPTS: readonly Readonly<{ term: string; summary: string }>[] =
+  [
+    {
+      term: "workspace",
+      summary:
+        "A directory of git worktrees, one per repository, branched and set up together",
+    },
+    {
+      term: "task",
+      summary:
+        "A short-lived extra worktree inside a workspace, on its own branch",
+    },
+    {
+      term: "standalone worktree",
+      summary:
+        "One repository's worktree on its own, not tied to a workspace (wf worktree)",
+    },
+    {
+      term: "template",
+      summary:
+        "A saved repository set, plus hooks and files, to create workspaces from",
+    },
+    {
+      term: "cached mirror",
+      summary:
+        "A local bare clone each worktree is built from, kept for fast offline setup",
+    },
+    {
+      term: "review workspace",
+      summary: "A workspace for reviewing someone's pull request (wf review)",
+    },
+  ];
+
+export const ROOT_OVERVIEW =
+  "workforest creates isolated git workspaces from cached repository mirrors, so you can run several tasks — or whole sets of repositories — side by side, each on its own branch, without juggling branches in a single checkout.";
+
 export async function help(): Promise<string> {
   let configPath = "(unavailable)";
   try {
@@ -57,9 +95,18 @@ export function rootHelp(
     key: shortcut.name,
     description: `Shortcut for ${formatCommand(shortcut.target)}`,
   }));
+  const concepts = CONCEPTS.map(({ term, summary }) => ({
+    key: term,
+    description: summary,
+  }));
 
   return renderHelp(`
 Usage: wf <command> [options]
+
+${wrapText(ROOT_OVERVIEW, 80)}
+
+Concepts:
+${formatRows(concepts)}
 
 Start here (for AI agents):
   wf skills get core --full
@@ -298,6 +345,25 @@ function nodeDisplayName(node: CommandNode): string {
     .map((alias) => alias.name)
     .join("|");
   return aliases ? `${node.name}|${aliases}` : node.name;
+}
+
+function wrapText(text: string, width: number): string {
+  const lines: string[] = [];
+  let current = "";
+  for (const word of text.split(" ")) {
+    if (current === "") {
+      current = word;
+    } else if (current.length + 1 + word.length <= width) {
+      current = `${current} ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current !== "") {
+    lines.push(current);
+  }
+  return lines.join("\n");
 }
 
 function formatUsage(lines: readonly string[]): string {
