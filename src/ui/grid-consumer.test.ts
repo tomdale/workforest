@@ -146,6 +146,11 @@ describe("shouldUseGrid", () => {
     expect(shouldUseGrid()).toBe(true);
   });
 
+  it("supports a single repository", () => {
+    stubTTY(true);
+    expect(shouldUseGrid(1)).toBe(true);
+  });
+
   it("returns false when repo count exceeds grid capacity", () => {
     stubTTY(true, 220, 50);
     expect(shouldUseGrid(10)).toBe(false);

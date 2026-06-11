@@ -543,6 +543,7 @@ export async function stampWorkspaceInteractive(
           copyTemplateFiles: () => copyTemplateFiles(template, workspaceDir),
         })
       : null;
+  const useGrid = shouldUseGrid(repos.length);
 
   async function recordRepoFailure(
     repoName: string,
@@ -592,7 +593,7 @@ export async function stampWorkspaceInteractive(
         branchName: effectiveBranchName,
         isNewWorkspace,
         beforeInitializers,
-        monitorBackground: useGridForRepoCount(repos.length),
+        monitorBackground: useGrid,
         templateBarrier,
       }),
     ]),
@@ -600,7 +601,6 @@ export async function stampWorkspaceInteractive(
 
   // Run all repo pipelines in parallel (git + detached initialization per repo)
   let repoResults: Map<string, { hasLockfile: boolean }>;
-  const useGrid = shouldUseGrid(repos.length) && repos.length > 1;
 
   async function finalizeWorkspace(
     results: Map<string, { hasLockfile: boolean }>,
@@ -667,10 +667,6 @@ export async function stampWorkspaceInteractive(
   return {
     setupFailures: [...repoFailures.values()],
   };
-}
-
-function useGridForRepoCount(repoCount: number): boolean {
-  return shouldUseGrid(repoCount) && repoCount > 1;
 }
 
 async function* createBackgroundRepoSetupPipeline({
