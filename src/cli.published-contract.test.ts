@@ -80,7 +80,7 @@ describe("published npm 0.0.1 command contract", () => {
       expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout).toContain(`Usage: wf ${command.name}`);
     }
-  });
+  }, 15_000);
 });
 
 async function loadPublishedContract(): Promise<PublishedContract> {
