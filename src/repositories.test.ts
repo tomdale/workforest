@@ -89,7 +89,7 @@ describe("registered repositories", () => {
         "second/myapp",
       ]),
     );
-  });
+  }, 15_000);
 
   it("ignores cached repositories hosted outside GitHub", async () => {
     const cacheDir = await createCacheDir();

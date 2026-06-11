@@ -72,6 +72,8 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     const homeDir = path.join(rootDir, "home");
     const workspaceDir = path.join(rootDir, "workspaces");
     const tmpDir = path.join(rootDir, "tmp");
+    const userConfigPath = path.join(rootDir, "empty-npmrc");
+    const xdgConfigDir = path.join(rootDir, "xdg-config");
 
     await Promise.all(
       [
@@ -84,13 +86,21 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
         homeDir,
         workspaceDir,
         tmpDir,
+        xdgConfigDir,
       ].map((dir) => mkdir(dir, { recursive: true })),
     );
+    await writeFile(userConfigPath, "", "utf8");
+    const packageManagerEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: homeDir,
+      NPM_CONFIG_USERCONFIG: userConfigPath,
+      XDG_CONFIG_HOME: xdgConfigDir,
+    };
     await copyPackingWorkspace(stagingDir);
     await runChecked(
       "pnpm",
       ["install", "--offline", "--frozen-lockfile", "--ignore-scripts"],
-      { cwd: stagingDir },
+      { cwd: stagingDir, env: packageManagerEnv },
     );
 
     const tarballs = new Map<string, string>();
@@ -99,6 +109,7 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
       const manifest = await readManifest(packageDir);
       await runChecked("pnpm", ["pack", "--pack-destination", packDir], {
         cwd: packageDir,
+        env: packageManagerEnv,
       });
 
       const tarball = path.join(packDir, tarballName(manifest));
@@ -131,6 +142,7 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     );
     await runChecked("pnpm", ["install", "--offline", "--ignore-scripts"], {
       cwd: consumerDir,
+      env: packageManagerEnv,
     });
 
     const rootTarball = requiredTarball(tarballs, "workforest");
@@ -251,11 +263,11 @@ async function extractTarball(
 async function runChecked(
   command: string,
   args: readonly string[],
-  options: { cwd?: string } = {},
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<void> {
   const result = await runSubprocess(command, args, {
     cwd: options.cwd,
-    env: process.env,
+    env: options.env ?? process.env,
     timeout: 120_000,
   });
 
