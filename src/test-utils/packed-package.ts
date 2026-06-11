@@ -16,6 +16,7 @@ const PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+const BASE_ENV = { ...process.env };
 const PACKAGE_DIRS = [
   "packages/core",
   "packages/package-managers",
@@ -91,7 +92,7 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     );
     await writeFile(userConfigPath, "", "utf8");
     const packageManagerEnv: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...withoutPackageCredentials(BASE_ENV),
       HOME: homeDir,
       NPM_CONFIG_USERCONFIG: userConfigPath,
       XDG_CONFIG_HOME: xdgConfigDir,
@@ -99,7 +100,13 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     await copyPackingWorkspace(stagingDir);
     await runChecked(
       "pnpm",
-      ["install", "--offline", "--frozen-lockfile", "--ignore-scripts"],
+      [
+        "--config.tokenHelper=",
+        "install",
+        "--offline",
+        "--frozen-lockfile",
+        "--ignore-scripts",
+      ],
       { cwd: stagingDir, env: packageManagerEnv },
     );
 
@@ -107,10 +114,14 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     for (const relativeDir of PACKAGE_DIRS) {
       const packageDir = path.resolve(stagingDir, relativeDir);
       const manifest = await readManifest(packageDir);
-      await runChecked("pnpm", ["pack", "--pack-destination", packDir], {
-        cwd: packageDir,
-        env: packageManagerEnv,
-      });
+      await runChecked(
+        "pnpm",
+        ["--config.tokenHelper=", "pack", "--pack-destination", packDir],
+        {
+          cwd: packageDir,
+          env: packageManagerEnv,
+        },
+      );
 
       const tarball = path.join(packDir, tarballName(manifest));
       tarballs.set(manifest.name, tarball);
@@ -140,16 +151,20 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
       path.join(consumerDir, "package.json"),
       `${JSON.stringify(consumerManifest, null, 2)}\n`,
     );
-    await runChecked("pnpm", ["install", "--offline", "--ignore-scripts"], {
-      cwd: consumerDir,
-      env: packageManagerEnv,
-    });
+    await runChecked(
+      "pnpm",
+      ["--config.tokenHelper=", "install", "--offline", "--ignore-scripts"],
+      {
+        cwd: consumerDir,
+        env: packageManagerEnv,
+      },
+    );
 
     const rootTarball = requiredTarball(tarballs, "workforest");
     await extractTarball(rootTarball, extractedDir);
 
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...withoutPackageCredentials(BASE_ENV),
       HOME: homeDir,
       NO_COLOR: "1",
       TMPDIR: tmpDir,
@@ -188,6 +203,17 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     await rm(rootDir, { recursive: true, force: true });
     throw error;
   }
+}
+
+function withoutPackageCredentials(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(environment).filter(
+      ([name]) =>
+        !/^(?:npm|pnpm)_config_/i.test(name) && !/(?:auth|token)/i.test(name),
+    ),
+  );
 }
 
 async function copyPackingWorkspace(destination: string): Promise<void> {

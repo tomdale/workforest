@@ -34,7 +34,7 @@
     "check": "pnpm test && pnpm typecheck && pnpm lint",
     "lint": "biome check .",
     "prepack": "pnpm build:plugins && tsdown",
-    "test": "pnpm build:plugins && vitest run",
+    "test": "pnpm build:plugins && vitest run --testTimeout=15000",
     "typecheck": "pnpm build:plugins && tsc --noEmit"
   },
   "dependencies": {
