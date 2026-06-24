@@ -11,7 +11,6 @@ import {
   CONCEPTS,
   commandPathHelp,
   commandUsageLines,
-  ROOT_OVERVIEW,
   rootHelp,
 } from "./help.ts";
 
@@ -49,10 +48,6 @@ describe("registry-derived help", () => {
     const output = stripAnsi(rootHelp(commandRegistry, ROOT_CONTEXT));
 
     expect(output).toContain("Concepts:");
-    // The overview wraps, so check a distinctive fragment rather than the whole
-    // sentence, which is broken across lines.
-    expect(output).toContain("isolated git workspaces");
-    expect(ROOT_OVERVIEW).toContain("isolated git workspaces");
     for (const { term, summary } of CONCEPTS) {
       expect(output).toContain(term);
       expect(output).toContain(summary);

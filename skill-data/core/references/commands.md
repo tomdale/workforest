@@ -6,7 +6,7 @@ All syntax is generated from the CLI command registry. Use `wf`; `workforest` re
 
 ## Concepts
 
-workforest creates isolated git workspaces from cached repository mirrors, so you can run several tasks — or whole sets of repositories — side by side, each on its own branch, without juggling branches in a single checkout.
+workforest creates isolated workspaces that span multiple repositories, so a feature can move the frontend, API, docs, and tooling together from cached mirrors without juggling branches in a single checkout.
 
 - **workspace** — A directory of git worktrees, one per repository, branched and set up together.
 - **task** — A short-lived extra worktree inside a workspace, on its own branch.
@@ -263,7 +263,7 @@ wf worktree <subcommand>
 
 Create a standalone worktree.
 
-Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task create`.
+Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task create`.
 
 ```text
 wf worktree create [options] <repository> <worktree name>
@@ -275,13 +275,13 @@ Arguments:
 
 Options:
 
-- `--dir <path>` — Write the worktree to this path instead of a directory named for the slug under the current directory.
+- `--dir <path>` — Write the worktree to this explicit path instead of `defaultDir/<repo>/<worktree-name>`.
 - `-n`, `--dry-run` — Show the repository, branch, and target path without writing anything.
 
 Examples:
 
-- `wf worktree create vercel/next.js fix-router` — Check out a new worktree of the repository on a branch named for the slug.
-- `wf worktree create <org/repo> <worktree-name> --dir <path>` — Place the worktree at a chosen path instead of under the current directory.
+- `wf worktree create vercel/next.js fix-router` — Check out a new worktree at `defaultDir/next.js/fix-router`.
+- `wf worktree create <org/repo> <worktree-name> --dir <path>` — Place the worktree at an explicit path.
 
 ### `wf worktree list`
 

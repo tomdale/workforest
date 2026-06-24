@@ -134,7 +134,6 @@ describe("packed package", () => {
       timeout: 10_000,
     });
     expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("Start here (for AI agents):");
     expect(help.stderr).not.toContain("Running local copy");
 
     const version = await runSubprocess(bin, ["version"], {

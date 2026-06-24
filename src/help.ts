@@ -56,7 +56,7 @@ export const CONCEPTS: readonly Readonly<{ term: string; summary: string }>[] =
   ];
 
 export const ROOT_OVERVIEW =
-  "workforest creates isolated git workspaces from cached repository mirrors, so you can run several tasks — or whole sets of repositories — side by side, each on its own branch, without juggling branches in a single checkout.";
+  "workforest creates isolated workspaces that span multiple repositories, so a feature can move the frontend, API, docs, and tooling together from cached mirrors without juggling branches in a single checkout.";
 
 export async function help(): Promise<string> {
   let configPath = "(unavailable)";
@@ -112,6 +112,7 @@ Commands:
 ${formatRows([...commands, ...shortcuts])}
 
 Examples:
+  wf workspace create vercel/front vercel/api vercel/docs -- "ship billing updates"
   wf workspace create vercel/next.js -- "update docs"
   wf workspace create --like current -- "try another approach"
   wf workspace open --search

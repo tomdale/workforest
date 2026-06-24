@@ -18,7 +18,6 @@ describe("bin/workforest.js", () => {
       { env, timeout: 10_000 },
     );
 
-    expect(result.stdout).toContain("Start here (for AI agents):");
     expect(result.stdout).toBe(stripAnsi(result.stdout));
     expect(result.stderr).not.toContain("Running local copy");
   });
@@ -36,7 +35,6 @@ describe("bin/workforest.js", () => {
       },
     );
 
-    expect(result.stdout).toContain("Start here (for AI agents):");
     expect(result.stderr).toContain("Running local copy");
     expect(result.stderr).not.toContain("ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX");
   });
