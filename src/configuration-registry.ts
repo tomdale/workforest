@@ -41,7 +41,8 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
   {
     key: "defaultDir",
     type: "string (path)",
-    description: "Directory under which normal workspaces are created.",
+    description:
+      "Directory under which normal workspaces and standalone worktrees are created.",
     defaultBehavior:
       "Unset. Commands that require a configured workspace root report an error or prompt for one.",
     example: "~/Code/workspaces",

@@ -96,7 +96,46 @@ describe("worktree CLI", () => {
     });
   });
 
-  it("creates a standalone worktree with explicit repository and slug", async () => {
+  it("creates a standalone worktree under defaultDir by repository name", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const defaultDir = await createTempDir("workforest-default-");
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      defaultDir,
+      branchPrefix: "tomdale/",
+    });
+    const targetDir = path.join(defaultDir, "front", "fix-auth");
+    createSingleWorktreeMock.mockResolvedValue({
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      branchName: "tomdale/fix-auth",
+      targetDir,
+    });
+
+    const { executeCli } = await importCli();
+    const result = await executeCli([
+      "worktree",
+      "create",
+      "vercel/front",
+      "fix-auth",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(createSingleWorktreeMock).toHaveBeenCalledWith({
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      branchName: "tomdale/fix-auth",
+      targetDir,
+    });
+  });
+
+  it("creates a standalone worktree at the explicit --dir path", async () => {
     const configDir = await createTempDir("workforest-config-");
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
@@ -136,6 +175,28 @@ describe("worktree CLI", () => {
       branchName: "tomdale/fix-auth",
       targetDir,
     });
+  });
+
+  it("requires defaultDir for the default standalone worktree path", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      branchPrefix: "tomdale/",
+    });
+
+    const { executeCli } = await importCli();
+    const result = await executeCli([
+      "worktree",
+      "create",
+      "vercel/front",
+      "fix-auth",
+    ]);
+
+    expect(result).toMatchObject({
+      exitCode: 1,
+      render: { kind: "text", stream: "stderr" },
+    });
+    expect(createSingleWorktreeMock).not.toHaveBeenCalled();
   });
 
   it("deletes only the explicit standalone worktree path", async () => {

@@ -677,7 +677,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["worktree", "create"],
             summary: "Create a standalone worktree",
             description:
-              "Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task create`.",
+              "Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task create`.",
             handler: "worktree.create",
             help: nestedHelp("worktree", "create"),
             operands: operands(
@@ -690,7 +690,7 @@ export const commandRegistry: CommandRegistry = {
             flags: [
               stringFlag("dir", "--dir", "path", {
                 description:
-                  "Write the worktree to this path instead of a directory named for the slug under the current directory.",
+                  "Write the worktree to this explicit path instead of `defaultDir/<repo>/<worktree-name>`.",
               }),
               booleanFlag(
                 "dryRun",
@@ -703,13 +703,12 @@ export const commandRegistry: CommandRegistry = {
               {
                 command: "wf worktree create vercel/next.js fix-router",
                 description:
-                  "Check out a new worktree of the repository on a branch named for the slug.",
+                  "Check out a new worktree at `defaultDir/next.js/fix-router`.",
               },
               {
                 command:
                   "wf worktree create <org/repo> <worktree-name> --dir <path>",
-                description:
-                  "Place the worktree at a chosen path instead of under the current directory.",
+                description: "Place the worktree at an explicit path.",
               },
             ],
             outputModes: ["human", "report"],

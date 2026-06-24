@@ -177,8 +177,10 @@ wf worktree create vercel/front fix-auth
 wf worktree create vercel/front fix-auth --dir ../front-fix-auth
 ```
 
-The target defaults to `./<slug>`. Inspect or remove standalone worktrees with
-explicit commands:
+The target defaults to `<defaultDir>/<repo>/<slug>`, for example
+`~/Code/front/fix-auth` when `defaultDir` is `~/Code`. Pass `--dir` to choose
+a different target path. Inspect or remove standalone worktrees with explicit
+commands:
 
 ```sh
 wf worktree list vercel/front

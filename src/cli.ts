@@ -732,7 +732,9 @@ async function runConfigShow(): Promise<CommandResult> {
         fields: [
           {
             label: "Default directory",
-            value: config.defaultDir ?? "(not set; uses current directory)",
+            value:
+              config.defaultDir ??
+              "(not set; required for workspaces and default worktree paths)",
           },
           {
             label: "Reviews directory",
@@ -1242,11 +1244,16 @@ async function runStandaloneWorktreeCreate({
       throw new Error("Exactly one repository is required.");
     }
 
-    const { config } = await loadWorkspaceConfig();
+    const { config, path: configPath } = await loadWorkspaceConfig();
     const branchName = buildBranchName(slug, config.branchPrefix);
     const targetDir = dir
       ? path.resolve(expandHome(dir))
-      : path.resolve(process.cwd(), slug);
+      : defaultStandaloneWorktreePath({
+          config,
+          configPath,
+          repoName: resolvedRepo.name,
+          slug,
+        });
 
     if (dryRun) {
       showDryRunReport({
@@ -1275,6 +1282,26 @@ async function runStandaloneWorktreeCreate({
   } catch (error) {
     throw operationalError(error);
   }
+}
+
+function defaultStandaloneWorktreePath({
+  config,
+  configPath,
+  repoName,
+  slug,
+}: {
+  config: WorkspaceConfig;
+  configPath: string;
+  repoName: string;
+  slug: string;
+}): string {
+  if (!config.defaultDir) {
+    throw new Error(
+      `No defaultDir configured. Set defaultDir in ${configPath}, or pass --dir to choose a target path.`,
+    );
+  }
+
+  return path.resolve(expandHome(config.defaultDir), repoName, slug);
 }
 
 async function runStandaloneWorktreeList(

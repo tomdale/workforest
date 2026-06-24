@@ -45,7 +45,7 @@ When both the XDG and legacy files are absent, a new config uses the preferred p
 
 Type: `string (path)`
 
-Directory under which normal workspaces are created.
+Directory under which normal workspaces and standalone worktrees are created.
 
 Default: Unset. Commands that require a configured workspace root report an error or prompt for one.
 
