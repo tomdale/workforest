@@ -9,6 +9,7 @@ describe("shell command model", () => {
     expect(model.commands.map((command) => command.name)).toEqual([
       "new",
       "clean",
+      "start",
       "list",
       "status",
       "workspace",
@@ -58,6 +59,7 @@ describe("shell command model", () => {
     expect(model.handoffCommands).toEqual([
       "new",
       "clean",
+      "start",
       "workspace",
       "task",
       "worktree",

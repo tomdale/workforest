@@ -21,6 +21,27 @@ Exit codes: `0` success, `2` usage error (invalid arguments or flags), `1` opera
 
 Commands whose options include `--json` emit a machine-readable envelope: `{ "ok": true, "data": ... }` on success, or `{ "ok": false, "error": { "kind": "operational" | "usage", "message": ... } }` on failure.
 
+## `wf start`
+
+Start a change.
+
+Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context.
+
+```text
+wf start <change> [source...]
+```
+
+Arguments:
+
+- `arguments` — A change name, optionally followed by one repository, multiple repositories, or one @template source.
+
+Examples:
+
+- `wf start redesign-cli tomdale/workforest` — Start a repository change.
+- `wf start auth-fix @vercel-agent` — Start a workspace change from a template.
+- `wf start billing vercel/front vercel/api` — Start an _adhoc workspace from several repositories.
+- `wf start follow-up` — Start another change from the current Workforest context.
+
 ## `wf list`
 
 List Workforest changes.

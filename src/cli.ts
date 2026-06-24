@@ -261,6 +261,15 @@ async function runInvocation(
       return runTypedCommand(() => runAddCommand(invocation));
     case "workspace.list":
       return runTypedCommand(runListCommand);
+    case "change.start":
+      return runTypedCommand(async () => {
+        const { runStartCommand } = await import("./cli/start.ts");
+        return runStartCommand(invocation, {
+          interactive: isInteractive(),
+          onEvent: humanServiceEventSink,
+          writeShellCdPath,
+        });
+      });
     case "change.list":
       return runTypedCommand(() => runChangeListCommand(invocation));
     case "change.status":

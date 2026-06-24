@@ -250,6 +250,43 @@ const skillsDefault = leaf({
   outputModes: ["report", "json"],
 });
 
+const changeStart = leaf({
+  name: "start",
+  path: ["start"],
+  summary: "Start a change",
+  description:
+    "Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context.",
+  handler: "change.start",
+  help: { kind: "command", command: "start" },
+  operands: operands(
+    1,
+    null,
+    "arguments",
+    "<change> [source...]",
+    "A change name, optionally followed by one repository, multiple repositories, or one @template source.",
+  ),
+  examples: [
+    {
+      command: "wf start redesign-cli tomdale/workforest",
+      description: "Start a repository change.",
+    },
+    {
+      command: "wf start auth-fix @vercel-agent",
+      description: "Start a workspace change from a template.",
+    },
+    {
+      command: "wf start billing vercel/front vercel/api",
+      description: "Start an _adhoc workspace from several repositories.",
+    },
+    {
+      command: "wf start follow-up",
+      description: "Start another change from the current Workforest context.",
+    },
+  ],
+  outputModes: ["human"],
+  shellHandoff: "optional-cd",
+});
+
 const changeList = leaf({
   name: "list",
   path: ["list"],
@@ -449,6 +486,7 @@ export const commandRegistry: CommandRegistry = {
     summary: "Workforest command line interface",
     help: { kind: "root" },
     children: [
+      changeStart,
       changeList,
       changeStatus,
       group({

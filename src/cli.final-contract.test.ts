@@ -4,7 +4,8 @@ import { parseInvocation } from "./cli/parse-invocation.ts";
 import { resolveCommand } from "./cli/resolve-command.ts";
 import type { ResolvedCommand } from "./cli/types.ts";
 
-const REQUIRED_COMMANDS = [
+const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
+  ["start"],
   ["workspace", "create"],
   ["workspace", "delete"],
   ["workspace", "open"],
@@ -33,10 +34,12 @@ const REQUIRED_COMMANDS = [
   ["template", "show"],
   ["template", "manage"],
   ["shell", "init"],
-] as const;
+];
 
 describe("final CLI contract", () => {
-  it.each(REQUIRED_COMMANDS)("registers wf %s %s", (...path) => {
+  it.each(
+    REQUIRED_COMMANDS.map((path) => ({ name: path.join(" "), path })),
+  )("registers wf $name", ({ path }) => {
     expect(resolve(path)).toMatchObject({
       canonicalPath: path,
     });
