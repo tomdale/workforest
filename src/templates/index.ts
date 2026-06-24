@@ -8,7 +8,6 @@ import {
 } from "../environment.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { TemplateConfig } from "../types.ts";
-import { normalizeBranchPrefix } from "../utils/branch-prefix.ts";
 import { ensureDir, pathExists } from "../utils/fs.ts";
 import {
   resolveContainedPath,
@@ -212,7 +211,7 @@ function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
 
   return {
     ...rest,
-    branchPrefix: normalizeBranchPrefix(config.branchPrefix) ?? "",
+    branchPrefix: config.branchPrefix?.trim() ?? "",
   };
 }
 

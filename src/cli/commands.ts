@@ -1721,8 +1721,7 @@ export const commandRegistry: CommandRegistry = {
             examples: [
               {
                 command: "wf help concepts",
-                description:
-                  "Read the conceptual glossary and the git model.",
+                description: "Read the conceptual glossary and the git model.",
               },
             ],
           }),

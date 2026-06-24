@@ -8,6 +8,7 @@ import {
   reposFromSlugs,
   saveWorkspaceConfig,
 } from "./config.ts";
+import { resolveWorkforestDirectories } from "./workspace/paths.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
 
@@ -33,6 +34,78 @@ afterEach(async () => {
 });
 
 describe("workspace config", () => {
+  it("defaults the Workforest directory layout", async () => {
+    await createConfigDir();
+
+    const loaded = await loadWorkspaceConfig();
+
+    expect(loaded.config.directory).toEqual({
+      base: "~/Code",
+      repos: "Repos",
+      workspaces: "Workspaces",
+      reviews: "Reviews",
+    });
+    expect(resolveWorkforestDirectories(loaded.config)).toEqual({
+      base: path.join(os.homedir(), "Code"),
+      repos: path.join(os.homedir(), "Code", "Repos"),
+      workspaces: path.join(os.homedir(), "Code", "Workspaces"),
+      reviews: path.join(os.homedir(), "Code", "Reviews"),
+    });
+  });
+
+  it("resolves relative directory children against directory.base", async () => {
+    const configDir = await createConfigDir();
+    await writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        directory: {
+          base: "~/Developer",
+          repos: "Checkouts",
+          workspaces: "Stacks",
+          reviews: "Reviews",
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkspaceConfig();
+
+    expect(resolveWorkforestDirectories(loaded.config)).toEqual({
+      base: path.join(os.homedir(), "Developer"),
+      repos: path.join(os.homedir(), "Developer", "Checkouts"),
+      workspaces: path.join(os.homedir(), "Developer", "Stacks"),
+      reviews: path.join(os.homedir(), "Developer", "Reviews"),
+    });
+  });
+
+  it("uses absolute directory children as provided", async () => {
+    const configDir = await createConfigDir();
+    const roots = {
+      repos: path.join(configDir, "repo-root"),
+      workspaces: path.join(configDir, "workspace-root"),
+      reviews: path.join(configDir, "review-root"),
+    };
+    await writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        directory: {
+          base: "~/Developer",
+          ...roots,
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkspaceConfig();
+
+    expect(resolveWorkforestDirectories(loaded.config)).toEqual({
+      base: path.join(os.homedir(), "Developer"),
+      repos: roots.repos,
+      workspaces: roots.workspaces,
+      reviews: roots.reviews,
+    });
+  });
+
   it("loads Vercel auto-link config", async () => {
     const configDir = await createConfigDir();
     await writeFile(
@@ -116,7 +189,7 @@ describe("workspace config", () => {
     expect(saved.reviewsDir).toBe("~/Code/reviews");
   });
 
-  it("normalizes branch prefixes when loading", async () => {
+  it("preserves branch prefixes when loading", async () => {
     const configDir = await createConfigDir();
     await writeFile(
       path.join(configDir, "config.json"),
@@ -128,10 +201,10 @@ describe("workspace config", () => {
 
     const loaded = await loadWorkspaceConfig();
 
-    expect(loaded.config.branchPrefix).toBe("tomdale/");
+    expect(loaded.config.branchPrefix).toBe("tomdale");
   });
 
-  it("normalizes branch prefixes when saving", async () => {
+  it("preserves branch prefixes when saving", async () => {
     const configDir = await createConfigDir();
     const configPath = path.join(configDir, "config.json");
 
@@ -143,7 +216,7 @@ describe("workspace config", () => {
       branchPrefix?: unknown;
     };
 
-    expect(saved.branchPrefix).toBe("tomdale/");
+    expect(saved.branchPrefix).toBe("tomdale");
   });
 
   it("rejects invalid Vercel auto-link config", async () => {

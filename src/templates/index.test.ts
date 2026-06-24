@@ -28,7 +28,7 @@ afterEach(async () => {
 });
 
 describe("templates", () => {
-  it("normalizes legacy branch prefixes when loading", async () => {
+  it("preserves branch prefixes when loading", async () => {
     const configHome = await createTemplatesHome();
     const templatePath = path.join(
       configHome,
@@ -50,10 +50,10 @@ describe("templates", () => {
 
     const template = await loadTemplate("demo");
 
-    expect(template?.config.branchPrefix).toBe("tomdale/");
+    expect(template?.config.branchPrefix).toBe("tomdale");
   });
 
-  it("persists normalized branch prefixes when creating templates", async () => {
+  it("persists branch prefixes when creating templates", async () => {
     const configHome = await createTemplatesHome();
 
     await createTemplate("demo", {
@@ -70,7 +70,7 @@ describe("templates", () => {
     );
     const contents = await readFile(templatePath, "utf8");
 
-    expect(contents).toContain('"branchPrefix": "tomdale/"');
+    expect(contents).toContain('"branchPrefix": "tomdale"');
   });
 
   it("preserves an explicit empty override when creating templates", async () => {

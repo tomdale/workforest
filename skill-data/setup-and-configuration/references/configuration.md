@@ -18,10 +18,13 @@ When both the XDG and legacy files are absent, a new config uses the preferred p
 
 ```json
 {
-  "defaultDir": "~/Code/workspaces",
-  "reviewsDir": "~/Code/reviews",
-  "dirPrefix": "workspace-",
-  "branchPrefix": "feature/",
+  "directory": {
+    "base": "~/Code",
+    "repos": "Repos",
+    "workspaces": "Workspaces",
+    "reviews": "Reviews"
+  },
+  "branchPrefix": "feature",
   "vercelLink": {
     "teamByGitHubOwner": {
       "vercel": "vercel",
@@ -41,35 +44,26 @@ When both the XDG and legacy files are absent, a new config uses the preferred p
 
 ## Fields
 
-### `defaultDir`
+### `directory`
 
-Type: `string (path)`
+Type: `object`
 
-Directory under which normal workspaces and standalone worktrees are created.
+Human-facing Workforest directory layout. Relative child values resolve against directory.base.
 
-Default: Unset. Commands that require a configured workspace root report an error or prompt for one.
+Default: Uses ~/Code as the base, with Repos, Workspaces, and Reviews child directories.
 
-### `reviewsDir`
+Nested fields:
 
-Type: `string (path)`
-
-Directory under which pull request review worktrees are created.
-
-Default: Unset. The first interactive review suggests a reviews directory beside defaultDir, or ~/Code/reviews.
-
-### `dirPrefix`
-
-Type: `string`
-
-Prefix added to generated workspace directory names.
-
-Default: The empty string ("").
+- `directory.base` (`string (path)`): Base directory for Workforest-managed checkouts. Default: ~/Code.
+- `directory.repos` (`string (path)`): Directory for single-repository changes. Default: Repos. Relative values resolve against directory.base.
+- `directory.workspaces` (`string (path)`): Directory for template and _adhoc workspace changes. Default: Workspaces. Relative values resolve against directory.base.
+- `directory.reviews` (`string (path)`): Directory for pull request review checkouts. Default: Reviews. Relative values resolve against directory.base.
 
 ### `branchPrefix`
 
 Type: `string`
 
-Global prefix added to generated feature branches. A missing trailing slash is added automatically.
+Global prefix added to generated feature branches. Values with or without a trailing slash are accepted.
 
 Default: The empty string ("").
 

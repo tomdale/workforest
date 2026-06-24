@@ -31,9 +31,7 @@ const PROJECT_ROOT = path.resolve(
 describe("configuration registry", () => {
   it("defines every supported top-level field once", () => {
     expect(CONFIGURATION_REGISTRY.map((field) => field.key)).toEqual([
-      "defaultDir",
-      "reviewsDir",
-      "dirPrefix",
+      "directory",
       "branchPrefix",
       "vercelLink",
     ]);
@@ -43,6 +41,12 @@ describe("configuration registry", () => {
     expect(
       normalizeWorkspaceConfig(
         {
+          directory: {
+            base: "  ~/Developer ",
+            repos: " Checkouts ",
+            workspaces: "",
+            reviews: "/tmp/reviews",
+          },
           defaultDir: "  ~/Code/workspaces ",
           reviewsDir: "",
           dirPrefix: " wf- ",
@@ -54,9 +58,15 @@ describe("configuration registry", () => {
         "config.json",
       ),
     ).toEqual({
+      directory: {
+        base: "~/Developer",
+        repos: "Checkouts",
+        workspaces: "Workspaces",
+        reviews: "/tmp/reviews",
+      },
       defaultDir: "~/Code/workspaces",
       dirPrefix: "wf-",
-      branchPrefix: "tomdale/",
+      branchPrefix: "tomdale",
       vercelLink: {
         teamByGitHubOwner: {
           vercel: "vercel",

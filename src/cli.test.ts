@@ -218,6 +218,12 @@ describe("cli", () => {
     await expect(
       readFile(path.join(configDir, "config.json"), "utf8").then(JSON.parse),
     ).resolves.toEqual({
+      directory: {
+        base: "~/Code",
+        repos: "Repos",
+        workspaces: "Workspaces",
+        reviews: "Reviews",
+      },
       defaultDir: "~/Code/workspaces",
       reviewsDir: "~/Code/reviews",
       dirPrefix: "wf-",

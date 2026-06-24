@@ -1,9 +1,9 @@
 import type {
   VercelLinkConfig,
   VercelRepoOverride,
+  WorkforestDirectoryConfig,
   WorkspaceConfig,
 } from "./types.ts";
-import { normalizeBranchPrefix } from "./utils/branch-prefix.ts";
 
 export type ConfigurationFieldDefinition = Readonly<{
   key: keyof WorkspaceConfig;
@@ -26,8 +26,14 @@ export type ConfigurationChildFieldDefinition = Readonly<{
 }>;
 
 export const DEFAULT_WORKSPACE_CONFIG: Required<
-  Pick<WorkspaceConfig, "dirPrefix" | "branchPrefix">
+  Pick<WorkspaceConfig, "directory" | "dirPrefix" | "branchPrefix">
 > = {
+  directory: {
+    base: "~/Code",
+    repos: "Repos",
+    workspaces: "Workspaces",
+    reviews: "Reviews",
+  },
   dirPrefix: "",
   branchPrefix: "",
 };
@@ -39,46 +45,61 @@ export const DEFAULT_WORKSPACE_CONFIG: Required<
  */
 export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
   {
-    key: "defaultDir",
-    type: "string (path)",
+    key: "directory",
+    type: "object",
     description:
-      "Directory under which normal workspaces and standalone worktrees are created.",
+      "Human-facing Workforest directory layout. Relative child values resolve against directory.base.",
     defaultBehavior:
-      "Unset. Commands that require a configured workspace root report an error or prompt for one.",
-    example: "~/Code/workspaces",
-    normalize: (value) => optionalStringField("defaultDir", value),
-  },
-  {
-    key: "reviewsDir",
-    type: "string (path)",
-    description:
-      "Directory under which pull request review worktrees are created.",
-    defaultBehavior:
-      "Unset. The first interactive review suggests a reviews directory beside defaultDir, or ~/Code/reviews.",
-    example: "~/Code/reviews",
-    normalize: (value) => optionalStringField("reviewsDir", value),
-  },
-  {
-    key: "dirPrefix",
-    type: "string",
-    description: "Prefix added to generated workspace directory names.",
-    defaultBehavior: 'The empty string ("").',
-    example: "workspace-",
-    normalize: (value) => ({
-      dirPrefix: normalizeString(value) ?? DEFAULT_WORKSPACE_CONFIG.dirPrefix,
+      "Uses ~/Code as the base, with Repos, Workspaces, and Reviews child directories.",
+    example: {
+      base: "~/Code",
+      repos: "Repos",
+      workspaces: "Workspaces",
+      reviews: "Reviews",
+    },
+    children: [
+      {
+        key: "base",
+        type: "string (path)",
+        description: "Base directory for Workforest-managed checkouts.",
+        defaultBehavior: "~/Code.",
+      },
+      {
+        key: "repos",
+        type: "string (path)",
+        description: "Directory for single-repository changes.",
+        defaultBehavior:
+          "Repos. Relative values resolve against directory.base.",
+      },
+      {
+        key: "workspaces",
+        type: "string (path)",
+        description: "Directory for template and _adhoc workspace changes.",
+        defaultBehavior:
+          "Workspaces. Relative values resolve against directory.base.",
+      },
+      {
+        key: "reviews",
+        type: "string (path)",
+        description: "Directory for pull request review checkouts.",
+        defaultBehavior:
+          "Reviews. Relative values resolve against directory.base.",
+      },
+    ],
+    normalize: (value, pathLabel) => ({
+      directory: normalizeDirectoryConfig(value, pathLabel),
     }),
   },
   {
     key: "branchPrefix",
     type: "string",
     description:
-      "Global prefix added to generated feature branches. A missing trailing slash is added automatically.",
+      "Global prefix added to generated feature branches. Values with or without a trailing slash are accepted.",
     defaultBehavior: 'The empty string ("").',
-    example: "feature/",
+    example: "feature",
     normalize: (value) => ({
       branchPrefix:
-        normalizeBranchPrefix(normalizeString(value)) ??
-        DEFAULT_WORKSPACE_CONFIG.branchPrefix,
+        normalizeString(value) ?? DEFAULT_WORKSPACE_CONFIG.branchPrefix,
     }),
   },
   {
@@ -158,18 +179,51 @@ export function normalizeWorkspaceConfig(
       field.normalize(source[field.key], `${configPath}.${field.key}`),
     );
   }
+  Object.assign(result, normalizeLegacyConfigFields(source));
 
   return result;
 }
 
-function optionalStringField(
-  key: "defaultDir" | "reviewsDir",
-  value: unknown,
+function normalizeLegacyConfigFields(
+  source: Record<string, unknown>,
 ): Readonly<Partial<WorkspaceConfig>> {
-  const normalized = normalizeString(value);
-  return normalized === undefined
-    ? {}
-    : ({ [key]: normalized } as Partial<WorkspaceConfig>);
+  const defaultDir = normalizeString(source["defaultDir"]);
+  const reviewsDir = normalizeString(source["reviewsDir"]);
+  return {
+    ...(defaultDir ? { defaultDir } : {}),
+    ...(reviewsDir ? { reviewsDir } : {}),
+    dirPrefix:
+      normalizeString(source["dirPrefix"]) ??
+      DEFAULT_WORKSPACE_CONFIG.dirPrefix,
+  };
+}
+
+function normalizeDirectoryConfig(
+  value: unknown,
+  pathLabel: string,
+): Required<WorkforestDirectoryConfig> {
+  if (value === undefined) {
+    return { ...DEFAULT_WORKSPACE_CONFIG.directory };
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  return {
+    base:
+      normalizeString(config["base"]) ??
+      DEFAULT_WORKSPACE_CONFIG.directory.base,
+    repos:
+      normalizeString(config["repos"]) ??
+      DEFAULT_WORKSPACE_CONFIG.directory.repos,
+    workspaces:
+      normalizeString(config["workspaces"]) ??
+      DEFAULT_WORKSPACE_CONFIG.directory.workspaces,
+    reviews:
+      normalizeString(config["reviews"]) ??
+      DEFAULT_WORKSPACE_CONFIG.directory.reviews,
+  };
 }
 
 function normalizeString(value: unknown): string | undefined {

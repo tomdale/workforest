@@ -7,7 +7,7 @@ import {
 } from "./branch-prefix.ts";
 
 describe("normalizeBranchPrefix", () => {
-  it("appends a trailing slash when missing", () => {
+  it("adds a branch separator when missing", () => {
     expect(normalizeBranchPrefix("tomdale")).toBe("tomdale/");
   });
 
@@ -21,8 +21,14 @@ describe("normalizeBranchPrefix", () => {
 });
 
 describe("buildBranchName", () => {
-  it("uses the normalized prefix when building branch names", () => {
+  it("uses exactly one separator when the prefix omits a trailing slash", () => {
     expect(buildBranchName("feature-work", "tomdale")).toBe(
+      "tomdale/feature-work",
+    );
+  });
+
+  it("uses exactly one separator when the prefix includes a trailing slash", () => {
+    expect(buildBranchName("feature-work", "tomdale/")).toBe(
       "tomdale/feature-work",
     );
   });
