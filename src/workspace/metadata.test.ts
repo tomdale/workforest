@@ -204,7 +204,7 @@ describe("workspace metadata", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "fix-tests",
+        path: "_tasks/front/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/fix-auth-bug",
         base_sha: "abc123",
@@ -226,7 +226,7 @@ describe("workspace metadata", () => {
         {
           slug: "fix-tests",
           parent_repo: "front",
-          path: "fix-tests",
+          path: "_tasks/front/fix-tests",
         },
       ],
     });
@@ -243,7 +243,7 @@ describe("workspace metadata", () => {
     const worktree = (slug: string) => ({
       slug,
       parent_repo: "front",
-      path: slug,
+      path: `_tasks/front/${slug}`,
       branch: `tomdale/${slug}`,
       base_branch: "main",
       base_sha: "abc123",
@@ -286,7 +286,7 @@ describe("workspace metadata", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "fix-tests",
+        path: "_tasks/front/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/fix-auth-bug",
         base_sha: "abc123",
@@ -328,7 +328,7 @@ describe("workspace metadata", () => {
     [
       "task path at the wrong contained location",
       (metadata: UnsafeMetadata) => {
-        firstTask(metadata).path = "another-task";
+        firstTask(metadata).path = "_tasks/front/another-task";
       },
     ],
     [
@@ -378,7 +378,8 @@ describe("workspace metadata", () => {
   it("rejects a persisted task path through a symlink", async () => {
     const workspaceDir = await createWorkspaceDir();
     const outsideDir = await createWorkspaceDir();
-    await symlink(outsideDir, path.join(workspaceDir, "fix-tests"));
+    await mkdir(path.join(workspaceDir, "_tasks"), { recursive: true });
+    await symlink(outsideDir, path.join(workspaceDir, "_tasks", "front"));
     await writeRawMetadata(workspaceDir, createUnsafeMetadataFixture());
 
     await expect(readWorkspaceMetadata(workspaceDir)).rejects.toThrow(
@@ -516,7 +517,7 @@ function createUnsafeMetadataFixture(): UnsafeMetadata {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "fix-tests",
+        path: "_tasks/front/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "main",
         base_sha: "abc123",

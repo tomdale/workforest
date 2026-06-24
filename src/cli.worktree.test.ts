@@ -10,12 +10,14 @@ const {
   removeStandaloneWorktreeMock,
   createTasksMock,
   listTasksMock,
+  finishTasksMock,
   deleteTasksMock,
 } = vi.hoisted(() => ({
   createSingleWorktreeMock: vi.fn(),
   removeStandaloneWorktreeMock: vi.fn(),
   createTasksMock: vi.fn(),
   listTasksMock: vi.fn(),
+  finishTasksMock: vi.fn(),
   deleteTasksMock: vi.fn(),
 }));
 
@@ -31,6 +33,7 @@ async function importCli(): Promise<typeof import("./cli.ts")> {
   vi.doMock("./workspace/tasks.ts", () => ({
     createTasks: createTasksMock,
     listTasks: listTasksMock,
+    finishTasks: finishTasksMock,
     deleteTasks: deleteTasksMock,
   }));
   return import("./cli.ts");
@@ -51,6 +54,7 @@ afterEach(async () => {
   removeStandaloneWorktreeMock.mockReset();
   createTasksMock.mockReset();
   listTasksMock.mockReset();
+  finishTasksMock.mockReset();
   deleteTasksMock.mockReset();
   process.chdir(ORIGINAL_CWD);
   if (ORIGINAL_CONFIG_DIR === undefined) {
@@ -229,8 +233,9 @@ describe("worktree CLI", () => {
 
 describe("task CLI", () => {
   it.each([
-    ["create", ["task", "create", "--help"]],
+    ["start", ["task", "start", "--help"]],
     ["list", ["task", "list", "--help"]],
+    ["finish", ["task", "finish", "--help"]],
     ["delete", ["task", "delete", "--help"]],
   ])("renders %s help", async (_name, argv) => {
     const { executeCli } = await importCli();
@@ -241,7 +246,8 @@ describe("task CLI", () => {
   });
 
   it.each([
-    ["missing create slug", ["task", "create"]],
+    ["missing start slug", ["task", "start"]],
+    ["missing finish slug", ["task", "finish"]],
     ["missing delete slug", ["task", "delete"]],
     ["inapplicable list flag", ["task", "list", "--dry-run"]],
     ["removed worktree shorthand", ["worktree", "fix-auth"]],
@@ -262,18 +268,19 @@ describe("task CLI", () => {
         {
           slug: "fix-tests",
           parentRepo: "front",
-          path: path.join(workspaceDir, "fix-tests"),
+          path: path.join(workspaceDir, "_tasks", "front", "fix-tests"),
           branch: "tomdale/fix-tests",
           setupStatus: "ready",
         },
       ],
       failures: [],
     });
+    finishTasksMock.mockResolvedValue({ removed: [] });
     deleteTasksMock.mockResolvedValue({ removed: [] });
 
     const { executeCli } = await importCli();
     expect(
-      await executeCli(["task", "create", "fix-tests", "--force"]),
+      await executeCli(["task", "start", "fix-tests", "--force"]),
     ).toMatchObject({ exitCode: 0 });
     expect(createTasksMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -282,6 +289,16 @@ describe("task CLI", () => {
         force: true,
       }),
     );
+
+    expect(
+      await executeCli(["task", "finish", "fix-tests", "--repo", "front"]),
+    ).toMatchObject({ exitCode: 0 });
+    expect(finishTasksMock).toHaveBeenCalledWith({
+      workspaceDir: resolvedWorkspaceDir,
+      slugs: ["fix-tests"],
+      parentRepoName: "front",
+      dryRun: false,
+    });
 
     expect(
       await executeCli(["task", "delete", "fix-tests", "--force"]),

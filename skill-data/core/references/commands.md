@@ -332,22 +332,22 @@ Examples:
 
 ## `wf task`
 
-Manage temporary workspace tasks.
+Manage temporary task worktrees.
 
-Create and remove short-lived task worktrees inside an existing workspace, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace. A task is scoped to one repository in the workspace; for a worktree not tied to any workspace, see `wf worktree`.
+Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task. For a worktree not tied to a managed change, see `wf worktree`.
 
 ```text
 wf task <subcommand>
 ```
 
-### `wf task create`
+### `wf task start`
 
-Create temporary worktrees.
+Start nested task lanes.
 
-Adds one or more task worktrees inside the current workspace, each on a new branch off the parent repository's current HEAD, then runs the template's setup initializers. Run from inside a workspace; the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is created, changes your shell's directory to it under shell integration. See also `wf task delete`.
+Adds one or more nested task worktrees under the current change's reserved _tasks directory, each on a new branch off the parent repository's committed HEAD, then runs setup initializers. Run from inside a workspace repo, repository change, or existing task; in workspaces, the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is started, changes your shell's directory to it under shell integration. See also `wf task finish` and `wf task delete`.
 
 ```text
-wf task create [options] <task names...>
+wf task start [options] <task names...>
 ```
 
 Arguments:
@@ -356,20 +356,20 @@ Arguments:
 
 Options:
 
-- `--repo <repository>` — Parent repository in the workspace to branch from; defaults to the one inferred from the current directory.
+- `--repo <repository>` — Parent repository in a workspace to branch from; defaults to the one inferred from the current directory.
 - `-n`, `--dry-run` — Show the worktrees and branches that would be created without writing anything.
 - `-f`, `--force` — Create even when the parent repository has uncommitted changes.
 
 Examples:
 
-- `wf task create fix-login` — Create one task worktree off the inferred parent repo and cd into it.
-- `wf task create fix-login add-tests --repo web` — Create two task worktrees branched from the `web` repository.
+- `wf task start fix-login` — Start one task lane off the inferred parent repo and cd into it.
+- `wf task start fix-login add-tests --repo web` — Start two task lanes branched from the `web` repository.
 
 ### `wf task list`
 
 List temporary worktrees.
 
-Lists the task worktrees tracked in the current workspace, showing each task's parent repository, branch, setup status, merge state, and path. Run from inside a workspace; the parent repository is inferred from the current directory unless `--repo` scopes the list. Exits 0 with a message when no tasks match.
+Lists task worktrees for the current managed change, grouped by parent repository. Shows each task's branch, setup status, merge state, and path. In workspaces, the parent repository is inferred from the current directory unless `--repo` scopes the list. Exits 0 with a message when no tasks match.
 
 ```text
 wf task list [options]
@@ -377,18 +377,42 @@ wf task list [options]
 
 Options:
 
-- `--repo <repository>` — Limit the list to tasks whose parent is this repository in the workspace.
+- `--repo <repository>` — Limit the list to tasks whose parent is this repository in the current workspace.
 
 Examples:
 
-- `wf task list` — List every task tracked in the current workspace.
+- `wf task list` — List every task tracked in the current managed change.
 - `wf task list --repo web` — List only tasks branched from the `web` repository.
+
+### `wf task finish`
+
+Finish integrated task lanes.
+
+Removes one or more clean task worktrees after verifying their branches are reachable from the parent repository. Run from inside a managed change. Use `wf task delete --force` for abandoned, dirty, or intentionally unmerged task lanes.
+
+```text
+wf task finish [options] <task names...>
+```
+
+Arguments:
+
+- `task names` — One or more task names (slugs) to finish, as shown by `wf task list`.
+
+Options:
+
+- `--repo <repository>` — Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.
+- `-n`, `--dry-run` — Show which task worktrees and branches would be removed without deleting anything.
+
+Examples:
+
+- `wf task finish fix-login` — Finish one integrated task lane.
+- `wf task finish fix-login add-tests --repo web` — Finish two integrated task lanes branched from the `web` repository.
 
 ### `wf task delete`
 
 Delete temporary worktrees.
 
-Removes one or more task worktrees and deletes their branches; this cannot be undone. Run from inside a workspace. Refuses a task with uncommitted changes or an unmerged branch unless you pass `--force`. Prompts for confirmation in a terminal; without a TTY it exits 1 unless `--force` or `--dry-run` is given. See also `wf task create`.
+Explicitly abandons one or more task worktrees and deletes their branches; this cannot be undone. Run from inside a managed change. Refuses a task with uncommitted changes or an unmerged branch unless you pass `--force`. Prompts for confirmation in a terminal; without a TTY it exits 1 unless `--force` or `--dry-run` is given. See also `wf task finish`.
 
 ```text
 wf task delete [options] <task names...>
@@ -400,7 +424,7 @@ Arguments:
 
 Options:
 
-- `--repo <repository>` — Parent repository to disambiguate the named tasks; required when a name matches tasks in more than one repository.
+- `--repo <repository>` — Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.
 - `-n`, `--dry-run` — Show which task worktrees and branches would be removed without deleting anything.
 - `-f`, `--force` — Delete without the prompt and even when a task is dirty or unmerged; required without a terminal.
 
@@ -423,7 +447,7 @@ wf worktree <subcommand>
 
 Create a standalone worktree.
 
-Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task create`.
+Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task start`.
 
 ```text
 wf worktree create [options] <repository> <worktree name>

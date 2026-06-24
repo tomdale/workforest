@@ -292,7 +292,7 @@ async function createStatusFixture(
     {
       slug: "fix-tests",
       parent_repo: "api",
-      path: "fix-tests",
+      path: "_tasks/api/fix-tests",
       branch: "tomdale/auth-fix/fix-tests",
       base_branch: "main",
       base_sha: "abc123",

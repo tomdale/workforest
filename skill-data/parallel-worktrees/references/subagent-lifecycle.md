@@ -10,14 +10,14 @@ default because subagent branches start from committed `HEAD`.
 
 ```sh
 cd ~/Code/workspaces/my-feature/next.js
-wf task create "fix-tests" "upgrade-dependencies"
+wf task start "fix-tests" "upgrade-dependencies"
 ```
 
 Expected shape:
 
 ```text
-~/Code/workspaces/my-feature/next.js-fix-tests
-~/Code/workspaces/my-feature/next.js-upgrade-dependencies
+~/Code/workspaces/my-feature/_tasks/next.js/fix-tests
+~/Code/workspaces/my-feature/_tasks/next.js/upgrade-dependencies
 ```
 
 Branches use the current primary branch namespace:

@@ -111,7 +111,7 @@ describe("registry-derived help", () => {
       commandPathHelp(commandRegistry, ["worktree", "create"]) ?? "",
     );
     const unbounded = stripAnsi(
-      commandPathHelp(commandRegistry, ["task", "create"]) ?? "",
+      commandPathHelp(commandRegistry, ["task", "start"]) ?? "",
     );
 
     expect(fixed).toContain("<repository> <worktree name>");

@@ -393,7 +393,7 @@ describe("wf review", () => {
       {
         slug: "fix-tests",
         parent_repo: "omniagent",
-        path: "fix-tests",
+        path: "_tasks/omniagent/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "pull/123",
         base_sha: "abc123",

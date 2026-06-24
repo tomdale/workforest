@@ -41,7 +41,10 @@ describe("parallel wf task commands", () => {
       slugs.map((slug, index) => runWorktree(fixture, slug, index)),
     );
 
-    expect(results.map((result) => result.code)).toEqual([0, 0, 0, 0]);
+    expect(
+      results.map((result) => result.code),
+      formatCommandResults(results),
+    ).toEqual([0, 0, 0, 0]);
     const metadata = await readWorkspaceMetadata(fixture.workspaceDir);
     expect(metadata?.tasks?.map((entry) => entry.slug).sort()).toEqual(
       [...slugs].sort(),
@@ -56,7 +59,10 @@ describe("parallel wf task commands", () => {
       runWorktree(fixture, "duplicate", 1),
     ]);
 
-    expect(results.map((result) => result.code).sort()).toEqual([0, 1]);
+    expect(
+      results.map((result) => result.code).sort(),
+      formatCommandResults(results),
+    ).toEqual([0, 1]);
     const failure = results.find((result) => result.code === 1);
     expect(`${failure?.stdout}\n${failure?.stderr}`).toMatch(
       /already exists|already checked out|cannot lock ref/i,
@@ -106,6 +112,15 @@ async function createFixture(): Promise<Fixture> {
   return { rootDir, workspaceDir, repoDir, configDir };
 }
 
+function formatCommandResults(results: readonly CommandResult[]): string {
+  return results
+    .map(
+      (result, index) =>
+        `#${index}: code=${result.code}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    )
+    .join("\n\n");
+}
+
 async function runGit(args: string[], cwd: string): Promise<void> {
   await execFileAsync("git", args, { cwd, timeout: 10_000 });
 }
@@ -121,6 +136,7 @@ function runWorktree(
     NO_COLOR: "1",
     WORKFOREST_CONFIG_DIR: fixture.configDir,
     WORKFOREST_NO_TUI: "1",
+    WORKFOREST_USE_SOURCE_CLI: "1",
     WORKFOREST_CD_PATH_FILE: path.join(
       fixture.rootDir,
       `${slug}-${invocation}.cd`,
@@ -131,7 +147,7 @@ function runWorktree(
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [path.resolve("bin/workforest.js"), "task", "create", slug, "--force"],
+      [path.resolve("bin/workforest.js"), "task", "start", slug, "--force"],
       {
         cwd: fixture.repoDir,
         encoding: "utf8",

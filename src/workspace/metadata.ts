@@ -15,6 +15,7 @@ import {
   resolveContainedPath,
   validateResourceName,
 } from "../utils/path-safety.ts";
+import { TASKS_DIRECTORY_NAME } from "./paths.ts";
 
 const METADATA_FILENAME = ".workforest";
 const WORKSPACE_METADATA_FILENAME = "workspace.json";
@@ -608,8 +609,13 @@ function validateTaskMetadata(
     "Repository name",
   );
   const worktreePath = requireString(worktree["path"], `${source}.path`);
-  if (worktreePath !== slug) {
-    throw new Error(`${source}.path must be exactly "${slug}".`);
+  const expectedTaskPath = path.posix.join(
+    TASKS_DIRECTORY_NAME,
+    parentRepo,
+    slug,
+  );
+  if (worktreePath !== expectedTaskPath) {
+    throw new Error(`${source}.path must be exactly "${expectedTaskPath}".`);
   }
   validateMetadataPath(workspaceDir, worktreePath, `${source}.path`);
   requireString(worktree["branch"], `${source}.branch`);

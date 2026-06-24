@@ -79,8 +79,8 @@ workspace when the user wants a separate approach with the same repositories
 but fresh branches.
 
 Use `wf worktree create <repo> <name>` for a standalone single-repository
-checkout. Use `wf task create <name...>` inside a workspace repository when
-parallel agents need short-lived sibling worktrees.
+checkout. Use `wf task start <name...>` inside a workspace repository when
+parallel agents need short-lived nested worktrees.
 
 ## Safety Rules
 

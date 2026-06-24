@@ -13,7 +13,7 @@ import {
   type WorkspaceInitializationState,
 } from "./initialization.ts";
 import { readWorkspaceMetadata } from "./metadata.ts";
-import { listTasks, type TaskListEntry } from "./tasks.ts";
+import { listRepositoryTasks, listTasks, type TaskListEntry } from "./tasks.ts";
 
 export type ChangeStatus = Readonly<{
   selector: string;
@@ -533,7 +533,14 @@ async function buildTaskStatuses(
   entry: ChangeInventoryEntry,
 ): Promise<ChangeTaskStatus[]> {
   if (entry.type === "repository-change") {
-    return [];
+    const tasks = await listRepositoryTasks({
+      parentRepoDir: entry.path,
+      repoName: entry.repository,
+      changeName: entry.changeName,
+    }).catch(() => []);
+    return tasks
+      .map((task) => formatTaskStatus(task, path.dirname(entry.path)))
+      .sort((left, right) => left.selector.localeCompare(right.selector));
   }
 
   const metadata = await readWorkspaceMetadata(entry.path).catch(() => null);

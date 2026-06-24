@@ -27,6 +27,7 @@ import {
   readWorkspaceMetadata,
   removeTasks as removeTaskMetadata,
 } from "./metadata.ts";
+import { TASKS_DIRECTORY_NAME } from "./paths.ts";
 import {
   appendRepoSetupLog,
   removeRepoSetupLog,
@@ -80,6 +81,53 @@ export type DeleteTasksOptions = {
 
 export type DeleteTasksResult = {
   removed: TaskMetadata[];
+};
+
+export type FinishTasksOptions = {
+  workspaceDir: string;
+  slugs: readonly string[];
+  parentRepoName?: string;
+  dryRun?: boolean;
+};
+
+export type CreateRepositoryTasksOptions = {
+  parentRepoDir: string;
+  repo: RepoConfig;
+  changeName: string;
+  slugs: readonly string[];
+  branchPrefix?: string;
+  force?: boolean;
+  dryRun?: boolean;
+  disabledInitializers?: boolean | string[];
+  onEvent?: ServiceEventSink;
+};
+
+export type RepositoryTasksOptions = {
+  parentRepoDir: string;
+  repoName: string;
+  changeName: string;
+};
+
+export type RemoveRepositoryTasksOptions = RepositoryTasksOptions & {
+  slugs: readonly string[];
+  force?: boolean;
+  dryRun?: boolean;
+};
+
+type RemoveWorkspaceTasksOptions = {
+  workspaceDir: string;
+  slugs: readonly string[];
+  parentRepoName: string | undefined;
+  force: boolean;
+  dryRun: boolean;
+  mode: "delete" | "finish";
+};
+
+type RemoveRepositoryTasksInternalOptions = RepositoryTasksOptions & {
+  slugs: readonly string[];
+  force: boolean;
+  dryRun: boolean;
+  mode: "delete" | "finish";
 };
 
 type CreateTaskState =
@@ -180,12 +228,13 @@ export async function createTasks({
   }
 
   if (created.length > 0) {
+    const plannedBySlug = new Map(planned.map((entry) => [entry.slug, entry]));
     await appendTasks(
       resolvedWorkspaceDir,
       created.map((result) => ({
         slug: result.slug,
         parent_repo: result.parentRepo,
-        path: result.slug,
+        path: plannedBySlug.get(result.slug)?.path ?? result.slug,
         branch: result.branch,
         base_branch: baseBranch,
         base_sha: baseSha,
@@ -194,6 +243,85 @@ export async function createTasks({
         ...(result.setupLog ? { setup_log: result.setupLog } : {}),
       })),
     );
+  }
+
+  return { created, failures };
+}
+
+export async function createRepositoryTasks({
+  parentRepoDir,
+  repo,
+  changeName,
+  slugs,
+  branchPrefix,
+  force = false,
+  dryRun = false,
+  disabledInitializers,
+  onEvent,
+}: CreateRepositoryTasksOptions): Promise<CreateTasksResult> {
+  const resolvedParentRepoDir = path.resolve(parentRepoDir);
+  const repoRootDir = path.dirname(resolvedParentRepoDir);
+  const repoName = validateRepositoryComponent(repo.name, "Repository name");
+  const safeChangeName = validateResourceName(changeName, "Change name");
+  validateRequestedSlugs(slugs);
+
+  const baseBranch = await getCurrentBranch(resolvedParentRepoDir);
+  const baseSha = await getCurrentSha(resolvedParentRepoDir);
+
+  if (!dryRun && !force && (await isGitDirty(resolvedParentRepoDir))) {
+    throw new Error(
+      `Repository change "${repoName}/${safeChangeName}" has uncommitted changes. Commit or stash them before creating tasks, or pass --force.`,
+    );
+  }
+
+  const planned = await planRepositoryTasks({
+    repoRootDir,
+    parentRepoDir: resolvedParentRepoDir,
+    repoName,
+    changeName: safeChangeName,
+    slugs,
+    baseBranch,
+    baseSha,
+    ...(branchPrefix !== undefined ? { branchPrefix } : {}),
+  });
+
+  if (dryRun) {
+    return {
+      created: planned.map((entry) => ({
+        slug: entry.slug,
+        parentRepo: entry.parent_repo,
+        path: resolveContainedPath(repoRootDir, entry.path),
+        branch: entry.branch,
+        setupStatus: entry.setup_status,
+      })),
+      failures: [],
+    };
+  }
+
+  const tasks = new Map(
+    planned.map((entry) => [
+      entry.slug,
+      createAndSetupTask({
+        workspaceDir: repoRootDir,
+        parentRepoDir: resolvedParentRepoDir,
+        repo,
+        entry,
+        ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+        ...(onEvent ? { onEvent } : {}),
+      }),
+    ]),
+  );
+
+  const created: TaskCreateResult[] = [];
+  const failures: TaskFailure[] = [];
+
+  for await (const { id, state } of runParallel(tasks)) {
+    if (state.phase === "complete") {
+      created.push(state.result);
+      continue;
+    }
+
+    failures.push({ slug: id, error: state.error });
   }
 
   return { created, failures };
@@ -232,6 +360,59 @@ export async function listTasks(
   return listed;
 }
 
+export async function listRepositoryTasks({
+  parentRepoDir,
+  repoName,
+  changeName,
+}: RepositoryTasksOptions): Promise<TaskListEntry[]> {
+  const resolvedParentRepoDir = path.resolve(parentRepoDir);
+  const repoRootDir = path.dirname(resolvedParentRepoDir);
+  const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
+  const safeChangeName = validateResourceName(changeName, "Change name");
+  const slugs = await listRepositoryTaskSlugs(repoRootDir, safeChangeName);
+  if (slugs.length === 0) {
+    return [];
+  }
+
+  const baseBranch = await getCurrentBranch(resolvedParentRepoDir).catch(
+    () => "HEAD",
+  );
+  const baseSha = await getCurrentSha(resolvedParentRepoDir).catch(() => "");
+  const entries: TaskListEntry[] = [];
+
+  for (const slug of slugs) {
+    const relativePath = repositoryTaskRelativePath(safeChangeName, slug);
+    const absolutePath = resolveContainedPath(repoRootDir, relativePath);
+    const setupLog = await repositoryTaskSetupLog(
+      repoRootDir,
+      safeRepoName,
+      slug,
+    );
+    const branch =
+      (await getCurrentBranch(absolutePath).catch(() => "")) ||
+      buildTemporaryBranchName(baseBranch, slug, undefined);
+
+    entries.push({
+      slug,
+      parent_repo: safeRepoName,
+      path: relativePath,
+      branch,
+      base_branch: baseBranch,
+      base_sha: baseSha,
+      created_at: await pathModifiedAt(absolutePath),
+      setup_status: setupLog ? "failed" : "ready",
+      ...(setupLog ? { setup_log: setupLog } : {}),
+      absolutePath,
+      state: setupLog ? "failed" : "ready",
+      merged: branch
+        ? await isBranchMerged(resolvedParentRepoDir, branch)
+        : null,
+    });
+  }
+
+  return entries;
+}
+
 export async function deleteTasks({
   workspaceDir,
   slugs,
@@ -239,6 +420,77 @@ export async function deleteTasks({
   force = false,
   dryRun = false,
 }: DeleteTasksOptions): Promise<DeleteTasksResult> {
+  return removeWorkspaceTasks({
+    workspaceDir,
+    slugs,
+    parentRepoName,
+    force,
+    dryRun,
+    mode: "delete",
+  });
+}
+
+export async function finishTasks({
+  workspaceDir,
+  slugs,
+  parentRepoName,
+  dryRun = false,
+}: FinishTasksOptions): Promise<DeleteTasksResult> {
+  return removeWorkspaceTasks({
+    workspaceDir,
+    slugs,
+    parentRepoName,
+    force: false,
+    dryRun,
+    mode: "finish",
+  });
+}
+
+export async function deleteRepositoryTasks({
+  parentRepoDir,
+  repoName,
+  changeName,
+  slugs,
+  force = false,
+  dryRun = false,
+}: RemoveRepositoryTasksOptions): Promise<DeleteTasksResult> {
+  return removeRepositoryTasks({
+    parentRepoDir,
+    repoName,
+    changeName,
+    slugs,
+    force,
+    dryRun,
+    mode: "delete",
+  });
+}
+
+export async function finishRepositoryTasks({
+  parentRepoDir,
+  repoName,
+  changeName,
+  slugs,
+  dryRun = false,
+}: RemoveRepositoryTasksOptions): Promise<DeleteTasksResult> {
+  return removeRepositoryTasks({
+    parentRepoDir,
+    repoName,
+    changeName,
+    slugs,
+    force: false,
+    dryRun,
+    mode: "finish",
+  });
+}
+
+async function removeWorkspaceTasks({
+  workspaceDir,
+  slugs,
+  parentRepoName,
+  force,
+  dryRun,
+  mode,
+}: RemoveWorkspaceTasksOptions): Promise<DeleteTasksResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
   validateRequestedSlugs(slugs);
@@ -259,7 +511,7 @@ export async function deleteTasks({
   const removed: TaskMetadata[] = [];
 
   for (const entry of targets) {
-    const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.slug);
+    const absolutePath = resolveContainedPath(resolvedWorkspaceDir, entry.path);
     const parentRepoDir = resolveContainedPath(
       resolvedWorkspaceDir,
       entry.parent_repo,
@@ -267,6 +519,11 @@ export async function deleteTasks({
     const exists = await pathExists(absolutePath);
 
     if (!exists) {
+      if (mode === "finish") {
+        throw new Error(
+          `Task "${entry.slug}" is stale. Run wf task delete ${entry.slug} --repo ${entry.parent_repo} --force to remove its metadata.`,
+        );
+      }
       await pruneStaleWorktree(parentRepoDir);
       await deleteBranchIfPossible(parentRepoDir, entry.branch, false);
       removed.push(entry);
@@ -275,7 +532,9 @@ export async function deleteTasks({
 
     if (!force && (await isGitDirty(absolutePath))) {
       throw new Error(
-        `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
+        mode === "finish"
+          ? `Task "${entry.slug}" has uncommitted changes. Commit or discard them before finishing the task.`
+          : `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
       );
     }
 
@@ -284,7 +543,9 @@ export async function deleteTasks({
       !(await isTemporaryBranchMerged(resolvedWorkspaceDir, entry))
     ) {
       throw new Error(
-        `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
+        mode === "finish"
+          ? `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or run wf task delete ${entry.slug} --repo ${entry.parent_repo} --force to abandon it.`
+          : `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
       );
     }
 
@@ -309,6 +570,88 @@ export async function deleteTasks({
 
   if (removed.length > 0) {
     await removeTaskMetadata(resolvedWorkspaceDir, removed);
+  }
+
+  return { removed };
+}
+
+async function removeRepositoryTasks({
+  parentRepoDir,
+  repoName,
+  changeName,
+  slugs,
+  force,
+  dryRun,
+  mode,
+}: RemoveRepositoryTasksInternalOptions): Promise<DeleteTasksResult> {
+  const resolvedParentRepoDir = path.resolve(parentRepoDir);
+  const repoRootDir = path.dirname(resolvedParentRepoDir);
+  const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
+  const safeChangeName = validateResourceName(changeName, "Change name");
+  validateRequestedSlugs(slugs);
+
+  const available = await listRepositoryTasks({
+    parentRepoDir: resolvedParentRepoDir,
+    repoName: safeRepoName,
+    changeName: safeChangeName,
+  });
+  const targets = resolveRemovalTargets(available, slugs, safeRepoName);
+
+  if (dryRun) {
+    return { removed: targets };
+  }
+
+  const removed: TaskMetadata[] = [];
+
+  for (const entry of targets) {
+    const absolutePath = resolveContainedPath(repoRootDir, entry.path);
+    const exists = await pathExists(absolutePath);
+
+    if (!exists) {
+      if (mode === "finish") {
+        throw new Error(
+          `Task "${entry.slug}" is stale. Run wf task delete ${entry.slug} --force to remove it.`,
+        );
+      }
+      await pruneStaleWorktree(resolvedParentRepoDir);
+      await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, false);
+      removed.push(entry);
+      continue;
+    }
+
+    if (!force && (await isGitDirty(absolutePath))) {
+      throw new Error(
+        mode === "finish"
+          ? `Task "${entry.slug}" has uncommitted changes. Commit or discard them before finishing the task.`
+          : `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
+      );
+    }
+
+    if (
+      !force &&
+      !(await isBranchMerged(resolvedParentRepoDir, entry.branch))
+    ) {
+      throw new Error(
+        mode === "finish"
+          ? `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or run wf task delete ${entry.slug} --force to abandon it.`
+          : `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
+      );
+    }
+
+    const removeArgs = ["worktree", "remove"];
+    if (force) removeArgs.push("--force");
+    removeArgs.push(absolutePath);
+    await runGit(removeArgs, { cwd: resolvedParentRepoDir, timeout: 30_000 });
+    await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, force);
+
+    if (entry.setup_log) {
+      await removeRepoSetupLog(
+        repoRootDir,
+        resolveContainedPath(repoRootDir, entry.setup_log),
+      );
+    }
+
+    removed.push(entry);
   }
 
   return { removed };
@@ -499,16 +842,26 @@ async function planTasks({
     workspaceDir,
     validateRepositoryComponent(parentRepo.name, "Repository name"),
   );
-  const existingSlugs = new Set(existingEntries.map((entry) => entry.slug));
+  const existingSlugs = new Set(
+    existingEntries
+      .filter((entry) => entry.parent_repo === parentRepo.name)
+      .map((entry) => entry.slug),
+  );
   const planned: TaskMetadata[] = [];
 
   for (const slug of slugs) {
-    const relativePath = slug;
+    const relativePath = path.posix.join(
+      TASKS_DIRECTORY_NAME,
+      parentRepo.name,
+      slug,
+    );
     const targetDir = resolveContainedPath(workspaceDir, relativePath);
     const branch = buildTemporaryBranchName(baseBranch, slug, branchPrefix);
 
     if (existingSlugs.has(slug)) {
-      throw new Error(`Task "${slug}" is already tracked in this workspace.`);
+      throw new Error(
+        `Task "${slug}" is already tracked for ${parentRepo.name}.`,
+      );
     }
 
     if (await pathExists(targetDir)) {
@@ -532,6 +885,110 @@ async function planTasks({
   }
 
   return planned;
+}
+
+async function planRepositoryTasks({
+  repoRootDir,
+  parentRepoDir,
+  repoName,
+  changeName,
+  slugs,
+  baseBranch,
+  baseSha,
+  branchPrefix,
+}: {
+  repoRootDir: string;
+  parentRepoDir: string;
+  repoName: string;
+  changeName: string;
+  slugs: readonly string[];
+  baseBranch: string;
+  baseSha: string;
+  branchPrefix?: string;
+}): Promise<TaskMetadata[]> {
+  const planned: TaskMetadata[] = [];
+
+  for (const slug of slugs) {
+    const relativePath = repositoryTaskRelativePath(changeName, slug);
+    const targetDir = resolveContainedPath(repoRootDir, relativePath);
+    const branch = buildTemporaryBranchName(baseBranch, slug, branchPrefix);
+
+    if (await pathExists(targetDir)) {
+      throw new Error(`Target directory already exists: ${targetDir}`);
+    }
+
+    if (await branchExists(parentRepoDir, branch)) {
+      throw new Error(`Branch already exists: ${branch}`);
+    }
+
+    planned.push({
+      slug,
+      parent_repo: repoName,
+      path: relativePath,
+      branch,
+      base_branch: baseBranch,
+      base_sha: baseSha,
+      created_at: new Date().toISOString(),
+      setup_status: "ready",
+    });
+  }
+
+  return planned;
+}
+
+function repositoryTaskRelativePath(changeName: string, slug: string): string {
+  return path.posix.join(TASKS_DIRECTORY_NAME, changeName, slug);
+}
+
+async function listRepositoryTaskSlugs(
+  repoRootDir: string,
+  changeName: string,
+): Promise<string[]> {
+  const taskRoot = resolveContainedPath(
+    repoRootDir,
+    TASKS_DIRECTORY_NAME,
+    changeName,
+  );
+  let entries: Array<{ isDirectory(): boolean; name: string }>;
+  try {
+    entries = await fs.readdir(taskRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      try {
+        return validateResourceName(entry.name, "Task name");
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is string => entry !== null)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+async function repositoryTaskSetupLog(
+  repoRootDir: string,
+  repoName: string,
+  slug: string,
+): Promise<string | undefined> {
+  const relativePath = getTaskSetupLogRelativePath(repoName, slug);
+  const absolutePath = resolveContainedPath(repoRootDir, relativePath);
+  return (await pathExists(absolutePath)) ? relativePath : undefined;
+}
+
+async function pathModifiedAt(target: string): Promise<string> {
+  try {
+    const stat = await fs.stat(target);
+    return stat.mtime.toISOString();
+  } catch {
+    return new Date(0).toISOString();
+  }
 }
 
 function buildTemporaryBranchName(
@@ -654,8 +1111,15 @@ async function isTemporaryBranchMerged(
   entry: TaskMetadata,
 ): Promise<boolean | null> {
   const parentRepoDir = resolveContainedPath(workspaceDir, entry.parent_repo);
+  return isBranchMerged(parentRepoDir, entry.branch);
+}
+
+async function isBranchMerged(
+  parentRepoDir: string,
+  branch: string,
+): Promise<boolean> {
   try {
-    await runGit(["merge-base", "--is-ancestor", entry.branch, "HEAD"], {
+    await runGit(["merge-base", "--is-ancestor", branch, "HEAD"], {
       cwd: parentRepoDir,
     });
     return true;

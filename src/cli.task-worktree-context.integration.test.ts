@@ -2,6 +2,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -75,7 +76,7 @@ describe("task command workspace context", () => {
       fixture.workspaceDir,
       fixture.env,
       "task",
-      "create",
+      "start",
       "from-root",
       "--dry-run",
     );
@@ -88,7 +89,7 @@ describe("task command workspace context", () => {
       fixture.workspaceDir,
       fixture.env,
       "task",
-      "create",
+      "start",
       "from-root",
       "--repo",
       "front",
@@ -103,7 +104,7 @@ describe("task command workspace context", () => {
         cwd,
         fixture.env,
         "task",
-        "create",
+        "start",
         cwd === fixture.frontRepoDir ? "from-primary" : "from-task",
         "--dry-run",
       );
@@ -158,6 +159,80 @@ describe("task command workspace context", () => {
       "front-current",
     ]);
   }, 30_000);
+
+  it("deleting the current workspace task writes a parent repo cd target", async () => {
+    const fixture = await createWorkspaceFixture();
+
+    const deleteCurrent = await runCli(
+      fixture.frontTaskDir,
+      fixture.env,
+      "task",
+      "delete",
+      "front-current",
+      "--force",
+    );
+    expectSuccess(deleteCurrent);
+    expect(deleteCurrent.stdout).toContain("Removed front-current");
+    await expectPathNotToExist(fixture.frontTaskDir);
+    await expect(readCdTarget(fixture.env)).resolves.toBe(
+      await realpath(fixture.frontRepoDir),
+    );
+  }, 30_000);
+});
+
+describe("task command repository-change context", () => {
+  it("infers the parent repository change from repo task paths", async () => {
+    const fixture = await createRepositoryTaskFixture();
+
+    const fromRepositoryChange = await runCli(
+      fixture.parentRepoDir,
+      fixture.env,
+      "task",
+      "list",
+    );
+    expectSuccess(fromRepositoryChange);
+    expect(fromRepositoryChange.stdout).toContain("existing-task");
+    expect(fromRepositoryChange.stdout).toContain("_tasks/my-feature");
+
+    const fromTaskWorktree = await runCli(
+      fixture.taskDir,
+      fixture.env,
+      "task",
+      "start",
+      "from-task",
+      "--dry-run",
+    );
+    expectSuccess(fromTaskWorktree);
+    expect(fromTaskWorktree.stdout).toContain("from-task");
+    expect(fromTaskWorktree.stdout).toContain("_tasks/my-feature");
+
+    const wrongRepo = await runCli(
+      fixture.parentRepoDir,
+      fixture.env,
+      "task",
+      "list",
+      "--repo",
+      "docs",
+    );
+    expectUsageFailure(
+      wrongRepo,
+      "Current repository change is front/my-feature",
+    );
+
+    const finishTask = await runCli(
+      fixture.taskDir,
+      fixture.env,
+      "task",
+      "finish",
+      "existing-task",
+    );
+    expectSuccess(finishTask);
+    expect(finishTask.stdout).toContain("Finished existing-task");
+    await expectPathNotToExist(fixture.taskDir);
+    await expect(readCdTarget(fixture.env)).resolves.toBe(
+      await realpath(fixture.parentRepoDir),
+    );
+  }, 30_000);
 });
 
 describe("standalone worktree command context", () => {
@@ -170,7 +245,7 @@ describe("standalone worktree command context", () => {
       "task",
       "list",
     );
-    expectOperationalFailure(taskResult, "Not inside a workspace.");
+    expectOperationalFailure(taskResult, "Not inside a Workforest change.");
 
     const missingTarget = await runCli(
       fixture.firstWorktreeDir,
@@ -215,14 +290,30 @@ type WorkspaceFixture = {
   env: CliEnvironment;
 };
 
+type RepositoryTaskFixture = {
+  parentRepoDir: string;
+  taskDir: string;
+  env: CliEnvironment;
+};
+
 async function createWorkspaceFixture(): Promise<WorkspaceFixture> {
   const rootDir = await createTempDir("workforest-task-context-");
   const workspaceDir = path.join(rootDir, "workspace");
   const frontRepoDir = path.join(workspaceDir, "front");
   const docsRepoDir = path.join(workspaceDir, "docs");
-  const frontTaskDir = path.join(workspaceDir, "front-current");
-  const frontSiblingTaskDir = path.join(workspaceDir, "front-sibling");
-  const docsTaskDir = path.join(workspaceDir, "docs-current");
+  const frontTaskDir = path.join(
+    workspaceDir,
+    "_tasks",
+    "front",
+    "front-current",
+  );
+  const frontSiblingTaskDir = path.join(
+    workspaceDir,
+    "_tasks",
+    "front",
+    "front-sibling",
+  );
+  const docsTaskDir = path.join(workspaceDir, "_tasks", "docs", "docs-current");
   await mkdir(workspaceDir, { recursive: true });
 
   const frontSha = await initializeRepository(
@@ -304,6 +395,47 @@ async function createStandaloneFixture(): Promise<{
   };
 }
 
+async function createRepositoryTaskFixture(): Promise<RepositoryTaskFixture> {
+  const rootDir = await createTempDir("workforest-repository-task-context-");
+  const cacheDir = path.join(rootDir, "cache");
+  await createCachedMirror(
+    cacheDir,
+    "front.git",
+    "git@github.com:example/front.git",
+  );
+
+  const parentRepoDir = path.join(rootDir, "Repos", "front", "my-feature");
+  const taskDir = path.join(
+    rootDir,
+    "Repos",
+    "front",
+    "_tasks",
+    "my-feature",
+    "existing-task",
+  );
+  await initializeRepository(parentRepoDir, "tomdale/my-feature");
+  await createLinkedWorktree(parentRepoDir, taskDir, "tomdale/existing-task");
+
+  return {
+    parentRepoDir,
+    taskDir,
+    env: await createCliEnvironment(rootDir, {
+      directory: { base: rootDir },
+    }),
+  };
+}
+
+async function createCachedMirror(
+  cacheDir: string,
+  directoryName: string,
+  remote: string,
+): Promise<void> {
+  const mirrorDir = path.join(cacheDir, directoryName);
+  await mkdir(mirrorDir, { recursive: true });
+  await runGit(mirrorDir, "init", "--bare", "--quiet");
+  await runGit(mirrorDir, "remote", "add", "origin", remote);
+}
+
 async function initializeRepository(
   repositoryDir: string,
   branch: string,
@@ -347,7 +479,7 @@ function taskMetadata(slug: string, parentRepo: string, baseSha: string) {
   return {
     slug,
     parent_repo: parentRepo,
-    path: slug,
+    path: `_tasks/${parentRepo}/${slug}`,
     branch: `tomdale/${slug}`,
     base_branch: "tomdale/workspace",
     base_sha: baseSha,
@@ -356,7 +488,10 @@ function taskMetadata(slug: string, parentRepo: string, baseSha: string) {
   };
 }
 
-async function createCliEnvironment(rootDir: string): Promise<CliEnvironment> {
+async function createCliEnvironment(
+  rootDir: string,
+  config: Record<string, unknown> = {},
+): Promise<CliEnvironment> {
   const configDir = path.join(rootDir, "config");
   const cacheDir = path.join(rootDir, "cache");
   await Promise.all([
@@ -365,7 +500,7 @@ async function createCliEnvironment(rootDir: string): Promise<CliEnvironment> {
   ]);
   await writeFile(
     path.join(configDir, "config.json"),
-    `${JSON.stringify({ branchPrefix: "tomdale/" }, null, 2)}\n`,
+    `${JSON.stringify({ branchPrefix: "tomdale/", ...config }, null, 2)}\n`,
     "utf8",
   );
 
@@ -406,7 +541,7 @@ async function runGit(
 }
 
 function expectSuccess(result: SubprocessResult): void {
-  expect(result.exitCode).toBe(0);
+  expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
   expect(result.stderr).toBe("");
   expectNoStack(result);
 }
@@ -441,6 +576,14 @@ async function expectPathToExist(targetPath: string): Promise<void> {
 
 async function expectPathNotToExist(targetPath: string): Promise<void> {
   await expect(access(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
+async function readCdTarget(env: CliEnvironment): Promise<string> {
+  const cdPathFile = env["WORKFOREST_CD_PATH_FILE"];
+  if (!cdPathFile) {
+    throw new Error("Expected WORKFOREST_CD_PATH_FILE");
+  }
+  return (await readFile(cdPathFile, "utf8")).trim();
 }
 
 async function createTempDir(prefix: string): Promise<string> {

@@ -819,19 +819,19 @@ export const commandRegistry: CommandRegistry = {
       group({
         name: "task",
         path: ["task"],
-        summary: "Manage temporary workspace tasks",
+        summary: "Manage temporary task worktrees",
         description:
-          "Create and remove short-lived task worktrees inside an existing workspace, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace. A task is scoped to one repository in the workspace; for a worktree not tied to any workspace, see `wf worktree`.",
+          "Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task. For a worktree not tied to a managed change, see `wf worktree`.",
         help: { kind: "command", command: "task" },
         children: [
           leaf({
-            name: "create",
-            path: ["task", "create"],
-            summary: "Create temporary worktrees",
+            name: "start",
+            path: ["task", "start"],
+            summary: "Start nested task lanes",
             description:
-              "Adds one or more task worktrees inside the current workspace, each on a new branch off the parent repository's current HEAD, then runs the template's setup initializers. Run from inside a workspace; the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is created, changes your shell's directory to it under shell integration. See also `wf task delete`.",
-            handler: "task.create",
-            help: nestedHelp("task", "create"),
+              "Adds one or more nested task worktrees under the current change's reserved _tasks directory, each on a new branch off the parent repository's committed HEAD, then runs setup initializers. Run from inside a workspace repo, repository change, or existing task; in workspaces, the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is started, changes your shell's directory to it under shell integration. See also `wf task finish` and `wf task delete`.",
+            handler: "task.start",
+            help: nestedHelp("task", "start"),
             operands: operands(
               1,
               null,
@@ -842,7 +842,7 @@ export const commandRegistry: CommandRegistry = {
             flags: [
               stringFlag("repo", "--repo", "repository", {
                 description:
-                  "Parent repository in the workspace to branch from; defaults to the one inferred from the current directory.",
+                  "Parent repository in a workspace to branch from; defaults to the one inferred from the current directory.",
               }),
               booleanFlag(
                 "dryRun",
@@ -859,14 +859,14 @@ export const commandRegistry: CommandRegistry = {
             ],
             examples: [
               {
-                command: "wf task create fix-login",
+                command: "wf task start fix-login",
                 description:
-                  "Create one task worktree off the inferred parent repo and cd into it.",
+                  "Start one task lane off the inferred parent repo and cd into it.",
               },
               {
-                command: "wf task create fix-login add-tests --repo web",
+                command: "wf task start fix-login add-tests --repo web",
                 description:
-                  "Create two task worktrees branched from the `web` repository.",
+                  "Start two task lanes branched from the `web` repository.",
               },
             ],
             outputModes: ["human", "report"],
@@ -878,20 +878,20 @@ export const commandRegistry: CommandRegistry = {
             path: ["task", "list"],
             summary: "List temporary worktrees",
             description:
-              "Lists the task worktrees tracked in the current workspace, showing each task's parent repository, branch, setup status, merge state, and path. Run from inside a workspace; the parent repository is inferred from the current directory unless `--repo` scopes the list. Exits 0 with a message when no tasks match.",
+              "Lists task worktrees for the current managed change, grouped by parent repository. Shows each task's branch, setup status, merge state, and path. In workspaces, the parent repository is inferred from the current directory unless `--repo` scopes the list. Exits 0 with a message when no tasks match.",
             handler: "task.list",
             help: nestedHelp("task", "list"),
             flags: [
               stringFlag("repo", "--repo", "repository", {
                 description:
-                  "Limit the list to tasks whose parent is this repository in the workspace.",
+                  "Limit the list to tasks whose parent is this repository in the current workspace.",
               }),
             ],
             examples: [
               {
                 command: "wf task list",
                 description:
-                  "List every task tracked in the current workspace.",
+                  "List every task tracked in the current managed change.",
               },
               {
                 command: "wf task list --repo web",
@@ -902,11 +902,52 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["report"],
           }),
           leaf({
+            name: "finish",
+            path: ["task", "finish"],
+            summary: "Finish integrated task lanes",
+            description:
+              "Removes one or more clean task worktrees after verifying their branches are reachable from the parent repository. Run from inside a managed change. Use `wf task delete --force` for abandoned, dirty, or intentionally unmerged task lanes.",
+            handler: "task.finish",
+            help: nestedHelp("task", "finish"),
+            operands: operands(
+              1,
+              null,
+              "task names",
+              undefined,
+              "One or more task names (slugs) to finish, as shown by `wf task list`.",
+            ),
+            flags: [
+              stringFlag("repo", "--repo", "repository", {
+                description:
+                  "Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.",
+              }),
+              booleanFlag(
+                "dryRun",
+                "--dry-run",
+                "-n",
+                "Show which task worktrees and branches would be removed without deleting anything.",
+              ),
+            ],
+            examples: [
+              {
+                command: "wf task finish fix-login",
+                description: "Finish one integrated task lane.",
+              },
+              {
+                command: "wf task finish fix-login add-tests --repo web",
+                description:
+                  "Finish two integrated task lanes branched from the `web` repository.",
+              },
+            ],
+            outputModes: ["human", "report"],
+            shellHandoff: "optional-cd",
+          }),
+          leaf({
             name: "delete",
             path: ["task", "delete"],
             summary: "Delete temporary worktrees",
             description:
-              "Removes one or more task worktrees and deletes their branches; this cannot be undone. Run from inside a workspace. Refuses a task with uncommitted changes or an unmerged branch unless you pass `--force`. Prompts for confirmation in a terminal; without a TTY it exits 1 unless `--force` or `--dry-run` is given. See also `wf task create`.",
+              "Explicitly abandons one or more task worktrees and deletes their branches; this cannot be undone. Run from inside a managed change. Refuses a task with uncommitted changes or an unmerged branch unless you pass `--force`. Prompts for confirmation in a terminal; without a TTY it exits 1 unless `--force` or `--dry-run` is given. See also `wf task finish`.",
             handler: "task.delete",
             help: nestedHelp("task", "delete"),
             operands: operands(
@@ -919,7 +960,7 @@ export const commandRegistry: CommandRegistry = {
             flags: [
               stringFlag("repo", "--repo", "repository", {
                 description:
-                  "Parent repository to disambiguate the named tasks; required when a name matches tasks in more than one repository.",
+                  "Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.",
               }),
               booleanFlag(
                 "dryRun",
@@ -965,7 +1006,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["worktree", "create"],
             summary: "Create a standalone worktree",
             description:
-              "Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task create`.",
+              "Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task start`.",
             handler: "worktree.create",
             help: nestedHelp("worktree", "create"),
             operands: operands(

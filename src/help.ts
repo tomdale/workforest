@@ -116,7 +116,7 @@ Examples:
   wf workspace create vercel/next.js -- "update docs"
   wf workspace create --like current -- "try another approach"
   wf workspace open --search
-  wf task create fix-tests
+  wf task start fix-tests
   wf worktree create vercel/next.js fix-auth
   wf cache doctor
   wf review open vercel/omniagent
@@ -145,9 +145,10 @@ Nouns:
                        \`.workforest/workspace.json\` at the root and records the workspace in a
                        global registry so \`wf workspace list\` and \`wf workspace open\` can find it.
 
-  task                 A short-lived extra worktree inside a workspace, on its own branch.
-                       Created with \`wf task create\` from inside a workspace. Because tasks reuse
-                       the workspace's cached mirrors, setup is instant. Delete with \`wf task delete\`.
+  task                 A short-lived nested worktree inside a change, on its own branch.
+                       Created with \`wf task start\` from inside a managed change. Because tasks
+                       reuse the parent repository's cached mirror, setup is instant. Finish integrated work
+                       with \`wf task finish\`, or abandon explicitly with \`wf task delete\`.
 
   standalone worktree  A single repository's worktree not attached to any workspace. Created with
                        \`wf worktree create\`. Useful for one-off explorations or single-repo work.
@@ -208,8 +209,8 @@ Interactive user workflows:
     wf review checkout vercel/next.js#1234
 
   Add an isolated experiment inside an existing workspace:
-    wf task create fix-auth             # new branch, instant setup
-    cd ../fix-auth/next.js
+    wf task start fix-auth              # new branch, instant setup
+    cd _tasks/next.js/fix-auth
     # ... experiment ...
     wf task delete fix-auth
 
@@ -230,7 +231,7 @@ Agent workflows:
 
   Adding to an existing workspace:
     wf workspace add vercel/swr         # add another repo mid-session
-    wf task create <name>               # add an isolated branch for an experiment
+    wf task start <name>                # add an isolated branch for an experiment
 
   Inspection:
     wf workspace list                   # list all known workspaces

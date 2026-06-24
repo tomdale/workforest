@@ -72,6 +72,7 @@ import {
 } from "./terminal/report.ts";
 import type {
   RepoConfig,
+  TaskMetadata,
   WorkspaceConfig,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
@@ -108,12 +109,18 @@ import {
   previewCleanup,
   validateWorkspace,
 } from "./workspace/cleanup.ts";
+import { resolveWorkforestContext } from "./workspace/context.ts";
 import { stampWorkspace } from "./workspace/index.ts";
 import {
   getMetadataPath,
   hasWorkspaceMetadata,
   readWorkspaceMetadata,
 } from "./workspace/metadata.ts";
+import {
+  getRepositoryChangePath,
+  resolveWorkforestDirectories,
+} from "./workspace/paths.ts";
+import type { TaskListEntry } from "./workspace/tasks.ts";
 
 export { log };
 
@@ -125,6 +132,14 @@ type TemplateAddFileEntry = {
 };
 
 type TemplateAddFileConflictAction = "overwrite" | "diff" | "skip" | "cancel";
+
+type RepositoryTaskCommandContext = {
+  parentRepoDir: string;
+  repoRootDir: string;
+  repoName: string;
+  changeName: string;
+  repo: RepoConfig;
+};
 
 const humanServiceEventSink: ServiceEventSink = (event) => {
   if (event.type === "output") {
@@ -416,10 +431,12 @@ async function runTaskInvocation(
 ): Promise<CommandResult> {
   try {
     switch (invocation.command.leaf.handler) {
-      case "task.create":
-        return await runTaskCreateInvocation(invocation);
+      case "task.start":
+        return await runTaskStartInvocation(invocation);
       case "task.list":
         return await runTaskListInvocation(invocation);
+      case "task.finish":
+        return await runTaskFinishInvocation(invocation);
       case "task.delete":
         return await runTaskDeleteInvocation(invocation);
       default:
@@ -1152,32 +1169,54 @@ async function runWorktreeDeleteInvocation(
   });
 }
 
-async function runTaskCreateInvocation(
+async function runTaskStartInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
+  const repo = stringFlag(invocation, "repo");
   const workspaceDir = await detectWorkspaceFromCwd();
-  if (!workspaceDir) {
-    throw new OperationalError(
-      "Run wf task create from inside a workspace. A task is a temporary worktree inside an existing workspace, and --repo selects which of the workspace's repositories to branch from — it does not name a workspace to create one in.\nFor a worktree outside a workspace, use: wf worktree create <repository> <name>",
+  if (workspaceDir) {
+    return runTaskStart(
+      {
+        slugs: [...invocation.beforeDoubleDash],
+        repo,
+        dryRun: booleanFlag(invocation, "dryRun"),
+        force: booleanFlag(invocation, "force"),
+      },
+      workspaceDir,
     );
   }
 
-  return runTaskCreate(
-    {
+  const context = await resolveRepositoryTaskCommandContext(repo);
+  if (context) {
+    return runRepositoryTaskStart({
       slugs: [...invocation.beforeDoubleDash],
-      repo: stringFlag(invocation, "repo"),
+      context,
       dryRun: booleanFlag(invocation, "dryRun"),
       force: booleanFlag(invocation, "force"),
-    },
-    workspaceDir,
+    });
+  }
+
+  throw new OperationalError(
+    "Run wf task start from inside a workspace repo or repository change. A task is a nested worktree inside an existing change, and --repo selects which workspace repository to branch from — it does not name a workspace to create one in.\nFor a worktree outside a managed change, use: wf worktree create <repository> <name>",
   );
 }
 
 async function runTaskListInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
+  const repo = stringFlag(invocation, "repo");
   return runTaskList({
+    repo,
+  });
+}
+
+async function runTaskFinishInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  return runTaskFinish({
+    names: [...invocation.beforeDoubleDash],
     repo: stringFlag(invocation, "repo"),
+    dryRun: booleanFlag(invocation, "dryRun"),
   });
 }
 
@@ -1563,7 +1602,83 @@ async function runStandaloneWorktreeRemove({
   }
 }
 
-async function runTaskCreate(
+async function resolveRepositoryTaskCommandContext(
+  repoFlag: string | undefined,
+): Promise<RepositoryTaskCommandContext | null> {
+  const { config } = await loadWorkspaceConfig();
+  const directories = await comparableWorkforestDirectories(
+    resolveWorkforestDirectories(config),
+  );
+  const context = resolveWorkforestContext(
+    await comparablePath(process.cwd()),
+    directories,
+  );
+  const repositoryContext =
+    context.kind === "repository-change"
+      ? {
+          repoName: context.repoName,
+          changeName: context.changeName,
+        }
+      : context.kind === "nested-task" &&
+          context.parentKind === "repository-change"
+        ? {
+            repoName: context.repoName,
+            changeName: context.changeName,
+          }
+        : null;
+
+  if (!repositoryContext) {
+    return null;
+  }
+
+  if (repoFlag && repoFlag !== repositoryContext.repoName) {
+    throw new UsageError(
+      `Current repository change is ${repositoryContext.repoName}/${repositoryContext.changeName}; omit --repo or use --repo ${repositoryContext.repoName}.`,
+    );
+  }
+
+  const [repo] = await resolveRepositorySpecifiers([
+    repositoryContext.repoName,
+  ]);
+  if (!repo) {
+    throw new Error(`Unknown repository "${repositoryContext.repoName}".`);
+  }
+
+  const parentRepoDir = getRepositoryChangePath(
+    directories,
+    repositoryContext.repoName,
+    repositoryContext.changeName,
+  );
+
+  return {
+    parentRepoDir,
+    repoRootDir: path.dirname(parentRepoDir),
+    repoName: repositoryContext.repoName,
+    changeName: repositoryContext.changeName,
+    repo,
+  };
+}
+
+async function comparableWorkforestDirectories(
+  directories: ReturnType<typeof resolveWorkforestDirectories>,
+): Promise<ReturnType<typeof resolveWorkforestDirectories>> {
+  return {
+    base: await comparablePath(directories.base),
+    repos: await comparablePath(directories.repos),
+    workspaces: await comparablePath(directories.workspaces),
+    reviews: await comparablePath(directories.reviews),
+  };
+}
+
+async function comparablePath(targetPath: string): Promise<string> {
+  try {
+    return await fs.realpath(targetPath);
+  } catch {
+    return path.resolve(targetPath);
+  }
+}
+
+async function runTaskStart(
   {
     slugs,
     repo,
@@ -1601,16 +1716,9 @@ async function runTaskCreate(
     );
 
     const { createTasks } = await import("./workspace/tasks.ts");
-    const sourceRepoDir = resolveWorktreeSourceDirFromCwd({
-      workspaceDir,
-      metadata,
-      parentRepoName: parentRepo.name,
-      cwd: process.cwd(),
-    });
     const result = await createTasks({
       workspaceDir,
       parentRepo,
-      ...(sourceRepoDir ? { sourceRepoDir } : {}),
       slugs,
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun,
@@ -1673,6 +1781,85 @@ async function runTaskCreate(
   }
 }
 
+async function runRepositoryTaskStart({
+  slugs,
+  context,
+  dryRun,
+  force,
+}: {
+  slugs: string[];
+  context: RepositoryTaskCommandContext;
+  dryRun: boolean;
+  force: boolean;
+}): Promise<CommandResult> {
+  try {
+    const { config } = await loadWorkspaceConfig();
+    const branchPrefix = resolveBranchPrefix(config.branchPrefix, undefined);
+    const { createRepositoryTasks } = await import("./workspace/tasks.ts");
+    const result = await createRepositoryTasks({
+      parentRepoDir: context.parentRepoDir,
+      repo: context.repo,
+      changeName: context.changeName,
+      slugs,
+      ...(branchPrefix !== undefined ? { branchPrefix } : {}),
+      dryRun,
+      force,
+      onEvent: humanServiceEventSink,
+    });
+
+    if (dryRun) {
+      showDryRunReport({
+        sections: [
+          {
+            entries: result.created.map((worktree) => ({
+              title: worktree.slug,
+              details: [
+                { label: "Repository", value: worktree.parentRepo },
+                { label: "Change", value: context.changeName },
+                { label: "Branch", value: worktree.branch },
+                { label: "Target", value: worktree.path },
+              ],
+            })),
+          },
+        ],
+      });
+      return success();
+    }
+
+    for (const worktree of result.created) {
+      const setup =
+        worktree.setupStatus === "ready"
+          ? "ready"
+          : `setup failed${worktree.setupLog ? ` (log: ${worktree.setupLog})` : ""}`;
+      log.success(`${worktree.slug}: ${worktree.path} (${setup})`);
+    }
+
+    for (const failure of result.failures) {
+      log.error(`${failure.slug}: ${failure.error.message}`);
+    }
+
+    if (result.created.length === 1 && result.failures.length === 0) {
+      const target = result.created[0]?.path;
+      if (target) {
+        await writeShellCdPath(target);
+        if (!isShellAutoCdEnabled()) {
+          log.info(`Run: cd ${target}`);
+        }
+      }
+    }
+
+    if (
+      result.failures.length > 0 ||
+      result.created.some((w) => w.setupStatus === "failed")
+    ) {
+      return failure(1, { kind: "none" });
+    }
+    return success();
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
 async function runTaskList({
   repo,
 }: {
@@ -1680,7 +1867,11 @@ async function runTaskList({
 }): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    throw new OperationalError("Not inside a workspace.");
+    const context = await resolveRepositoryTaskCommandContext(repo);
+    if (!context) {
+      throw new OperationalError("Not inside a Workforest change.");
+    }
+    return runRepositoryTaskList(context);
   }
 
   try {
@@ -1708,28 +1899,7 @@ async function runTaskList({
 
     printReport({
       title: "Tasks",
-      sections: [
-        {
-          entries: entries.map((entry) => ({
-            title: entry.slug,
-            details: [
-              { label: "Repository", value: entry.parent_repo },
-              { label: "Branch", value: entry.branch },
-              { label: "Status", value: entry.state },
-              {
-                label: "Merged",
-                value:
-                  entry.merged === null
-                    ? "unknown"
-                    : entry.merged
-                      ? "yes"
-                      : "no",
-              },
-              { label: "Path", value: entry.absolutePath },
-            ],
-          })),
-        },
-      ],
+      sections: taskListReportSections(entries),
       footer: [
         `Workspace: ${workspaceDir}`,
         `${entries.length} task${entries.length === 1 ? "" : "s"}`,
@@ -1739,6 +1909,74 @@ async function runTaskList({
   } catch (error) {
     throw operationalError(error);
   }
+}
+
+async function runRepositoryTaskList(
+  context: RepositoryTaskCommandContext,
+): Promise<CommandResult> {
+  try {
+    const { listRepositoryTasks } = await import("./workspace/tasks.ts");
+    const entries = await listRepositoryTasks({
+      parentRepoDir: context.parentRepoDir,
+      repoName: context.repoName,
+      changeName: context.changeName,
+    });
+
+    if (entries.length === 0) {
+      log.info("No tasks found.");
+      return success();
+    }
+
+    printReport({
+      title: "Tasks",
+      sections: taskListReportSections(entries, {
+        changeName: context.changeName,
+      }),
+      footer: [
+        `Repository change: ${context.repoName}/${context.changeName}`,
+        `${entries.length} task${entries.length === 1 ? "" : "s"}`,
+      ].join("\n"),
+    });
+    return success();
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+function taskListReportSections(
+  entries: readonly TaskListEntry[],
+  options: { changeName?: string } = {},
+): ReportSection[] {
+  const grouped = new Map<string, TaskListEntry[]>();
+  for (const entry of entries) {
+    const group = grouped.get(entry.parent_repo) ?? [];
+    group.push(entry);
+    grouped.set(entry.parent_repo, group);
+  }
+
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([repoName, tasks]) => ({
+      title: options.changeName
+        ? `${repoName}/${options.changeName}`
+        : repoName,
+      entries: tasks
+        .slice()
+        .sort((left, right) => left.slug.localeCompare(right.slug))
+        .map((entry) => ({
+          title: entry.slug,
+          details: [
+            { label: "Branch", value: entry.branch },
+            { label: "Status", value: entry.state },
+            {
+              label: "Merged",
+              value:
+                entry.merged === null ? "unknown" : entry.merged ? "yes" : "no",
+            },
+            { label: "Path", value: entry.absolutePath },
+          ],
+        })),
+    }));
 }
 
 async function runTaskDelete({
@@ -1756,7 +1994,17 @@ async function runTaskDelete({
 }): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
-    throw new OperationalError("Not inside a workspace.");
+    const context = await resolveRepositoryTaskCommandContext(repo);
+    if (!context) {
+      throw new OperationalError("Not inside a Workforest change.");
+    }
+    return runRepositoryTaskDelete({
+      names,
+      context,
+      dryRun,
+      force,
+      skipConfirmation,
+    });
   }
 
   try {
@@ -1786,6 +2034,7 @@ async function runTaskDelete({
       if (!confirmed) return success();
     }
 
+    const invocationCwd = process.cwd();
     const result = await deleteTasks({
       workspaceDir,
       slugs: names,
@@ -1816,10 +2065,259 @@ async function runTaskDelete({
       for (const entry of result.removed) {
         log.success(`Removed ${entry.slug}`);
       }
+      await writeTaskRemovalCdTarget(
+        workspaceTaskRemovalCdTarget(
+          result.removed,
+          workspaceDir,
+          invocationCwd,
+        ),
+      );
     }
     return success();
   } catch (error) {
     throw operationalError(error);
+  }
+}
+
+async function runRepositoryTaskDelete({
+  names,
+  context,
+  dryRun,
+  force,
+  skipConfirmation = false,
+}: {
+  names: string[];
+  context: RepositoryTaskCommandContext;
+  dryRun: boolean;
+  force: boolean;
+  skipConfirmation?: boolean;
+}): Promise<CommandResult> {
+  try {
+    const { deleteRepositoryTasks } = await import("./workspace/tasks.ts");
+    if (!skipConfirmation) {
+      const confirmed = await confirmDelete({
+        dryRun,
+        force,
+        description:
+          names.length === 1 ? `task "${names[0]}"` : `${names.length} tasks`,
+        targetPath: context.parentRepoDir,
+      });
+      if (!confirmed) return success();
+    }
+
+    const invocationCwd = process.cwd();
+    const result = await deleteRepositoryTasks({
+      parentRepoDir: context.parentRepoDir,
+      repoName: context.repoName,
+      changeName: context.changeName,
+      slugs: names,
+      dryRun,
+      force,
+    });
+
+    if (dryRun) {
+      showDryRunReport({
+        sections: [
+          {
+            entries: result.removed.map((entry) => ({
+              title: entry.slug,
+              details: [
+                { label: "Repository", value: entry.parent_repo },
+                { label: "Change", value: context.changeName },
+                { label: "Branch", value: entry.branch },
+                {
+                  label: "Path",
+                  value: resolveContainedPath(context.repoRootDir, entry.path),
+                },
+              ],
+            })),
+          },
+        ],
+      });
+    } else {
+      for (const entry of result.removed) {
+        log.success(`Removed ${entry.slug}`);
+      }
+      await writeTaskRemovalCdTarget(
+        repositoryTaskRemovalCdTarget(result.removed, context, invocationCwd),
+      );
+    }
+    return success();
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+async function runTaskFinish({
+  names,
+  repo,
+  dryRun,
+}: {
+  names: string[];
+  repo?: string | undefined;
+  dryRun: boolean;
+}): Promise<CommandResult> {
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    const context = await resolveRepositoryTaskCommandContext(repo);
+    if (!context) {
+      throw new OperationalError("Not inside a Workforest change.");
+    }
+    return runRepositoryTaskFinish({
+      names,
+      context,
+      dryRun,
+    });
+  }
+
+  try {
+    const metadata = await readWorkspaceMetadata(workspaceDir);
+    if (!metadata) {
+      throw new Error(`Could not read workspace metadata from ${workspaceDir}`);
+    }
+
+    const parentRepoName =
+      repo ??
+      resolveWorkspaceRepoNameFromCwd({
+        workspaceDir,
+        metadata,
+        cwd: process.cwd(),
+        allowTask: true,
+      });
+
+    const { finishTasks } = await import("./workspace/tasks.ts");
+    const invocationCwd = process.cwd();
+    const result = await finishTasks({
+      workspaceDir,
+      slugs: names,
+      dryRun,
+      ...(parentRepoName ? { parentRepoName } : {}),
+    });
+
+    if (dryRun) {
+      showDryRunReport({
+        sections: [
+          {
+            entries: result.removed.map((entry) => ({
+              title: entry.slug,
+              details: [
+                { label: "Repository", value: entry.parent_repo },
+                { label: "Branch", value: entry.branch },
+                {
+                  label: "Path",
+                  value: resolveContainedPath(workspaceDir, entry.path),
+                },
+              ],
+            })),
+          },
+        ],
+      });
+    } else {
+      for (const entry of result.removed) {
+        log.success(`Finished ${entry.slug}`);
+      }
+      await writeTaskRemovalCdTarget(
+        workspaceTaskRemovalCdTarget(
+          result.removed,
+          workspaceDir,
+          invocationCwd,
+        ),
+      );
+    }
+    return success();
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+async function runRepositoryTaskFinish({
+  names,
+  context,
+  dryRun,
+}: {
+  names: string[];
+  context: RepositoryTaskCommandContext;
+  dryRun: boolean;
+}): Promise<CommandResult> {
+  try {
+    const { finishRepositoryTasks } = await import("./workspace/tasks.ts");
+    const invocationCwd = process.cwd();
+    const result = await finishRepositoryTasks({
+      parentRepoDir: context.parentRepoDir,
+      repoName: context.repoName,
+      changeName: context.changeName,
+      slugs: names,
+      dryRun,
+    });
+
+    if (dryRun) {
+      showDryRunReport({
+        sections: [
+          {
+            entries: result.removed.map((entry) => ({
+              title: entry.slug,
+              details: [
+                { label: "Repository", value: entry.parent_repo },
+                { label: "Change", value: context.changeName },
+                { label: "Branch", value: entry.branch },
+                {
+                  label: "Path",
+                  value: resolveContainedPath(context.repoRootDir, entry.path),
+                },
+              ],
+            })),
+          },
+        ],
+      });
+    } else {
+      for (const entry of result.removed) {
+        log.success(`Finished ${entry.slug}`);
+      }
+      await writeTaskRemovalCdTarget(
+        repositoryTaskRemovalCdTarget(result.removed, context, invocationCwd),
+      );
+    }
+    return success();
+  } catch (error) {
+    throw operationalError(error);
+  }
+}
+
+function workspaceTaskRemovalCdTarget(
+  removed: readonly Pick<TaskMetadata, "parent_repo" | "path">[],
+  workspaceDir: string,
+  invocationCwd: string,
+): string | undefined {
+  for (const entry of removed) {
+    const taskDir = resolveContainedPath(workspaceDir, entry.path);
+    if (isPathInsideOrEqual(invocationCwd, taskDir)) {
+      return resolveContainedPath(workspaceDir, entry.parent_repo);
+    }
+  }
+  return undefined;
+}
+
+function repositoryTaskRemovalCdTarget(
+  removed: readonly Pick<TaskMetadata, "path">[],
+  context: RepositoryTaskCommandContext,
+  invocationCwd: string,
+): string | undefined {
+  for (const entry of removed) {
+    const taskDir = resolveContainedPath(context.repoRootDir, entry.path);
+    if (isPathInsideOrEqual(invocationCwd, taskDir)) {
+      return context.parentRepoDir;
+    }
+  }
+  return undefined;
+}
+
+async function writeTaskRemovalCdTarget(
+  target: string | undefined,
+): Promise<void> {
+  if (!target) return;
+  await writeShellCdPath(target);
+  if (!isShellAutoCdEnabled()) {
+    log.info(`Run: cd ${target}`);
   }
 }
 
@@ -4016,40 +4514,6 @@ function resolveWorkspaceRepoNameFromCwd({
       if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
         return entry.parent_repo;
       }
-    }
-  }
-
-  return undefined;
-}
-
-function resolveWorktreeSourceDirFromCwd({
-  workspaceDir,
-  metadata,
-  parentRepoName,
-  cwd,
-}: {
-  workspaceDir: string;
-  metadata: WorkspaceMetadata;
-  parentRepoName: string;
-  cwd: string;
-}): string | undefined {
-  const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const resolvedCwd = path.resolve(cwd);
-
-  for (const entry of metadata.review_worktrees ?? []) {
-    const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
-    if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
-      return worktreeDir;
-    }
-  }
-
-  for (const entry of metadata.tasks ?? []) {
-    const worktreeDir = resolveContainedPath(resolvedWorkspaceDir, entry.path);
-    if (
-      entry.parent_repo === parentRepoName &&
-      isPathInsideOrEqual(resolvedCwd, worktreeDir)
-    ) {
-      return worktreeDir;
     }
   }
 

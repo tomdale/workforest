@@ -85,7 +85,7 @@ beforeEach(() => {
       {
         slug: "fix-tests",
         parent_repo: "api",
-        path: "api-fix-tests",
+        path: "_tasks/api/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/demo",
         base_sha: "abc123",

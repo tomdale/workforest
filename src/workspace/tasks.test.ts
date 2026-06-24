@@ -93,7 +93,7 @@ describe("workspace tasks", () => {
       {
         slug: "fix-tests",
         parentRepo: "front",
-        path: path.join(workspaceDir, "fix-tests"),
+        path: path.join(workspaceDir, "_tasks", "front", "fix-tests"),
         branch: "tomdale/fix-tests",
         setupStatus: "ready",
       },
@@ -104,7 +104,7 @@ describe("workspace tasks", () => {
         "add",
         "-b",
         "tomdale/fix-tests",
-        path.join(workspaceDir, "fix-tests"),
+        path.join(workspaceDir, "_tasks", "front", "fix-tests"),
         "HEAD",
       ],
       { cwd: path.join(workspaceDir, "front") },
@@ -121,7 +121,7 @@ describe("workspace tasks", () => {
         {
           slug: "fix-tests",
           parent_repo: "front",
-          path: "fix-tests",
+          path: "_tasks/front/fix-tests",
           branch: "tomdale/fix-tests",
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",
@@ -164,20 +164,20 @@ describe("workspace tasks", () => {
         "add",
         "-b",
         "tomdale/optional-corepack",
-        path.join(workspaceDir, "optional-corepack"),
+        path.join(workspaceDir, "_tasks", "front", "optional-corepack"),
         "HEAD",
       ],
       { cwd: path.join(workspaceDir, "front") },
     );
   });
 
-  it("rejects duplicate slugs anywhere in the workspace", async () => {
+  it("rejects duplicate slugs for the same parent repo", async () => {
     const workspaceDir = await createWorkspaceDir();
     await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
-        parent_repo: "docs",
-        path: "fix-tests",
+        parent_repo: "front",
+        path: "_tasks/front/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "main",
         base_sha: "abc123",
@@ -203,7 +203,52 @@ describe("workspace tasks", () => {
         },
         slugs: ["fix-tests"],
       }),
-    ).rejects.toThrow("already tracked in this workspace");
+    ).rejects.toThrow('Task "fix-tests" is already tracked for front.');
+  });
+
+  it("allows the same slug for different workspace parent repos", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    await mkdir(path.join(workspaceDir, "docs"), { recursive: true });
+    await appendTasks(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "docs",
+        path: "_tasks/docs/fix-tests",
+        branch: "tomdale/docs-fix-tests",
+        base_branch: "main",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+    const { createTasks } = await import("./tasks.ts");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "def456\n", stderr: "" })
+      .mockRejectedValueOnce(new Error("missing branch"));
+
+    await expect(
+      createTasks({
+        workspaceDir,
+        parentRepo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          default_branch: "main",
+          has_lockfile: true,
+        },
+        slugs: ["fix-tests"],
+        dryRun: true,
+      }),
+    ).resolves.toMatchObject({
+      created: [
+        {
+          slug: "fix-tests",
+          parentRepo: "front",
+          path: path.join(workspaceDir, "_tasks", "front", "fix-tests"),
+        },
+      ],
+    });
   });
 
   it("keeps a worktree and records a setup log when initializers fail", async () => {
@@ -260,13 +305,13 @@ describe("workspace tasks", () => {
 
   it("removes merged clean worktrees and deletes their local branches", async () => {
     const workspaceDir = await createWorkspaceDir();
-    const targetDir = path.join(workspaceDir, "fix-tests");
-    await mkdir(targetDir);
+    const targetDir = path.join(workspaceDir, "_tasks", "front", "fix-tests");
+    await mkdir(targetDir, { recursive: true });
     await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "fix-tests",
+        path: "_tasks/front/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/my-feature",
         base_sha: "abc123",
@@ -315,6 +360,35 @@ describe("workspace tasks", () => {
     ).resolves.not.toHaveProperty("tasks");
   });
 
+  it("refuses to finish stale workspace tasks", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    await appendTasks(workspaceDir, [
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "_tasks/front/fix-tests",
+        branch: "tomdale/fix-tests",
+        base_branch: "tomdale/my-feature",
+        base_sha: "abc123",
+        created_at: "2026-05-15T00:00:00.000Z",
+        setup_status: "ready",
+      },
+    ]);
+    const { finishTasks } = await import("./tasks.ts");
+
+    await expect(
+      finishTasks({
+        workspaceDir,
+        slugs: ["fix-tests"],
+        parentRepoName: "front",
+      }),
+    ).rejects.toThrow('Task "fix-tests" is stale.');
+    expect(runGitMock).not.toHaveBeenCalled();
+    await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
+      tasks: [expect.objectContaining({ slug: "fix-tests" })],
+    });
+  });
+
   it("refuses destructive cleanup when a setup log ancestor is a symlink", async () => {
     const workspaceDir = await createWorkspaceDir();
     const outsideDir = await mkdtemp(
@@ -327,7 +401,7 @@ describe("workspace tasks", () => {
       {
         slug: "fix-tests",
         parent_repo: "front",
-        path: "fix-tests",
+        path: "_tasks/front/fix-tests",
         branch: "tomdale/fix-tests",
         base_branch: "tomdale/my-feature",
         base_sha: "abc123",
@@ -336,7 +410,9 @@ describe("workspace tasks", () => {
         setup_log: ".workforest/logs/front-fix-tests.log",
       },
     ]);
-    await mkdir(path.join(workspaceDir, "fix-tests"));
+    await mkdir(path.join(workspaceDir, "_tasks", "front", "fix-tests"), {
+      recursive: true,
+    });
     await symlink(outsideDir, path.join(workspaceDir, ".workforest", "logs"));
     const { deleteTasks } = await import("./tasks.ts");
 
@@ -350,5 +426,140 @@ describe("workspace tasks", () => {
 
     await expect(readFile(outsideLog, "utf8")).resolves.toBe("keep\n");
     expect(runGitMock).not.toHaveBeenCalled();
+  });
+
+  it("creates repository-change tasks under the reserved change task path", async () => {
+    const repoRootDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-repo-"),
+    );
+    tempDirs.push(repoRootDir);
+    const parentRepoDir = path.join(repoRootDir, "my-feature");
+    await mkdir(parentRepoDir, { recursive: true });
+    const { createRepositoryTasks } = await import("./tasks.ts");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockRejectedValueOnce(new Error("missing branch"))
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const result = await createRepositoryTasks({
+      parentRepoDir,
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      changeName: "my-feature",
+      slugs: ["fix-tests"],
+    });
+
+    expect(result.created).toEqual([
+      {
+        slug: "fix-tests",
+        parentRepo: "front",
+        path: path.join(repoRootDir, "_tasks", "my-feature", "fix-tests"),
+        branch: "tomdale/fix-tests",
+        setupStatus: "ready",
+      },
+    ]);
+    expect(runGitMock).toHaveBeenLastCalledWith(
+      [
+        "worktree",
+        "add",
+        "-b",
+        "tomdale/fix-tests",
+        path.join(repoRootDir, "_tasks", "my-feature", "fix-tests"),
+        "HEAD",
+      ],
+      { cwd: parentRepoDir },
+    );
+  });
+
+  it("lists repository-change tasks from reserved task directories", async () => {
+    const repoRootDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-repo-"),
+    );
+    tempDirs.push(repoRootDir);
+    const parentRepoDir = path.join(repoRootDir, "my-feature");
+    const taskDir = path.join(repoRootDir, "_tasks", "my-feature", "fix-tests");
+    await mkdir(taskDir, { recursive: true });
+    const { listRepositoryTasks } = await import("./tasks.ts");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "tomdale/fix-tests\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    await expect(
+      listRepositoryTasks({
+        parentRepoDir,
+        repoName: "front",
+        changeName: "my-feature",
+      }),
+    ).resolves.toMatchObject([
+      {
+        slug: "fix-tests",
+        parent_repo: "front",
+        path: "_tasks/my-feature/fix-tests",
+        branch: "tomdale/fix-tests",
+        absolutePath: taskDir,
+        state: "ready",
+        merged: true,
+      },
+    ]);
+  });
+
+  it("finishes merged repository-change tasks", async () => {
+    const repoRootDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-repo-"),
+    );
+    tempDirs.push(repoRootDir);
+    const parentRepoDir = path.join(repoRootDir, "my-feature");
+    const taskDir = path.join(repoRootDir, "_tasks", "my-feature", "fix-tests");
+    await mkdir(taskDir, { recursive: true });
+    const { finishRepositoryTasks } = await import("./tasks.ts");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "tomdale/fix-tests\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    await expect(
+      finishRepositoryTasks({
+        parentRepoDir,
+        repoName: "front",
+        changeName: "my-feature",
+        slugs: ["fix-tests"],
+      }),
+    ).resolves.toEqual({
+      removed: [
+        expect.objectContaining({
+          slug: "fix-tests",
+          parent_repo: "front",
+        }),
+      ],
+    });
+
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      7,
+      ["worktree", "remove", taskDir],
+      {
+        cwd: parentRepoDir,
+        timeout: 30_000,
+      },
+    );
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      8,
+      ["branch", "-d", "tomdale/fix-tests"],
+      { cwd: parentRepoDir },
+    );
   });
 });

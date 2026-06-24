@@ -64,7 +64,8 @@ describe("parseInvocation", () => {
     [["workspace", "list", "extra"], "Expected no operands"],
     [["workspace", "delete"], "Expected 1 workspace"],
     [["workspace", "delete", "one", "two"], "Expected 1 workspace"],
-    [["task", "create"], "Expected 1 or more task names"],
+    [["task", "start"], "Expected 1 or more task names"],
+    [["task", "finish"], "Expected 1 or more task names"],
     [["task", "delete"], "Expected 1 or more task names"],
     [
       ["worktree", "create", "front"],
@@ -122,11 +123,17 @@ describe("parseInvocation", () => {
 
   it("parses task and standalone worktree flags independently", () => {
     expect(
-      parse(["task", "create", "fix", "--repo", "front", "-n", "-f"]).flags,
+      parse(["task", "start", "fix", "--repo", "front", "-n", "-f"]).flags,
     ).toEqual({
       repo: "front",
       dryRun: true,
       force: true,
+    });
+    expect(
+      parse(["task", "finish", "fix", "--repo", "front", "-n"]).flags,
+    ).toEqual({
+      repo: "front",
+      dryRun: true,
     });
     expect(
       parse(["worktree", "create", "front", "fix", "--dir", "./target", "-n"])

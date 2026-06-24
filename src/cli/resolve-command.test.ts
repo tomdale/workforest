@@ -15,7 +15,8 @@ describe("resolveCommand", () => {
       ["workspace", "delete"],
       "workspace.delete",
     ],
-    [["task", "create", "fix-auth"], ["task", "create"], "task.create"],
+    [["task", "start", "fix-auth"], ["task", "start"], "task.start"],
+    [["task", "finish", "fix-auth"], ["task", "finish"], "task.finish"],
     [
       ["worktree", "create", "front", "fix-auth"],
       ["worktree", "create"],
