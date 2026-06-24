@@ -260,6 +260,8 @@ async function runInvocation(
       return runTypedCommand(runListCommand);
     case "change.list":
       return runTypedCommand(() => runChangeListCommand(invocation));
+    case "change.status":
+      return runTypedCommand(() => runChangeStatusCommand(invocation));
     case "shell.init":
       return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":
@@ -994,6 +996,46 @@ async function runChangeListCommand(
           }),
         ),
       );
+}
+
+async function runChangeStatusCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const { config } = await loadWorkspaceConfig();
+  const selector = invocation.beforeDoubleDash[0];
+  const { resolveChangeSelector } = await import("./workspace/selectors.ts");
+  const resolution = await resolveChangeSelector(config, selector);
+
+  if (resolution.kind === "outside") {
+    throw new OperationalError(
+      [
+        "Not in a Workforest change.",
+        "Run: wf list",
+        "Or start explicitly: wf start <change> <repo|@template>",
+      ].join("\n"),
+    );
+  }
+  if (resolution.kind === "missing") {
+    throw new UsageError(`Unknown change selector: ${resolution.selector}`);
+  }
+  if (resolution.kind === "ambiguous") {
+    throw new UsageError(
+      [
+        `Ambiguous change selector "${resolution.selector}".`,
+        "Matches:",
+        ...resolution.matches.map((match) => `  ${match}`),
+        "Use <group>/<change>.",
+      ].join("\n"),
+    );
+  }
+
+  const { buildChangeStatus, renderChangeStatus } = await import(
+    "./workspace/status.ts"
+  );
+  const status = await buildChangeStatus(resolution.entry);
+  return booleanInvocationFlag(invocation, "json")
+    ? jsonSuccess(status)
+    : success(reportOutput(renderChangeStatus(status)));
 }
 
 async function runWorktreeCreateInvocation(

@@ -10,6 +10,7 @@ describe("shell command model", () => {
       "new",
       "clean",
       "list",
+      "status",
       "workspace",
       "task",
       "worktree",

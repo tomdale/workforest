@@ -44,6 +44,30 @@ Examples:
 - `wf list --repo workforest` — Show changes containing the workforest repository.
 - `wf list --group _adhoc --paths` — Show _adhoc workspace changes with paths.
 
+## `wf status`
+
+Show change status.
+
+Shows a static report for one Workforest change, resolving the current change from the working directory when no selector is provided.
+
+```text
+wf status [options] [selector]
+```
+
+Arguments:
+
+- `selector` — Change selector as <group>/<change>, or a bare change name when unique.
+
+Options:
+
+- `--json` — Emit the change status model as a JSON envelope instead of the report.
+
+Examples:
+
+- `wf status` — Show status for the current Workforest change.
+- `wf status workforest/cli-redesign` — Show a repository change by selector.
+- `wf status vercel-agent/auth-fix --json` — Print a workspace change status as JSON.
+
 ## `wf workspace`
 
 Manage workspaces.

@@ -82,7 +82,6 @@ describe("workspace CLI conformance", () => {
     [["find"], "Unknown command"],
     [["fork", "workspace"], "Unknown command"],
     [["add", "vercel/front"], "Unknown command"],
-    [["status"], "Unknown command"],
     [["delete", "workspace"], "Unknown command"],
   ])("returns exit 2 for unsupported invocation %j", async (argv, message) => {
     const result = await executeCli(argv);

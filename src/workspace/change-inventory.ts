@@ -41,6 +41,10 @@ export type RepositoryChangeInventoryEntry = Readonly<{
   path: string;
 }>;
 
+export type ChangeInventoryEntry =
+  | WorkspaceChangeInventoryEntry
+  | RepositoryChangeInventoryEntry;
+
 export type ChangeInventory = Readonly<{
   workspaces: readonly WorkspaceChangeInventoryEntry[];
   repositories: readonly RepositoryChangeInventoryEntry[];

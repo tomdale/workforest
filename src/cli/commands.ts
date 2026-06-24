@@ -297,6 +297,46 @@ const changeList = leaf({
   outputModes: ["report", "json"],
 });
 
+const changeStatus = leaf({
+  name: "status",
+  path: ["status"],
+  summary: "Show change status",
+  description:
+    "Shows a static report for one Workforest change, resolving the current change from the working directory when no selector is provided.",
+  handler: "change.status",
+  help: { kind: "command", command: "status" },
+  operands: operands(
+    0,
+    1,
+    "selector",
+    undefined,
+    "Change selector as <group>/<change>, or a bare change name when unique.",
+  ),
+  flags: [
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit the change status model as a JSON envelope instead of the report.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf status",
+      description: "Show status for the current Workforest change.",
+    },
+    {
+      command: "wf status workforest/cli-redesign",
+      description: "Show a repository change by selector.",
+    },
+    {
+      command: "wf status vercel-agent/auth-fix --json",
+      description: "Print a workspace change status as JSON.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
 const workspaceCreate = leaf({
   name: "create",
   path: ["workspace", "create"],
@@ -405,6 +445,7 @@ export const commandRegistry: CommandRegistry = {
     help: { kind: "root" },
     children: [
       changeList,
+      changeStatus,
       group({
         name: "workspace",
         path: ["workspace"],
