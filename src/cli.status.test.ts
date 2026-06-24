@@ -84,6 +84,58 @@ describe("wf status", () => {
     expect(rendered.stdout).toContain("Inspect initialization details above.");
   });
 
+  it("shows a static report when watch has no initialization state", async () => {
+    await createStatusFixture();
+
+    const result = await executeCli([
+      "status",
+      "workforest/cli-redesign",
+      "--watch",
+    ]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
+    expect(rendered.stdout).toContain("Change status");
+    expect(rendered.stdout).toContain("Note");
+    expect(rendered.stdout).toContain(
+      "No initialization is recorded for this change; showing the static report.",
+    );
+  });
+
+  it("shows a static report for watch outside an interactive terminal", async () => {
+    await createStatusFixture({
+      repoInitializations: [
+        {
+          version: 1,
+          repo: "api",
+          status: "running",
+          phase: "initializer",
+          step: "install",
+          message: "Installing dependencies",
+          pid: 4242,
+          run_id: "run-1",
+          attempt: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = await executeCli([
+      "status",
+      "vercel-agent/auth-fix",
+      "--watch",
+    ]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
+    expect(rendered.stdout).toContain("Initialization");
+    expect(rendered.stdout).toContain("Failed:    api");
+    expect(rendered.stdout).toContain(
+      "Initialization watcher requires an interactive terminal; showing the static report.",
+    );
+  });
+
   it("reports ambiguous bare selectors", async () => {
     await createStatusFixture();
 
@@ -168,6 +220,20 @@ async function createStatusFixture(
       current_hook?: string;
       updated_at: string;
     };
+    repoInitializations?: Array<{
+      version: 1;
+      repo: string;
+      status: "pending" | "git" | "queued" | "running" | "ready" | "failed";
+      phase?: "git" | "initializer";
+      step?: string;
+      message?: string;
+      error?: string;
+      pid?: number;
+      run_id?: string;
+      attempt: number;
+      created_at: string;
+      updated_at: string;
+    }>;
   } = {},
 ): Promise<{
   workspace: string;
@@ -245,6 +311,24 @@ async function createStatusFixture(
       path.join(initializationDir, "workspace.json"),
       JSON.stringify(options.workspaceInitialization, null, 2),
       "utf8",
+    );
+  }
+  if (options.repoInitializations?.length) {
+    const repoStateDir = path.join(
+      workspace,
+      ".workforest",
+      "initialization",
+      "repos",
+    );
+    await mkdir(repoStateDir, { recursive: true });
+    await Promise.all(
+      options.repoInitializations.map((state) =>
+        writeFile(
+          path.join(repoStateDir, `${encodeURIComponent(state.repo)}.json`),
+          JSON.stringify(state, null, 2),
+          "utf8",
+        ),
+      ),
     );
   }
 

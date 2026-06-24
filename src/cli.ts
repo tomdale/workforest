@@ -197,6 +197,9 @@ export async function executeCli(
   const errorOutputMode = requestsJsonOutput(argv) ? "json" : "human";
 
   try {
+    const workerResult = await runPrivateWorkerIfRequested();
+    if (workerResult) return workerResult;
+
     const resolution = resolveCommand(commandRegistry, argv);
     if (resolution.kind === "help") {
       return success({
@@ -319,8 +322,6 @@ async function runInvocation(
       });
     case "version":
       return runVersionCommand();
-    case "initialize-repo":
-      return runInitializeRepoWorkerCommand(invocation);
   }
 
   if (invocation.command.leaf.handler.startsWith("template.")) {
@@ -432,6 +433,33 @@ function stringInvocationFlag(
   return typeof value === "string" ? value : undefined;
 }
 
+async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
+  const worker = process.env["WORKFOREST_WORKER"];
+  if (!worker) return null;
+  if (worker !== "repo-initializer") {
+    throw new OperationalError(`Unknown Workforest worker: ${worker}`);
+  }
+
+  const workspaceDir = process.env["WORKFOREST_WORKER_WORKSPACE"];
+  const repoName = process.env["WORKFOREST_WORKER_REPO"];
+  const runId = process.env["WORKFOREST_WORKER_RUN_ID"];
+  if (!workspaceDir || !repoName || !runId) {
+    throw new OperationalError(
+      "Repository initialization worker requires WORKFOREST_WORKER_WORKSPACE, WORKFOREST_WORKER_REPO, and WORKFOREST_WORKER_RUN_ID.",
+    );
+  }
+
+  const { runRepoInitializationWorker } = await import(
+    "./workspace/initialization.ts"
+  );
+  try {
+    await runRepoInitializationWorker({ workspaceDir, repoName, runId });
+    return success();
+  } catch (error) {
+    throw new OperationalError(getErrorMessage(error), { cause: error });
+  }
+}
+
 async function renderHelpReference(
   reference: HelpReference,
   pathSegments: readonly string[],
@@ -454,29 +482,6 @@ async function renderHelpReference(
 
 No additional help is available for this internal command.`)
   );
-}
-
-async function runInitializeRepoWorkerCommand(
-  invocation: ParsedInvocation,
-): Promise<CommandResult> {
-  const workspaceDir = stringInvocationFlag(invocation, "workspace");
-  const repoName = stringInvocationFlag(invocation, "repo");
-  const runId = stringInvocationFlag(invocation, "runId");
-  if (!workspaceDir || !repoName || !runId) {
-    throw new UsageError(
-      "Internal repository initialization requires --workspace, --repo, and --run-id.",
-    );
-  }
-
-  const { runRepoInitializationWorker } = await import(
-    "./workspace/initialization.ts"
-  );
-  try {
-    await runRepoInitializationWorker({ workspaceDir, repoName, runId });
-    return success();
-  } catch (error) {
-    throw new OperationalError(getErrorMessage(error), { cause: error });
-  }
 }
 
 async function runStatusCommand(
@@ -1001,6 +1006,13 @@ async function runChangeListCommand(
 async function runChangeStatusCommand(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
+  if (
+    booleanInvocationFlag(invocation, "watch") &&
+    booleanInvocationFlag(invocation, "json")
+  ) {
+    throw new UsageError('Flag "--watch" cannot be combined with "--json".');
+  }
+
   const { config } = await loadWorkspaceConfig();
   const selector = invocation.beforeDoubleDash[0];
   const { resolveChangeSelector } = await import("./workspace/selectors.ts");
@@ -1033,6 +1045,38 @@ async function runChangeStatusCommand(
     "./workspace/status.ts"
   );
   const status = await buildChangeStatus(resolution.entry);
+
+  if (booleanInvocationFlag(invocation, "watch")) {
+    if (!status.initialization || status.initialization.repos.length === 0) {
+      return success(
+        reportOutput(
+          renderChangeStatus(status, {
+            note: "No initialization is recorded for this change; showing the static report.",
+          }),
+        ),
+      );
+    }
+
+    if (!isInteractive()) {
+      return success(
+        reportOutput(
+          renderChangeStatus(status, {
+            note: "Initialization watcher requires an interactive terminal; showing the static report.",
+          }),
+        ),
+      );
+    }
+
+    const { renderInitializationStatus } = await import(
+      "./ui/initialization-status.ts"
+    );
+    await renderInitializationStatus(
+      resolution.entry.path,
+      status.initialization.repos.map((state) => state.repo),
+    );
+    return success();
+  }
+
   return booleanInvocationFlag(invocation, "json")
     ? jsonSuccess(status)
     : success(reportOutput(renderChangeStatus(status)));

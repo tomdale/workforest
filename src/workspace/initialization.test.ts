@@ -4,8 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RepoConfig } from "../types.ts";
 import {
+  buildRepoInitializerWorkerEnvironment,
   cancelRepoInitializations,
   initializeWorkspaceInitialization,
+  REPO_INITIALIZER_WORKER,
   readRepoInitializationState,
   readWorkspaceInitializationState,
   retryRepoInitializations,
@@ -47,6 +49,24 @@ async function createWorkspace(): Promise<string> {
 }
 
 describe("background repository initialization", () => {
+  it("builds the private worker environment for detached initializers", () => {
+    expect(
+      buildRepoInitializerWorkerEnvironment({
+        workspaceDir: "/tmp/workspace",
+        repoName: "front",
+        runId: "run-1",
+        environment: { EXISTING: "value" },
+      }),
+    ).toEqual({
+      EXISTING: "value",
+      WORKFOREST_BACKGROUND_WORKER: "1",
+      WORKFOREST_WORKER: REPO_INITIALIZER_WORKER,
+      WORKFOREST_WORKER_WORKSPACE: "/tmp/workspace",
+      WORKFOREST_WORKER_REPO: "front",
+      WORKFOREST_WORKER_RUN_ID: "run-1",
+    });
+  });
+
   it("runs an initializer worker to completion and finalizes the workspace", async () => {
     const workspaceDir = await createWorkspace();
     const queued = await startRepoInitialization(

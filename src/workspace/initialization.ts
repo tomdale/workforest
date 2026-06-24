@@ -23,6 +23,7 @@ const LOCK_RETRY_MS = 20;
 const LOCK_TIMEOUT_MS = 10_000;
 const STALE_LOCK_MS = 30_000;
 const QUEUED_STALE_MS = 2_000;
+export const REPO_INITIALIZER_WORKER = "repo-initializer";
 
 export type RepoInitializationStatus =
   | "pending"
@@ -81,6 +82,27 @@ type WorkerLaunch = (options: {
   repoName: string;
   runId: string;
 }) => Promise<number>;
+
+export function buildRepoInitializerWorkerEnvironment({
+  workspaceDir,
+  repoName,
+  runId,
+  environment = process.env,
+}: {
+  workspaceDir: string;
+  repoName: string;
+  runId: string;
+  environment?: NodeJS.ProcessEnv;
+}): NodeJS.ProcessEnv {
+  return {
+    ...environment,
+    WORKFOREST_BACKGROUND_WORKER: "1",
+    WORKFOREST_WORKER: REPO_INITIALIZER_WORKER,
+    WORKFOREST_WORKER_WORKSPACE: workspaceDir,
+    WORKFOREST_WORKER_REPO: repoName,
+    WORKFOREST_WORKER_RUN_ID: runId,
+  };
+}
 
 export async function initializeWorkspaceInitialization({
   workspaceDir,
@@ -722,28 +744,16 @@ async function launchDetachedWorker({
     throw new Error("Unable to resolve the workforest CLI entrypoint.");
   }
 
-  const child = spawn(
-    process.execPath,
-    [
-      path.resolve(entrypoint),
-      "_initialize-repo",
-      "--workspace",
+  const child = spawn(process.execPath, [path.resolve(entrypoint)], {
+    cwd: workspaceDir,
+    detached: true,
+    stdio: "ignore",
+    env: buildRepoInitializerWorkerEnvironment({
       workspaceDir,
-      "--repo",
       repoName,
-      "--run-id",
       runId,
-    ],
-    {
-      cwd: workspaceDir,
-      detached: true,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        WORKFOREST_BACKGROUND_WORKER: "1",
-      },
-    },
-  );
+    }),
+  });
 
   await waitForSpawn(child);
   if (child.pid === undefined) {

@@ -98,5 +98,8 @@ describe("resolveCommand", () => {
     expect(() => resolveCommand(commandRegistry, ["cache", "inspect"])).toThrow(
       "Unknown wf cache subcommand: inspect",
     );
+    expect(() => resolveCommand(commandRegistry, ["_initialize-repo"])).toThrow(
+      "Unknown command: _initialize-repo",
+    );
   });
 });

@@ -151,9 +151,9 @@ describe("parseInvocation", () => {
     expect(() => parse(["skills", "get", "--all", "core"])).toThrow(UsageError);
   });
 
-  it("enforces required internal-worker flags", () => {
+  it("does not expose the repository initializer worker as a command", () => {
     expect(() => parse(["_initialize-repo"])).toThrow(
-      'Missing required flag "--workspace".',
+      "Unknown command: _initialize-repo",
     );
   });
 

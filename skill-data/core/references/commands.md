@@ -61,6 +61,7 @@ Arguments:
 Options:
 
 - `--json` — Emit the change status model as a JSON envelope instead of the report.
+- `--watch` — Open the initialization watcher for the selected change when setup state exists.
 
 Examples:
 

@@ -16,7 +16,6 @@ import type {
 } from "./types.ts";
 
 const visible: Visibility = "visible";
-const hidden: Visibility = "hidden";
 const noTty: TtyRequirement = { kind: "none" };
 const optionalStdin: TtyRequirement = {
   kind: "optional",
@@ -318,6 +317,12 @@ const changeStatus = leaf({
       "--json",
       undefined,
       "Emit the change status model as a JSON envelope instead of the report.",
+    ),
+    booleanFlag(
+      "watch",
+      "--watch",
+      undefined,
+      "Open the initialization watcher for the selected change when setup state exists.",
     ),
   ],
   examples: [
@@ -1846,19 +1851,6 @@ export const commandRegistry: CommandRegistry = {
             description: "Print the installed version.",
           },
         ],
-      }),
-      leaf({
-        name: "_initialize-repo",
-        path: ["_initialize-repo"],
-        summary: "Run an internal repository initializer",
-        handler: "initialize-repo",
-        help: { kind: "command", command: "_initialize-repo" },
-        flags: [
-          stringFlag("workspace", "--workspace", "dir", { required: true }),
-          stringFlag("repo", "--repo", "repository", { required: true }),
-          stringFlag("runId", "--run-id", "id", { required: true }),
-        ],
-        visibility: hidden,
       }),
     ],
   }),

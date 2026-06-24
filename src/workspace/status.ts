@@ -107,6 +107,10 @@ export type StatusDetail = Readonly<{
   value: string;
 }>;
 
+export type RenderChangeStatusOptions = Readonly<{
+  note?: string;
+}>;
+
 type RepositoryTarget = Readonly<{
   name: string;
   path: string;
@@ -148,7 +152,10 @@ export async function buildChangeStatus(
   };
 }
 
-export function renderChangeStatus(status: ChangeStatus): string {
+export function renderChangeStatus(
+  status: ChangeStatus,
+  options: RenderChangeStatusOptions = {},
+): string {
   const lines = ["Change status", "", "Summary"];
   lines.push(...renderFields(summaryFields(status.summary), 2));
 
@@ -183,6 +190,10 @@ export function renderChangeStatus(status: ChangeStatus): string {
   lines.push("", "Next steps");
   for (const step of status.nextSteps) {
     lines.push(`  ${step}`);
+  }
+
+  if (options.note) {
+    lines.push("", "Note", `  ${options.note}`);
   }
 
   return lines.join("\n");
