@@ -21,6 +21,29 @@ Exit codes: `0` success, `2` usage error (invalid arguments or flags), `1` opera
 
 Commands whose options include `--json` emit a machine-readable envelope: `{ "ok": true, "data": ... }` on success, or `{ "ok": false, "error": { "kind": "operational" | "usage", "message": ... } }` on failure.
 
+## `wf list`
+
+List Workforest changes.
+
+Shows a compact inventory of Workforest-managed workspace and repository changes, grouped by their human-facing directory layout.
+
+```text
+wf list [options]
+```
+
+Options:
+
+- `--repo <repo>` — Show only changes containing this repository.
+- `--group <group>` — Show one workspace recipe group, repository group, or _adhoc.
+- `--paths` — Include the absolute path for each change.
+- `--json` — Emit the change inventory as a JSON envelope instead of the report.
+
+Examples:
+
+- `wf list` — Show all workspace and repository changes.
+- `wf list --repo workforest` — Show changes containing the workforest repository.
+- `wf list --group _adhoc --paths` — Show _adhoc workspace changes with paths.
+
 ## `wf workspace`
 
 Manage workspaces.

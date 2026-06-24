@@ -25,9 +25,11 @@ export type ConfigurationChildFieldDefinition = Readonly<{
   defaultBehavior: string;
 }>;
 
-export const DEFAULT_WORKSPACE_CONFIG: Required<
-  Pick<WorkspaceConfig, "directory" | "dirPrefix" | "branchPrefix">
-> = {
+export const DEFAULT_WORKSPACE_CONFIG: {
+  directory: Required<WorkforestDirectoryConfig>;
+  dirPrefix: string;
+  branchPrefix: string;
+} = {
   directory: {
     base: "~/Code",
     repos: "Repos",

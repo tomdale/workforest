@@ -258,6 +258,8 @@ async function runInvocation(
       return runTypedCommand(() => runAddCommand(invocation));
     case "workspace.list":
       return runTypedCommand(runListCommand);
+    case "change.list":
+      return runTypedCommand(() => runChangeListCommand(invocation));
     case "shell.init":
       return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":
@@ -967,6 +969,31 @@ async function runListCommand(): Promise<CommandResult> {
     ].join("\n"),
   });
   return success();
+}
+
+async function runChangeListCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const { config } = await loadWorkspaceConfig();
+  const { collectChangeInventory, renderChangeList } = await import(
+    "./workspace/change-inventory.ts"
+  );
+  const repoFilter = stringInvocationFlag(invocation, "repo");
+  const groupFilter = stringInvocationFlag(invocation, "group");
+  const inventory = await collectChangeInventory(config, {
+    ...(repoFilter ? { repo: repoFilter } : {}),
+    ...(groupFilter ? { group: groupFilter } : {}),
+  });
+
+  return booleanInvocationFlag(invocation, "json")
+    ? jsonSuccess(inventory)
+    : success(
+        reportOutput(
+          renderChangeList(inventory, {
+            paths: booleanInvocationFlag(invocation, "paths"),
+          }),
+        ),
+      );
 }
 
 async function runWorktreeCreateInvocation(

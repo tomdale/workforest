@@ -251,6 +251,52 @@ const skillsDefault = leaf({
   outputModes: ["report", "json"],
 });
 
+const changeList = leaf({
+  name: "list",
+  path: ["list"],
+  summary: "List Workforest changes",
+  description:
+    "Shows a compact inventory of Workforest-managed workspace and repository changes, grouped by their human-facing directory layout.",
+  handler: "change.list",
+  help: { kind: "command", command: "list" },
+  flags: [
+    stringFlag("repo", "--repo", "repo", {
+      description: "Show only changes containing this repository.",
+    }),
+    stringFlag("group", "--group", "group", {
+      description:
+        "Show one workspace recipe group, repository group, or _adhoc.",
+    }),
+    booleanFlag(
+      "paths",
+      "--paths",
+      undefined,
+      "Include the absolute path for each change.",
+    ),
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit the change inventory as a JSON envelope instead of the report.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf list",
+      description: "Show all workspace and repository changes.",
+    },
+    {
+      command: "wf list --repo workforest",
+      description: "Show changes containing the workforest repository.",
+    },
+    {
+      command: "wf list --group _adhoc --paths",
+      description: "Show _adhoc workspace changes with paths.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
 const workspaceCreate = leaf({
   name: "create",
   path: ["workspace", "create"],
@@ -358,6 +404,7 @@ export const commandRegistry: CommandRegistry = {
     summary: "Workforest command line interface",
     help: { kind: "root" },
     children: [
+      changeList,
       group({
         name: "workspace",
         path: ["workspace"],

@@ -82,7 +82,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'new clean workspace task worktree cache review template shell config skills help version'",
+      "_workforest_complete_words 'new clean list workspace task worktree cache review template shell config skills help version'",
     );
     expect(script).toContain(
       "_workforest_complete_words 'create delete open list status add'",
@@ -114,7 +114,7 @@ describe("shell integration", () => {
     const script = renderShellInit("bash", registry);
 
     expect(script).toContain(
-      "_workforest_complete_words 'new clean inspect visit workspace",
+      "_workforest_complete_words 'new clean inspect visit list workspace",
     );
     expect(script).toContain(
       "new|clean|visit|workspace|task|worktree|review|template)",

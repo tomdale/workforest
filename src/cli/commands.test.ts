@@ -10,6 +10,7 @@ import type {
 describe("commandRegistry", () => {
   it("defines the exact visible command tree", () => {
     expect(visibleTree(commandRegistry.root)).toEqual({
+      list: null,
       workspace: ["create", "delete", "open", "list", "status", "add"],
       task: ["create", "list", "delete"],
       worktree: ["create", "list", "delete"],
