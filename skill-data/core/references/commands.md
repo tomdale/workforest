@@ -90,6 +90,50 @@ Examples:
 - `wf status workforest/cli-redesign` — Show a repository change by selector.
 - `wf status vercel-agent/auth-fix --json` — Print a workspace change status as JSON.
 
+## `wf add`
+
+Add repositories to the current change.
+
+Adds repositories to the current Workforest change. From a workspace change, missing repositories are added to that workspace. From a repository change, the change is promoted into a workspace and the existing worktree is moved there; pass @template to use the template's repository set.
+
+```text
+wf add [options] <repo...|@template>
+```
+
+Arguments:
+
+- `sources` — One or more repositories, or one @template when promoting a repository change.
+
+Options:
+
+- `--yes` — Confirm repository-change promotion without prompting.
+
+Examples:
+
+- `wf add vercel/api` — Add one repository to the current workspace change.
+- `wf add vercel/api vercel/dashboard` — Add several repositories to the current workspace change.
+- `wf add @vercel-agent --yes` — Promote the current repository change into a template workspace.
+
+## `wf switch`
+
+Switch to a Workforest change.
+
+Changes your shell to a Workforest change. Use <group>/<change> to select exactly, a bare change name when unique, or no selector in an interactive terminal to fuzzy-pick from all known changes.
+
+```text
+wf switch [selector]
+```
+
+Arguments:
+
+- `selector` — Change selector as <group>/<change>, or a bare change name when unique.
+
+Examples:
+
+- `wf switch workforest/cli-redesign` — Switch to a repository change.
+- `wf switch vercel-agent/auth-fix` — Switch to a workspace change.
+- `wf switch` — Fuzzy-pick from known changes interactively.
+
 ## `wf workspace`
 
 Manage workspaces.

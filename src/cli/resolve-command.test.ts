@@ -5,6 +5,8 @@ import { resolveCommand } from "./resolve-command.ts";
 describe("resolveCommand", () => {
   it.each([
     [["start", "fix-auth", "vercel/front"], ["start"], "change.start"],
+    [["add", "vercel/api"], ["add"], "change.add"],
+    [["switch", "vercel-agent/auth-fix"], ["switch"], "change.switch"],
     [["workspace", "create"], ["workspace", "create"], "workspace.create"],
     [
       ["workspace", "delete", "demo"],

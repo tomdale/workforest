@@ -47,7 +47,7 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|clean|start|workspace|task|worktree|review|template",
+      "new|clean|start|add|switch|workspace|task|worktree|review|template",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
@@ -82,7 +82,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'new clean start list status workspace task worktree cache review template shell config skills help version'",
+      "_workforest_complete_words 'new clean start list status add switch workspace task worktree cache review template shell config skills help version'",
     );
     expect(script).toContain(
       "_workforest_complete_words 'create delete open list status add'",
@@ -114,10 +114,10 @@ describe("shell integration", () => {
     const script = renderShellInit("bash", registry);
 
     expect(script).toContain(
-      "_workforest_complete_words 'new clean inspect visit start list status workspace",
+      "_workforest_complete_words 'new clean inspect visit start list status add switch workspace",
     );
     expect(script).toContain(
-      "new|clean|visit|start|workspace|task|worktree|review|template)",
+      "new|clean|visit|start|add|switch|workspace|task|worktree|review|template)",
     );
     expect(script).not.toContain("new|clean|inspect|visit|workspace");
   });

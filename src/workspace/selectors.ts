@@ -23,6 +23,7 @@ export type ChangeSelectorResolution =
       kind: "ambiguous";
       selector: string;
       matches: readonly string[];
+      hint?: string;
     }>;
 
 export async function resolveChangeSelector(
@@ -45,8 +46,20 @@ function resolveExplicitSelector(
   selector: string,
 ): ChangeSelectorResolution {
   if (selector.includes("/")) {
-    const entry = entries.find((candidate) => candidate.selector === selector);
-    return entry ? { kind: "resolved", entry } : { kind: "missing", selector };
+    const matches = entries.filter(
+      (candidate) => candidate.selector === selector,
+    );
+    if (matches.length === 1) {
+      const entry = matches[0];
+      if (!entry) {
+        return { kind: "missing", selector };
+      }
+      return { kind: "resolved", entry };
+    }
+    if (matches.length > 1) {
+      return ambiguousSelectorResolution(selector, matches);
+    }
+    return { kind: "missing", selector };
   }
 
   const matches = entries.filter((entry) => entry.changeName === selector);
@@ -58,13 +71,42 @@ function resolveExplicitSelector(
     return { kind: "resolved", entry };
   }
   if (matches.length > 1) {
-    return {
-      kind: "ambiguous",
-      selector,
-      matches: matches.map((entry) => entry.selector).sort(),
-    };
+    return ambiguousSelectorResolution(selector, matches);
   }
   return { kind: "missing", selector };
+}
+
+function ambiguousSelectorResolution(
+  selector: string,
+  matches: readonly ChangeInventoryEntry[],
+): ChangeSelectorResolution {
+  const selectorCounts = new Map<string, number>();
+  for (const entry of matches) {
+    selectorCounts.set(
+      entry.selector,
+      (selectorCounts.get(entry.selector) ?? 0) + 1,
+    );
+  }
+  const hasDuplicateSelector = Array.from(selectorCounts.values()).some(
+    (count) => count > 1,
+  );
+
+  return {
+    kind: "ambiguous",
+    selector,
+    matches: hasDuplicateSelector
+      ? matches.map(formatAmbiguousSelectorMatch).sort()
+      : matches.map((entry) => entry.selector).sort(),
+    ...(hasDuplicateSelector
+      ? {
+          hint: "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.",
+        }
+      : {}),
+  };
+}
+
+function formatAmbiguousSelectorMatch(entry: ChangeInventoryEntry): string {
+  return `${entry.selector} (${entry.type} at ${entry.path})`;
 }
 
 async function resolveCurrentChange(

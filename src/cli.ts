@@ -274,6 +274,23 @@ async function runInvocation(
       return runTypedCommand(() => runChangeListCommand(invocation));
     case "change.status":
       return runTypedCommand(() => runChangeStatusCommand(invocation));
+    case "change.add":
+      return runTypedCommand(async () => {
+        const { runChangeAddCommand } = await import("./cli/add.ts");
+        return runChangeAddCommand(invocation, {
+          interactive: isInteractive(),
+          onEvent: humanServiceEventSink,
+          writeShellCdPath,
+        });
+      });
+    case "change.switch":
+      return runTypedCommand(async () => {
+        const { runSwitchCommand } = await import("./cli/switch.ts");
+        return runSwitchCommand(invocation, {
+          interactive: isInteractive(),
+          writeShellCdPath,
+        });
+      });
     case "shell.init":
       return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":
@@ -1045,7 +1062,7 @@ async function runChangeStatusCommand(
         `Ambiguous change selector "${resolution.selector}".`,
         "Matches:",
         ...resolution.matches.map((match) => `  ${match}`),
-        "Use <group>/<change>.",
+        resolution.hint ?? "Use <group>/<change>.",
       ].join("\n"),
     );
   }

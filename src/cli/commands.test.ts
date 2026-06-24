@@ -13,6 +13,8 @@ describe("commandRegistry", () => {
       start: null,
       list: null,
       status: null,
+      add: null,
+      switch: null,
       workspace: ["create", "delete", "open", "list", "status", "add"],
       task: ["create", "list", "delete"],
       worktree: ["create", "list", "delete"],

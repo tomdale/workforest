@@ -47,6 +47,8 @@ describe("workspace CLI conformance", () => {
   it.each([
     [["new", "--help"], "Usage: wf new"],
     [["clean", "--help"], "Usage: wf clean"],
+    [["add", "--help"], "Usage: wf add"],
+    [["switch", "--help"], "Usage: wf switch"],
     [["workspace", "create", "--help"], "Usage: wf workspace create"],
     [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
     [["workspace", "open", "--help"], "Usage: wf workspace open"],
@@ -81,7 +83,6 @@ describe("workspace CLI conformance", () => {
     [["cd", "workspace"], "Unknown command"],
     [["find"], "Unknown command"],
     [["fork", "workspace"], "Unknown command"],
-    [["add", "vercel/front"], "Unknown command"],
     [["delete", "workspace"], "Unknown command"],
   ])("returns exit 2 for unsupported invocation %j", async (argv, message) => {
     const result = await executeCli(argv);

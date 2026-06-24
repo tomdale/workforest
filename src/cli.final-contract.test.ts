@@ -6,6 +6,8 @@ import type { ResolvedCommand } from "./cli/types.ts";
 
 const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["start"],
+  ["add"],
+  ["switch"],
   ["workspace", "create"],
   ["workspace", "delete"],
   ["workspace", "open"],

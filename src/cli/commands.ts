@@ -379,6 +379,81 @@ const changeStatus = leaf({
   outputModes: ["report", "json"],
 });
 
+const changeAdd = leaf({
+  name: "add",
+  path: ["add"],
+  summary: "Add repositories to the current change",
+  description:
+    "Adds repositories to the current Workforest change. From a workspace change, missing repositories are added to that workspace. From a repository change, the change is promoted into a workspace and the existing worktree is moved there; pass @template to use the template's repository set.",
+  handler: "change.add",
+  help: { kind: "command", command: "add" },
+  operands: operands(
+    1,
+    null,
+    "sources",
+    "<repo...|@template>",
+    "One or more repositories, or one @template when promoting a repository change.",
+  ),
+  flags: [
+    booleanFlag(
+      "yes",
+      "--yes",
+      undefined,
+      "Confirm repository-change promotion without prompting.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf add vercel/api",
+      description: "Add one repository to the current workspace change.",
+    },
+    {
+      command: "wf add vercel/api vercel/dashboard",
+      description: "Add several repositories to the current workspace change.",
+    },
+    {
+      command: "wf add @vercel-agent --yes",
+      description:
+        "Promote the current repository change into a template workspace.",
+    },
+  ],
+  tty: optionalStdin,
+  shellHandoff: "optional-cd",
+});
+
+const changeSwitch = leaf({
+  name: "switch",
+  path: ["switch"],
+  summary: "Switch to a Workforest change",
+  description:
+    "Changes your shell to a Workforest change. Use <group>/<change> to select exactly, a bare change name when unique, or no selector in an interactive terminal to fuzzy-pick from all known changes.",
+  handler: "change.switch",
+  help: { kind: "command", command: "switch" },
+  operands: operands(
+    0,
+    1,
+    "selector",
+    "[selector]",
+    "Change selector as <group>/<change>, or a bare change name when unique.",
+  ),
+  examples: [
+    {
+      command: "wf switch workforest/cli-redesign",
+      description: "Switch to a repository change.",
+    },
+    {
+      command: "wf switch vercel-agent/auth-fix",
+      description: "Switch to a workspace change.",
+    },
+    {
+      command: "wf switch",
+      description: "Fuzzy-pick from known changes interactively.",
+    },
+  ],
+  tty: optionalStdin,
+  shellHandoff: "optional-cd",
+});
+
 const workspaceCreate = leaf({
   name: "create",
   path: ["workspace", "create"],
@@ -489,6 +564,8 @@ export const commandRegistry: CommandRegistry = {
       changeStart,
       changeList,
       changeStatus,
+      changeAdd,
+      changeSwitch,
       group({
         name: "workspace",
         path: ["workspace"],

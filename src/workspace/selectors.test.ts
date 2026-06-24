@@ -53,6 +53,69 @@ describe("resolveChangeSelector", () => {
     });
   });
 
+  it("reports ambiguous exact selectors when a workspace group and repository collide", async () => {
+    const base = await createInventoryFixture();
+    await mkdir(
+      path.join(base, "Workspaces", "workforest", "cli-redesign", "front"),
+      {
+        recursive: true,
+      },
+    );
+
+    const resolution = await resolveChangeSelector(
+      { directory: { base } },
+      "workforest/cli-redesign",
+    );
+
+    expect(resolution).toMatchObject({
+      kind: "ambiguous",
+      selector: "workforest/cli-redesign",
+      hint: "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.",
+    });
+    if (resolution.kind !== "ambiguous") return;
+    expect(resolution.matches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("repository-change"),
+        expect.stringContaining("template-workspace"),
+      ]),
+    );
+    expect(resolution.matches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          path.join(base, "Repos", "workforest", "cli-redesign"),
+        ),
+        expect.stringContaining(
+          path.join(base, "Workspaces", "workforest", "cli-redesign"),
+        ),
+      ]),
+    );
+  });
+
+  it("reports duplicate selectors for bare change ambiguity", async () => {
+    const base = await createInventoryFixture();
+    await mkdir(
+      path.join(base, "Workspaces", "workforest", "cli-redesign", "front"),
+      {
+        recursive: true,
+      },
+    );
+
+    const resolution = await resolveChangeSelector(
+      { directory: { base } },
+      "cli-redesign",
+    );
+
+    expect(resolution).toMatchObject({
+      kind: "ambiguous",
+      selector: "cli-redesign",
+      hint: "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.",
+    });
+    if (resolution.kind !== "ambiguous") return;
+    expect(resolution.matches).toHaveLength(2);
+    expect(resolution.matches.join("\n")).toContain("repository-change");
+    expect(resolution.matches.join("\n")).toContain("template-workspace");
+  });
+
   it("resolves the current directory inside a managed change", async () => {
     const base = await createInventoryFixture();
     const cwd = path.join(
