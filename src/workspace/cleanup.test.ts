@@ -45,6 +45,7 @@ vi.mock("./repository.ts", () => ({
 
 import {
   type CleanupState,
+  cleanupRepositoryChange,
   cleanupWorkspace,
   cleanupWorkspaceGenerator,
   previewCleanup,
@@ -162,5 +163,79 @@ describe("cleanupWorkspaceGenerator", () => {
     });
     expect(consoleLog).not.toHaveBeenCalled();
     expect(consoleError).not.toHaveBeenCalled();
+  });
+});
+
+describe("cleanupRepositoryChange", () => {
+  it("removes the change directory while preserving mirrors when the mirror is missing", async () => {
+    pathExistsMock.mockResolvedValue(false);
+    const states: CleanupState[] = [];
+
+    await expect(
+      cleanupRepositoryChange({
+        repoName: "api",
+        changePath: "/tmp/repos/api/demo",
+        onState: (state) => {
+          states.push(state);
+        },
+      }),
+    ).resolves.toEqual({
+      dryRun: false,
+      removedRepos: [],
+      deletedBranches: [],
+    });
+
+    expect(cleanupWorkspaceWorktreesGeneratorMock).not.toHaveBeenCalled();
+    expect(rmMock).toHaveBeenCalledTimes(1);
+    expect(rmMock).toHaveBeenCalledWith("/tmp/repos/api/demo", {
+      recursive: true,
+      force: true,
+    });
+    expect(rmMock).not.toHaveBeenCalledWith(
+      "/tmp/cache/api.git",
+      expect.anything(),
+    );
+    expect(states).toContainEqual({
+      phase: "worktree",
+      repo: "api",
+      state: {
+        status: "skipped",
+        reason: "Mirror not found in cache",
+      },
+    });
+    expect(states.at(-1)).toEqual({
+      phase: "complete",
+      removedRepos: [],
+    });
+  });
+
+  it("dry-runs repository change cleanup without removing directories", async () => {
+    const states: CleanupState[] = [];
+
+    await expect(
+      cleanupRepositoryChange({
+        repoName: "api",
+        changePath: "/tmp/repos/api/demo",
+        dryRun: true,
+        onState: (state) => {
+          states.push(state);
+        },
+      }),
+    ).resolves.toEqual({
+      dryRun: true,
+      removedRepos: ["api"],
+      deletedBranches: [],
+    });
+
+    expect(cleanupWorkspaceWorktreesGeneratorMock).not.toHaveBeenCalled();
+    expect(rmMock).not.toHaveBeenCalled();
+    expect(states).toContainEqual({
+      phase: "remove-dir",
+      message: "Would remove directory: /tmp/repos/api/demo (dry-run)",
+    });
+    expect(states.at(-1)).toEqual({
+      phase: "complete",
+      removedRepos: ["api"],
+    });
   });
 });

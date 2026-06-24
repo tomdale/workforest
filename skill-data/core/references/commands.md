@@ -134,6 +134,53 @@ Examples:
 - `wf switch vercel-agent/auth-fix` — Switch to a workspace change.
 - `wf switch` — Fuzzy-pick from known changes interactively.
 
+## `wf finish`
+
+Finish an integrated change.
+
+Removes a Workforest change after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks. With no selector, resolves the current change from the working directory. Pass --force only for squash merges, cherry-picks, abandoned work, or proof Workforest cannot detect.
+
+```text
+wf finish [options] [selector]
+```
+
+Arguments:
+
+- `selector` — Change selector as <group>/<change>, or a bare change name when unique. Omit to finish the current change.
+
+Options:
+
+- `-f`, `--force` — Skip finish safety blockers for intentional squash merges, cherry-picks, or abandoned work.
+
+Examples:
+
+- `wf finish workforest/cli-redesign` — Finish a repository change after integration.
+- `wf finish vercel-agent/auth-fix` — Finish a workspace change after integration.
+- `wf finish workforest/squashed-change --force` — Finish a change integrated in a way Workforest cannot prove.
+
+## `wf delete`
+
+Delete a Workforest change.
+
+Explicitly deletes a Workforest change without integration proof. Requires a selector and confirmation in an interactive terminal; scripts must pass --force. Cached mirrors are preserved.
+
+```text
+wf delete [options] <selector>
+```
+
+Arguments:
+
+- `selector` — Change selector as <group>/<change>, or a bare change name when unique.
+
+Options:
+
+- `-f`, `--force` — Skip the confirmation prompt; required to proceed without a terminal.
+
+Examples:
+
+- `wf delete _adhoc/experiment` — Delete a change after confirming.
+- `wf delete _adhoc/experiment --force` — Delete without prompting.
+
 ## `wf workspace`
 
 Manage workspaces.

@@ -61,6 +61,14 @@ export type CleanupExecutionOptions = CleanupOptions & {
   onState?: CleanupStateSink;
 };
 
+export type RepositoryChangeCleanupOptions = Readonly<{
+  repoName: string;
+  changePath: string;
+  repo?: RepoConfig;
+  dryRun?: boolean;
+  onState?: CleanupStateSink;
+}>;
+
 /**
  * Check if a remote branch exists on origin.
  */
@@ -521,4 +529,96 @@ export async function cleanupWorkspace(
   }
 
   return result;
+}
+
+export async function cleanupRepositoryChange({
+  repoName,
+  changePath,
+  repo,
+  dryRun = false,
+  onState,
+}: RepositoryChangeCleanupOptions): Promise<CleanupResult> {
+  const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
+  const resolvedChangePath = path.resolve(changePath);
+  const cacheDir = await ensureCacheDir();
+  const mirrorDir = repo
+    ? await resolveMirrorDir(repo, cacheDir)
+    : resolveContainedPath(cacheDir, `${safeRepoName}.git`);
+  const removedRepos: string[] = [];
+
+  await onState?.({
+    phase: "init",
+    message: `Cleaning repository change ${safeRepoName}`,
+  });
+
+  if (await pathExists(mirrorDir)) {
+    if (dryRun) {
+      await onState?.({
+        phase: "worktree",
+        repo: safeRepoName,
+        state: {
+          status: "log",
+          level: "info",
+          message: "Would remove worktree from mirror (dry-run)",
+        },
+      });
+      await onState?.({ phase: "worktree-complete", repo: safeRepoName });
+      removedRepos.push(safeRepoName);
+    } else {
+      let cleaned = false;
+      try {
+        for await (const state of cleanupWorkspaceWorktreesGenerator(
+          mirrorDir,
+          resolvedChangePath,
+        )) {
+          await onState?.({ phase: "worktree", repo: safeRepoName, state });
+        }
+        cleaned = true;
+      } catch (error) {
+        await onState?.({
+          phase: "worktree",
+          repo: safeRepoName,
+          state: {
+            status: "failed",
+            error: error instanceof Error ? error : new Error(String(error)),
+          },
+        });
+      }
+
+      if (cleaned) {
+        await onState?.({ phase: "worktree-complete", repo: safeRepoName });
+        removedRepos.push(safeRepoName);
+      }
+    }
+  } else {
+    await onState?.({
+      phase: "worktree",
+      repo: safeRepoName,
+      state: {
+        status: "skipped",
+        reason: "Mirror not found in cache",
+      },
+    });
+  }
+
+  if (dryRun) {
+    await onState?.({
+      phase: "remove-dir",
+      message: `Would remove directory: ${resolvedChangePath} (dry-run)`,
+    });
+  } else {
+    await onState?.({
+      phase: "remove-dir",
+      message: `Removing directory: ${resolvedChangePath}`,
+    });
+    await fs.rm(resolvedChangePath, { recursive: true, force: true });
+  }
+
+  await onState?.({ phase: "complete", removedRepos });
+
+  return {
+    dryRun,
+    removedRepos,
+    deletedBranches: [],
+  };
 }

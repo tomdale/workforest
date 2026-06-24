@@ -291,6 +291,24 @@ async function runInvocation(
           writeShellCdPath,
         });
       });
+    case "change.finish":
+      return runTypedCommand(async () => {
+        const { runFinishCommand } = await import("./cli/finish.ts");
+        return runFinishCommand(invocation, {
+          interactive: isInteractive(),
+          writeShellCdPath,
+          onCleanupState: (state) => renderCleanupState(state, false),
+        });
+      });
+    case "change.delete":
+      return runTypedCommand(async () => {
+        const { runChangeDeleteCommand } = await import("./cli/finish.ts");
+        return runChangeDeleteCommand(invocation, {
+          interactive: isInteractive(),
+          writeShellCdPath,
+          onCleanupState: (state) => renderCleanupState(state, false),
+        });
+      });
     case "shell.init":
       return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":

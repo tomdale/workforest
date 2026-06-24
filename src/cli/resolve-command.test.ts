@@ -7,6 +7,8 @@ describe("resolveCommand", () => {
     [["start", "fix-auth", "vercel/front"], ["start"], "change.start"],
     [["add", "vercel/api"], ["add"], "change.add"],
     [["switch", "vercel-agent/auth-fix"], ["switch"], "change.switch"],
+    [["finish", "workforest/cli-redesign"], ["finish"], "change.finish"],
+    [["delete", "_adhoc/experiment"], ["delete"], "change.delete"],
     [["workspace", "create"], ["workspace", "create"], "workspace.create"],
     [
       ["workspace", "delete", "demo"],

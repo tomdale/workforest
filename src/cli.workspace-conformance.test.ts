@@ -49,6 +49,8 @@ describe("workspace CLI conformance", () => {
     [["clean", "--help"], "Usage: wf clean"],
     [["add", "--help"], "Usage: wf add"],
     [["switch", "--help"], "Usage: wf switch"],
+    [["finish", "--help"], "Usage: wf finish"],
+    [["delete", "--help"], "Usage: wf delete"],
     [["workspace", "create", "--help"], "Usage: wf workspace create"],
     [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
     [["workspace", "open", "--help"], "Usage: wf workspace open"],
@@ -79,11 +81,11 @@ describe("workspace CLI conformance", () => {
     [["workspace", "list", "extra"], "Invalid operands"],
     [["workspace", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
     [["workspace", "status", "extra"], "Invalid operands"],
+    [["delete"], "Invalid operands for wf delete"],
     [["workspace", "create", "--like", "other", "--", "next"], "Unsupported"],
     [["cd", "workspace"], "Unknown command"],
     [["find"], "Unknown command"],
     [["fork", "workspace"], "Unknown command"],
-    [["delete", "workspace"], "Unknown command"],
   ])("returns exit 2 for unsupported invocation %j", async (argv, message) => {
     const result = await executeCli(argv);
     expect(result).toMatchObject({

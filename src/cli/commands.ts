@@ -454,6 +454,84 @@ const changeSwitch = leaf({
   shellHandoff: "optional-cd",
 });
 
+const changeFinish = leaf({
+  name: "finish",
+  path: ["finish"],
+  summary: "Finish an integrated change",
+  description:
+    "Removes a Workforest change after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks. With no selector, resolves the current change from the working directory. Pass --force only for squash merges, cherry-picks, abandoned work, or proof Workforest cannot detect.",
+  handler: "change.finish",
+  help: { kind: "command", command: "finish" },
+  operands: operands(
+    0,
+    1,
+    "selector",
+    "[selector]",
+    "Change selector as <group>/<change>, or a bare change name when unique. Omit to finish the current change.",
+  ),
+  flags: [
+    booleanFlag(
+      "force",
+      "--force",
+      "-f",
+      "Skip finish safety blockers for intentional squash merges, cherry-picks, or abandoned work.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf finish workforest/cli-redesign",
+      description: "Finish a repository change after integration.",
+    },
+    {
+      command: "wf finish vercel-agent/auth-fix",
+      description: "Finish a workspace change after integration.",
+    },
+    {
+      command: "wf finish workforest/squashed-change --force",
+      description:
+        "Finish a change integrated in a way Workforest cannot prove.",
+    },
+  ],
+  shellHandoff: "optional-cd",
+});
+
+const changeDelete = leaf({
+  name: "delete",
+  path: ["delete"],
+  summary: "Delete a Workforest change",
+  description:
+    "Explicitly deletes a Workforest change without integration proof. Requires a selector and confirmation in an interactive terminal; scripts must pass --force. Cached mirrors are preserved.",
+  handler: "change.delete",
+  help: { kind: "command", command: "delete" },
+  operands: operands(
+    1,
+    1,
+    "selector",
+    "<selector>",
+    "Change selector as <group>/<change>, or a bare change name when unique.",
+  ),
+  flags: [
+    booleanFlag(
+      "force",
+      "--force",
+      "-f",
+      "Skip the confirmation prompt; required to proceed without a terminal.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf delete _adhoc/experiment",
+      description: "Delete a change after confirming.",
+    },
+    {
+      command: "wf delete _adhoc/experiment --force",
+      description: "Delete without prompting.",
+    },
+  ],
+  tty: optionalStdin,
+  shellHandoff: "optional-cd",
+});
+
 const workspaceCreate = leaf({
   name: "create",
   path: ["workspace", "create"],
@@ -566,6 +644,8 @@ export const commandRegistry: CommandRegistry = {
       changeStatus,
       changeAdd,
       changeSwitch,
+      changeFinish,
+      changeDelete,
       group({
         name: "workspace",
         path: ["workspace"],

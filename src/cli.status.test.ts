@@ -348,6 +348,9 @@ async function createGitRepo(
   await execFileAsync("git", ["init", "-q", "-b", options.branch ?? "main"], {
     cwd: dir,
   });
+  await execFileAsync("git", ["config", "commit.gpgsign", "false"], {
+    cwd: dir,
+  });
   await writeFile(path.join(dir, "README.md"), "fixture\n", "utf8");
   await execFileAsync("git", ["add", "README.md"], { cwd: dir });
   await execFileAsync("git", ["commit", "-q", "-m", "Initial commit"], {

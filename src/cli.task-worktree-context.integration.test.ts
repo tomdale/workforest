@@ -317,6 +317,7 @@ async function initializeRepository(
     "user.email",
     "workforest-tests@example.com",
   );
+  await runGit(repositoryDir, "config", "commit.gpgsign", "false");
   await writeFile(path.join(repositoryDir, "README.md"), "fixture\n", "utf8");
   await runGit(repositoryDir, "add", "README.md");
   await runGit(repositoryDir, "commit", "-m", "Initial commit");
