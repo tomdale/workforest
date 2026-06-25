@@ -38,6 +38,38 @@ Disables fullscreen and grid terminal interfaces and uses their non-TUI fallback
 
 When unset: TUI surfaces are enabled when the terminal supports them and CI is not set.
 
+### `WORKFOREST_AI_PROVIDER`
+
+Value: provider id.
+
+Selects the AI provider for AI-backed Workforest features, overriding ai.provider in config.
+
+When unset: Uses ai.provider from config, or auto-detects available providers.
+
+### `WORKFOREST_AI_MODEL`
+
+Value: model name.
+
+Selects the model passed to the chosen AI provider, overriding ai.model in config.
+
+When unset: Uses ai.model from config, or the provider default.
+
+### `WORKFOREST_AI_TIMEOUT_MS`
+
+Value: positive integer milliseconds.
+
+Sets the timeout for a single AI generation, overriding ai.timeoutMs in config.
+
+When unset: Uses ai.timeoutMs from config, or 120000.
+
+### `WORKFOREST_AI_DISABLED`
+
+Value: true/false.
+
+Disables AI-backed Workforest features, overriding ai.disabled in config.
+
+When unset: Uses ai.disabled from config, or false.
+
 ### `XDG_CONFIG_HOME`
 
 Value: directory path.

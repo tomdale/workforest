@@ -45,6 +45,10 @@ describe("template command conformance", () => {
       argv: ["template", "manage"],
       usage: "Usage: wf template manage",
     },
+    {
+      argv: ["template", "suggest"],
+      usage: "Usage: wf template suggest",
+    },
     { argv: ["template", "list"], usage: "Usage: wf template list" },
     { argv: ["template", "open"], usage: "Usage: wf template open" },
     { argv: ["template", "show"], usage: "Usage: wf template show" },
@@ -79,6 +83,11 @@ describe("template command conformance", () => {
       label: "template list surplus operands",
       argv: ["template", "list", "extra"],
       message: "Invalid operands for wf template list",
+    },
+    {
+      label: "template suggest surplus operands",
+      argv: ["template", "suggest", "extra"],
+      message: "Invalid operands for wf template suggest",
     },
     {
       label: "template open missing operand",
@@ -162,6 +171,10 @@ describe("template command conformance", () => {
     },
     {
       argv: ["template", "list"],
+      foreign: ["--force"],
+    },
+    {
+      argv: ["template", "suggest"],
       foreign: ["--force"],
     },
     {

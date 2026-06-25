@@ -83,6 +83,8 @@ describe("initializer runner", () => {
       "@wf-plugin/package-managers",
       "@wf-plugin/vercel",
       "@wf-plugin/turbo",
+      "@wf-plugin/codex-cli",
+      "@wf-plugin/claude-cli",
     ]);
     expect(builtInInitializerIds).toEqual([
       "pnpm-install",

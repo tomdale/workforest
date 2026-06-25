@@ -1,4 +1,4 @@
-import { runCommand } from "./exec.ts";
+import { generateText } from "../services/ai/index.ts";
 
 /**
  * Check if a string is already a valid slug.
@@ -27,7 +27,7 @@ export function sanitizeSlug(input: string): string {
 }
 
 /**
- * Generates a slug from a description using Claude Haiku.
+ * Generates a slug from a description using the configured AI provider.
  * Returns null if generation fails or CLI is not available.
  */
 export async function generateSlugFromDescription(
@@ -43,13 +43,7 @@ Rules:
 - Output ONLY the slug, nothing else`;
 
   try {
-    const { stdout } = await runCommand("claude", [
-      "--model",
-      "haiku",
-      "-p",
-      prompt,
-    ]);
-
+    const stdout = await generateText({ prompt });
     const rawSlug = stdout.trim();
     if (!rawSlug) {
       return null;
@@ -58,7 +52,7 @@ Rules:
     const sanitized = sanitizeSlug(rawSlug);
     return sanitized || null;
   } catch {
-    // Claude CLI not available or failed - silently skip
+    // AI slug generation is opportunistic; callers can fall back to sanitizeSlug.
     return null;
   }
 }

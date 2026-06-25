@@ -185,6 +185,35 @@ Examples:
 - `wf delete _adhoc/experiment` — Delete a change after confirming.
 - `wf delete _adhoc/experiment --force` — Delete without prompting.
 
+## `wf ai`
+
+Inspect AI provider setup.
+
+Reports the built-in provider adapters available to AI-backed Workforest features.
+
+```text
+wf ai <subcommand>
+```
+
+### `wf ai status`
+
+Show AI provider status.
+
+Shows built-in AI provider detection results, the selected provider, model, timeout, and setup hints. With --json it emits the same status model as a JSON envelope.
+
+```text
+wf ai status [options]
+```
+
+Options:
+
+- `--json` — Emit AI provider status as a JSON envelope instead of the report.
+
+Examples:
+
+- `wf ai status` — Show detected AI providers and the selected provider.
+- `wf ai status --json` — Emit AI provider status as a JSON envelope.
+
 ## `wf migrate`
 
 Migrate Workforest layouts.
@@ -583,6 +612,20 @@ wf template manage
 Examples:
 
 - `wf template manage` — Browse and edit all templates in an interactive screen.
+
+### `wf template suggest`
+
+Suggest templates from PR history.
+
+Analyzes recent authored, reviewed, and commented GitHub pull requests with the configured AI provider, then lets you review and save suggested workspace templates. Requires an interactive terminal.
+
+```text
+wf template suggest
+```
+
+Examples:
+
+- `wf template suggest` — Analyze recent GitHub PR activity and choose suggested templates to save.
 
 ### `wf template new`
 

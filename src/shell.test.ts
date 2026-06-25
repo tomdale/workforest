@@ -79,7 +79,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'start list status add switch finish delete migrate task cache review template shell config skills help version'",
+      "_workforest_complete_words 'start list status add switch finish delete ai migrate task cache review template shell config skills help version'",
     );
     expect(script).toContain(
       "_workforest_complete_words 'start list finish delete'",
@@ -110,7 +110,7 @@ describe("shell integration", () => {
     const script = renderShellInit("bash", registry);
 
     expect(script).toContain(
-      "_workforest_complete_words 'inspect visit start list status add switch finish delete migrate task",
+      "_workforest_complete_words 'inspect visit start list status add switch finish delete ai migrate task",
     );
     expect(script).toContain(
       "visit|start|add|switch|finish|delete|task|review|template)",

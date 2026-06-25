@@ -1,4 +1,5 @@
 import type {
+  AiConfig,
   VercelLinkConfig,
   VercelRepoOverride,
   WorkforestDirectoryConfig,
@@ -156,6 +157,53 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
       return vercelLink === undefined ? {} : { vercelLink };
     },
   },
+  {
+    key: "ai",
+    type: "object",
+    description:
+      "Controls Workforest-owned AI provider selection and generation defaults.",
+    defaultBehavior:
+      "Unset. Workforest auto-detects built-in providers in priority order when an AI feature requires one.",
+    example: {
+      provider: "codex-cli",
+      model: "gpt-5",
+      timeoutMs: 120000,
+      disabled: false,
+    },
+    children: [
+      {
+        key: "provider",
+        type: "string",
+        description:
+          "Selects a provider by plugin provider ID, for example codex-cli or claude-cli.",
+        defaultBehavior:
+          "Auto-detects available providers, preferring codex-cli then claude-cli.",
+      },
+      {
+        key: "model",
+        type: "string",
+        description:
+          "Passes a model name through to the selected provider when a provider supports model selection.",
+        defaultBehavior: "Uses the selected provider's CLI default.",
+      },
+      {
+        key: "timeoutMs",
+        type: "positive integer",
+        description: "Maximum time to wait for a single AI generation.",
+        defaultBehavior: "120000.",
+      },
+      {
+        key: "disabled",
+        type: "boolean",
+        description: "Disables AI-backed Workforest features.",
+        defaultBehavior: "false.",
+      },
+    ],
+    normalize: (value, pathLabel) => {
+      const ai = normalizeAiConfig(value, pathLabel);
+      return ai === undefined ? {} : { ai };
+    },
+  },
 ] as const;
 
 export const CONFIGURATION_EXAMPLE: WorkspaceConfig = Object.fromEntries(
@@ -246,6 +294,64 @@ function normalizeVercelLinkConfig(
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeAiConfig(
+  value: unknown,
+  pathLabel: string,
+): AiConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  const result: AiConfig = {};
+  const provider = normalizeString(config["provider"]);
+  const model = normalizeString(config["model"]);
+  const timeoutMs = normalizePositiveInteger(
+    config["timeoutMs"],
+    `${pathLabel}.timeoutMs`,
+  );
+  const disabled = normalizeBoolean(
+    config["disabled"],
+    `${pathLabel}.disabled`,
+  );
+
+  if (provider !== undefined) result.provider = provider;
+  if (model !== undefined) result.model = model;
+  if (timeoutMs !== undefined) result.timeoutMs = timeoutMs;
+  if (disabled !== undefined) result.disabled = disabled;
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizePositiveInteger(
+  value: unknown,
+  pathLabel: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${pathLabel} must be a positive integer.`);
+  }
+  return value;
+}
+
+function normalizeBoolean(
+  value: unknown,
+  pathLabel: string,
+): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${pathLabel} must be a boolean.`);
+  }
+  return value;
 }
 
 function normalizeStringRecord(

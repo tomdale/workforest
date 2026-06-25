@@ -21,10 +21,18 @@ export type WorkforestDirectoryConfig = {
   reviews?: string;
 };
 
+export type AiConfig = {
+  provider?: string;
+  model?: string;
+  timeoutMs?: number;
+  disabled?: boolean;
+};
+
 export type WorkspaceConfig = {
   directory?: WorkforestDirectoryConfig;
   branchPrefix?: string;
   vercelLink?: VercelLinkConfig;
+  ai?: AiConfig;
 };
 
 export type ResolvedWorkspaceConfig = {

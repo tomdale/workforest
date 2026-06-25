@@ -42,6 +42,8 @@
     "wf": "WORKFOREST_USE_SOURCE_CLI=1 node bin/workforest.js"
   },
   "dependencies": {
+    "@wf-plugin/claude-cli": "workspace:*",
+    "@wf-plugin/codex-cli": "workspace:*",
     "@wf-plugin/core": "workspace:*",
     "@wf-plugin/package-managers": "workspace:*",
     "@wf-plugin/turbo": "workspace:*",

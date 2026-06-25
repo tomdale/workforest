@@ -38,6 +38,12 @@ When both the XDG and legacy files are absent, a new config uses the preferred p
         "disabled": true
       }
     }
+  },
+  "ai": {
+    "provider": "codex-cli",
+    "model": "gpt-5",
+    "timeoutMs": 120000,
+    "disabled": false
   }
 }
 ```
@@ -81,5 +87,20 @@ Nested fields:
 - `vercelLink.repoOverrides` (`object<string, { team?: string; disabled?: boolean }>`): Overrides the Vercel team or disables automatic linking for an owner/repository slug. Default: No per-repository overrides.
 - `vercelLink.repoOverrides.<owner/repository>.team` (`string`): Selects a Vercel team for one repository. Default: Uses the owner mapping when one exists.
 - `vercelLink.repoOverrides.<owner/repository>.disabled` (`boolean`): Disables automatic Vercel linking for one repository. Default: false.
+
+### `ai`
+
+Type: `object`
+
+Controls Workforest-owned AI provider selection and generation defaults.
+
+Default: Unset. Workforest auto-detects built-in providers in priority order when an AI feature requires one.
+
+Nested fields:
+
+- `ai.provider` (`string`): Selects a provider by plugin provider ID, for example codex-cli or claude-cli. Default: Auto-detects available providers, preferring codex-cli then claude-cli.
+- `ai.model` (`string`): Passes a model name through to the selected provider when a provider supports model selection. Default: Uses the selected provider's CLI default.
+- `ai.timeoutMs` (`positive integer`): Maximum time to wait for a single AI generation. Default: 120000.
+- `ai.disabled` (`boolean`): Disables AI-backed Workforest features. Default: false.
 
 Unknown top-level fields are ignored. String values are trimmed; blank optional paths are treated as unset.

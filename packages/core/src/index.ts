@@ -74,6 +74,46 @@ export type InitializerDefinition = {
   ) => TaskGenerator;
 };
 
+export type AiAvailability =
+  | { available: true; setupHint?: string }
+  | { available: false; setupHint: string; reason?: string };
+
+export type SpawnEnvironment = Record<string, string | undefined>;
+
+export type AiProviderContext = {
+  cwd: string;
+  env: SpawnEnvironment;
+  model?: string;
+  timeoutMs: number;
+};
+
+export type AiTextGenerationRequest = {
+  prompt: string;
+  model?: string;
+  timeoutMs?: number;
+};
+
+export type AiTextGenerationResult = {
+  text: string;
+};
+
+export type AiProviderClient = {
+  generateText(
+    request: AiTextGenerationRequest,
+  ): Promise<AiTextGenerationResult>;
+};
+
+export type AiProviderDefinition = {
+  id: string;
+  label: string;
+  priority: number;
+  capabilities: string[];
+  detect(context: AiProviderContext): Promise<AiAvailability>;
+  create(
+    context: AiProviderContext,
+  ): Promise<AiProviderClient> | AiProviderClient;
+};
+
 export type RunCommandOptions = {
   cwd?: string;
 };
@@ -455,7 +495,7 @@ const INHERITED_ENV_PREFIXES = [
   "VERCEL_",
 ];
 
-function createSpawnEnv(cwd?: string): NodeJS.ProcessEnv | undefined {
+export function createSpawnEnv(cwd?: string): SpawnEnvironment | undefined {
   if (cwd === undefined) {
     return undefined;
   }

@@ -19,6 +19,8 @@ const PROJECT_ROOT = path.resolve(
 const BASE_ENV = { ...process.env };
 const PACKAGE_DIRS = [
   "packages/core",
+  "packages/codex-cli",
+  "packages/claude-cli",
   "packages/package-managers",
   "packages/turbo",
   "packages/vercel",

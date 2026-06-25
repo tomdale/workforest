@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import {
   type InitializerContext,
   type InitializerDefinition,
@@ -7,10 +6,21 @@ import {
   runParallel,
   type TaskState,
 } from "@wf-plugin/core";
-import * as packageManagersPlugin from "@wf-plugin/package-managers";
-import * as turboPlugin from "@wf-plugin/turbo";
-import * as vercelPlugin from "@wf-plugin/vercel";
 import { loadWorkspaceConfig } from "../../config.ts";
+import {
+  builtInPluginPackageNames,
+  builtInPluginPackages,
+  getPluginId,
+  getPluginMetadata,
+  getPluginPackageName,
+  type NormalizedPluginCapabilityMetadata,
+  normalizePluginCapabilityMetadata,
+  type PluginCapabilityEntry,
+  type PluginCapabilityMetadata,
+  type PluginPackage,
+  type PluginPackageManifest,
+  type WorkforestPluginMetadata,
+} from "../plugins/index.ts";
 
 export type { InitializerContext, InitializerDefinition, InitializerDetection };
 
@@ -46,45 +56,20 @@ export type SingleRepoInitializerState =
     }
   | { phase: "complete" };
 
-type PluginActivationModule = Record<string, unknown> & {
-  detect?: PluginDetect;
-};
-
 type InitializerModule = Record<string, unknown> & { default?: unknown };
 
-export type PluginInitializerMetadata = {
-  id: string;
-  module?: string;
-  export?: string;
-  before?: string[];
-  after?: string[];
-  requires?: string[];
-};
-
-type PluginInitializerEntry = string | PluginInitializerMetadata;
-
-export type WorkforestPluginMetadata = {
-  id?: string;
-  initializers?: PluginInitializerEntry[];
-};
-
-export type PluginPackageManifest = {
-  name?: string;
-  workforest?: {
-    plugin?: WorkforestPluginMetadata;
-  };
-};
-
-export type PluginPackage = {
-  manifest: PluginPackageManifest;
-  module: PluginActivationModule;
+export type {
+  PluginCapabilityEntry as PluginInitializerEntry,
+  PluginCapabilityMetadata as PluginInitializerMetadata,
+  PluginPackage,
+  PluginPackageManifest,
+  WorkforestPluginMetadata,
 };
 
 type RegisteredInitializer = {
   packageName: string;
   pluginId: string;
-  metadata: Required<Pick<PluginInitializerMetadata, "id" | "module">> &
-    Omit<PluginInitializerMetadata, "id" | "module">;
+  metadata: NormalizedPluginCapabilityMetadata;
   key: string;
 };
 
@@ -93,40 +78,13 @@ type LoadedInitializer = {
   initializer: InitializerDefinition;
 };
 
-const ACTIVE_PLUGIN_PACKAGE_NAMES = [
-  "@wf-plugin/package-managers",
-  "@wf-plugin/vercel",
-  "@wf-plugin/turbo",
-] as const;
-
-const require = createRequire(import.meta.url);
-
-const activePluginPackages: PluginPackage[] = [
-  {
-    manifest: loadPluginManifest("@wf-plugin/package-managers"),
-    module: packageManagersPlugin,
-  },
-  {
-    manifest: loadPluginManifest("@wf-plugin/vercel"),
-    module: vercelPlugin,
-  },
-  {
-    manifest: loadPluginManifest("@wf-plugin/turbo"),
-    module: turboPlugin,
-  },
-];
-
-const activeInitializerRegistry =
-  buildInitializerRegistry(activePluginPackages);
+const activeInitializerRegistry = buildInitializerRegistry(
+  builtInPluginPackages,
+);
 
 export const builtInInitializerIds = activeInitializerRegistry.map(
   (entry) => entry.metadata.id,
 );
-
-function loadPluginManifest(packageName: string): PluginPackageManifest {
-  const manifestPath = require.resolve(`${packageName}/package.json`);
-  return require(manifestPath) as PluginPackageManifest;
-}
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -170,26 +128,18 @@ function buildInitializerRegistry(
   const seenIds = new Map<string, string>();
 
   for (const pluginPackage of packages) {
-    const packageName = pluginPackage.manifest.name;
-    if (!packageName) {
-      throw new Error("Plugin package is missing package.json name.");
-    }
-
-    const pluginMetadata = pluginPackage.manifest.workforest?.plugin;
-    if (!pluginMetadata) {
-      throw new Error(
-        `Plugin package "${packageName}" is missing workforest.plugin metadata.`,
-      );
-    }
-
-    if (!isPluginDetect(pluginPackage.module.detect)) {
+    const packageName = getPluginPackageName(pluginPackage);
+    const pluginMetadata = getPluginMetadata(pluginPackage);
+    const pluginId = pluginMetadata.id ?? packageName;
+    const initializerMetadata = pluginMetadata.initializers ?? [];
+    if (
+      initializerMetadata.length > 0 &&
+      !isPluginDetect(pluginPackage.module.detect)
+    ) {
       throw new Error(
         `Plugin package "${packageName}" is missing detect export.`,
       );
     }
-
-    const pluginId = pluginMetadata.id ?? packageName;
-    const initializerMetadata = pluginMetadata.initializers ?? [];
 
     for (const entry of initializerMetadata) {
       const metadata = normalizeInitializerMetadata(entry);
@@ -215,40 +165,13 @@ function buildInitializerRegistry(
 }
 
 function normalizeInitializerMetadata(
-  entry: PluginInitializerEntry,
+  entry: PluginCapabilityEntry,
 ): RegisteredInitializer["metadata"] {
-  let metadata: RegisteredInitializer["metadata"];
-  if (typeof entry === "string") {
-    metadata = {
-      id: entry,
-      module: defaultInitializerModule(entry),
-    };
-  } else {
-    metadata = {
-      ...entry,
-      module: entry.module ?? defaultInitializerModule(entry.id),
-    };
-  }
-
-  if (metadata.module.startsWith("./")) {
-    metadata.module = metadata.module.slice(2);
-  }
-
-  if (
-    metadata.module.startsWith("@") ||
-    metadata.module.startsWith("/") ||
-    metadata.module.startsWith("../")
-  ) {
-    throw new Error(
-      `Initializer "${metadata.id}" module must be relative to the plugin package root.`,
-    );
-  }
-
-  return metadata;
-}
-
-function defaultInitializerModule(initializerId: string): string {
-  return `initializers/${initializerId}`;
+  return normalizePluginCapabilityMetadata({
+    entry,
+    capabilityKind: "Initializer",
+    defaultModuleDirectory: "initializers",
+  });
 }
 
 function orderRegisteredInitializers(
@@ -461,13 +384,13 @@ async function activateInitializersForRepo({
   const activeByKey = new Map<string, RegisteredInitializer>();
 
   for (const pluginPackage of activePluginPackages) {
-    const packageName = pluginPackage.manifest.name;
-    if (!packageName) {
-      throw new Error("Plugin package is missing package.json name.");
+    const packageName = getPluginPackageName(pluginPackage);
+    const pluginMetadata = getPluginMetadata(pluginPackage);
+    if ((pluginMetadata.initializers ?? []).length === 0) {
+      continue;
     }
 
-    const pluginMetadata = pluginPackage.manifest.workforest?.plugin;
-    const pluginId = pluginMetadata?.id ?? packageName;
+    const pluginId = getPluginId(pluginPackage);
     const detect = pluginPackage.module.detect;
     if (!isPluginDetect(detect)) {
       throw new Error(
@@ -681,4 +604,6 @@ export async function* runSingleRepoInitializersGenerator({
   yield { phase: "complete" };
 }
 
-export const activePluginPackageNames = [...ACTIVE_PLUGIN_PACKAGE_NAMES];
+const activePluginPackages = builtInPluginPackages;
+
+export const activePluginPackageNames = builtInPluginPackageNames;

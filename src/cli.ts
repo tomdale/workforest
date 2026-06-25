@@ -286,6 +286,8 @@ async function runInvocation(
           onCleanupState: (state) => renderCleanupState(state, false),
         });
       });
+    case "ai.status":
+      return runTypedCommand(() => runAiStatusCommand(invocation));
     case "migrate.workspaces":
       return runTypedCommand(async () => {
         const { runMigrateWorkspacesCommand } = await import(
@@ -549,6 +551,7 @@ async function runConfigInit(): Promise<CommandResult> {
 
   const newConfig: WorkspaceConfig = {
     ...(config.vercelLink ? { vercelLink: config.vercelLink } : {}),
+    ...(config.ai ? { ai: config.ai } : {}),
     directory: {
       base: directoryBase,
       repos: directoryRepos,
@@ -589,6 +592,7 @@ async function runConfigShow(): Promise<CommandResult> {
     config.vercelLink?.teamByGitHubOwner ?? {},
   );
   const repoOverrides = Object.entries(config.vercelLink?.repoOverrides ?? {});
+  const aiConfig = config.ai;
 
   printReport({
     title: "Workspace configuration",
@@ -676,6 +680,34 @@ async function runConfigShow(): Promise<CommandResult> {
             },
           ]
         : []),
+      ...(aiConfig
+        ? [
+            {
+              title: "AI",
+              fields: [
+                {
+                  label: "Provider",
+                  value: aiConfig.provider ?? "(auto)",
+                },
+                {
+                  label: "Model",
+                  value: aiConfig.model ?? "(provider default)",
+                },
+                {
+                  label: "Timeout",
+                  value:
+                    aiConfig.timeoutMs === undefined
+                      ? "120000ms"
+                      : `${aiConfig.timeoutMs}ms`,
+                },
+                {
+                  label: "Disabled",
+                  value: aiConfig.disabled ? "yes" : "no",
+                },
+              ],
+            },
+          ]
+        : []),
     ],
     footer: `Config: ${configPath}`,
   });
@@ -742,6 +774,18 @@ async function runVersionCommand(): Promise<CommandResult> {
     value: `workforest ${packageJson.version}`,
     stream: "stdout",
   });
+}
+
+async function runAiStatusCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const { getAiStatus, renderAiStatus } = await import(
+    "./services/ai/index.ts"
+  );
+  const status = await getAiStatus();
+  return booleanInvocationFlag(invocation, "json")
+    ? jsonSuccess(status)
+    : success(reportOutput(renderAiStatus(status)));
 }
 
 async function runChangeListCommand(
@@ -1782,6 +1826,12 @@ async function runTemplateInvocation(
       return runTemplateOpen(invocation.beforeDoubleDash[0] ?? "");
     case "template.show":
       return runTemplateShow(invocation.beforeDoubleDash[0] ?? "");
+    case "template.suggest": {
+      const { runTemplateSuggestCommand } = await import(
+        "./cli/template-suggest.ts"
+      );
+      return runTemplateSuggestCommand({ interactive: isInteractive() });
+    }
     case "template.new":
       return runTemplateNew(invocation);
     case "template.edit":

@@ -514,6 +514,35 @@ const migrateWorkspaces = leaf({
   outputModes: ["report", "json"],
 });
 
+const aiStatus = leaf({
+  name: "status",
+  path: ["ai", "status"],
+  summary: "Show AI provider status",
+  description:
+    "Shows built-in AI provider detection results, the selected provider, model, timeout, and setup hints. With --json it emits the same status model as a JSON envelope.",
+  handler: "ai.status",
+  help: nestedHelp("ai", "status"),
+  flags: [
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit AI provider status as a JSON envelope instead of the report.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf ai status",
+      description: "Show detected AI providers and the selected provider.",
+    },
+    {
+      command: "wf ai status --json",
+      description: "Emit AI provider status as a JSON envelope.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
 export const commandRegistry: CommandRegistry = {
   shortcuts: [],
   root: group({
@@ -529,6 +558,15 @@ export const commandRegistry: CommandRegistry = {
       changeSwitch,
       changeFinish,
       changeDelete,
+      group({
+        name: "ai",
+        path: ["ai"],
+        summary: "Inspect AI provider setup",
+        description:
+          "Reports the built-in provider adapters available to AI-backed Workforest features.",
+        help: { kind: "command", command: "ai" },
+        children: [aiStatus],
+      }),
       group({
         name: "migrate",
         path: ["migrate"],
@@ -1132,6 +1170,24 @@ export const commandRegistry: CommandRegistry = {
                 command: "wf template manage",
                 description:
                   "Browse and edit all templates in an interactive screen.",
+              },
+            ],
+            outputModes: ["interactive"],
+            tty: requiredStdin,
+          }),
+          leaf({
+            name: "suggest",
+            path: ["template", "suggest"],
+            summary: "Suggest templates from PR history",
+            description:
+              "Analyzes recent authored, reviewed, and commented GitHub pull requests with the configured AI provider, then lets you review and save suggested workspace templates. Requires an interactive terminal.",
+            handler: "template.suggest",
+            help: nestedHelp("template", "suggest"),
+            examples: [
+              {
+                command: "wf template suggest",
+                description:
+                  "Analyze recent GitHub PR activity and choose suggested templates to save.",
               },
             ],
             outputModes: ["interactive"],

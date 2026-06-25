@@ -1,0 +1,38 @@
+{
+  "name": "@wf-plugin/claude-cli",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./ai-providers/claude-cli": {
+      "types": "./dist/ai-providers/claude-cli.d.mts",
+      "import": "./dist/ai-providers/claude-cli.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsdown src/index.ts src/ai-providers/*.ts",
+    "prepare": "tsdown src/index.ts src/ai-providers/*.ts",
+    "prepack": "tsdown src/index.ts src/ai-providers/*.ts"
+  },
+  "dependencies": {
+    "@wf-plugin/core": "workspace:*"
+  },
+  "workforest": {
+    "plugin": {
+      "aiProviders": [
+        {
+          "id": "claude-cli",
+          "module": "./ai-providers/claude-cli",
+          "priority": 50
+        }
+      ]
+    }
+  }
+}

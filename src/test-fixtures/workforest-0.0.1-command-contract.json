@@ -75,6 +75,7 @@
   "templateSubcommands": {
     "list": [],
     "show": [],
+    "suggest": [],
     "new": [],
     "delete": [],
     "edit": []

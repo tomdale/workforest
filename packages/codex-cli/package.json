@@ -1,0 +1,38 @@
+{
+  "name": "@wf-plugin/codex-cli",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./ai-providers/codex-cli": {
+      "types": "./dist/ai-providers/codex-cli.d.mts",
+      "import": "./dist/ai-providers/codex-cli.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsdown src/index.ts src/ai-providers/*.ts",
+    "prepare": "tsdown src/index.ts src/ai-providers/*.ts",
+    "prepack": "tsdown src/index.ts src/ai-providers/*.ts"
+  },
+  "dependencies": {
+    "@wf-plugin/core": "workspace:*"
+  },
+  "workforest": {
+    "plugin": {
+      "aiProviders": [
+        {
+          "id": "codex-cli",
+          "module": "./ai-providers/codex-cli",
+          "priority": 100
+        }
+      ]
+    }
+  }
+}
