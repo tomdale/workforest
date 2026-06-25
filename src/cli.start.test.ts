@@ -12,7 +12,10 @@ import {
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { createTemplate } from "./templates/index.ts";
-import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
+import {
+  readWorkspaceMetadata,
+  writeWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -96,6 +99,24 @@ describe("wf start", () => {
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
     ]);
+    await expect(
+      readWorkspaceMetadata(
+        path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
+      ),
+    ).resolves.toMatchObject({
+      workspace: {
+        feature_name: "redesign-cli",
+      },
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          default_branch: "main",
+          feature_branch: "tomdale/redesign-cli",
+          has_lockfile: false,
+        },
+      ],
+    });
   });
 
   it("routes a template source to the template workspace layout", async () => {

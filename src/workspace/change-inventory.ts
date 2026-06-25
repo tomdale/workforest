@@ -14,6 +14,8 @@ import {
   type WorkforestDirectories,
 } from "./paths.ts";
 
+const GIT_STATUS_TIMEOUT_MS = 5_000;
+
 export type ChangeState = "clean" | "dirty" | "stale";
 
 export type WorkspaceChangeInventoryEntry = Readonly<{
@@ -165,9 +167,9 @@ async function collectWorkspaceChanges(
       const metadata = await readWorkspaceMetadata(changePath).catch(
         () => null,
       );
-      const repos =
-        metadata?.repos.map((repo) => repo.name) ??
-        (await inferWorkspaceRepoNames(changePath));
+      if (!metadata) continue;
+
+      const repos = metadata.repos.map((repo) => repo.name);
       const repoPaths = repos.map((repo) => path.join(changePath, repo));
       const modifiedAtMs = await newestMtimeMs([
         changePath,
@@ -213,6 +215,11 @@ async function collectRepositoryChanges(
       if (!changeName) continue;
 
       const changePath = path.join(repository.path, changeName);
+      const metadata = await readWorkspaceMetadata(changePath).catch(
+        () => null,
+      );
+      if (!metadata) continue;
+
       const modifiedAtMs = await newestMtimeMs([
         changePath,
         path.join(changePath, ".workforest"),
@@ -232,17 +239,6 @@ async function collectRepositoryChanges(
   }
 
   return entries;
-}
-
-async function inferWorkspaceRepoNames(
-  changePath: string,
-): Promise<readonly string[]> {
-  const entries = await readChildDirectories(changePath);
-  return entries
-    .map((entry) => entry.name)
-    .filter(
-      (name) => name !== TASKS_DIRECTORY_NAME && safeRepositoryName(name),
-    );
 }
 
 async function aggregateRepoState(
@@ -270,6 +266,7 @@ async function detectRepoState(repoPath: string): Promise<ChangeState> {
   try {
     const { stdout } = await runGit(["status", "--porcelain"], {
       cwd: repoPath,
+      timeout: GIT_STATUS_TIMEOUT_MS,
     });
     return stdout.trim().length > 0 ? "dirty" : "clean";
   } catch {

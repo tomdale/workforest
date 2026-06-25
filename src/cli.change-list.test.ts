@@ -131,7 +131,7 @@ describe("wf list", () => {
     });
   });
 
-  it("sorts inferred workspace repositories without metadata", async () => {
+  it("ignores metadata-less grouped workspace directories", async () => {
     const { baseDir } = await createConfigFixture();
     const workspace = path.join(baseDir, "Workspaces", "_adhoc", "no-metadata");
     await Promise.all([
@@ -146,16 +146,41 @@ describe("wf list", () => {
     expect(JSON.parse(rendered.stdout)).toEqual({
       ok: true,
       data: {
-        workspaces: [
-          expect.objectContaining({
-            selector: "_adhoc/no-metadata",
-            repos: ["api", "zeta"],
-            repoSummary: "api, zeta",
-          }),
-        ],
+        workspaces: [],
         repositories: [],
         totals: {
-          workspaces: 1,
+          workspaces: 0,
+          repositories: 0,
+        },
+      },
+    });
+  });
+
+  it("ignores metadata-less workspace repository directories", async () => {
+    const { baseDir } = await createConfigFixture();
+    const flatWorkspaceRepo = path.join(
+      baseDir,
+      "Workspaces",
+      "flat-change",
+      "api",
+    );
+    await createGitRepo(flatWorkspaceRepo);
+    await Promise.all([
+      mkdir(path.join(flatWorkspaceRepo, "packages"), { recursive: true }),
+      mkdir(path.join(flatWorkspaceRepo, "src"), { recursive: true }),
+    ]);
+
+    const result = await executeCli(["list", "--json"]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(rendered.stdout)).toEqual({
+      ok: true,
+      data: {
+        workspaces: [],
+        repositories: [],
+        totals: {
+          workspaces: 0,
           repositories: 0,
         },
       },
@@ -226,6 +251,18 @@ async function createInventoryFixture(): Promise<{ baseDir: string }> {
         remote: "git@github.com:vercel/api.git",
         defaultBranch: "main",
         hasLockfile: true,
+      },
+    ],
+  });
+  await writeWorkspaceMetadata(repoChange, {
+    featureName: "cli-redesign",
+    branchName: "tomdale/cli-redesign",
+    repos: [
+      {
+        name: "workforest",
+        remote: "git@github.com:tomdale/workforest.git",
+        defaultBranch: "main",
+        hasLockfile: false,
       },
     ],
   });

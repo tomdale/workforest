@@ -17,6 +17,7 @@ import {
   printRepoSetupFailures,
   stampWorkspace,
   stampWorkspaceInteractive,
+  writeInitialWorkspaceMetadata,
 } from "../workspace/index.ts";
 import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import {
@@ -94,6 +95,12 @@ export async function runStartCommand(
       repo: source.repo,
       branchName,
       targetDir,
+    });
+    await writeInitialWorkspaceMetadata({
+      workspaceDir: targetDir,
+      featureName: changeName,
+      branchName,
+      repos: [source.repo],
     });
     await options.writeShellCdPath(targetDir);
     log.success(`Change ready: ${targetDir}`);
