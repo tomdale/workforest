@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -20,6 +20,33 @@ async function git(args: string[], cwd?: string): Promise<string> {
   return stdout.trim();
 }
 
+async function createCommit(
+  cwd: string,
+  tree: string,
+  message: string,
+  parent?: string,
+): Promise<string> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message],
+    {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Test User",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "Test User",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    },
+  );
+  return stdout.trim();
+}
+
+async function updateMain(cwd: string, commit: string): Promise<void> {
+  await git(["update-ref", "refs/heads/main", commit], cwd);
+}
+
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const states: T[] = [];
   for await (const state of gen) {
@@ -37,44 +64,35 @@ afterEach(async () => {
 describe("ensureMirrorRepoGenerator", () => {
   it("updates remote refs without damaging a linked worktree on main", async () => {
     const rootDir = await createTempDir("workforest-cache-update-");
-    const originDir = path.join(rootDir, "origin.git");
     const sourceDir = path.join(rootDir, "source");
     const mirrorDir = path.join(rootDir, "front.git");
     const worktreeDir = path.join(rootDir, "front");
 
-    await git(["init", "--bare", originDir]);
     await git(["init", "--initial-branch=main", sourceDir]);
-    await git(["config", "user.email", "test@example.com"], sourceDir);
-    await git(["config", "user.name", "Test User"], sourceDir);
-    await writeFile(path.join(sourceDir, "README.md"), "initial\n");
-    await git(["add", "README.md"], sourceDir);
-    await git(["commit", "-m", "initial"], sourceDir);
-    await git(["remote", "add", "origin", originDir], sourceDir);
-    await git(["push", "origin", "main"], sourceDir);
+    const emptyTree = await git(["write-tree"], sourceDir);
+    const localMainBefore = await createCommit(sourceDir, emptyTree, "initial");
+    await updateMain(sourceDir, localMainBefore);
 
-    await git(["clone", "--bare", originDir, mirrorDir]);
+    await git(["clone", "--bare", sourceDir, mirrorDir]);
     await git(
       ["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"],
       mirrorDir,
     );
     await git(["worktree", "add", worktreeDir, "main"], mirrorDir);
 
-    const localMainBefore = await git(
-      ["rev-parse", "refs/heads/main"],
-      mirrorDir,
+    const originMain = await createCommit(
+      sourceDir,
+      emptyTree,
+      "update",
+      localMainBefore,
     );
-
-    await writeFile(path.join(sourceDir, "README.md"), "updated\n");
-    await git(["add", "README.md"], sourceDir);
-    await git(["commit", "-m", "update"], sourceDir);
-    await git(["push", "origin", "main"], sourceDir);
-    const originMain = await git(["rev-parse", "main"], sourceDir);
+    await updateMain(sourceDir, originMain);
 
     const states = await collectStates(
       ensureMirrorRepoGenerator(
         {
           name: "front",
-          remote: originDir,
+          remote: sourceDir,
           defaultBranch: "main",
         },
         mirrorDir,
@@ -82,18 +100,17 @@ describe("ensureMirrorRepoGenerator", () => {
     );
     expect(states).toEqual([{ status: "running" }]);
 
-    await expect(git(["status", "--short"], worktreeDir)).resolves.toBe("");
     await expect(
-      git(["symbolic-ref", "--short", "HEAD"], worktreeDir),
-    ).resolves.toBe("main");
-    await expect(git(["rev-parse", "HEAD"], worktreeDir)).resolves.toBe(
-      localMainBefore,
-    );
-    await expect(
-      git(["rev-parse", "refs/heads/main"], mirrorDir),
-    ).resolves.toBe(localMainBefore);
-    await expect(
-      git(["rev-parse", "refs/remotes/origin/main"], mirrorDir),
-    ).resolves.toBe(originMain);
+      git(["status", "--porcelain=v1", "--branch"], worktreeDir),
+    ).resolves.toBe("## main");
+
+    const [localMainAfter, remoteMainAfter] = (
+      await git(
+        ["rev-parse", "refs/heads/main", "refs/remotes/origin/main"],
+        mirrorDir,
+      )
+    ).split("\n");
+    expect(localMainAfter).toBe(localMainBefore);
+    expect(remoteMainAfter).toBe(originMain);
   });
 });
