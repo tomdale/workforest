@@ -195,7 +195,7 @@ wf migrate <subcommand>
 
 Migrate workspace layouts and repository metadata.
 
-Moves metadata-bearing direct workspace directories into the grouped workspace layout and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.
+Moves metadata-bearing direct workspace directories into the grouped workspace layout, moves legacy repo-only directories from <repo>/<change> into Repos/<repo>/<change>, and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.
 
 ```text
 wf migrate workspaces [options]
@@ -208,8 +208,8 @@ Options:
 
 Examples:
 
-- `wf migrate workspaces` — Preview workspace moves and repository metadata backfills.
-- `wf migrate workspaces --apply` — Apply workspace moves and repository metadata backfills.
+- `wf migrate workspaces` — Preview workspace moves, repository directory moves, and repository metadata backfills.
+- `wf migrate workspaces --apply` — Apply workspace moves, repository directory moves, and repository metadata backfills.
 
 ## `wf task`
 
