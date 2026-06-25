@@ -476,7 +476,7 @@ const migrateWorkspaces = leaf({
   path: ["migrate", "workspaces"],
   summary: "Migrate workspace layouts and repository metadata",
   description:
-    "Moves metadata-bearing direct workspace directories into the grouped workspace layout and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.",
+    "Moves metadata-bearing direct workspace directories into the grouped workspace layout, moves legacy repo-only directories from <repo>/<change> into Repos/<repo>/<change>, and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.",
   handler: "migrate.workspaces",
   help: nestedHelp("migrate", "workspaces"),
   flags: [
@@ -496,11 +496,13 @@ const migrateWorkspaces = leaf({
   examples: [
     {
       command: "wf migrate workspaces",
-      description: "Preview workspace moves and repository metadata backfills.",
+      description:
+        "Preview workspace moves, repository directory moves, and repository metadata backfills.",
     },
     {
       command: "wf migrate workspaces --apply",
-      description: "Apply workspace moves and repository metadata backfills.",
+      description:
+        "Apply workspace moves, repository directory moves, and repository metadata backfills.",
     },
   ],
   outputModes: ["report", "json"],

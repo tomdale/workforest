@@ -15,6 +15,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
+const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -22,6 +23,11 @@ afterEach(async () => {
     delete process.env["WORKFOREST_CONFIG_DIR"];
   } else {
     process.env["WORKFOREST_CONFIG_DIR"] = ORIGINAL_CONFIG_DIR;
+  }
+  if (ORIGINAL_CACHE_DIR === undefined) {
+    delete process.env["WORKFOREST_CACHE_DIR"];
+  } else {
+    process.env["WORKFOREST_CACHE_DIR"] = ORIGINAL_CACHE_DIR;
   }
 
   await Promise.all(
@@ -158,6 +164,101 @@ describe("wf migrate workspaces", () => {
     ).resolves.toBeNull();
   });
 
+  it("previews legacy repo-only directory moves without changing files", async () => {
+    const { baseDir, cacheDir } = await createMigrationFixture();
+    const source = await createLegacyRepositoryChange(
+      baseDir,
+      cacheDir,
+      "workforest",
+      "main",
+    );
+    const target = path.join(baseDir, "Repos", "workforest", "main");
+
+    const result = await executeCli(["migrate", "workspaces"]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode).toBe(0);
+    expect(rendered.stdout).toContain("Repository directories ready");
+    expect(rendered.stdout).toContain("workforest/main");
+    await expect(
+      execFileAsync("git", ["status", "--short"], { cwd: source }),
+    ).resolves.toHaveProperty("stdout");
+    await expect(
+      execFileAsync("git", ["status", "--short"], { cwd: target }),
+    ).rejects.toThrow();
+  });
+
+  it("ignores legacy-looking repo-only directories that are not cached worktrees", async () => {
+    const { baseDir } = await createMigrationFixture();
+    const source = await createRepositoryChangeIn(
+      baseDir,
+      "workforest",
+      "main",
+    );
+
+    const result = await executeCli(["migrate", "workspaces"]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode).toBe(0);
+    expect(rendered.stdout).not.toContain("Repository directories ready");
+    await expect(
+      execFileAsync("git", ["status", "--short"], { cwd: source }),
+    ).resolves.toHaveProperty("stdout");
+  });
+
+  it("moves legacy repo-only directories into repository change paths", async () => {
+    const { baseDir, cacheDir } = await createMigrationFixture();
+    const source = await createLegacyRepositoryChange(
+      baseDir,
+      cacheDir,
+      "workforest",
+      "main",
+    );
+    const target = path.join(baseDir, "Repos", "workforest", "main");
+
+    const result = await executeCli([
+      "migrate",
+      "workspaces",
+      "--apply",
+      "--json",
+    ]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(rendered.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        applied: true,
+        repositoryDirectories: {
+          migrated: [expect.objectContaining({ selector: "workforest/main" })],
+          blocked: [],
+        },
+      },
+    });
+    await expect(
+      execFileAsync("git", ["status", "--short"], { cwd: source }),
+    ).rejects.toThrow();
+    await expect(
+      execFileAsync("git", ["status", "--short"], { cwd: target }),
+    ).resolves.toHaveProperty("stdout");
+    await expect(
+      readRepositoryChangeMetadata(
+        path.join(baseDir, "Repos", "workforest"),
+        "main",
+      ),
+    ).resolves.toMatchObject({
+      workspace: { feature_name: "main" },
+      repos: [
+        {
+          name: "workforest",
+          remote: "git@github.com:tomdale/workforest.git",
+          feature_branch: "tomdale/main",
+          has_lockfile: true,
+        },
+      ],
+    });
+  });
+
   it("writes repository metadata under the repo root", async () => {
     const { baseDir } = await createMigrationFixture();
     await createRepositoryChange(baseDir, "workforest", "cli-redesign");
@@ -186,15 +287,20 @@ describe("wf migrate workspaces", () => {
   });
 });
 
-async function createMigrationFixture(): Promise<{ baseDir: string }> {
+async function createMigrationFixture(): Promise<{
+  baseDir: string;
+  cacheDir: string;
+}> {
   const configDir = await createTempDir("workforest-migrate-config-");
+  const cacheDir = await createTempDir("workforest-migrate-cache-");
   const baseDir = await createTempDir("workforest-migrate-base-");
   process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+  process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
   await saveWorkspaceConfig(path.join(configDir, "config.json"), {
     directory: { base: baseDir },
     branchPrefix: "tomdale",
   });
-  return { baseDir };
+  return { baseDir, cacheDir };
 }
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -208,7 +314,66 @@ async function createRepositoryChange(
   repoName: string,
   changeName: string,
 ): Promise<string> {
-  const changeDir = path.join(baseDir, "Repos", repoName, changeName);
+  return createRepositoryChangeIn(
+    path.join(baseDir, "Repos"),
+    repoName,
+    changeName,
+  );
+}
+
+async function createLegacyRepositoryChange(
+  baseDir: string,
+  cacheDir: string,
+  repoName: string,
+  changeName: string,
+): Promise<string> {
+  const seedDir = await createTempDir("workforest-migrate-seed-");
+  await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: seedDir });
+  await execFileAsync("git", ["config", "user.name", "Workforest Tests"], {
+    cwd: seedDir,
+  });
+  await execFileAsync(
+    "git",
+    ["config", "user.email", "workforest-tests@example.com"],
+    { cwd: seedDir },
+  );
+  await execFileAsync("git", ["config", "commit.gpgsign", "false"], {
+    cwd: seedDir,
+  });
+  await writeFile(path.join(seedDir, "README.md"), "fixture\n", "utf8");
+  await execFileAsync("git", ["add", "README.md"], { cwd: seedDir });
+  await execFileAsync("git", ["commit", "-q", "-m", "Initial commit"], {
+    cwd: seedDir,
+  });
+
+  const mirrorDir = path.join(cacheDir, `${repoName}.git`);
+  await execFileAsync("git", ["clone", "--bare", seedDir, mirrorDir]);
+  await execFileAsync(
+    "git",
+    ["remote", "set-url", "origin", `git@github.com:tomdale/${repoName}.git`],
+    { cwd: mirrorDir },
+  );
+  await execFileAsync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], {
+    cwd: mirrorDir,
+  });
+
+  const changeDir = path.join(baseDir, repoName, changeName);
+  await mkdir(path.dirname(changeDir), { recursive: true });
+  await execFileAsync(
+    "git",
+    ["worktree", "add", "-b", `tomdale/${changeName}`, changeDir, "main"],
+    { cwd: mirrorDir },
+  );
+  await writeFile(path.join(changeDir, "pnpm-lock.yaml"), "lockfile\n", "utf8");
+  return changeDir;
+}
+
+async function createRepositoryChangeIn(
+  rootDir: string,
+  repoName: string,
+  changeName: string,
+): Promise<string> {
+  const changeDir = path.join(rootDir, repoName, changeName);
   await mkdir(changeDir, { recursive: true });
   await execFileAsync("git", ["init", "-q", "-b", `tomdale/${changeName}`], {
     cwd: changeDir,

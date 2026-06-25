@@ -3,6 +3,10 @@ import { type Dirent, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
+import {
+  type CachedRepository,
+  listCachedRepositories,
+} from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
@@ -21,10 +25,12 @@ import {
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
+  getRepositoryChangePath,
   getWorkspaceChangePath,
   isPathInsideOrEqual,
   resolveWorkforestDirectories,
   TASKS_DIRECTORY_NAME,
+  type WorkforestDirectories,
 } from "../workspace/paths.ts";
 import {
   failure,
@@ -48,6 +54,28 @@ export type BlockedWorkspaceMigrationEntry = WorkspaceMigrationEntry &
   Readonly<{
     reason: string;
   }>;
+
+export type RepositoryDirectoryMigrationEntry = Readonly<{
+  repository: string;
+  changeName: string;
+  selector: string;
+  source: string;
+  target: string;
+  metadataPath: string;
+  branchName: string;
+  repo: RepoConfig;
+  hasLockfile: boolean;
+}>;
+
+export type BlockedRepositoryDirectoryMigrationEntry = Readonly<{
+  repository: string;
+  changeName: string;
+  selector: string;
+  source: string;
+  target: string;
+  metadataPath: string;
+  reason: string;
+}>;
 
 export type RepositoryMetadataMigrationEntry = Readonly<{
   repository: string;
@@ -74,6 +102,11 @@ export type WorkspaceMigrationResult = Readonly<{
   planned: readonly WorkspaceMigrationEntry[];
   migrated: readonly WorkspaceMigrationEntry[];
   blocked: readonly BlockedWorkspaceMigrationEntry[];
+  repositoryDirectories: Readonly<{
+    planned: readonly RepositoryDirectoryMigrationEntry[];
+    migrated: readonly RepositoryDirectoryMigrationEntry[];
+    blocked: readonly BlockedRepositoryDirectoryMigrationEntry[];
+  }>;
   repositoryMetadata: Readonly<{
     planned: readonly RepositoryMetadataMigrationEntry[];
     migrated: readonly RepositoryMetadataMigrationEntry[];
@@ -109,6 +142,7 @@ export async function migrateWorkspaceLayout(
   const candidates = await readChildDirectories(directories.workspaces);
   const entries: WorkspaceMigrationEntry[] = [];
   const blocked: BlockedWorkspaceMigrationEntry[] = [];
+  const repositoryDirectories = await planRepositoryDirectoryMigration(config);
   const repositoryMetadata = await planRepositoryMetadataMigration(config);
 
   for (const candidate of candidates) {
@@ -134,6 +168,7 @@ export async function migrateWorkspaceLayout(
   if (
     !options.apply ||
     blocked.length > 0 ||
+    repositoryDirectories.blocked.length > 0 ||
     repositoryMetadata.blocked.length > 0
   ) {
     return {
@@ -141,6 +176,11 @@ export async function migrateWorkspaceLayout(
       planned: entries,
       migrated: [],
       blocked,
+      repositoryDirectories: {
+        planned: repositoryDirectories.entries,
+        migrated: [],
+        blocked: repositoryDirectories.blocked,
+      },
       repositoryMetadata: {
         planned: repositoryMetadata.entries,
         migrated: [],
@@ -151,6 +191,19 @@ export async function migrateWorkspaceLayout(
 
   for (const entry of entries) {
     await moveWorkspaceDirectory(entry.source, entry.target);
+  }
+  for (const entry of repositoryDirectories.entries) {
+    await moveWorkspaceDirectory(entry.source, entry.target);
+    await writeRepositoryChangeMetadata(path.dirname(entry.target), {
+      featureName: entry.changeName,
+      branchName: entry.branchName,
+      repos: [
+        {
+          ...entry.repo,
+          hasLockfile: entry.hasLockfile,
+        },
+      ],
+    });
   }
   for (const entry of repositoryMetadata.entries) {
     await writeRepositoryChangeMetadata(path.dirname(entry.worktreePath), {
@@ -170,6 +223,11 @@ export async function migrateWorkspaceLayout(
     planned: [],
     migrated: entries,
     blocked: [],
+    repositoryDirectories: {
+      planned: [],
+      migrated: repositoryDirectories.entries,
+      blocked: [],
+    },
     repositoryMetadata: {
       planned: [],
       migrated: repositoryMetadata.entries,
@@ -189,13 +247,16 @@ export function renderWorkspaceMigration(
     result.planned.length === 0 &&
     result.migrated.length === 0 &&
     result.blocked.length === 0 &&
+    result.repositoryDirectories.planned.length === 0 &&
+    result.repositoryDirectories.migrated.length === 0 &&
+    result.repositoryDirectories.blocked.length === 0 &&
     result.repositoryMetadata.planned.length === 0 &&
     result.repositoryMetadata.migrated.length === 0 &&
     result.repositoryMetadata.blocked.length === 0
   ) {
     lines.push(
       "",
-      "No direct workspace directories or repository metadata need migration.",
+      "No workspace directories, repository directories, or repository metadata need migration.",
     );
     return lines.join("\n");
   }
@@ -218,6 +279,27 @@ export function renderWorkspaceMigration(
     lines.push("", "Blocked");
     for (const entry of result.blocked) {
       lines.push(formatMigrationEntry(entry, entry.reason));
+    }
+  }
+
+  if (result.repositoryDirectories.planned.length > 0) {
+    lines.push("", "Repository directories ready");
+    for (const entry of result.repositoryDirectories.planned) {
+      lines.push(formatRepositoryDirectoryEntry(entry));
+    }
+  }
+
+  if (result.repositoryDirectories.migrated.length > 0) {
+    lines.push("", "Repository directories moved");
+    for (const entry of result.repositoryDirectories.migrated) {
+      lines.push(formatRepositoryDirectoryEntry(entry));
+    }
+  }
+
+  if (result.repositoryDirectories.blocked.length > 0) {
+    lines.push("", "Repository directories blocked");
+    for (const entry of result.repositoryDirectories.blocked) {
+      lines.push(formatRepositoryDirectoryEntry(entry, entry.reason));
     }
   }
 
@@ -244,7 +326,9 @@ export function renderWorkspaceMigration(
 
   if (
     !result.applied &&
-    (result.planned.length > 0 || result.repositoryMetadata.planned.length > 0)
+    (result.planned.length > 0 ||
+      result.repositoryDirectories.planned.length > 0 ||
+      result.repositoryMetadata.planned.length > 0)
   ) {
     lines.push("", "Run: wf migrate workspaces --apply");
   }
@@ -254,7 +338,9 @@ export function renderWorkspaceMigration(
 
 function hasMigrationBlockers(result: WorkspaceMigrationResult): boolean {
   return (
-    result.blocked.length > 0 || result.repositoryMetadata.blocked.length > 0
+    result.blocked.length > 0 ||
+    result.repositoryDirectories.blocked.length > 0 ||
+    result.repositoryMetadata.blocked.length > 0
   );
 }
 
@@ -275,6 +361,176 @@ function migrationEntryFromMetadata(
     groupName,
     changeName,
     repoNames: metadata.repos.map((repo) => repo.name),
+  };
+}
+
+async function planRepositoryDirectoryMigration(
+  config: WorkspaceConfig,
+): Promise<{
+  entries: RepositoryDirectoryMigrationEntry[];
+  blocked: BlockedRepositoryDirectoryMigrationEntry[];
+}> {
+  const directories = resolveWorkforestDirectories(config);
+  const comparableDirectories =
+    await comparableWorkforestDirectories(directories);
+  const repositories = await listCachedRepositories();
+  const entries: RepositoryDirectoryMigrationEntry[] = [];
+  const blocked: BlockedRepositoryDirectoryMigrationEntry[] = [];
+  const seenSources = new Set<string>();
+
+  for (const repository of repositories) {
+    const repoName = safeRepositoryName(repository.name);
+    if (!repoName) continue;
+
+    for (const worktree of repository.worktrees) {
+      if (!worktree.exists || worktree.prunable) continue;
+
+      const source = path.resolve(worktree.path);
+      if (seenSources.has(source)) continue;
+      seenSources.add(source);
+
+      const candidate = await legacyRepositoryDirectoryCandidate(
+        comparableDirectories,
+        repoName,
+        source,
+      );
+      if (!candidate) continue;
+
+      const { changeName } = candidate;
+
+      const target = getRepositoryChangePath(directories, repoName, changeName);
+      if (pathsEqual(source, target)) continue;
+
+      const metadataPath = getRepositoryChangeMetadataPath(
+        path.dirname(target),
+        changeName,
+      );
+      const base = {
+        repository: repoName,
+        changeName,
+        selector: `${repoName}/${changeName}`,
+        source,
+        target,
+        metadataPath,
+      };
+
+      if (await pathExists(target)) {
+        blocked.push({
+          ...base,
+          reason: "Target already exists.",
+        });
+        continue;
+      }
+
+      const existing = await readRepositoryChangeMetadata(
+        path.dirname(target),
+        changeName,
+      ).catch(() => null);
+      if (existing) {
+        blocked.push({
+          ...base,
+          reason: "Repository metadata already exists.",
+        });
+        continue;
+      }
+
+      const repo = repoConfigFromCachedRepository(repository, repoName);
+      if (!repo) {
+        blocked.push({
+          ...base,
+          reason: "Could not infer repository remote.",
+        });
+        continue;
+      }
+
+      entries.push({
+        ...base,
+        repo,
+        branchName: worktree.branch ?? changeName,
+        hasLockfile: await hasLockfile(source),
+      });
+    }
+  }
+
+  return { entries, blocked };
+}
+
+async function legacyRepositoryDirectoryCandidate(
+  directories: WorkforestDirectories,
+  repoName: string,
+  source: string,
+): Promise<{ changeName: string } | null> {
+  const comparableSource = await comparablePath(source);
+
+  if (
+    [directories.repos, directories.workspaces, directories.reviews].some(
+      (managedRoot) => isPathInsideOrEqual(managedRoot, comparableSource),
+    )
+  ) {
+    return null;
+  }
+
+  const relative = path.relative(
+    path.resolve(directories.base),
+    comparableSource,
+  );
+  if (
+    relative.length === 0 ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return null;
+  }
+
+  const parts = relative.split(path.sep);
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [repoDirectoryName, changeDirectoryName] = parts;
+  if (!repoDirectoryName || !changeDirectoryName) {
+    return null;
+  }
+  if (safeRepositoryName(repoDirectoryName) !== repoName) {
+    return null;
+  }
+
+  const changeName = safeResourceName(changeDirectoryName);
+  return changeName ? { changeName } : null;
+}
+
+async function comparableWorkforestDirectories(
+  directories: WorkforestDirectories,
+): Promise<WorkforestDirectories> {
+  return {
+    base: await comparablePath(directories.base),
+    repos: await comparablePath(directories.repos),
+    workspaces: await comparablePath(directories.workspaces),
+    reviews: await comparablePath(directories.reviews),
+  };
+}
+
+async function comparablePath(value: string): Promise<string> {
+  try {
+    return await fs.realpath(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function repoConfigFromCachedRepository(
+  repository: CachedRepository,
+  repoName: string,
+): RepoConfig | null {
+  if (!repository.remote) {
+    return null;
+  }
+
+  return {
+    name: repoName,
+    remote: repository.remote,
+    defaultBranch: repository.defaultBranch ?? "main",
   };
 }
 
@@ -463,6 +719,21 @@ function formatMigrationEntry(
     `  ${entry.selector}${details}`,
     `    ${compactHome(entry.source)}`,
     `    -> ${compactHome(entry.target)}`,
+  ].join("\n");
+}
+
+function formatRepositoryDirectoryEntry(
+  entry:
+    | RepositoryDirectoryMigrationEntry
+    | BlockedRepositoryDirectoryMigrationEntry,
+  suffix?: string,
+): string {
+  const details = suffix ? ` (${suffix})` : "";
+  return [
+    `  ${entry.selector}${details}`,
+    `    ${compactHome(entry.source)}`,
+    `    -> ${compactHome(entry.target)}`,
+    `    metadata: ${compactHome(entry.metadataPath)}`,
   ].join("\n");
 }
 
