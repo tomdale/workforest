@@ -83,6 +83,55 @@ export const DASHBOARD_ROUTES: readonly DashboardRoute[] = [
 
 export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
   {
+    id: "home.start",
+    label: "Start a change",
+    description: "Open the creation workbench.",
+    kind: "navigate",
+    route: "start",
+  },
+  {
+    id: "home.changes",
+    label: "Review changes",
+    description: "Inspect active repository changes and workspaces.",
+    kind: "navigate",
+    route: "changes",
+  },
+  {
+    id: "home.tasks",
+    label: "Review tasks",
+    description: "Inspect nested task worktrees for the current change.",
+    kind: "navigate",
+    route: "tasks",
+  },
+  {
+    id: "home.templates",
+    label: "Manage templates",
+    description: "Open the Templates dashboard screen.",
+    kind: "navigate",
+    route: "templates",
+  },
+  {
+    id: "home.cache",
+    label: "Inspect cache",
+    description: "Open the Cache dashboard screen.",
+    kind: "navigate",
+    route: "cache",
+  },
+  {
+    id: "home.reviews",
+    label: "Open reviews",
+    description: "Open the Reviews dashboard screen.",
+    kind: "navigate",
+    route: "reviews",
+  },
+  {
+    id: "home.config",
+    label: "Edit config",
+    description: "Open the Config dashboard screen.",
+    kind: "navigate",
+    route: "config",
+  },
+  {
     id: "start.repository",
     label: "Repository change",
     description: "Create one change worktree for a single repository.",
@@ -123,11 +172,44 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     shellHandoff: false,
   },
   {
+    id: "tasks.start",
+    label: "Start task",
+    description: "Create one nested task worktree from the current change.",
+    kind: "command",
+    command: ["task", "start", "<task>"],
+    shellHandoff: true,
+  },
+  {
+    id: "tasks.finish",
+    label: "Finish task",
+    description: "Remove a task after its branch is integrated.",
+    kind: "command",
+    command: ["task", "finish", "<task>"],
+    shellHandoff: true,
+  },
+  {
     id: "templates.screen",
-    label: "Templates screen",
-    description: "Open template management.",
-    kind: "navigate",
-    route: "templates",
+    label: "Open manager",
+    description: "Open dashboard-native template management.",
+    kind: "command",
+    command: ["templates"],
+    shellHandoff: false,
+  },
+  {
+    id: "templates.list",
+    label: "List templates",
+    description: "Show saved workspace templates.",
+    kind: "command",
+    command: ["template", "list"],
+    shellHandoff: false,
+  },
+  {
+    id: "templates.new",
+    label: "New template",
+    description: "Create a workspace template from repositories.",
+    kind: "command",
+    command: ["template", "new"],
+    shellHandoff: false,
   },
   {
     id: "cache.list",
@@ -135,6 +217,22 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show cached mirror inventory.",
     kind: "command",
     command: ["cache", "list"],
+    shellHandoff: false,
+  },
+  {
+    id: "cache.check",
+    label: "Cache health",
+    description: "Check cached mirrors for integrity problems.",
+    kind: "command",
+    command: ["cache", "check"],
+    shellHandoff: false,
+  },
+  {
+    id: "cache.sync",
+    label: "Sync mirrors",
+    description: "Fetch updates for selected or all cached mirrors.",
+    kind: "command",
+    command: ["cache", "sync"],
     shellHandoff: false,
   },
   {
@@ -146,11 +244,60 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     shellHandoff: true,
   },
   {
+    id: "reviews.checkout",
+    label: "Checkout PR",
+    description: "Add a pull request worktree inside a review workspace.",
+    kind: "command",
+    command: ["review", "checkout", "<repo>#<number>"],
+    shellHandoff: true,
+  },
+  {
     id: "config.screen",
-    label: "Config screen",
-    description: "Review and edit configuration.",
-    kind: "navigate",
-    route: "config",
+    label: "Show config",
+    description: "Print resolved configuration and paths.",
+    kind: "command",
+    command: ["config", "show"],
+    shellHandoff: false,
+  },
+  {
+    id: "config.init",
+    label: "Initialize config",
+    description: "Configure checkout directories and branch prefix.",
+    kind: "command",
+    command: ["config", "init"],
+    shellHandoff: false,
+  },
+  {
+    id: "config.edit",
+    label: "External editor",
+    description: "Open config.json in the configured editor.",
+    kind: "command",
+    command: ["config", "edit"],
+    shellHandoff: false,
+  },
+  {
+    id: "help.overview",
+    label: "Overview help",
+    description: "Show the Workforest command overview.",
+    kind: "command",
+    command: ["help"],
+    shellHandoff: false,
+  },
+  {
+    id: "help.workflow",
+    label: "Workflow guide",
+    description: "Show recommended workflows for users and agents.",
+    kind: "command",
+    command: ["help", "workflow"],
+    shellHandoff: false,
+  },
+  {
+    id: "help.skills",
+    label: "Agent skill",
+    description: "Print the bundled core agent skill.",
+    kind: "command",
+    command: ["skills", "get", "core", "--full"],
+    shellHandoff: false,
   },
 ];
 
@@ -221,7 +368,9 @@ export function dashboardActionsForRoute(
         action.id.startsWith("config."),
       );
     case "help":
-      return [];
+      return DASHBOARD_ACTIONS.filter((action) =>
+        action.id.startsWith("help."),
+      );
     case "home":
       return DASHBOARD_ACTIONS;
   }
