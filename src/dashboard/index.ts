@@ -40,6 +40,11 @@ export type DashboardState = Readonly<{
   operationMessage: string;
 }>;
 
+export type DashboardActionSelection = Readonly<{
+  state: DashboardState;
+  command: readonly string[] | null;
+}>;
+
 type DashboardTerminal = Readonly<{
   stdin: Pick<NodeJS.ReadStream, "isTTY">;
   stdout: Pick<NodeJS.WriteStream, "columns" | "isTTY" | "rows">;
@@ -171,20 +176,69 @@ export function closeDashboardPalette(state: DashboardState): DashboardState {
   };
 }
 
-export function selectDashboardAction(state: DashboardState): DashboardState {
+export function selectDashboardAction(
+  state: DashboardState,
+): DashboardState {
+  return activateDashboardAction(state).state;
+}
+
+export function activateDashboardAction(
+  state: DashboardState,
+): DashboardActionSelection {
   const action = state.paletteOpen
     ? DASHBOARD_ACTIONS[state.paletteIndex]
     : currentActions(state)[state.actionIndex];
   if (!action) {
     return {
-      ...state,
-      operationMessage: "No action selected",
+      state: {
+        ...state,
+        operationMessage: "No action selected",
+      },
+      command: null,
     };
   }
 
   if (action.kind === "navigate") {
-    const route = getDashboardRoute(action.route);
+    return selectDashboardRoute(state, action.route);
+  }
+
+  const dashboardRoute = dashboardCommandRoute(action.command);
+  if (dashboardRoute) {
+    return selectDashboardRoute(state, dashboardRoute);
+  }
+
+  if (dashboardCommandNeedsOperands(action.command)) {
     return {
+      state: {
+        ...state,
+        paletteOpen: false,
+        operationMessage: `${formatDashboardCommand(
+          action.command,
+        )} needs operands before it can run`,
+      },
+      command: null,
+    };
+  }
+
+  return {
+    state: {
+      ...state,
+      paletteOpen: false,
+      operationMessage: `Exiting to run ${formatDashboardCommand(
+        action.command,
+      )}`,
+    },
+    command: action.command,
+  };
+}
+
+function selectDashboardRoute(
+  state: DashboardState,
+  routeId: DashboardRoute["id"],
+): DashboardActionSelection {
+  const route = getDashboardRoute(routeId);
+  return {
+    state: {
       ...state,
       routeIndex: Math.max(
         0,
@@ -193,15 +247,8 @@ export function selectDashboardAction(state: DashboardState): DashboardState {
       actionIndex: 0,
       paletteOpen: false,
       operationMessage: `Opened ${route.title}`,
-    };
-  }
-
-  return {
-    ...state,
-    paletteOpen: false,
-    operationMessage: `${formatDashboardCommand(action.command)} ${
-      action.shellHandoff ? "requests shell handoff" : "is ready to run"
-    }`,
+    },
+    command: null,
   };
 }
 
@@ -241,7 +288,9 @@ export function renderDashboardReport(route: DashboardRoute): string {
   });
 }
 
-export async function runDashboardTui(route: DashboardRoute): Promise<void> {
+export async function runDashboardTui(
+  route: DashboardRoute,
+): Promise<readonly string[] | null> {
   return new Promise((resolve) => {
     const screen = createFullscreenScreen();
     const layout = dashboardLayoutForSize(
@@ -252,11 +301,11 @@ export async function runDashboardTui(route: DashboardRoute): Promise<void> {
     let state = createDashboardState(route);
     let done = false;
 
-    const finish = (): void => {
+    const finish = (command: readonly string[] | null = null): void => {
       if (done) return;
       done = true;
       screen.destroy();
-      resolve();
+      resolve(command);
     };
 
     const refresh = (): void => {
@@ -294,7 +343,12 @@ export async function runDashboardTui(route: DashboardRoute): Promise<void> {
       refresh();
     });
     screen.key(["enter"], () => {
-      state = selectDashboardAction(state);
+      const selection = activateDashboardAction(state);
+      state = selection.state;
+      if (selection.command) {
+        finish(selection.command);
+        return;
+      }
       refresh();
     });
 
@@ -604,6 +658,29 @@ function actionDetails(action: DashboardAction) {
     { label: "Command", value: formatDashboardCommand(action.command) },
     { label: "Shell handoff", value: action.shellHandoff ? "yes" : "no" },
   ];
+}
+
+function dashboardCommandNeedsOperands(command: readonly string[]): boolean {
+  return command.some((token) => /<[^>]+>/.test(token));
+}
+
+function dashboardCommandRoute(
+  command: readonly string[],
+): DashboardRoute["id"] | null {
+  if (command.length !== 1) return null;
+
+  switch (command[0]) {
+    case "dashboard":
+      return "home";
+    case "templates":
+      return "templates";
+    case "tasks":
+      return "tasks";
+    case "reviews":
+      return "reviews";
+    default:
+      return null;
+  }
 }
 
 function wrapIndex(index: number, length: number): number {

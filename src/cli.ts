@@ -443,8 +443,8 @@ async function runDashboardCommand(
     "./dashboard/index.ts"
   );
   if (await shouldUseDashboardTui()) {
-    await runDashboardTui(route);
-    return success();
+    const selectedCommand = await runDashboardTui(route);
+    return selectedCommand ? executeCli(selectedCommand) : success();
   }
 
   return success(reportOutput(renderDashboardReport(route)));
