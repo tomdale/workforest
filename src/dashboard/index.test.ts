@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activateDashboardAction,
   createDashboardState,
   dashboardLayoutForSize,
   getDashboardRoute,
@@ -56,14 +57,55 @@ describe("dashboard rendering", () => {
     expect(secondAction.actionIndex).toBe(1);
   });
 
-  it("uses Enter to navigate or stage command actions", () => {
+  it("uses Enter to navigate or mark commands that still need operands", () => {
     const home = createDashboardState(getDashboardRoute("home"));
     const openedStart = selectDashboardAction(home);
-    const startCommand = selectDashboardAction(openedStart);
+    const startCommand = activateDashboardAction(openedStart);
 
     expect(openedStart.routeIndex).toBe(1);
     expect(openedStart.operationMessage).toBe("Opened Start");
-    expect(startCommand.operationMessage).toContain("wf start <change> <repo>");
+    expect(startCommand.command).toBeNull();
+    expect(startCommand.state.operationMessage).toBe(
+      "wf start <change> <repo> needs operands before it can run",
+    );
+  });
+
+  it.each([
+    ["changes", 0, ["list"], "wf list"],
+    ["cache", 1, ["cache", "doctor"], "wf cache doctor"],
+    ["config", 0, ["config", "show"], "wf config show"],
+    ["help", 1, ["help", "workflow"], "wf help workflow"],
+    [
+      "help",
+      2,
+      ["skills", "get", "core", "--full"],
+      "wf skills get core --full",
+    ],
+  ] as const)(
+    "returns %s dashboard command actions for CLI execution",
+    (routeId, actionOffset, command, displayCommand) => {
+      let state = createDashboardState(getDashboardRoute(routeId));
+      for (let count = 0; count < actionOffset; count += 1) {
+        state = moveDashboardAction(state, 1);
+      }
+
+      const selected = activateDashboardAction(state);
+
+      expect(selected.command).toEqual(command);
+      expect(selected.state.operationMessage).toBe(
+        `Exiting to run ${displayCommand}`,
+      );
+    },
+  );
+
+  it("keeps dashboard shortcut actions inside the dashboard", () => {
+    const selected = activateDashboardAction(
+      createDashboardState(getDashboardRoute("templates")),
+    );
+
+    expect(selected.command).toBeNull();
+    expect(selected.state.routeIndex).toBe(4);
+    expect(selected.state.operationMessage).toBe("Opened Templates");
   });
 
   it("uses the palette as a global action selector", () => {
