@@ -32,10 +32,14 @@
     "bench:ghostty": "tsx benchmarks/ghostty-real.ts",
     "bench:tui": "tsx benchmarks/tui-grid.ts",
     "check": "pnpm test && pnpm typecheck && pnpm lint",
+    "format": "biome format --write .",
     "lint": "biome check .",
+    "lint:fix": "biome check --write .",
     "prepack": "pnpm build:plugins && tsdown",
     "test": "pnpm build && vitest run --testTimeout=15000",
-    "typecheck": "pnpm build:plugins && tsc --noEmit"
+    "test:watch": "vitest --testTimeout=15000",
+    "typecheck": "pnpm build:plugins && tsc --noEmit",
+    "wf": "WORKFOREST_USE_SOURCE_CLI=1 node bin/workforest.js"
   },
   "dependencies": {
     "@wf-plugin/core": "workspace:*",
