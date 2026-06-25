@@ -262,8 +262,8 @@ wf cache show vercel/front
 wf cache show vercel/front --path
 wf cache sync vercel/front vercel/api
 wf cache sync
-wf cache check
-wf cache check vercel/front --fix
+wf cache doctor
+wf cache doctor vercel/front --fix
 ```
 
 Preview unused mirror cleanup before deleting anything:
@@ -396,9 +396,9 @@ Run `wf status --watch` inside the change and inspect
 Inspect before repairing or deleting data:
 
 ```sh
-wf cache check
+wf cache doctor
 wf cache show <repo>
-wf cache check <repo> --fix
+wf cache doctor <repo> --fix
 ```
 
 ### A Template Is Missing

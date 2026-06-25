@@ -119,7 +119,7 @@ Examples:
   wf status --watch
   wf task start fix-tests
   wf finish workforest/cli-redesign
-  wf cache check
+  wf cache doctor
   wf review open vercel/omniagent
   wf review checkout vercel/omniagent#123
   wf template manage
@@ -272,7 +272,7 @@ Agent workflows:
     wf list                             # list known changes
     wf switch                           # fuzzy-find a change (interactive)
     wf cache list                       # inspect cached mirrors
-    wf cache check                      # diagnose mirror health
+    wf cache doctor                     # diagnose mirror health
 
 See also:
   wf --help            Overview of all commands and examples

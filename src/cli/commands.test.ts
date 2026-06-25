@@ -19,7 +19,7 @@ describe("commandRegistry", () => {
       delete: null,
       migrate: ["workspaces"],
       task: ["start", "list", "finish", "delete"],
-      cache: ["list", "show", "sync", "check", "delete", "clean"],
+      cache: ["list", "show", "sync", "doctor", "delete", "clean"],
       review: ["open", "checkout"],
       template: [
         "list",

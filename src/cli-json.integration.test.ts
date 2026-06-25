@@ -110,7 +110,7 @@ describe("JSON CLI integration", () => {
     });
   });
 
-  it("reports healthy and unhealthy cache check results", async () => {
+  it("reports healthy and unhealthy cache doctor results", async () => {
     const healthyCacheDir = await createTempDir(
       "workforest-json-healthy-cache-",
     );
@@ -126,10 +126,10 @@ describe("JSON CLI integration", () => {
       "utf8",
     );
 
-    const healthy = await runJson(["cache", "check", "--json"], {
+    const healthy = await runJson(["cache", "doctor", "--json"], {
       cacheDir: healthyCacheDir,
     });
-    const unhealthy = await runJson(["cache", "check", "--json"], {
+    const unhealthy = await runJson(["cache", "doctor", "--json"], {
       cacheDir: unhealthyCacheDir,
     });
 
@@ -294,8 +294,8 @@ describe("JSON CLI integration", () => {
       'Flag "--json" cannot be combined with "--path".',
     ],
     [
-      ["cache", "check", "--force", "--json"],
-      'Unknown flag "--force" for wf cache check.',
+      ["cache", "doctor", "--force", "--json"],
+      'Unknown flag "--force" for wf cache doctor.',
     ],
     [
       ["skills", "list", "extra", "--json"],

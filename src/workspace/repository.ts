@@ -441,8 +441,20 @@ async function* updatePristineRepoGenerator(
 ): AsyncGenerator<TaskState, void, undefined> {
   // --no-tags: Skip fetching tags (faster, we only need branches)
   // --prune: Remove stale remote-tracking refs
+  // Explicit refspec/refmap: ignore stale remote.origin.fetch settings that may
+  // point remote branches at refs/heads/* in older bare caches.
   const fetchGen = asGenerator(() =>
-    runGit(["fetch", "origin", "--prune", "--no-tags"], { cwd: mirrorDir }),
+    runGit(
+      [
+        "fetch",
+        "--prune",
+        "--no-tags",
+        "--refmap=",
+        "origin",
+        "+refs/heads/*:refs/remotes/origin/*",
+      ],
+      { cwd: mirrorDir },
+    ),
   );
 
   try {

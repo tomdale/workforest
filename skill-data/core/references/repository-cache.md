@@ -38,11 +38,11 @@ registrations, and repository validity.
 
 ```sh
 wf cache show next.js
-wf cache check
-wf cache check next.js --json
+wf cache doctor
+wf cache doctor next.js --json
 ```
 
-`check` exits unsuccessfully when any selected mirror needs attention, making
+`doctor` exits unsuccessfully when any selected mirror needs attention, making
 it suitable for scripts.
 
 ## Refresh Cached Data
@@ -64,8 +64,8 @@ When a managed change was moved or deleted outside Workforest, prune stale
 worktree registrations and verify Git object connectivity.
 
 ```sh
-wf cache check next.js --fix
-wf cache check --fix
+wf cache doctor next.js --fix
+wf cache doctor --fix
 ```
 
 Invalid non-Git cache directories cannot be repaired in place; inspect them,
@@ -94,7 +94,7 @@ composition.
 ```sh
 wf cache list --json
 wf cache show next.js --json
-wf cache check --json
+wf cache doctor --json
 wf cache show --path
 wf cache show next.js --path
 ```

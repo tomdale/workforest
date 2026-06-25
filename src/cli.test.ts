@@ -304,7 +304,7 @@ describe("cli", () => {
     [["cache", "list", "--help"], "Usage: wf cache list"],
     [["cache", "show", "--help"], "Usage: wf cache show"],
     [["cache", "sync", "--help"], "Usage: wf cache sync"],
-    [["cache", "check", "--help"], "Usage: wf cache check"],
+    [["cache", "doctor", "--help"], "Usage: wf cache doctor"],
     [["cache", "delete", "--help"], "Usage: wf cache delete"],
     [["cache", "clean", "--help"], "Usage: wf cache clean"],
     [["shell", "init", "--help"], "Usage: wf shell init"],

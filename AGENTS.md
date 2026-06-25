@@ -14,6 +14,19 @@ long-lived branches accumulating changes.
 After any source changes are complete, always run `pnpm build` before wrapping
 up the work.
 
+## Testing Style
+
+Tests must assert current contracts and invariants, not historical negative
+cases. When behavior, commands, fields, files, formats, or configuration options
+are removed or renamed, never add or preserve dedicated "does not support X"
+tests for the retired name. Instead, assert the complete supported surface or
+the current invariant so old behavior fails naturally if it is still present.
+
+Do not use specific removed names in generic invalid-input tests. Use placeholder
+names such as `unknown`, `invalid`, or `unsupported`. A real retired name may
+appear in a test only when the product intentionally supports a migration,
+compatibility warning, or tailored error for that exact legacy input.
+
 ## Parallel Multi-Agent Workflow
 
 When a task can be split safely across multiple agents, use Workforest tasks

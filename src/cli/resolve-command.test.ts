@@ -11,7 +11,7 @@ describe("resolveCommand", () => {
     [["delete", "_adhoc/experiment"], ["delete"], "change.delete"],
     [["task", "start", "fix-auth"], ["task", "start"], "task.start"],
     [["task", "finish", "fix-auth"], ["task", "finish"], "task.finish"],
-    [["cache", "check", "front"], ["cache", "check"], "cache.check"],
+    [["cache", "doctor", "front"], ["cache", "doctor"], "cache.doctor"],
     [["review", "checkout", "123"], ["review", "checkout"], "review.checkout"],
     [["template", "manage"], ["template", "manage"], "template.manage"],
     [["shell", "init", "zsh"], ["shell", "init"], "shell.init"],

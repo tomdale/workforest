@@ -322,7 +322,7 @@ Examples:
 
 Manage cached repositories.
 
-The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.
+The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.
 
 ```text
 wf cache <subcommand>
@@ -393,14 +393,14 @@ Examples:
 - `wf cache sync` — Fetch new commits for every cached mirror.
 - `wf cache sync vercel/next.js facebook/react` — Update cached matches and clone missing mirrors in one invocation.
 
-### `wf cache check`
+### `wf cache doctor`
 
-Check cached repositories.
+Diagnose cached repositories.
 
-Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any checked repository is unhealthy (in both report and JSON modes).
+Diagnoses cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, diagnoses every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any diagnosed repository is unhealthy (in both report and JSON modes).
 
 ```text
-wf cache check [options] [repositories...]
+wf cache doctor [options] [repositories...]
 ```
 
 Arguments:
@@ -414,9 +414,9 @@ Options:
 
 Examples:
 
-- `wf cache check` — Report health for every cached mirror.
-- `wf cache check --json` — Emit health records as JSON; nonzero exit flags problems.
-- `wf cache check vercel/next.js --fix` — Repair one cached mirror before reporting health.
+- `wf cache doctor` — Report health for every cached mirror.
+- `wf cache doctor --json` — Emit health records as JSON; nonzero exit flags problems.
+- `wf cache doctor vercel/next.js --fix` — Repair one cached mirror before reporting health.
 
 ### `wf cache delete`
 

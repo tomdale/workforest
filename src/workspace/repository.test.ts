@@ -174,6 +174,43 @@ branch refs/heads/test
 });
 
 describe("ensureMirrorRepoGenerator", () => {
+  it("fetches remote branches into remote-tracking refs explicitly", async () => {
+    const mirrorDir = await createTempDir("workforest-front.git-");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: `worktree ${mirrorDir}
+bare
+`,
+        stderr: "",
+      });
+
+    await collectStates(
+      ensureMirrorRepoGenerator(
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+        },
+        mirrorDir,
+      ),
+    );
+
+    expect(runGitMock).toHaveBeenNthCalledWith(
+      1,
+      [
+        "fetch",
+        "--prune",
+        "--no-tags",
+        "--refmap=",
+        "origin",
+        "+refs/heads/*:refs/remotes/origin/*",
+      ],
+      { cwd: mirrorDir },
+    );
+  });
+
   it("repairs case-conflicting stale remote refs when pruning the mirror fails", async () => {
     const mirrorDir = await createTempDir("workforest-front.git-");
     const lockError = new Error(
@@ -233,7 +270,14 @@ bare
     );
     expect(runGitMock).toHaveBeenNthCalledWith(
       7,
-      ["fetch", "origin", "--prune", "--no-tags"],
+      [
+        "fetch",
+        "--prune",
+        "--no-tags",
+        "--refmap=",
+        "origin",
+        "+refs/heads/*:refs/remotes/origin/*",
+      ],
       { cwd: mirrorDir },
     );
   });

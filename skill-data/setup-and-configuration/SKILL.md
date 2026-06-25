@@ -150,8 +150,8 @@ If a repository fails during setup, inspect logs under the workspace's
 If a cached mirror looks stale or unhealthy:
 
 ```sh
-wf cache check
-wf cache check <repo> --fix
+wf cache doctor
+wf cache doctor <repo> --fix
 wf cache clean --dry-run
 ```
 

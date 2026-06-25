@@ -720,7 +720,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cache"],
         summary: "Manage cached repositories",
         description:
-          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
+          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
         children: [
           leaf({
@@ -850,13 +850,13 @@ export const commandRegistry: CommandRegistry = {
             tty: optionalStdin,
           }),
           leaf({
-            name: "check",
-            path: ["cache", "check"],
-            summary: "Check cached repositories",
+            name: "doctor",
+            path: ["cache", "doctor"],
+            summary: "Diagnose cached repositories",
             description:
-              "Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any checked repository is unhealthy (in both report and JSON modes).",
-            handler: "cache.check",
-            help: nestedHelp("cache", "check"),
+              "Diagnoses cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, diagnoses every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any diagnosed repository is unhealthy (in both report and JSON modes).",
+            handler: "cache.doctor",
+            help: nestedHelp("cache", "doctor"),
             operands: operands(
               0,
               null,
@@ -880,16 +880,16 @@ export const commandRegistry: CommandRegistry = {
             ],
             examples: [
               {
-                command: "wf cache check",
+                command: "wf cache doctor",
                 description: "Report health for every cached mirror.",
               },
               {
-                command: "wf cache check --json",
+                command: "wf cache doctor --json",
                 description:
                   "Emit health records as JSON; nonzero exit flags problems.",
               },
               {
-                command: "wf cache check vercel/next.js --fix",
+                command: "wf cache doctor vercel/next.js --fix",
                 description:
                   "Repair one cached mirror before reporting health.",
               },
