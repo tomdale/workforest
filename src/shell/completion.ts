@@ -5,9 +5,7 @@ import type {
 } from "./command-model.ts";
 
 export function renderZshCompletion(model: ShellCommandModel): string {
-  return `${renderZshWorkspaceHelpers()}
-
-_workforest_complete_flags() {
+  return `_workforest_complete_flags() {
   local -a flags
   flags=("$@")
   (( $#flags > 0 )) || return 1
@@ -51,9 +49,7 @@ __workforest_register_completion`;
 }
 
 export function renderBashCompletion(model: ShellCommandModel): string {
-  return `${renderBashWorkspaceHelpers()}
-
-_workforest_complete_words() {
+  return `_workforest_complete_words() {
   local words="$1"
   local current="$2"
   COMPREPLY=( $(compgen -W "$words" -- "$current") )
@@ -151,15 +147,6 @@ function renderZshLeafBody(
   const padding = " ".repeat(indent);
   const lines: string[] = [];
 
-  if (usesWorkspaceNameCompletion(command)) {
-    lines.push(
-      `${padding}if [[ "$PREFIX" != -* ]]; then`,
-      `${padding}  _workforest_workspace_names`,
-      `${padding}  return`,
-      `${padding}fi`,
-    );
-  }
-
   if (command.flags.length > 0) {
     lines.push(
       `${padding}_workforest_complete_flags ${renderFlagWords(command.flags)}`,
@@ -216,15 +203,6 @@ function renderBashLeafBody(
   const padding = " ".repeat(indent);
   const lines: string[] = [];
 
-  if (usesWorkspaceNameCompletion(command)) {
-    lines.push(
-      `${padding}if [[ "$current" != -* ]]; then`,
-      `${padding}  _workforest_workspace_names "$current"`,
-      `${padding}  return`,
-      `${padding}fi`,
-    );
-  }
-
   const flags = flagWords(command.flags);
   if (flags.length > 0) {
     lines.push(
@@ -268,105 +246,6 @@ function flagWords(flags: readonly FlagDefinition[]): string[] {
   );
 }
 
-function usesWorkspaceNameCompletion(command: ShellCompletionCommand): boolean {
-  return (
-    command.canonicalPath.length === 2 &&
-    command.canonicalPath[0] === "workspace" &&
-    (command.canonicalPath[1] === "open" ||
-      command.canonicalPath[1] === "delete")
-  );
-}
-
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
-}
-
-function renderZshWorkspaceHelpers(): string {
-  return `_workforest_workspace_names() {
-  local workspace_root
-  workspace_root="$(__workforest_workspace_root)"
-  local -a workspaces
-  [[ -n "$workspace_root" && -d "$workspace_root" ]] || return 1
-
-  for dir in \${workspace_root}/*(N/); do
-    workspaces+=("\${dir:t}")
-  done
-
-  (( $#workspaces > 0 )) || return 1
-  _describe -t workspaces 'workspace' workspaces
-}
-
-${renderWorkspaceRootResolver("zsh")}`;
-}
-
-function renderBashWorkspaceHelpers(): string {
-  return `_workforest_workspace_names() {
-  local current="$1"
-  local workspace_root
-  workspace_root="$(__workforest_workspace_root)"
-  [[ -n "$workspace_root" && -d "$workspace_root" ]] || return 1
-
-  local workspace_path
-  local -a workspaces=()
-  while IFS= read -r workspace_path; do
-    workspaces+=("\${workspace_path##*/}")
-  done < <(compgen -d -- "$workspace_root/$current")
-
-  COMPREPLY=("\${workspaces[@]}")
-}
-
-${renderWorkspaceRootResolver("bash")}`;
-}
-
-function renderWorkspaceRootResolver(shell: "bash" | "zsh"): string {
-  const printRoot =
-    shell === "zsh" ? '  print -r -- "$root"' : '  printf "%s\\n" "$root"';
-
-  return `__workforest_workspace_root() {
-  local config_dir config_path root
-  config_dir="\${WORKFOREST_CONFIG_DIR:-}"
-
-  if [[ -n "$config_dir" ]]; then
-    config_path="$config_dir/config.json"
-  elif [[ -n "\${XDG_CONFIG_HOME:-}" ]]; then
-    config_path="$XDG_CONFIG_HOME/workforest/config.json"
-  else
-    config_path="$HOME/.workforest/config.json"
-  fi
-
-  [[ -r "$config_path" ]] || return 1
-
-  root="$(node --input-type=module -e '
-    import fs from "node:fs";
-    import os from "node:os";
-    import path from "node:path";
-
-    const configPath = process.argv[1];
-    let config;
-    try {
-      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    } catch {
-      process.exit(1);
-    }
-
-    const defaultDir = typeof config.defaultDir === "string"
-      ? config.defaultDir.trim()
-      : "";
-
-    if (!defaultDir) {
-      process.exit(1);
-    }
-
-    const expanded = defaultDir === "~"
-      ? os.homedir()
-      : defaultDir.startsWith("~/")
-        ? path.join(os.homedir(), defaultDir.slice(2))
-        : defaultDir;
-
-    process.stdout.write(path.resolve(expanded));
-  ' "$config_path" 2>/dev/null)" || return 1
-
-  [[ -n "$root" ]] || return 1
-${printRoot}
-}`;
 }

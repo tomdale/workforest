@@ -47,7 +47,7 @@ describe("shell integration", () => {
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
     expect(script).toContain(
-      "new|clean|start|add|switch|finish|delete|workspace|task|worktree|review|template",
+      "start|add|switch|finish|delete|task|review|template",
     );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
@@ -55,15 +55,12 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("(( $+functions[compdef] )) || return 0");
     expect(script).toContain("compdef _workforest_complete wf workforest");
-    expect(script).toContain("__workforest_workspace_root()");
     expect(script).toContain('local root_command="$' + '{words[2]:-}"');
     expect(script).toContain('local subcommand="$' + '{words[3]:-}"');
-    expect(script).toContain("'workspace:Manage workspaces'");
-    expect(script).toContain("'create:Create a workspace'");
+    expect(script).toContain("'start:Start a change'");
+    expect(script).toContain("'task:Manage temporary task worktrees'");
+    expect(script).toContain("'start:Start nested task lanes'");
     expect(script).toContain("'--json:option'");
-    expect(script).toContain(
-      'if [[ "$PREFIX" != -* ]]; then\n            _workforest_workspace_names',
-    );
     expect(script).toContain(
       "'review:Manage review workspaces and PR worktrees'",
     );
@@ -82,15 +79,14 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'new clean start list status add switch finish delete workspace task worktree cache review template shell config skills help version'",
+      "_workforest_complete_words 'start list status add switch finish delete task cache review template shell config skills help version'",
     );
     expect(script).toContain(
-      "_workforest_complete_words 'create delete open list status add'",
+      "_workforest_complete_words 'start list finish delete'",
     );
     expect(script).toContain(
-      "_workforest_complete_words '--like -d --description -n --dry-run'",
+      "_workforest_complete_words '--repo -n --dry-run -f --force'",
     );
-    expect(script).toContain('_workforest_workspace_names "$current"');
     expect(script).not.toContain("compdef _workforest_complete");
   });
 
@@ -114,12 +110,12 @@ describe("shell integration", () => {
     const script = renderShellInit("bash", registry);
 
     expect(script).toContain(
-      "_workforest_complete_words 'new clean inspect visit start list status add switch finish delete workspace",
+      "_workforest_complete_words 'inspect visit start list status add switch finish delete task",
     );
     expect(script).toContain(
-      "new|clean|visit|start|add|switch|finish|delete|workspace|task|worktree|review|template)",
+      "visit|start|add|switch|finish|delete|task|review|template)",
     );
-    expect(script).not.toContain("new|clean|inspect|visit|workspace");
+    expect(script).not.toContain("inspect|visit|start");
   });
 
   it.each(["bash", "zsh"] as const)("renders valid %s syntax", (shell) => {
@@ -136,7 +132,7 @@ describe("shell integration", () => {
       input: `${renderShellInit("bash")}
 complete -p wf
 complete -p workforest
-COMP_WORDS=(wf wor)
+COMP_WORDS=(wf s)
 COMP_CWORD=1
 _workforest_complete
 printf '%s\\n' "\${COMPREPLY[@]}"
@@ -149,8 +145,8 @@ printf '%s\\n' "\${COMPREPLY[@]}"
     expect(result.stdout).toContain(
       "complete -F _workforest_complete workforest",
     );
-    expect(result.stdout).toContain("workspace\n");
-    expect(result.stdout).toContain("worktree\n");
+    expect(result.stdout).toContain("status\n");
+    expect(result.stdout).toContain("switch\n");
   });
 
   it("resolves cleanup cd target only when current dir is inside the workspace", () => {

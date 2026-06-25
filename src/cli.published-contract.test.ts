@@ -4,18 +4,16 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runSubprocess } from "./test-utils/subprocess.ts";
 
-type PublishedCommand = {
+type CommandContractEntry = {
   name: string;
   summary: string;
-  preserveAsShortcut: boolean;
 };
 
 type PublishedContract = {
   version: string;
-  publishedAt: string;
-  integrity: string;
   bins: string[];
-  rootCommands: PublishedCommand[];
+  rootCommands: CommandContractEntry[];
+  removedRootCommands: string[];
   templateSubcommands: Record<string, string[]>;
 };
 
@@ -27,24 +25,37 @@ afterEach(async () => {
   );
 });
 
-describe("published npm 0.0.1 command contract", () => {
-  it("records the complete published root command surface", async () => {
+describe("final command contract", () => {
+  it("records the complete public root command surface", async () => {
     const contract = await loadPublishedContract();
 
     expect(contract.rootCommands.map(({ name }) => name)).toEqual([
+      "start",
+      "add",
+      "switch",
+      "list",
+      "status",
+      "finish",
+      "delete",
+      "task",
+      "cache",
+      "review",
+      "template",
+      "shell",
+      "config",
+      "skills",
+      "help",
+      "version",
+    ]);
+    expect(contract.removedRootCommands).toEqual([
       "new",
       "clean",
-      "config",
-      "template",
+      "workspace",
+      "worktree",
     ]);
-    expect(
-      contract.rootCommands
-        .filter(({ preserveAsShortcut }) => preserveAsShortcut)
-        .map(({ name }) => name),
-    ).toEqual(["new", "clean"]);
   });
 
-  it("keeps both published executable names", async () => {
+  it("keeps both executable names", async () => {
     const contract = await loadPublishedContract();
     const packageJson = JSON.parse(
       await readFile(path.resolve("package.json"), "utf8"),
@@ -55,7 +66,7 @@ describe("published npm 0.0.1 command contract", () => {
     );
   });
 
-  it("keeps every published root command invocable", async () => {
+  it("keeps every public root command invocable and rejects removed roots", async () => {
     const contract = await loadPublishedContract();
     const configDir = await mkdtemp(
       path.join(os.tmpdir(), "workforest-published-contract-"),
@@ -66,6 +77,7 @@ describe("published npm 0.0.1 command contract", () => {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         NO_COLOR: "1",
+        WORKFOREST_USE_SOURCE_CLI: "1",
         WORKFOREST_CONFIG_DIR: configDir,
         XDG_CONFIG_HOME: configDir,
       };
@@ -79,6 +91,26 @@ describe("published npm 0.0.1 command contract", () => {
 
       expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout).toContain(`Usage: wf ${command.name}`);
+    }
+
+    for (const command of contract.removedRootCommands) {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        NO_COLOR: "1",
+        WORKFOREST_USE_SOURCE_CLI: "1",
+        WORKFOREST_CONFIG_DIR: configDir,
+        XDG_CONFIG_HOME: configDir,
+      };
+      Reflect.deleteProperty(env, "FORCE_COLOR");
+
+      const result = await runSubprocess(
+        process.execPath,
+        [path.resolve("bin/workforest.js"), command, "--help"],
+        { env },
+      );
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain(`Unknown command: ${command}`);
     }
   }, 15_000);
 });

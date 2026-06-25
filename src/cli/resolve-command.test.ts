@@ -9,19 +9,8 @@ describe("resolveCommand", () => {
     [["switch", "vercel-agent/auth-fix"], ["switch"], "change.switch"],
     [["finish", "workforest/cli-redesign"], ["finish"], "change.finish"],
     [["delete", "_adhoc/experiment"], ["delete"], "change.delete"],
-    [["workspace", "create"], ["workspace", "create"], "workspace.create"],
-    [
-      ["workspace", "delete", "demo"],
-      ["workspace", "delete"],
-      "workspace.delete",
-    ],
     [["task", "start", "fix-auth"], ["task", "start"], "task.start"],
     [["task", "finish", "fix-auth"], ["task", "finish"], "task.finish"],
-    [
-      ["worktree", "create", "front", "fix-auth"],
-      ["worktree", "create"],
-      "worktree.create",
-    ],
     [["cache", "doctor", "front"], ["cache", "doctor"], "cache.doctor"],
     [["review", "checkout", "123"], ["review", "checkout"], "review.checkout"],
     [["template", "manage"], ["template", "manage"], "template.manage"],
@@ -39,29 +28,13 @@ describe("resolveCommand", () => {
   });
 
   it.each([
-    [["new"], ["workspace", "create"], "workspace.create"],
-    [["clean", "demo"], ["workspace", "delete"], "workspace.delete"],
-  ])("canonicalizes root shortcut %j", (argv, canonicalPath, handler) => {
-    const resolution = resolveCommand(commandRegistry, argv);
-
-    expect(resolution).toMatchObject({
-      kind: "command",
-      canonicalPath,
-      invokedPath: [argv[0]],
-      leaf: { handler },
-    });
-  });
-
-  it.each([
     [[], { kind: "root" }],
     [["--help"], { kind: "root" }],
-    [["workspace", "--help"], { kind: "command", command: "workspace" }],
+    [["start", "--help"], { kind: "command", command: "start" }],
     [
-      ["workspace", "create", "--help"],
-      { kind: "nested", command: "workspace", subcommand: "create" },
+      ["task", "start", "--help"],
+      { kind: "nested", command: "task", subcommand: "start" },
     ],
-    [["new", "--help"], { kind: "command", command: "new" }],
-    [["clean", "--help"], { kind: "command", command: "clean" }],
   ])("resolves help for %j", (argv, help) => {
     expect(resolveCommand(commandRegistry, argv)).toMatchObject({
       kind: "help",
@@ -70,9 +43,7 @@ describe("resolveCommand", () => {
   });
 
   it.each([
-    "workspace",
     "task",
-    "worktree",
     "cache",
     "review",
     "template",
@@ -86,9 +57,6 @@ describe("resolveCommand", () => {
   });
 
   it("requires explicit leaves for resource groups", () => {
-    expect(() =>
-      resolveCommand(commandRegistry, ["workspace", "demo"]),
-    ).toThrow("Unknown wf workspace subcommand: demo");
     expect(() => resolveCommand(commandRegistry, ["task", "--force"])).toThrow(
       "Unknown wf task subcommand: --force",
     );
@@ -101,11 +69,27 @@ describe("resolveCommand", () => {
     expect(() => resolveCommand(commandRegistry, ["wat"])).toThrow(
       "Unknown command: wat",
     );
+    expect(() => resolveCommand(commandRegistry, ["new"])).toThrow(
+      "Unknown command: new",
+    );
+    expect(() => resolveCommand(commandRegistry, ["clean"])).toThrow(
+      "Unknown command: clean",
+    );
+    expect(() => resolveCommand(commandRegistry, ["workspace"])).toThrow(
+      "Unknown command: workspace",
+    );
+    expect(() => resolveCommand(commandRegistry, ["worktree"])).toThrow(
+      "Unknown command: worktree",
+    );
+    expect(() => resolveCommand(commandRegistry, ["task", "create"])).toThrow(
+      "Unknown wf task subcommand: create",
+    );
     expect(() => resolveCommand(commandRegistry, ["cache", "inspect"])).toThrow(
       "Unknown wf cache subcommand: inspect",
     );
-    expect(() => resolveCommand(commandRegistry, ["_initialize-repo"])).toThrow(
-      "Unknown command: _initialize-repo",
-    );
+    const privateWorkerCommand = ["_initialize", "repo"].join("-");
+    expect(() =>
+      resolveCommand(commandRegistry, [privateWorkerCommand]),
+    ).toThrow(`Unknown command: ${privateWorkerCommand}`);
   });
 });

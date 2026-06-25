@@ -25,24 +25,24 @@ export type RootHelpContext = Readonly<{
 export const CONCEPTS: readonly Readonly<{ term: string; summary: string }>[] =
   [
     {
+      term: "change",
+      summary:
+        "A repository or workspace lane managed by Workforest for one piece of work",
+    },
+    {
       term: "workspace",
       summary:
-        "A directory of git worktrees, one per repository, branched and set up together",
+        "A multi-repository change directory, branched and set up together",
     },
     {
       term: "task",
       summary:
-        "A short-lived extra worktree inside a workspace, on its own branch",
-    },
-    {
-      term: "standalone worktree",
-      summary:
-        "One repository's worktree on its own, not tied to a workspace (wf worktree)",
+        "A short-lived nested worktree inside a managed change, on its own branch",
     },
     {
       term: "template",
       summary:
-        "A saved repository set, plus hooks and files, to create workspaces from",
+        "A saved repository set, plus hooks and files, to start workspaces from",
     },
     {
       term: "cached mirror",
@@ -56,7 +56,7 @@ export const CONCEPTS: readonly Readonly<{ term: string; summary: string }>[] =
   ];
 
 export const ROOT_OVERVIEW =
-  "workforest creates isolated workspaces that span multiple repositories, so a feature can move the frontend, API, docs, and tooling together from cached mirrors without juggling branches in a single checkout.";
+  "workforest creates isolated changes from cached repositories, so a feature can move one repo or several together without juggling branches in a single checkout.";
 
 export async function help(): Promise<string> {
   let configPath = "(unavailable)";
@@ -112,12 +112,13 @@ Commands:
 ${formatRows([...commands, ...shortcuts])}
 
 Examples:
-  wf workspace create vercel/front vercel/api vercel/docs -- "ship billing updates"
-  wf workspace create vercel/next.js -- "update docs"
-  wf workspace create --like current -- "try another approach"
-  wf workspace open --search
+  wf start billing vercel/front vercel/api vercel/docs
+  wf start docs vercel/next.js
+  wf start follow-up
+  wf switch
+  wf status --watch
   wf task start fix-tests
-  wf worktree create vercel/next.js fix-auth
+  wf finish workforest/cli-redesign
   wf cache doctor
   wf review open vercel/omniagent
   wf review checkout vercel/omniagent#123
@@ -140,18 +141,21 @@ export function conceptsPage(): string {
 wf help concepts - Core concepts and the git model behind workforest.
 
 Nouns:
-  workspace            A directory of git worktrees, one per repository, all sharing a branch name.
-                       Created with \`wf workspace create\`. workforest writes metadata to
-                       \`.workforest/workspace.json\` at the root and records the workspace in a
-                       global registry so \`wf workspace list\` and \`wf workspace open\` can find it.
+  change               A repository or workspace lane for one piece of work. Created with
+                       \`wf start\`, entered with \`wf switch\`, inspected with \`wf list\` and
+                       \`wf status\`, and cleaned up with \`wf finish\` or \`wf delete\`.
+
+  repository change    A single repository worktree under \`Repos/<repo>/<change>\`.
+                       Created with \`wf start <change> <repo>\`.
+
+  workspace            A multi-repository change under \`Workspaces/<template>/<change>\` or
+                       \`Workspaces/_adhoc/<change>\`, with metadata at
+                       \`.workforest/workspace.json\`.
 
   task                 A short-lived nested worktree inside a change, on its own branch.
                        Created with \`wf task start\` from inside a managed change. Because tasks
                        reuse the parent repository's cached mirror, setup is instant. Finish integrated work
                        with \`wf task finish\`, or abandon explicitly with \`wf task delete\`.
-
-  standalone worktree  A single repository's worktree not attached to any workspace. Created with
-                       \`wf worktree create\`. Useful for one-off explorations or single-repo work.
 
   template             A saved workspace recipe: a list of repositories plus optional hooks, extra
                        files, and a branch prefix. Stored under
@@ -169,17 +173,18 @@ Nouns:
 
   shell integration    A wrapper function installed by \`eval "$(wf shell init zsh)"\` that intercepts
                        directory-changing commands and changes your shell's working directory, so
-                       \`wf workspace create\` lands you in the new workspace automatically.
+                       \`wf start\`, \`wf switch\`, \`wf finish\`, and \`wf delete\` update the
+                       current shell automatically.
 
 Git model:
-  Workspace creation follows this sequence for each repository:
+  Change creation follows this sequence for each repository:
     1. Clone the remote as a bare mirror into \`~/.cache/workforest/\` if one does not exist.
        The clone uses \`--filter=blob:none\` to skip file blobs (fetched on demand).
     2. Create a git worktree from the mirror onto a new branch whose name is derived
-       from the work words you supplied after \`--\`.
+       from the change name.
     3. Run \`pnpm install\` (or the configured installer) inside the worktree.
     4. Run the template hooks in the order they are defined.
-  Steps 1-4 run in parallel across all repositories; \`wf workspace status\` shows progress.
+  Steps 1-4 run in parallel across all repositories; \`wf status --watch\` shows progress.
 
 See also:
   wf --help            Overview of all commands and examples
@@ -195,28 +200,28 @@ wf help workflow - Recommended workflows for users and agents.
 Interactive user workflows:
 
   Start a feature across multiple repos:
-    wf workspace create vercel/next.js vercel/turbo -- "update docs build"
-    wf workspace status         # monitor background setup; wait for READY
-    cd ~/Code/workspaces/update-docs-build/next.js
+    wf start update-docs-build vercel/next.js vercel/turbo
+    wf status --watch           # monitor background setup; wait for READY
+    cd ~/Code/Workspaces/_adhoc/update-docs-build/next.js
     # ... make changes, commit, open PRs ...
-    wf workspace delete update-docs-build
+    wf finish _adhoc/update-docs-build
 
   Try a second approach without losing the first:
-    wf workspace create --like current -- "try different approach"
+    wf start try-different-approach
 
   Review a pull request:
     wf review open vercel/next.js       # one-time setup for this repo
     wf review checkout vercel/next.js#1234
 
-  Add an isolated experiment inside an existing workspace:
+  Add an isolated task inside an existing change:
     wf task start fix-auth              # new branch, instant setup
-    cd _tasks/next.js/fix-auth
+    cd _tasks/next.js/fix-auth          # or let shell integration cd there
     # ... experiment ...
-    wf task delete fix-auth
+    wf task finish fix-auth
 
   Create a workspace from a saved template:
     wf template manage                  # browse and edit templates
-    wf workspace create my-template -- "feature description"
+    wf start feature-description @my-template
 
 Agent workflows:
 
@@ -224,18 +229,18 @@ Agent workflows:
     wf skills get core --full           # complete lifecycle reference for agents
 
   Typical lifecycle:
-    wf workspace create <repos or template> -- <work description>
-    wf workspace status                 # confirm all repos are READY
+    wf start <change> <repo...|@template>
+    wf status --watch                   # confirm all repos are READY
     # work inside the worktrees using normal project tooling
-    wf workspace delete <name> --force  # clean up when done
+    wf finish [selector]                # clean up after integration
 
   Adding to an existing workspace:
-    wf workspace add vercel/swr         # add another repo mid-session
+    wf add vercel/swr                   # add another repo mid-session
     wf task start <name>                # add an isolated branch for an experiment
 
   Inspection:
-    wf workspace list                   # list all known workspaces
-    wf workspace open --search          # fuzzy-find a workspace (interactive)
+    wf list                             # list known changes
+    wf switch                           # fuzzy-find a change (interactive)
     wf cache list                       # inspect cached mirrors
     wf cache doctor                     # diagnose mirror health
 
@@ -624,7 +629,7 @@ function styleRowKey(value: string, section: string): string {
 
 function styleExample(value: string): string {
   return value.replace(
-    /"[^"]*"|'[^']*'|(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|(?:^|\s)(?:add-file|cache|checkout|clean|config|confetti|create|delete|dev|doctor|edit|eval|get|info|init|list|manage|new|open|path|prune|repair|review|shell|show|simulate|skills|status|task|template|update|version|worktree|workspace)(?=\s|$)|(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)\S+|\b\d+\b/gi,
+    /"[^"]*"|'[^']*'|(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|(?:^|\s)(?:add|add-file|cache|checkout|config|confetti|copy|delete|dev|doctor|edit|eval|finish|get|info|init|list|manage|open|path|prune|repair|review|shell|show|simulate|skills|start|status|switch|task|template|update|version)(?=\s|$)|(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)\S+|\b\d+\b/gi,
     (token) => {
       const normalized = token.trimStart();
       const prefix = token.slice(0, token.length - normalized.length);

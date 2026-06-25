@@ -37,25 +37,23 @@ Use `bash` instead of `zsh` for Bash.
 
 ```sh
 # Create a multi-repository workspace.
-wf workspace create vercel/front vercel/api -- "fix authentication"
+wf start fix-authentication vercel/front vercel/api
 
 # Monitor background dependency installation and hooks.
-wf workspace status
+wf status --watch
 
 # Add another repository to the current workspace.
-wf workspace add vercel/docs
+wf add vercel/docs
 
-# Open an existing workspace.
-wf workspace open fix-authentication
+# Open an existing change.
+wf switch _adhoc/fix-authentication
 
-# Delete it after the work is merged.
-wf workspace delete fix-authentication --dry-run
-wf workspace delete fix-authentication --force
+# Clean it up after the work is integrated.
+wf finish _adhoc/fix-authentication
 ```
 
-`wf new` is the documented shortcut for `wf workspace create`. `wf clean` is a
-temporary shortcut for `wf workspace delete`. Other commands use their
-resource-first canonical paths.
+The main lifecycle is `wf start`, `wf switch`, `wf list`, `wf status`,
+`wf add`, `wf finish`, and `wf delete`.
 
 ## Workspace Workflows
 
@@ -64,18 +62,17 @@ resource-first canonical paths.
 Create a workspace from repositories:
 
 ```sh
-wf workspace create vercel/front vercel/api -- "add account switching"
+wf start account-switching vercel/front vercel/api
 ```
 
 The command creates a directory such as `add-account-switching/`, adds a
 matching feature branch to each repository, and returns after the worktrees are
 available. Initializers and template hooks continue in background workers.
 
-Run the command without repository arguments for the interactive creation
-flow:
+Run the command with just a change name for the interactive creation flow:
 
 ```sh
-wf workspace create
+wf start account-switching
 ```
 
 ### Create From The Current Workspace
@@ -84,7 +81,7 @@ Start a separate approach with the same repository set:
 
 ```sh
 cd ~/Code/workspaces/fix-authentication
-wf workspace create --like current -- "try token refresh"
+wf start try-token-refresh
 ```
 
 The new workspace uses fresh branches from each repository's default branch.
@@ -94,13 +91,14 @@ The new workspace uses fresh branches from each repository's default branch.
 From anywhere inside a workspace:
 
 ```sh
-wf workspace add vercel/docs
+wf add vercel/docs
 ```
 
-Or target one explicitly:
+To add to another change, switch there first:
 
 ```sh
-wf workspace add vercel/docs --workspace ~/Code/workspaces/fix-authentication
+wf switch _adhoc/fix-authentication
+wf add vercel/docs
 ```
 
 Workforest checks out the repository on the workspace branch, runs its
@@ -109,18 +107,18 @@ initializers, and updates workspace metadata.
 ### Open And List Workspaces
 
 ```sh
-wf workspace list
-wf workspace open fix-authentication
-wf workspace open --search
+wf list
+wf switch _adhoc/fix-authentication
+wf switch
 ```
 
-With shell integration installed, `workspace open` changes the current shell
-directory. `--search` opens an interactive workspace picker.
+With shell integration installed, `wf switch` changes the current shell
+directory. Running it without a selector opens an interactive change picker.
 
 ### Monitor Setup
 
 ```sh
-wf workspace status
+wf status --watch
 ```
 
 Run status from anywhere inside the workspace to inspect repository setup and
@@ -129,8 +127,8 @@ hook progress. Detailed repository logs live under `.workforest/logs/`.
 ### Delete A Workspace
 
 ```sh
-wf workspace delete fix-authentication --dry-run
-wf workspace delete fix-authentication --force
+wf finish _adhoc/fix-authentication
+wf delete _adhoc/fix-authentication --force
 ```
 
 Use Workforest rather than deleting the directory manually so cached Git
@@ -143,7 +141,7 @@ repository in the same workspace:
 
 ```sh
 cd ~/Code/workspaces/account-switching/front
-wf task create fix-tests upgrade-dependencies
+wf task start fix-tests upgrade-dependencies
 ```
 
 Each task starts from the primary repository's committed `HEAD`, receives a
@@ -153,39 +151,34 @@ initializers. Template files and workspace hooks are not reapplied.
 From the workspace root, identify the parent repository explicitly:
 
 ```sh
-wf task create --repo front fix-tests
+wf task start --repo front fix-tests
 ```
 
 Inspect and remove tasks after their branches are integrated:
 
 ```sh
 wf task list
-wf task delete fix-tests
+wf task finish fix-tests
 ```
 
 Deletion refuses dirty or unmerged task worktrees unless `--force` is supplied.
 Destructive commands require an explicit resource; Workforest does not infer a
 task to delete from the current directory.
 
-## Standalone Worktrees
+## Single-Repository Changes
 
-Create a single-repository worktree without workspace metadata, templates,
-hooks, or a VS Code workspace:
+Create a single-repository change without a multi-repo workspace:
 
 ```sh
-wf worktree create vercel/front fix-auth
-wf worktree create vercel/front fix-auth --dir ../front-fix-auth
+wf start fix-auth vercel/front
 ```
 
-The target defaults to `<defaultDir>/<repo>/<slug>`, for example
-`~/Code/front/fix-auth` when `defaultDir` is `~/Code`. Pass `--dir` to choose
-a different target path. Inspect or remove standalone worktrees with explicit
-commands:
+The target uses the opinionated `Repos/<repo>/<change>` layout. Inspect or
+remove these changes with the same lifecycle commands:
 
 ```sh
-wf worktree list vercel/front
-wf worktree delete ../front-fix-auth --dry-run
-wf worktree delete ../front-fix-auth --force
+wf status workforest/fix-auth
+wf finish workforest/fix-auth
 ```
 
 ## Code Review
@@ -254,7 +247,7 @@ new workspace before initializers and hooks run.
 Create a workspace from a template by passing its name:
 
 ```sh
-wf workspace create full-stack -- "implement user avatars"
+wf start user-avatars @full-stack
 ```
 
 ## Repository Cache
@@ -353,20 +346,18 @@ wf config edit
 This is a workflow map rather than an exhaustive flag reference:
 
 ```text
-wf workspace create    Create a workspace
-wf workspace delete    Delete an explicit workspace
-wf workspace open      Open or search for a workspace
-wf workspace list      List workspaces
-wf workspace status    Inspect background setup
-wf workspace add       Add repositories
+wf start               Start a repository or workspace change
+wf switch              Open or search for a change
+wf list                List changes
+wf status              Inspect change state or background setup
+wf add                 Add repositories to the current change
+wf finish              Clean up an integrated change
+wf delete              Explicitly delete a change
 
-wf task create         Create workspace-scoped task worktrees
+wf task start          Create change-scoped task worktrees
 wf task list           List task worktrees
+wf task finish         Clean up integrated task worktrees
 wf task delete         Delete explicit task worktrees
-
-wf worktree create     Create a standalone worktree
-wf worktree list       List standalone worktrees
-wf worktree delete     Delete an explicit standalone worktree
 
 wf cache manage        Open the cache manager
 wf review open         Open a review workspace
@@ -375,13 +366,6 @@ wf template manage     Open the template manager
 wf template show       Show template details
 wf template open       Open a template directory
 wf shell init          Print shell integration
-```
-
-The only command shortcuts are:
-
-```text
-wf new                 Shortcut for wf workspace create
-wf clean <workspace>   Shortcut for wf workspace delete <workspace>
 ```
 
 ## Building From Source
@@ -408,7 +392,7 @@ ssh -T git@github.com
 
 ### Workspace Setup Fails
 
-Run `wf workspace status` inside the workspace and inspect
+Run `wf status --watch` inside the change and inspect
 `.workforest/logs/<repo>.log`.
 
 ### Cache Health Fails

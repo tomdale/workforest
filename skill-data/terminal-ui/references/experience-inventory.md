@@ -24,20 +24,20 @@ Status values:
 
 | Experience | Entry point | Implementation | Status |
 | --- | --- | --- | --- |
-| New workspace wizard | `wf workspace create` without selections | `src/ui/new-wizard.ts` | Canonical |
-| Parallel repository setup grid | `wf workspace create`, `wf workspace add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
-| Background initialization status grid | `wf workspace status` inside a workspace | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
+| New workspace wizard | `wf start` interactive setup | `src/ui/new-wizard.ts` | Canonical |
+| Parallel repository setup grid | `wf start`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
+| Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
 | Template browser and manager | `wf template manage` | `src/ui/template-manager.ts` | Canonical |
 | Cached repository browser and manager | `wf cache manage` | `src/ui/repository-manager.ts` | Canonical |
 | Template create/edit/copy forms | `wf template manage` | Prompt timeline with preview and confirmation in `src/ui/index.ts` | Canonical |
 | Template file conflict resolution | Template manager | Select and confirm prompts in `src/cli.ts` | Canonical |
-| Workspace picker | `wf workspace open` | Select prompt in `src/cli.ts` | Canonical |
-| Fuzzy workspace finder | `wf workspace open --search` | Fuzzy-select prompt in `src/cli.ts` | Canonical |
+| Workspace picker | `wf switch` | Select prompt in `src/cli.ts` | Canonical |
+| Fuzzy workspace finder | `wf switch` | Fuzzy-select prompt in `src/cli.ts` | Canonical |
 | Config initialization | `wf config init` | Prompt timeline with preview and confirmation in `src/cli.ts` | Canonical |
 | Reviews directory first-run prompt | `wf review open` without a configured directory | Text prompt in `src/cli.ts` | Canonical |
-| Delete confirmations | Explicit workspace, task, worktree, template, and cache delete commands | Select and confirm prompts in `src/cli.ts` | Canonical |
-| Cleanup preview | `wf workspace delete <workspace>`, `wf clean <workspace>` | Prompt note in `src/cli.ts` | Canonical |
+| Delete confirmations | Explicit change, task, template, and cache delete commands | Select and confirm prompts in `src/cli.ts` | Canonical |
+| Cleanup preview | `wf finish <selector>`, `wf delete <selector>` | Prompt note in `src/cli.ts` | Canonical |
 | External editor handoff | `wf config edit` | Status line, inherited editor session, completion status | Canonical |
 | Template directory jump | `wf template open` | Shell auto-cd handoff or explicit `cd` status line | Canonical |
 | Spinner fallback for setup | Small terminal, CI, too many repos, or `WORKFOREST_NO_TUI` | Prompt spinner and generator consumers | Canonical |
@@ -48,15 +48,14 @@ Status values:
 | --- | --- | --- |
 | Top-level, scoped, and nested help | `wf --help`, `<command> --help`, nested `--help` | Canonical |
 | Version | `wf version` | Canonical |
-| Workspace list | `wf workspace list` | Canonical |
+| Change list | `wf list` | Canonical |
 | Config report | `wf config show` | Canonical |
 | Task worktree list | `wf task list` | Canonical |
-| Standalone worktree list | `wf worktree list` | Canonical |
 | Template details | `wf template show` | Canonical |
 | Cached repository list, info, and health | `wf cache list|info|doctor` | Canonical |
 | Skills list | `wf skills list` | Canonical |
-| Dry-run reports for workspace, task, worktree, cache, and review operations | `--dry-run` variants | Canonical |
-| Non-interactive cleanup preview | Explicit workspace deletion outside a TTY | Canonical |
+| Dry-run reports for task and cache operations | `--dry-run` variants | Canonical |
+| Non-interactive cleanup preview | Explicit change deletion outside a TTY | Canonical |
 | Fallback workspace next steps | Workspace setup without the fullscreen grid | Canonical |
 | Success, warning, error, and informational status lines | All commands | Canonical |
 | Empty states | List and lookup commands | Canonical |

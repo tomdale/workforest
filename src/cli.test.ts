@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import {
-  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -34,7 +33,6 @@ const runTemplateManagerMock = vi.hoisted(() =>
   vi.fn(async () => ({ type: "quit" as const })),
 );
 const shouldUseTemplateManagerMock = vi.hoisted(() => vi.fn(() => true));
-const runNewWizardMock = vi.hoisted(() => vi.fn());
 const shouldUseGridMock = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock("./ui/prompts/index.ts", async () => {
@@ -55,10 +53,6 @@ vi.mock("./ui/template-manager.ts", () => ({
   shouldUseTemplateManager: shouldUseTemplateManagerMock,
 }));
 
-vi.mock("./ui/new-wizard.ts", () => ({
-  runNewWizard: runNewWizardMock,
-}));
-
 vi.mock("./ui/grid-consumer.ts", async () => {
   const actual = await vi.importActual<typeof import("./ui/grid-consumer.ts")>(
     "./ui/grid-consumer.ts",
@@ -74,7 +68,6 @@ import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
 import { createTemplate, loadTemplate } from "./templates/index.ts";
-import { CancelError } from "./ui/prompts/index.ts";
 import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -120,7 +113,6 @@ afterEach(async () => {
   runTemplateManagerMock.mockResolvedValue({ type: "quit" });
   shouldUseTemplateManagerMock.mockReset();
   shouldUseTemplateManagerMock.mockReturnValue(true);
-  runNewWizardMock.mockReset();
   shouldUseGridMock.mockReset();
   shouldUseGridMock.mockReturnValue(false);
 
@@ -167,33 +159,6 @@ afterEach(async () => {
 });
 
 describe("cli", () => {
-  it("exits cleanly when the fullscreen new wizard is cancelled", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const output: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: true,
-    });
-    shouldUseGridMock.mockReturnValue(true);
-    runNewWizardMock.mockRejectedValue(new CancelError());
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      output.push(String(chunk));
-      return true;
-    });
-
-    process.argv = ["node", "wf", "new"];
-    process.exitCode = undefined;
-
-    await expect(cli()).resolves.toBeUndefined();
-
-    expect(runNewWizardMock).toHaveBeenCalledOnce();
-    expect(output.join("")).toContain("Cancelled");
-    expect(process.exitCode).toBeUndefined();
-  });
-
   it("previews and confirms configuration before saving", async () => {
     const configDir = await createTempDir("workforest-config-");
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
@@ -231,159 +196,6 @@ describe("cli", () => {
     });
   });
 
-  it("parses repositories before -- and a slug after -- for wf new", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const workspaceRoot = await createTempDir("workforest-root-");
-    const logs: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      defaultDir: workspaceRoot,
-      branchPrefix: "tomdale/",
-    });
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = [
-      "node",
-      "wf",
-      "new",
-      "--dry-run",
-      "vercel/front",
-      "vercel/api",
-      "--",
-      "fix-auth",
-    ];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toContain(
-      `Directory: ${path.join(workspaceRoot, "fix-auth")}`,
-    );
-    expect(output).toMatch(/Feature:\s+fix-auth/);
-    expect(output).toMatch(/Branch:\s+tomdale\/fix-auth/);
-    expect(output).toContain("front");
-    expect(output).toContain("git@github.com:vercel/front.git");
-    expect(output).toContain("api");
-    expect(output).toContain("git@github.com:vercel/api.git");
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("rejects a configured directory prefix that escapes defaultDir", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const workspaceRoot = await createTempDir("workforest-root-");
-    const errors: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      defaultDir: workspaceRoot,
-      dirPrefix: "../",
-    });
-    vi.spyOn(console, "error").mockImplementation((...args) => {
-      errors.push(args.join(" "));
-    });
-    process.argv = [
-      "node",
-      "wf",
-      "new",
-      "--dry-run",
-      "vercel/front",
-      "--",
-      "fix-auth",
-    ];
-
-    await expect(cli()).resolves.toBeUndefined();
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toContain("Workspace name");
-    expect(errors.join("\n")).not.toContain("at runNewCommand");
-    await expect(
-      stat(path.join(path.dirname(workspaceRoot), "fix-auth")),
-    ).rejects.toThrow();
-  });
-
-  it("resolves an unqualified registered repository for wf new", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const cacheDir = await createTempDir("workforest-cache-");
-    const workspaceRoot = await createTempDir("workforest-root-");
-    const logs: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      defaultDir: workspaceRoot,
-      branchPrefix: "tomdale/",
-    });
-    await createCachedMirror(
-      cacheDir,
-      "myapp.git",
-      "git@github.com:mycompany/myapp.git",
-    );
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = [
-      "node",
-      "wf",
-      "new",
-      "--dry-run",
-      "myapp",
-      "--",
-      "fix-auth",
-    ];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toContain("myapp");
-    expect(output).toContain("git@github.com:mycompany/myapp.git");
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("resolves an unqualified registered repository for wf workspace add", async () => {
-    const cacheDir = await createTempDir("workforest-cache-");
-    const workspaceDir = await createTempDir("workforest-workspace-");
-    const logs: string[] = [];
-
-    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
-    await createCachedMirror(
-      cacheDir,
-      "api.git",
-      "git@github.com:vercel/api.git",
-    );
-    await writeWorkspaceMetadata(workspaceDir, {
-      featureName: "fix-auth",
-      branchName: "tomdale/fix-auth",
-      repos: [
-        {
-          name: "front",
-          remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
-          hasLockfile: true,
-        },
-      ],
-    });
-    process.chdir(workspaceDir);
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "workspace", "add", "--dry-run", "api"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(logs.join("\n")).toContain("git@github.com:vercel/api.git");
-    expect(process.exitCode).toBeUndefined();
-  });
-
   it("stores qualified repositories when creating a template", async () => {
     const cacheDir = await createTempDir("workforest-cache-");
     const xdgConfigHome = await createTempDir("workforest-xdg-");
@@ -407,56 +219,10 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("prefers a template over a registered repository with the same name", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const cacheDir = await createTempDir("workforest-cache-");
-    const xdgConfigHome = await createTempDir("workforest-xdg-");
-    const workspaceRoot = await createTempDir("workforest-root-");
-    const logs: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
-    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      defaultDir: workspaceRoot,
-    });
-    await createCachedMirror(
-      cacheDir,
-      "myapp.git",
-      "git@github.com:mycompany/myapp.git",
-    );
-    await createTemplate("myapp", {
-      repos: ["vercel/front"],
-    });
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = [
-      "node",
-      "wf",
-      "new",
-      "--dry-run",
-      "myapp",
-      "--",
-      "fix-auth",
-    ];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toMatch(/Template:\s+myapp/);
-    expect(output).toContain("git@github.com:vercel/front.git");
-    expect(output).not.toContain("git@github.com:mycompany/myapp.git");
-    expect(process.exitCode).toBeUndefined();
-  });
-
   it("warns and fails when registered repository names collide", async () => {
     const configDir = await createTempDir("workforest-config-");
     const cacheDir = await createTempDir("workforest-cache-");
-    const warnings: string[] = [];
+    const errors: string[] = [];
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
@@ -472,142 +238,32 @@ describe("cli", () => {
       "git@github.com:second/myapp.git",
     );
 
-    vi.spyOn(console, "warn").mockImplementation((...args) => {
-      warnings.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "new", "myapp", "--", "fix-auth"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(warnings.join("\n")).toContain(
-      'Repository shorthand "myapp" has a naming collision',
-    );
-    expect(warnings.join("\n")).toContain("first/myapp, second/myapp");
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("parses templates before -- and prose after -- for wf new", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const xdgConfigHome = await createTempDir("workforest-xdg-");
-    const binDir = await createTempDir("workforest-bin-");
-    const logs: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
-    process.env["PATH"] =
-      `${binDir}${path.delimiter}${process.env["PATH"] ?? ""}`;
-    const claudePath = path.join(binDir, "claude");
-    await writeFile(claudePath, "#!/bin/sh\nprintf 'fix-auth\\n'\n");
-    await chmod(claudePath, 0o755);
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
-    await createTemplate("site", {
-      repos: ["vercel/front"],
-      description: "Site template",
-    });
-
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
-
-    process.argv = [
-      "node",
-      "wf",
-      "new",
-      "--dry-run",
-      "site",
-      "--",
-      "fixing",
-      "auth",
-    ];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const output = logs.join("\n");
-    expect(output).toMatch(/Description:\s+fixing auth/);
-    expect(output).toMatch(/Template:\s+site/);
-    expect(output).toContain("front");
-    expect(output).toContain("git@github.com:vercel/front.git");
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("rejects wf new without both sides of the -- delimiter", async () => {
-    const errors: string[] = [];
-
     vi.spyOn(console, "error").mockImplementation((...args) => {
       errors.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "new", "--", "fix-auth"];
+    process.argv = ["node", "wf", "start", "fix-auth", "myapp"];
     process.exitCode = undefined;
 
     await cli();
 
-    expect(process.exitCode).toBe(2);
     expect(errors.join("\n")).toContain(
-      "Invalid operands for wf workspace create",
+      'Repository shorthand "myapp" has a naming collision',
     );
-
-    errors.length = 0;
-    process.argv = ["node", "wf", "new", "site", "--"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(process.exitCode).toBe(2);
-    expect(errors.join("\n")).toContain(
-      "Invalid operands for wf workspace create",
-    );
-  });
-
-  it("writes the configured path for wf workspace open", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const workspaceRoot = await createTempDir("workforest-root-");
-    const cdDir = await createTempDir("workforest-cd-");
-    const workspaceDir = path.join(workspaceRoot, "wf-fix-auth");
-    const cdPathFile = path.join(cdDir, "target");
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
-
-    await mkdir(workspaceDir, { recursive: true });
-    await writeWorkspaceMetadata(workspaceDir, {
-      featureName: "fix-auth",
-      branchName: "tomdale/fix-auth",
-      repos: [
-        {
-          name: "front",
-          remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
-          hasLockfile: true,
-        },
-      ],
-    });
-
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      defaultDir: workspaceRoot,
-      dirPrefix: "wf-",
-    });
-
-    process.argv = ["node", "wf", "workspace", "open", "fix-auth"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    const written = await readFile(cdPathFile, "utf8");
-    expect(written).toBe(`${path.resolve(workspaceDir)}\n`);
-    expect(process.exitCode).toBeUndefined();
+    expect(errors.join("\n")).toContain("first/myapp, second/myapp");
+    expect(process.exitCode).toBe(1);
   });
 
   it.each([
-    ["new", "Usage: wf new"],
-    ["worktree", "Usage: wf worktree"],
+    ["start", "Usage: wf start"],
+    ["add", "Usage: wf add"],
+    ["switch", "Usage: wf switch"],
+    ["list", "Usage: wf list"],
+    ["status", "Usage: wf status"],
+    ["finish", "Usage: wf finish"],
+    ["delete", "Usage: wf delete"],
     ["task", "Usage: wf task"],
     ["review", "Usage: wf review"],
-    ["workspace", "Usage: wf workspace"],
-    ["clean", "Usage: wf clean"],
     ["template", "Usage: wf template"],
     ["cache", "Usage: wf cache"],
     ["shell", "Usage: wf shell"],
@@ -632,21 +288,12 @@ describe("cli", () => {
   });
 
   it.each([
-    [["worktree", "create", "--help"], "Usage: wf worktree create"],
-    [["worktree", "list", "--help"], "Usage: wf worktree list"],
-    [["worktree", "delete", "--help"], "Usage: wf worktree delete"],
     [["task", "start", "--help"], "Usage: wf task start"],
     [["task", "list", "--help"], "Usage: wf task list"],
     [["task", "finish", "--help"], "Usage: wf task finish"],
     [["task", "delete", "--help"], "Usage: wf task delete"],
     [["review", "open", "--help"], "Usage: wf review open"],
     [["review", "checkout", "--help"], "Usage: wf review checkout"],
-    [["workspace", "create", "--help"], "Usage: wf workspace create"],
-    [["workspace", "delete", "--help"], "Usage: wf workspace delete"],
-    [["workspace", "open", "--help"], "Usage: wf workspace open"],
-    [["workspace", "list", "--help"], "Usage: wf workspace list"],
-    [["workspace", "status", "--help"], "Usage: wf workspace status"],
-    [["workspace", "add", "--help"], "Usage: wf workspace add"],
     [["template", "list", "--help"], "Usage: wf template list"],
     [["template", "open", "--help"], "Usage: wf template open"],
     [["template", "show", "--help"], "Usage: wf template show"],
@@ -681,85 +328,6 @@ describe("cli", () => {
     const output = logs.join("\n");
     expect(output).toContain(usage);
     expect(process.exitCode).toBeUndefined();
-  });
-
-  it("does not delete a workspace when confirmation is declined", async () => {
-    const workspaceDir = await createTempDir("workforest-workspace-");
-
-    await writeWorkspaceMetadata(workspaceDir, {
-      featureName: "demo-work",
-      repos: [
-        {
-          name: "front",
-          remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
-          hasLockfile: true,
-        },
-      ],
-    });
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: true,
-    });
-    promptConfirmMock.mockResolvedValue(false);
-
-    process.argv = ["node", "wf", "workspace", "delete", workspaceDir];
-    process.exitCode = undefined;
-
-    await cli();
-
-    await expect(stat(workspaceDir)).resolves.toBeTruthy();
-    expect(promptConfirmMock).toHaveBeenCalledWith(
-      `Delete workspace at ${path.resolve(workspaceDir)}?`,
-      false,
-    );
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("requires an interactive terminal for workspace search", async () => {
-    const errors: string[] = [];
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: false,
-    });
-
-    vi.spyOn(console, "error").mockImplementation((...args) => {
-      errors.push(args.join(" "));
-    });
-
-    process.argv = ["node", "wf", "workspace", "open", "--search"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(errors.join("\n")).toContain(
-      "wf workspace open --search requires an interactive terminal",
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("reports missing defaultDir for workspace search", async () => {
-    const configDir = await createTempDir("workforest-config-");
-    const writes: string[] = [];
-
-    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: true,
-    });
-
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      writes.push(String(chunk));
-      return true;
-    });
-
-    process.argv = ["node", "wf", "workspace", "open", "--search"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(writes.join("")).toContain("No defaultDir configured");
-    expect(process.exitCode).toBe(1);
   });
 
   it("writes the template directory for wf template open", async () => {

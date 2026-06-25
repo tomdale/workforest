@@ -17,9 +17,7 @@ describe("commandRegistry", () => {
       switch: null,
       finish: null,
       delete: null,
-      workspace: ["create", "delete", "open", "list", "status", "add"],
       task: ["start", "list", "finish", "delete"],
-      worktree: ["create", "list", "delete"],
       cache: [
         "list",
         "info",
@@ -53,31 +51,14 @@ describe("commandRegistry", () => {
   });
 
   it("defines only the published root shortcuts", () => {
-    expect(commandRegistry.shortcuts).toEqual([
-      expect.objectContaining({
-        name: "new",
-        target: ["workspace", "create"],
-      }),
-      expect.objectContaining({
-        name: "clean",
-        target: ["workspace", "delete"],
-      }),
-    ]);
+    expect(commandRegistry.shortcuts).toEqual([]);
     expect(
       collectNodes(commandRegistry.root).flatMap((node) => node.aliases),
     ).toEqual([]);
   });
 
   it("uses explicit resource leaves without contextual defaults", () => {
-    for (const name of [
-      "workspace",
-      "task",
-      "worktree",
-      "cache",
-      "review",
-      "template",
-      "shell",
-    ]) {
+    for (const name of ["task", "cache", "review", "template", "shell"]) {
       expect(findGroup(commandRegistry.root, name).default).toBeUndefined();
     }
     expect(findGroup(commandRegistry.root, "config").default?.handler).toBe(
@@ -108,38 +89,50 @@ describe("commandRegistry", () => {
 
   it("rejects shortcut collisions and unknown targets", () => {
     const collision = cloneRegistry();
-    firstShortcut(collision).name = "workspace";
+    collision.shortcuts.push({
+      name: "cache",
+      target: ["start"],
+      visibility: "visible",
+      summary: "Synthetic shortcut",
+      help: { kind: "command", command: "cache" },
+    });
     expect(() => validateCommandRegistry(collision)).toThrow(
-      'Duplicate command or alias "workspace"',
+      'Duplicate command or alias "cache"',
     );
 
     const unknownTarget = cloneRegistry();
-    firstShortcut(unknownTarget).target = ["workspace", "missing"];
+    unknownTarget.shortcuts.push({
+      name: "missing-target",
+      target: ["missing"],
+      visibility: "visible",
+      summary: "Synthetic shortcut",
+      help: { kind: "command", command: "missing-target" },
+    });
     expect(() => validateCommandRegistry(unknownTarget)).toThrow(
-      "targets unknown command wf workspace missing",
+      "targets unknown command wf missing",
     );
   });
 
   it("rejects paths that disagree with the command tree", () => {
     const registry = cloneRegistry();
-    findMutableNode(registry.root, ["workspace", "list"]).path = ["wrong"];
+    findMutableNode(registry.root, ["cache", "list"]).path = ["wrong"];
 
     expect(() => validateCommandRegistry(registry)).toThrow(
-      "does not match wf workspace list",
+      "does not match wf cache list",
     );
   });
 
   it("rejects duplicate leaf flags", () => {
     const registry = cloneRegistry();
-    const add = findMutableNode(registry.root, ["workspace", "add"]);
+    const add = findMutableNode(registry.root, ["add"]);
     if (add.kind !== "leaf") throw new Error("Expected add command");
     add.flags = [
       ...add.flags,
-      { name: "other", long: "--workspace", kind: "boolean" },
+      { name: "other", long: "--yes", kind: "boolean" },
     ];
 
     expect(() => validateCommandRegistry(registry)).toThrow(
-      'Duplicate flag "--workspace"',
+      'Duplicate flag "--yes"',
     );
   });
 });
@@ -197,14 +190,6 @@ function collectLeaves(registry: CommandRegistry) {
 
 function cloneRegistry(): MutableCommandRegistry {
   return structuredClone(commandRegistry) as MutableCommandRegistry;
-}
-
-function firstShortcut(registry: MutableCommandRegistry) {
-  const shortcut = registry.shortcuts[0];
-  if (!shortcut) {
-    throw new Error("Expected a root shortcut");
-  }
-  return shortcut;
 }
 
 function findMutableNode(

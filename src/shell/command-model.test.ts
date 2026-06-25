@@ -7,8 +7,6 @@ describe("shell command model", () => {
     const model = createShellCommandModel(commandRegistry);
 
     expect(model.commands.map((command) => command.name)).toEqual([
-      "new",
-      "clean",
       "start",
       "list",
       "status",
@@ -16,9 +14,7 @@ describe("shell command model", () => {
       "switch",
       "finish",
       "delete",
-      "workspace",
       "task",
-      "worktree",
       "cache",
       "review",
       "template",
@@ -29,31 +25,25 @@ describe("shell command model", () => {
       "version",
     ]);
     expect(model.commands.map((command) => command.name)).not.toContain(
-      "_initialize-repo",
+      ["_initialize", "repo"].join("-"),
     );
   });
 
   it("derives scoped commands and flags from leaf metadata", () => {
     const model = createShellCommandModel(commandRegistry);
-    const workspace = model.commands.find(
-      (command) => command.name === "workspace",
-    );
-    const create = workspace?.children.find(
-      (command) => command.name === "create",
-    );
+    const task = model.commands.find((command) => command.name === "task");
+    const start = task?.children.find((command) => command.name === "start");
 
-    expect(workspace?.children.map((command) => command.name)).toEqual([
-      "create",
-      "delete",
-      "open",
+    expect(task?.children.map((command) => command.name)).toEqual([
+      "start",
       "list",
-      "status",
-      "add",
+      "finish",
+      "delete",
     ]);
-    expect(create?.flags.map((flag) => flag.long)).toEqual([
-      "--like",
-      "--description",
+    expect(start?.flags.map((flag) => flag.long)).toEqual([
+      "--repo",
       "--dry-run",
+      "--force",
     ]);
   });
 
@@ -61,16 +51,12 @@ describe("shell command model", () => {
     const model = createShellCommandModel(commandRegistry);
 
     expect(model.handoffCommands).toEqual([
-      "new",
-      "clean",
       "start",
       "add",
       "switch",
       "finish",
       "delete",
-      "workspace",
       "task",
-      "worktree",
       "review",
       "template",
     ]);

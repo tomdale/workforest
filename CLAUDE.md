@@ -15,7 +15,7 @@ pnpm biome check .      # Lint and format check
 pnpm biome check --write .  # Auto-fix lint/format issues
 
 # Run CLI during development
-node bin/workforest.js workspace create <template|org/repo...> -- <name-or-description>
+node bin/workforest.js start <change> <org/repo...|@template>
 node bin/workforest.js template manage
 ```
 
@@ -68,7 +68,7 @@ This silently bypasses large parts of the CLI:
 - Any code path gated on `process.stdout.isTTY` is invisible to automated tests
 
 **After any change that touches the TUI, prompt flow, or
-`wf workspace create` end-to-end path, smoke-test in a real terminal using
+`wf start` end-to-end path, smoke-test in a real terminal using
 tmux:**
 
 ```bash

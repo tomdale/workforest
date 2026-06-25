@@ -48,7 +48,7 @@ describe("generated shell wrappers", () => {
       await realpath(target),
     );
     expect(result.stderr).toBe("");
-    expect(await readFile(fixture.logPath, "utf8")).toBe("new\n");
+    expect(await readFile(fixture.logPath, "utf8")).toBe("switch\n");
     expect(await readdir(fixture.tmpDir)).toEqual([]);
   });
 
@@ -128,7 +128,7 @@ async function createShellFixture(
     [
       `. ${shellQuote(initPath)}`,
       `cd ${shellQuote(startDir)}`,
-      '"$WORKFOREST_TEST_BIN" new',
+      '"$WORKFOREST_TEST_BIN" switch',
       "workforest_status=$?",
       'printf "status=%s\\ncwd=%s\\n" "$workforest_status" "$PWD"',
       "",

@@ -6,7 +6,7 @@ description: Workforest setup and configuration guidance. Use when configuring W
 # Workforest Setup And Configuration
 
 Use this skill when a workspace needs repeatable setup beyond a one-off
-`wf workspace create` command: global config, templates, built-in initializers,
+`wf start` command: global config, templates, built-in initializers,
 hooks, branch prefixes, Vercel linking, or default files.
 
 ## Common Commands

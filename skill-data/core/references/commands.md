@@ -6,12 +6,12 @@ All syntax is generated from the CLI command registry. Use `wf`; `workforest` re
 
 ## Concepts
 
-workforest creates isolated workspaces that span multiple repositories, so a feature can move the frontend, API, docs, and tooling together from cached mirrors without juggling branches in a single checkout.
+workforest creates isolated changes from cached repositories, so a feature can move one repo or several together without juggling branches in a single checkout.
 
-- **workspace** — A directory of git worktrees, one per repository, branched and set up together.
-- **task** — A short-lived extra worktree inside a workspace, on its own branch.
-- **standalone worktree** — One repository's worktree on its own, not tied to a workspace (wf worktree).
-- **template** — A saved repository set, plus hooks and files, to create workspaces from.
+- **change** — A repository or workspace lane managed by Workforest for one piece of work.
+- **workspace** — A multi-repository change directory, branched and set up together.
+- **task** — A short-lived nested worktree inside a managed change, on its own branch.
+- **template** — A saved repository set, plus hooks and files, to start workspaces from.
 - **cached mirror** — A local bare clone each worktree is built from, kept for fast offline setup.
 - **review workspace** — A workspace for reviewing someone's pull request (wf review).
 
@@ -181,160 +181,11 @@ Examples:
 - `wf delete _adhoc/experiment` — Delete a change after confirming.
 - `wf delete _adhoc/experiment --force` — Delete without prompting.
 
-## `wf workspace`
-
-Manage workspaces.
-
-Create, open, inspect, and delete workspaces — directories holding one git worktree per repository, set up from a template or repo set. See also `wf task` (temporary worktrees inside a workspace), `wf worktree` (standalone worktrees), and `wf review` (review workspaces for PRs).
-
-```text
-wf workspace <subcommand>
-```
-
-### `wf workspace create`
-
-Create a workspace.
-
-Sets up a workspace directory with a git worktree per repository from a cached bare mirror, then runs the template's hooks; repository setup continues in the background, tracked by `wf workspace status`. In a terminal with no arguments, prompts interactively; without a TTY, arguments are required — one or more repositories or a template, then `--`, then the work words — and omitting them is a usage error. The work words name the workspace and its branch. Changes your shell's directory to the new workspace under shell integration. Also available as `wf new`.
-
-```text
-wf workspace create [options]
-wf workspace create [options] <templates or repositories...> -- <work words...>
-wf workspace create [options] -- <work words...>
-```
-
-Arguments:
-
-- `templates or repositories` — A template name, or one or more repositories as a cached repo name, `org/repo` GitHub shorthand, or full git URL.
-- `work words` — Free-text after `--` describing the work; becomes the workspace name and branch.
-
-Options:
-
-- `--like <workspace>` — Reuse another workspace's repository set instead of naming repos or a template; pass `current` to reuse the workspace you are in, with the work words after `--`.
-- `-d`, `--description <description>` — Set the workspace description; otherwise derived from the work words.
-- `-n`, `--dry-run` — Show the workspace, branch, and repositories that would be created without writing anything.
-
-Examples:
-
-- `wf workspace create vercel/next.js -- "update docs"` — Create a workspace with one repository, on a branch named for the work.
-- `wf workspace create <template> -- "fix login bug"` — Create a workspace from a saved template's repository set.
-- `wf workspace create --like current -- "try another approach"` — Reuse the current workspace's repositories in a fresh workspace.
-
-### `wf workspace delete`
-
-Delete a workspace.
-
-Removes the workspace directory and the git worktrees inside it; with `-r` it also deletes each repository's merged feature branch from its remote, and with `--delete-mirrors` it also removes the cached bare mirrors. Shows a preview and prompts for confirmation in a terminal; without a TTY it refuses unless `--force` is passed, exiting 1. If you delete the workspace you are currently inside, your shell moves to the parent directory under shell integration. Also available as `wf clean`.
-
-```text
-wf workspace delete [options] <workspace>
-```
-
-Arguments:
-
-- `workspace` — The workspace to delete, as a path to its directory or a workspace name resolved under `defaultDir`.
-
-Options:
-
-- `-n`, `--dry-run` — Show what would be removed without deleting anything.
-- `-f`, `--force` — Skip the confirmation prompt; required to proceed without a terminal.
-- `--delete-mirrors` — Also remove the cached bare mirror, not just the worktree; it must be re-cloned next time.
-- `-r`, `--delete-remote-branches` — Also delete each repository's merged feature branch from its remote.
-
-Examples:
-
-- `wf workspace delete <workspace>` — Preview and confirm removal of a workspace and its worktrees.
-- `wf workspace delete <workspace> --force` — Delete without prompting, for scripts or a non-interactive shell.
-- `wf workspace delete <workspace> -r --delete-mirrors` — Also delete merged remote branches and the cached mirrors.
-
-### `wf workspace open`
-
-Open a workspace.
-
-Resolves a workspace and changes your shell's directory to it under shell integration; as the bare binary it prints `cd <path>` instead. Given a name, resolves it under `defaultDir`. With no name in a terminal it shows a picker, or `--search` opens a fuzzy finder; without a TTY a name is required.
-
-```text
-wf workspace open [options] [workspace]
-wf workspace open [options]
-```
-
-Arguments:
-
-- `workspace` — The workspace to open, resolved by name under `defaultDir`. Required without a TTY.
-
-Options:
-
-- `--search` — Open a fuzzy finder to pick a workspace; requires an interactive terminal.
-
-Examples:
-
-- `wf workspace open <workspace>` — Switch to the named workspace's directory.
-- `wf workspace open --search` — Fuzzy-find a workspace interactively, then switch to it.
-
-### `wf workspace list`
-
-List workspaces.
-
-Prints each workspace found under `defaultDir` with its description, template, branch, and repository count. Entries with unreadable metadata are skipped. Errors if `defaultDir` is unset (set it with `wf config edit`).
-
-```text
-wf workspace list
-```
-
-Examples:
-
-- `wf workspace list` — Show every workspace under the configured directory.
-
-### `wf workspace status`
-
-Show repository initialization status.
-
-Reports the background initialization state of each repository in a workspace — queued, running, failed, or cancelled — finalizing completed work before reporting. Run from inside a workspace, or target one with `-w`. With no recorded initialization it exits 0 with a message. With `--json` it emits `{ "ok": true, "data": { "workspace": …, "repos": [ … ] } }`.
-
-```text
-wf workspace status [options]
-```
-
-Options:
-
-- `--json` — Emit the machine-readable envelope instead of human output.
-- `-w`, `--workspace <dir>` — Path to the workspace to inspect (default: the current workforest workspace).
-
-Examples:
-
-- `wf workspace status` — Show initialization progress for the current workspace.
-- `wf workspace status -w <dir> --json` — Print another workspace's status as a JSON envelope.
-
-### `wf workspace add`
-
-Add repositories to a workspace.
-
-Adds repositories to an existing workspace, creating a worktree for each on the workspace's feature branch and running the template's initializers. Run from inside a workspace or target one with `-w`. With no repositories in a terminal it prompts; without a TTY at least one repository is required.
-
-```text
-wf workspace add [options] [repositories...]
-wf workspace add [options] <repositories...>
-```
-
-Arguments:
-
-- `repositories` — One or more repositories to add, each a cached repo name, `org/repo` shorthand, or git URL. Required without a TTY.
-
-Options:
-
-- `-w`, `--workspace <dir>` — Path to the target workspace (default: the current workforest workspace).
-- `-n`, `--dry-run` — Show which repositories would be added without writing anything.
-
-Examples:
-
-- `wf workspace add vercel/turborepo` — Add a repository to the current workspace.
-- `wf workspace add vercel/next.js vercel/turborepo -w <dir>` — Add repositories to a specific workspace.
-
 ## `wf task`
 
 Manage temporary task worktrees.
 
-Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task. For a worktree not tied to a managed change, see `wf worktree`.
+Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task.
 
 ```text
 wf task <subcommand>
@@ -432,83 +283,6 @@ Examples:
 
 - `wf task delete fix-login` — Delete one task worktree and its branch after confirming.
 - `wf task delete fix-login add-tests --force` — Delete two tasks with no prompt, including dirty or unmerged ones.
-
-## `wf worktree`
-
-Manage standalone worktrees.
-
-Create, list, and delete standalone worktrees — single git worktrees checked out from a cached bare mirror, each on its own branch, not tied to any workspace. Reach for these when you want one repository's worktree on its own. See also `wf task` for a worktree created inside a workspace.
-
-```text
-wf worktree <subcommand>
-```
-
-### `wf worktree create`
-
-Create a standalone worktree.
-
-Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task start`.
-
-```text
-wf worktree create [options] <repository> <worktree name>
-```
-
-Arguments:
-
-- `repository and worktree name` — The repository (cached name, `org/repo`, or git URL) followed by the worktree name — a slug of lowercase letters, digits, and single hyphens.
-
-Options:
-
-- `--dir <path>` — Write the worktree to this explicit path instead of `defaultDir/<repo>/<worktree-name>`.
-- `-n`, `--dry-run` — Show the repository, branch, and target path without writing anything.
-
-Examples:
-
-- `wf worktree create vercel/next.js fix-router` — Check out a new worktree at `defaultDir/next.js/fix-router`.
-- `wf worktree create <org/repo> <worktree-name> --dir <path>` — Place the worktree at an explicit path.
-
-### `wf worktree list`
-
-List standalone worktrees.
-
-Lists standalone worktrees recorded against cached bare mirrors, showing each worktree's path, repository, branch, and whether it still exists on disk. With no argument, lists across all cached repositories. Exits 0 with a message when none match. See also `wf cache list`.
-
-```text
-wf worktree list [repository]
-```
-
-Arguments:
-
-- `repository` — Limit the listing to one cached repository (a cached repo name or `org/repo`). Omit to list all.
-
-Examples:
-
-- `wf worktree list` — List every standalone worktree across all cached repositories.
-- `wf worktree list <org/repo>` — List only the standalone worktrees of one cached repository.
-
-### `wf worktree delete`
-
-Delete a standalone worktree.
-
-Removes the git worktree at the given path; this deletes its working directory and cannot be undone. Prompts for confirmation in a terminal; without a TTY it errors (exit 1) unless you pass `--force`. The cached bare mirror and its branch are left intact. See also `wf worktree create`.
-
-```text
-wf worktree delete [options] <worktree path>
-```
-
-Arguments:
-
-- `worktree path` — Path to the standalone worktree directory to remove.
-
-Options:
-
-- `-n`, `--dry-run` — Show which worktree and branch would be removed without deleting anything.
-- `-f`, `--force` — Skip the confirmation prompt; required to proceed without a terminal.
-
-Examples:
-
-- `wf worktree delete <path>` — Delete the worktree at the given path after confirming.
-- `wf worktree delete <path> --force` — Delete without prompting; use this in scripts and non-interactive shells.
 
 ## `wf cache`
 
@@ -771,7 +545,7 @@ Examples:
 
 Manage templates.
 
-Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf workspace create <template>` to build a workspace from one.
+Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf start <change> @<template>` to build a workspace from one.
 
 ```text
 wf template <subcommand>
@@ -845,7 +619,7 @@ Examples:
 
 Create a template.
 
-Creates a new template directory and `template.jsonc` from a name and a repository set. In a terminal, prompts for anything missing; without a TTY the name and at least one repository are required, and omitting them is a usage error. Errors if a template with that name already exists. See also `wf template edit` and `wf workspace create <template>`.
+Creates a new template directory and `template.jsonc` from a name and a repository set. In a terminal, prompts for anything missing; without a TTY the name and at least one repository are required, and omitting them is a usage error. Errors if a template with that name already exists. See also `wf template edit` and `wf start <change> @<template>`.
 
 ```text
 wf template new [options] [template] [repositories...]
@@ -951,7 +725,7 @@ Examples:
 
 Manage shell integration.
 
-Set up shell integration so directory-changing commands (`wf workspace create`/`open`/`delete`, `wf task`, `wf worktree`, `wf review`, `wf template open`) change your shell's working directory instead of just printing a path.
+Set up shell integration so directory-changing commands (`wf start`, `wf switch`, `wf finish`, `wf delete`, `wf task`, `wf review`, and `wf template open`) change your shell's working directory instead of just printing a path.
 
 ```text
 wf shell <subcommand>
@@ -1164,25 +938,3 @@ wf version
 Examples:
 
 - `wf version` — Print the installed version.
-
-## Shortcuts
-
-Shortcuts preserve the published command surface while using the same parser and handler as their canonical commands.
-
-### `wf new`
-
-Shortcut for `wf workspace create`.
-
-```text
-wf new [options]
-wf new [options] <templates or repositories...> -- <work words...>
-wf new [options] -- <work words...>
-```
-
-### `wf clean`
-
-Shortcut for `wf workspace delete`.
-
-```text
-wf clean [options] <workspace>
-```

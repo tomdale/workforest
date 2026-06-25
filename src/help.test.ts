@@ -39,7 +39,7 @@ describe("registry-derived help", () => {
       );
     }
 
-    expect(output).not.toContain("_initialize-repo");
+    expect(output).not.toContain(["_initialize", "repo"].join("-"));
     expect(output).not.toContain("Usage: workforest");
     expect(output).toContain("Usage: wf <command> [options]");
   });
@@ -55,44 +55,42 @@ describe("registry-derived help", () => {
   });
 
   it("renders scoped subcommands, operands, and flags from the registry", () => {
-    const workspace = stripAnsi(
-      commandPathHelp(commandRegistry, ["workspace"]) ?? "",
-    );
-    const status = stripAnsi(
-      commandPathHelp(commandRegistry, ["workspace", "status"]) ?? "",
+    const task = stripAnsi(commandPathHelp(commandRegistry, ["task"]) ?? "");
+    const start = stripAnsi(
+      commandPathHelp(commandRegistry, ["task", "start"]) ?? "",
     );
 
-    for (const child of findGroup(commandRegistry.root, "workspace").children) {
+    for (const child of findGroup(commandRegistry.root, "task").children) {
       if (child.visibility === "visible") {
-        expect(workspace).toContain(child.name);
-        expect(workspace).toContain(child.summary);
+        expect(task).toContain(child.name);
+        expect(task).toContain(child.summary);
       }
     }
-    expect(status).toContain("Usage: wf workspace status [options]");
-    expect(status).toContain("-w, --workspace <dir>");
-    expect(status).toContain("--json");
+    expect(start).toContain("Usage: wf task start [options] <task names...>");
+    expect(start).toContain("--repo <repository>");
+    expect(start).toContain("--dry-run");
   });
 
   it("hides hidden commands and aliases while showing visible aliases", () => {
     const registry = structuredClone(commandRegistry) as MutableCommandRegistry;
-    const workspace = findMutableNode(registry.root, ["workspace"]);
-    const create = findMutableNode(registry.root, ["workspace", "create"]);
-    if (workspace.kind !== "group") throw new Error("Expected workspace group");
+    const task = findMutableNode(registry.root, ["task"]);
+    const start = findMutableNode(registry.root, ["task", "start"]);
+    if (task.kind !== "group") throw new Error("Expected task group");
 
-    create.aliases = [
+    start.aliases = [
       { name: "make", visibility: "visible" },
       { name: "internal-create", visibility: "hidden" },
     ];
-    workspace.children.push({
-      ...structuredClone(create),
+    task.children.push({
+      ...structuredClone(start),
       name: "internal",
-      path: ["workspace", "internal"],
+      path: ["task", "internal"],
       aliases: [],
       visibility: "hidden",
     });
 
-    const output = stripAnsi(commandPathHelp(registry, ["workspace"]) ?? "");
-    expect(output).toContain("create|make");
+    const output = stripAnsi(commandPathHelp(registry, ["task"]) ?? "");
+    expect(output).toContain("start|make");
     expect(output).not.toContain("internal-create");
     expect(output).not.toContain("internal");
   });
@@ -108,13 +106,13 @@ describe("registry-derived help", () => {
 
   it("uses ellipses only for unbounded operand cardinality", () => {
     const fixed = stripAnsi(
-      commandPathHelp(commandRegistry, ["worktree", "create"]) ?? "",
+      commandPathHelp(commandRegistry, ["template", "copy"]) ?? "",
     );
     const unbounded = stripAnsi(
       commandPathHelp(commandRegistry, ["task", "start"]) ?? "",
     );
 
-    expect(fixed).toContain("<repository> <worktree name>");
+    expect(fixed).toContain("<source template> <destination template>");
     expect(unbounded).toContain("<task names...>");
   });
 

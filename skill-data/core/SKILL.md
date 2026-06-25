@@ -14,13 +14,12 @@ for each repo.
 Use these commands for the usual workspace lifecycle:
 
 ```sh
-wf workspace create vercel/next.js vercel/turbo -- "update docs build"
-wf workspace status                               # monitor background setup
-wf workspace list                                 # list workspaces
-wf workspace add vercel/swr                       # add a repository
-wf workspace create --like current -- "new approach"
-wf workspace delete update-docs-build --dry-run  # preview cleanup
-wf workspace delete update-docs-build --force    # remove the workspace
+wf start update-docs-build vercel/next.js vercel/turbo
+wf status --watch                                 # monitor background setup
+wf list                                           # list changes
+wf add vercel/swr                                 # add a repository
+wf start new-approach                             # repeat current context
+wf finish _adhoc/update-docs-build                # remove after integration
 wf cache list                                     # inspect cached repositories
 ```
 
@@ -40,13 +39,13 @@ Agent workflow:
 
 ```sh
 # Create a named workspace with both repos on matching feature branches.
-wf workspace create vercel/next.js vercel/turbo -- "update docs build"
+wf start update-docs-build vercel/next.js vercel/turbo
 
-cd ~/Code/workspaces/update-docs-build
+cd ~/Code/Workspaces/_adhoc/update-docs-build
 
 # Inspect what Workforest created.
-wf workspace status
-wf workspace list
+wf status --watch
+wf list
 ls
 
 # Work in the repos using normal project commands.
@@ -57,11 +56,10 @@ pnpm test
 
 # Add another repo later if the investigation needs it.
 cd ..
-wf workspace add vercel/swr
+wf add vercel/swr
 
 # When the workspace is no longer needed, preview and clean it.
-wf workspace delete update-docs-build --dry-run
-wf workspace delete update-docs-build --force
+wf finish _adhoc/update-docs-build
 ```
 
 Expected shape:
@@ -74,20 +72,19 @@ Expected shape:
   .workforest/workspace.json
 ```
 
-Use `wf workspace create --like current -- "try token refresh"` from inside the
-workspace when the user wants a separate approach with the same repositories
-but fresh branches.
+Use `wf start try-token-refresh` from inside the workspace when the user wants
+a separate approach with the same repositories but fresh branches.
 
-Use `wf worktree create <repo> <name>` for a standalone single-repository
-checkout. Use `wf task start <name...>` inside a workspace repository when
+Use `wf start <change> <repo>` for a standalone single-repository change. Use
+`wf task start <name...>` inside a workspace repository when
 parallel agents need short-lived nested worktrees.
 
 ## Safety Rules
 
-- Do not manually delete a workspace before `wf workspace delete`; Workforest
+- Do not manually delete a workspace before `wf finish` or `wf delete`; Workforest
   removes Git worktree registrations as well as directories.
-- Prefer `wf workspace delete <workspace> --dry-run` before destructive
-  cleanup.
+- Prefer `wf finish <selector>` after integration; use `wf delete <selector>`
+  only for explicit abandonment.
 - Prefer `wf cache prune --dry-run` before deleting unused cached mirrors.
 - Do not force-delete a mirror with active worktrees unless those worktrees are
   intentionally being abandoned.

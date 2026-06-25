@@ -137,7 +137,7 @@ describe("generated references", () => {
       );
     }
 
-    expect(generated).not.toContain("_initialize-repo");
+    expect(generated).not.toContain(["_initialize", "repo"].join("-"));
     expect(generated).not.toContain("Usage: workforest");
   });
 });

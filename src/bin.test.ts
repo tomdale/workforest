@@ -49,9 +49,9 @@ describe("bin/workforest.js", () => {
     const results = await Promise.all(
       [
         ["--help"],
-        ["worktree", "--help"],
-        ["worktree", "delete", "--help"],
-        ["workspace", "create", "--help"],
+        ["task", "--help"],
+        ["task", "delete", "--help"],
+        ["start", "--help"],
       ].map((args) =>
         execFileAsync(
           process.execPath,
@@ -115,10 +115,7 @@ describe("bin/workforest.js", () => {
 
   it.each([
     [["wat"], "Unknown command: wat"],
-    [
-      ["workspace", "list", "--bogus"],
-      'Unknown flag "--bogus" for wf workspace list',
-    ],
+    [["list", "--bogus"], 'Unknown flag "--bogus" for wf list'],
     [["template", "copy", "only-one"], "Invalid operands for wf template copy"],
   ])("reports invocation errors without parser stacks for %j", async (args, message) => {
     const result = await runSubprocess(

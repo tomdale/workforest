@@ -1,35 +1,78 @@
 {
   "version": "0.0.1",
-  "publishedAt": "2026-01-24T06:42:09.139Z",
-  "integrity": "sha512-L8RlLxW4N5K11a7KSMWvL0f6GH1Z3BvyBSJXyr/VpbLtGrIrqt1QuzKUgaPgOrPBzEdbaSAf6b2XdnyjxYdlqA==",
   "bins": ["wf", "workforest"],
   "rootCommands": [
     {
-      "name": "new",
-      "summary": "Create a workspace",
-      "preserveAsShortcut": true
+      "name": "start",
+      "summary": "Start a change"
     },
     {
-      "name": "clean",
-      "summary": "Remove a workspace",
-      "preserveAsShortcut": true
+      "name": "add",
+      "summary": "Add repositories to the current change"
     },
     {
-      "name": "config",
-      "summary": "Show config location",
-      "preserveAsShortcut": false
+      "name": "switch",
+      "summary": "Switch to a Workforest change"
+    },
+    {
+      "name": "list",
+      "summary": "List Workforest changes"
+    },
+    {
+      "name": "status",
+      "summary": "Show change status"
+    },
+    {
+      "name": "finish",
+      "summary": "Finish an integrated change"
+    },
+    {
+      "name": "delete",
+      "summary": "Delete a Workforest change"
+    },
+    {
+      "name": "task",
+      "summary": "Manage temporary task worktrees"
+    },
+    {
+      "name": "cache",
+      "summary": "Manage cached repositories"
+    },
+    {
+      "name": "review",
+      "summary": "Manage review workspaces and PR worktrees"
     },
     {
       "name": "template",
-      "summary": "Manage templates",
-      "preserveAsShortcut": false
+      "summary": "Manage templates"
+    },
+    {
+      "name": "shell",
+      "summary": "Manage shell integration"
+    },
+    {
+      "name": "config",
+      "summary": "Manage configuration"
+    },
+    {
+      "name": "skills",
+      "summary": "Inspect bundled agent skills"
+    },
+    {
+      "name": "help",
+      "summary": "Show help pages"
+    },
+    {
+      "name": "version",
+      "summary": "Print the workforest version"
     }
   ],
+  "removedRootCommands": ["new", "clean", "workspace", "worktree"],
   "templateSubcommands": {
-    "list": ["ls"],
+    "list": [],
     "show": [],
-    "new": ["create"],
-    "delete": ["rm"],
+    "new": [],
+    "delete": [],
     "edit": []
   }
 }

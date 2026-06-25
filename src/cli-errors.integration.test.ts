@@ -36,19 +36,11 @@ afterAll(async () => {
 
 describe("expected CLI errors", () => {
   it.each([
-    [
-      ["workspace", "status"],
-      1,
-      "Run wf workspace status from inside a workforest workspace.",
-    ],
+    [["status"], 1, "Not in a Workforest change."],
     [["cache", "info", "missing"], 1, "Cached repository not found: missing"],
     [["skills", "get", "missing"], 1, "Skill not found: missing"],
     [["wat"], 2, "Unknown command: wat"],
-    [
-      ["workspace", "status", "extra"],
-      2,
-      "Invalid operands for wf workspace status.",
-    ],
+    [["status", "one", "two"], 2, "Invalid operands for wf status."],
   ])("prints a concise error without a stack for %j", async (argv, exitCode, message) => {
     const result = await runCli(argv);
 

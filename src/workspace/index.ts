@@ -497,7 +497,7 @@ export async function stampWorkspace(
   return {
     setupFailures: [...setupFailures.values()],
     workspaceDir,
-    nextSteps: [...getNextSteps(workspaceDir), "wf workspace status"],
+    nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
   };
 }
 

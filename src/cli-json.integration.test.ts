@@ -44,24 +44,22 @@ afterAll(async () => {
 });
 
 describe("JSON CLI integration", () => {
-  it("reports workspace status with no initialization records", async () => {
+  it("reports change status with no initialization records", async () => {
     const workspaceDir = await createWorkspaceFixture();
-    const result = await runJson([
-      "workspace",
-      "status",
-      "--workspace",
-      workspaceDir,
-      "--json",
-    ]);
+    const result = await runJson(["status", "--json"], { cwd: workspaceDir });
 
     expectJsonResult(result, 0, {
       ok: true,
-      data: { workspace: null, repos: [] },
+      data: expect.objectContaining({
+        type: "adhoc-workspace",
+        selector: "_adhoc/json-status",
+        initialization: null,
+      }),
     });
   });
 
-  it("reports workspace lookup failures as operational JSON", async () => {
-    const result = await runJson(["workspace", "status", "--json"], {
+  it("reports change lookup failures as operational JSON", async () => {
+    const result = await runJson(["status", "--json"], {
       cwd: unrelatedDir,
     });
 
@@ -69,7 +67,8 @@ describe("JSON CLI integration", () => {
       ok: false,
       error: {
         kind: "operational",
-        message: "Run wf workspace status from inside a workforest workspace.",
+        message:
+          "Not in a Workforest change.\nRun: wf list\nOr start explicitly: wf start <change> <repo|@template>",
       },
     });
   });
@@ -279,8 +278,8 @@ describe("JSON CLI integration", () => {
 
   it.each([
     [
-      ["workspace", "status", "extra", "--json"],
-      "Invalid operands for wf workspace status. Expected no operands.",
+      ["status", "one", "two", "--json"],
+      "Invalid operands for wf status. Expected 0-1 selector.",
     ],
     [
       ["cache", "list", "extra", "--json"],
@@ -373,8 +372,14 @@ function skillContent(
 }
 
 async function createWorkspaceFixture(): Promise<string> {
-  const workspaceDir = await createTempDir("workforest-json-workspace-");
-  await mkdir(path.join(workspaceDir, "front"));
+  const workspaceDir = path.join(
+    baseHomeDir,
+    "Code",
+    "Workspaces",
+    "_adhoc",
+    "json-status",
+  );
+  await mkdir(path.join(workspaceDir, "front"), { recursive: true });
   await writeWorkspaceMetadata(workspaceDir, {
     featureName: "json-status",
     branchName: "tomdale/json-status",

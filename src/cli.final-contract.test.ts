@@ -8,21 +8,14 @@ const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["start"],
   ["add"],
   ["switch"],
+  ["list"],
+  ["status"],
   ["finish"],
   ["delete"],
-  ["workspace", "create"],
-  ["workspace", "delete"],
-  ["workspace", "open"],
-  ["workspace", "list"],
-  ["workspace", "status"],
-  ["workspace", "add"],
   ["task", "start"],
   ["task", "list"],
   ["task", "finish"],
   ["task", "delete"],
-  ["worktree", "create"],
-  ["worktree", "list"],
-  ["worktree", "delete"],
   ["cache", "list"],
   ["cache", "info"],
   ["cache", "path"],
@@ -50,20 +43,16 @@ describe("final CLI contract", () => {
     });
   });
 
-  it.each([
-    [["new"], ["workspace", "create"]],
-    [
-      ["clean", "example"],
-      ["workspace", "delete"],
-    ],
-  ] as const)("keeps the published %s shortcut", (argv, canonicalPath) => {
-    expect(resolve(argv)).toMatchObject({ canonicalPath });
+  it.each(
+    [["new"], ["clean"], ["workspace"], ["worktree"], ["task", "create"]].map(
+      (argv) => ({ argv }),
+    ),
+  )("does not expose removed command wf %s", ({ argv }) => {
+    expect(() => resolve(argv)).toThrow();
   });
 
   it.each([
-    ["workspace delete", ["workspace", "delete"]],
     ["task delete", ["task", "delete"]],
-    ["worktree delete", ["worktree", "delete"]],
     ["cache delete", ["cache", "delete"]],
     ["delete", ["delete"]],
   ] as const)("%s requires an explicit target", (_name, argv) => {

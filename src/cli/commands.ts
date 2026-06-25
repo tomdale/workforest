@@ -159,67 +159,6 @@ function nestedHelp(command: string, subcommand: string): HelpReference {
   return { kind: "nested", command, subcommand };
 }
 
-const workspaceCreateOperands: OperandSpec = {
-  variants: [
-    {
-      beforeDoubleDash: cardinality(0, 0),
-      delimiter: "forbidden",
-      when: { flag: "like", present: false, interactive: true },
-    },
-    {
-      beforeDoubleDash: cardinality(
-        1,
-        null,
-        "templates or repositories",
-        undefined,
-        "A template name, or one or more repositories as a cached repo name, `org/repo` GitHub shorthand, or full git URL.",
-      ),
-      delimiter: "required",
-      afterDoubleDash: cardinality(
-        1,
-        null,
-        "work words",
-        undefined,
-        "Free-text after `--` describing the work; becomes the workspace name and branch.",
-      ),
-      when: { flag: "like", present: false, interactive: false },
-    },
-    {
-      beforeDoubleDash: cardinality(0, 0),
-      delimiter: "required",
-      afterDoubleDash: cardinality(1, null, "work words"),
-      when: { flag: "like", present: true },
-    },
-  ],
-};
-
-const workspaceDeleteFlags = [
-  booleanFlag(
-    "dryRun",
-    "--dry-run",
-    "-n",
-    "Show what would be removed without deleting anything.",
-  ),
-  booleanFlag(
-    "force",
-    "--force",
-    "-f",
-    "Skip the confirmation prompt; required to proceed without a terminal.",
-  ),
-  booleanFlag(
-    "deleteMirrors",
-    "--delete-mirrors",
-    undefined,
-    "Also remove the cached bare mirror, not just the worktree; it must be re-cloned next time.",
-  ),
-  booleanFlag(
-    "deleteRemoteBranches",
-    "--delete-remote-branches",
-    "-r",
-    "Also delete each repository's merged feature branch from its remote.",
-  ),
-] as const;
-
 const configDefault = leaf({
   name: "",
   path: ["config"],
@@ -532,107 +471,8 @@ const changeDelete = leaf({
   shellHandoff: "optional-cd",
 });
 
-const workspaceCreate = leaf({
-  name: "create",
-  path: ["workspace", "create"],
-  summary: "Create a workspace",
-  description:
-    "Sets up a workspace directory with a git worktree per repository from a cached bare mirror, then runs the template's hooks; repository setup continues in the background, tracked by `wf workspace status`. In a terminal with no arguments, prompts interactively; without a TTY, arguments are required — one or more repositories or a template, then `--`, then the work words — and omitting them is a usage error. The work words name the workspace and its branch. Changes your shell's directory to the new workspace under shell integration. Also available as `wf new`.",
-  handler: "workspace.create",
-  help: nestedHelp("workspace", "create"),
-  operands: workspaceCreateOperands,
-  flags: [
-    stringFlag("like", "--like", "workspace", {
-      description:
-        "Reuse another workspace's repository set instead of naming repos or a template; pass `current` to reuse the workspace you are in, with the work words after `--`.",
-    }),
-    stringFlag("description", "--description", "description", {
-      short: "-d",
-      description:
-        "Set the workspace description; otherwise derived from the work words.",
-    }),
-    booleanFlag(
-      "dryRun",
-      "--dry-run",
-      "-n",
-      "Show the workspace, branch, and repositories that would be created without writing anything.",
-    ),
-  ],
-  examples: [
-    {
-      command: 'wf workspace create vercel/next.js -- "update docs"',
-      description:
-        "Create a workspace with one repository, on a branch named for the work.",
-    },
-    {
-      command: 'wf workspace create <template> -- "fix login bug"',
-      description: "Create a workspace from a saved template's repository set.",
-    },
-    {
-      command: 'wf workspace create --like current -- "try another approach"',
-      description:
-        "Reuse the current workspace's repositories in a fresh workspace.",
-    },
-  ],
-  outputModes: ["interactive", "report"],
-  tty: optionalStdin,
-  shellHandoff: "optional-cd",
-});
-
-const workspaceDelete = leaf({
-  name: "delete",
-  path: ["workspace", "delete"],
-  summary: "Delete a workspace",
-  description:
-    "Removes the workspace directory and the git worktrees inside it; with `-r` it also deletes each repository's merged feature branch from its remote, and with `--delete-mirrors` it also removes the cached bare mirrors. Shows a preview and prompts for confirmation in a terminal; without a TTY it refuses unless `--force` is passed, exiting 1. If you delete the workspace you are currently inside, your shell moves to the parent directory under shell integration. Also available as `wf clean`.",
-  handler: "workspace.delete",
-  help: nestedHelp("workspace", "delete"),
-  operands: operands(
-    1,
-    1,
-    "workspace",
-    undefined,
-    "The workspace to delete, as a path to its directory or a workspace name resolved under `defaultDir`.",
-  ),
-  flags: workspaceDeleteFlags,
-  examples: [
-    {
-      command: "wf workspace delete <workspace>",
-      description:
-        "Preview and confirm removal of a workspace and its worktrees.",
-    },
-    {
-      command: "wf workspace delete <workspace> --force",
-      description:
-        "Delete without prompting, for scripts or a non-interactive shell.",
-    },
-    {
-      command: "wf workspace delete <workspace> -r --delete-mirrors",
-      description: "Also delete merged remote branches and the cached mirrors.",
-    },
-  ],
-  outputModes: ["human", "report"],
-  tty: optionalStdin,
-  shellHandoff: "optional-cd",
-});
-
 export const commandRegistry: CommandRegistry = {
-  shortcuts: [
-    {
-      name: "new",
-      target: ["workspace", "create"],
-      visibility: visible,
-      summary: "Create a workspace",
-      help: { kind: "command", command: "new" },
-    },
-    {
-      name: "clean",
-      target: ["workspace", "delete"],
-      visibility: visible,
-      summary: "Delete a workspace",
-      help: { kind: "command", command: "clean" },
-    },
-  ],
+  shortcuts: [],
   root: group({
     name: "",
     path: [],
@@ -647,181 +487,11 @@ export const commandRegistry: CommandRegistry = {
       changeFinish,
       changeDelete,
       group({
-        name: "workspace",
-        path: ["workspace"],
-        summary: "Manage workspaces",
-        description:
-          "Create, open, inspect, and delete workspaces — directories holding one git worktree per repository, set up from a template or repo set. See also `wf task` (temporary worktrees inside a workspace), `wf worktree` (standalone worktrees), and `wf review` (review workspaces for PRs).",
-        help: { kind: "command", command: "workspace" },
-        children: [
-          workspaceCreate,
-          workspaceDelete,
-          leaf({
-            name: "open",
-            path: ["workspace", "open"],
-            summary: "Open a workspace",
-            description:
-              "Resolves a workspace and changes your shell's directory to it under shell integration; as the bare binary it prints `cd <path>` instead. Given a name, resolves it under `defaultDir`. With no name in a terminal it shows a picker, or `--search` opens a fuzzy finder; without a TTY a name is required.",
-            handler: "workspace.open",
-            help: nestedHelp("workspace", "open"),
-            operands: {
-              variants: [
-                {
-                  beforeDoubleDash: cardinality(
-                    0,
-                    1,
-                    "workspace",
-                    undefined,
-                    "The workspace to open, resolved by name under `defaultDir`. Required without a TTY.",
-                  ),
-                  delimiter: "forbidden",
-                  when: { flag: "search", present: false },
-                },
-                {
-                  beforeDoubleDash: cardinality(0, 0, "workspace"),
-                  delimiter: "forbidden",
-                  when: { flag: "search", present: true },
-                },
-              ],
-            },
-            flags: [
-              booleanFlag(
-                "search",
-                "--search",
-                undefined,
-                "Open a fuzzy finder to pick a workspace; requires an interactive terminal.",
-              ),
-            ],
-            examples: [
-              {
-                command: "wf workspace open <workspace>",
-                description: "Switch to the named workspace's directory.",
-              },
-              {
-                command: "wf workspace open --search",
-                description:
-                  "Fuzzy-find a workspace interactively, then switch to it.",
-              },
-            ],
-            tty: optionalStdin,
-            shellHandoff: "optional-cd",
-          }),
-          leaf({
-            name: "list",
-            path: ["workspace", "list"],
-            summary: "List workspaces",
-            description:
-              "Prints each workspace found under `defaultDir` with its description, template, branch, and repository count. Entries with unreadable metadata are skipped. Errors if `defaultDir` is unset (set it with `wf config edit`).",
-            handler: "workspace.list",
-            help: nestedHelp("workspace", "list"),
-            examples: [
-              {
-                command: "wf workspace list",
-                description:
-                  "Show every workspace under the configured directory.",
-              },
-            ],
-            outputModes: ["report"],
-          }),
-          leaf({
-            name: "status",
-            path: ["workspace", "status"],
-            summary: "Show repository initialization status",
-            description:
-              'Reports the background initialization state of each repository in a workspace — queued, running, failed, or cancelled — finalizing completed work before reporting. Run from inside a workspace, or target one with `-w`. With no recorded initialization it exits 0 with a message. With `--json` it emits `{ "ok": true, "data": { "workspace": …, "repos": [ … ] } }`.',
-            handler: "workspace.status",
-            help: nestedHelp("workspace", "status"),
-            flags: [
-              booleanFlag(
-                "json",
-                "--json",
-                undefined,
-                "Emit the machine-readable envelope instead of human output.",
-              ),
-              stringFlag("workspace", "--workspace", "dir", {
-                short: "-w",
-                description:
-                  "Path to the workspace to inspect (default: the current workforest workspace).",
-              }),
-            ],
-            examples: [
-              {
-                command: "wf workspace status",
-                description:
-                  "Show initialization progress for the current workspace.",
-              },
-              {
-                command: "wf workspace status -w <dir> --json",
-                description:
-                  "Print another workspace's status as a JSON envelope.",
-              },
-            ],
-            outputModes: ["interactive", "report", "json"],
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "add",
-            path: ["workspace", "add"],
-            summary: "Add repositories to a workspace",
-            description:
-              "Adds repositories to an existing workspace, creating a worktree for each on the workspace's feature branch and running the template's initializers. Run from inside a workspace or target one with `-w`. With no repositories in a terminal it prompts; without a TTY at least one repository is required.",
-            handler: "workspace.add",
-            help: nestedHelp("workspace", "add"),
-            operands: {
-              variants: [
-                {
-                  beforeDoubleDash: cardinality(
-                    0,
-                    null,
-                    "repositories",
-                    undefined,
-                    "One or more repositories to add, each a cached repo name, `org/repo` shorthand, or git URL. Required without a TTY.",
-                  ),
-                  delimiter: "forbidden",
-                  when: { interactive: true },
-                },
-                {
-                  beforeDoubleDash: cardinality(1, null, "repositories"),
-                  delimiter: "forbidden",
-                  when: { interactive: false },
-                },
-              ],
-            },
-            flags: [
-              stringFlag("workspace", "--workspace", "dir", {
-                short: "-w",
-                description:
-                  "Path to the target workspace (default: the current workforest workspace).",
-              }),
-              booleanFlag(
-                "dryRun",
-                "--dry-run",
-                "-n",
-                "Show which repositories would be added without writing anything.",
-              ),
-            ],
-            examples: [
-              {
-                command: "wf workspace add vercel/turborepo",
-                description: "Add a repository to the current workspace.",
-              },
-              {
-                command:
-                  "wf workspace add vercel/next.js vercel/turborepo -w <dir>",
-                description: "Add repositories to a specific workspace.",
-              },
-            ],
-            outputModes: ["interactive", "report"],
-            tty: optionalStdin,
-          }),
-        ],
-      }),
-      group({
         name: "task",
         path: ["task"],
         summary: "Manage temporary task worktrees",
         description:
-          "Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task. For a worktree not tied to a managed change, see `wf worktree`.",
+          "Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task.",
         help: { kind: "command", command: "task" },
         children: [
           leaf({
@@ -985,133 +655,6 @@ export const commandRegistry: CommandRegistry = {
                 command: "wf task delete fix-login add-tests --force",
                 description:
                   "Delete two tasks with no prompt, including dirty or unmerged ones.",
-              },
-            ],
-            outputModes: ["human", "report"],
-            tty: optionalStdin,
-            shellHandoff: "optional-cd",
-          }),
-        ],
-      }),
-      group({
-        name: "worktree",
-        path: ["worktree"],
-        summary: "Manage standalone worktrees",
-        description:
-          "Create, list, and delete standalone worktrees — single git worktrees checked out from a cached bare mirror, each on its own branch, not tied to any workspace. Reach for these when you want one repository's worktree on its own. See also `wf task` for a worktree created inside a workspace.",
-        help: { kind: "command", command: "worktree" },
-        children: [
-          leaf({
-            name: "create",
-            path: ["worktree", "create"],
-            summary: "Create a standalone worktree",
-            description:
-              "Creates a git worktree from a cached bare mirror on a new branch, caching the mirror first if needed; the worktree is not attached to any workspace. The target path is `defaultDir/<repo>/<worktree-name>` unless `--dir` is passed. The branch is named for the worktree name using the configured `branchPrefix`. Changes your shell's directory into the new worktree under shell integration. See also `wf task start`.",
-            handler: "worktree.create",
-            help: nestedHelp("worktree", "create"),
-            operands: operands(
-              2,
-              2,
-              "repository and worktree name",
-              "<repository> <worktree name>",
-              "The repository (cached name, `org/repo`, or git URL) followed by the worktree name — a slug of lowercase letters, digits, and single hyphens.",
-            ),
-            flags: [
-              stringFlag("dir", "--dir", "path", {
-                description:
-                  "Write the worktree to this explicit path instead of `defaultDir/<repo>/<worktree-name>`.",
-              }),
-              booleanFlag(
-                "dryRun",
-                "--dry-run",
-                "-n",
-                "Show the repository, branch, and target path without writing anything.",
-              ),
-            ],
-            examples: [
-              {
-                command: "wf worktree create vercel/next.js fix-router",
-                description:
-                  "Check out a new worktree at `defaultDir/next.js/fix-router`.",
-              },
-              {
-                command:
-                  "wf worktree create <org/repo> <worktree-name> --dir <path>",
-                description: "Place the worktree at an explicit path.",
-              },
-            ],
-            outputModes: ["human", "report"],
-            tty: optionalStdin,
-            shellHandoff: "optional-cd",
-          }),
-          leaf({
-            name: "list",
-            path: ["worktree", "list"],
-            summary: "List standalone worktrees",
-            description:
-              "Lists standalone worktrees recorded against cached bare mirrors, showing each worktree's path, repository, branch, and whether it still exists on disk. With no argument, lists across all cached repositories. Exits 0 with a message when none match. See also `wf cache list`.",
-            handler: "worktree.list",
-            help: nestedHelp("worktree", "list"),
-            operands: operands(
-              0,
-              1,
-              "repository",
-              undefined,
-              "Limit the listing to one cached repository (a cached repo name or `org/repo`). Omit to list all.",
-            ),
-            examples: [
-              {
-                command: "wf worktree list",
-                description:
-                  "List every standalone worktree across all cached repositories.",
-              },
-              {
-                command: "wf worktree list <org/repo>",
-                description:
-                  "List only the standalone worktrees of one cached repository.",
-              },
-            ],
-            outputModes: ["report"],
-          }),
-          leaf({
-            name: "delete",
-            path: ["worktree", "delete"],
-            summary: "Delete a standalone worktree",
-            description:
-              "Removes the git worktree at the given path; this deletes its working directory and cannot be undone. Prompts for confirmation in a terminal; without a TTY it errors (exit 1) unless you pass `--force`. The cached bare mirror and its branch are left intact. See also `wf worktree create`.",
-            handler: "worktree.delete",
-            help: nestedHelp("worktree", "delete"),
-            operands: operands(
-              1,
-              1,
-              "worktree path",
-              undefined,
-              "Path to the standalone worktree directory to remove.",
-            ),
-            flags: [
-              booleanFlag(
-                "dryRun",
-                "--dry-run",
-                "-n",
-                "Show which worktree and branch would be removed without deleting anything.",
-              ),
-              booleanFlag(
-                "force",
-                "--force",
-                "-f",
-                "Skip the confirmation prompt; required to proceed without a terminal.",
-              ),
-            ],
-            examples: [
-              {
-                command: "wf worktree delete <path>",
-                description:
-                  "Delete the worktree at the given path after confirming.",
-              },
-              {
-                command: "wf worktree delete <path> --force",
-                description:
-                  "Delete without prompting; use this in scripts and non-interactive shells.",
               },
             ],
             outputModes: ["human", "report"],
@@ -1510,7 +1053,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["template"],
         summary: "Manage templates",
         description:
-          "Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf workspace create <template>` to build a workspace from one.",
+          "Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf start <change> @<template>` to build a workspace from one.",
         help: { kind: "command", command: "template" },
         children: [
           leaf({
@@ -1602,7 +1145,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["template", "new"],
             summary: "Create a template",
             description:
-              "Creates a new template directory and `template.jsonc` from a name and a repository set. In a terminal, prompts for anything missing; without a TTY the name and at least one repository are required, and omitting them is a usage error. Errors if a template with that name already exists. See also `wf template edit` and `wf workspace create <template>`.",
+              "Creates a new template directory and `template.jsonc` from a name and a repository set. In a terminal, prompts for anything missing; without a TTY the name and at least one repository are required, and omitting them is a usage error. Errors if a template with that name already exists. See also `wf template edit` and `wf start <change> @<template>`.",
             handler: "template.new",
             help: nestedHelp("template", "new"),
             operands: {
@@ -1779,7 +1322,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["shell"],
         summary: "Manage shell integration",
         description:
-          "Set up shell integration so directory-changing commands (`wf workspace create`/`open`/`delete`, `wf task`, `wf worktree`, `wf review`, `wf template open`) change your shell's working directory instead of just printing a path.",
+          "Set up shell integration so directory-changing commands (`wf start`, `wf switch`, `wf finish`, `wf delete`, `wf task`, `wf review`, and `wf template open`) change your shell's working directory instead of just printing a path.",
         help: { kind: "command", command: "shell" },
         children: [
           leaf({

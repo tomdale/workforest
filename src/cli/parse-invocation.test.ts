@@ -7,75 +7,46 @@ import type { ResolvedCommand } from "./types.ts";
 
 describe("parseInvocation", () => {
   it("parses leaf-local boolean and string flags", () => {
-    const parsed = parse([
-      "workspace",
-      "add",
-      "-n",
-      "--workspace=./demo",
-      "vercel/front",
-    ]);
+    const parsed = parse(["task", "start", "-n", "--repo=front", "fix-auth"]);
 
     expect(parsed.flags).toEqual({
       dryRun: true,
-      workspace: "./demo",
+      repo: "front",
     });
-    expect(parsed.beforeDoubleDash).toEqual(["vercel/front"]);
-  });
-
-  it("parses root shortcuts using their canonical leaf contract", () => {
-    expect(
-      parse(["new", "--dry-run", "vercel/front", "--", "fix", "auth"]),
-    ).toMatchObject({
-      flags: { dryRun: true },
-      beforeDoubleDash: ["vercel/front"],
-      afterDoubleDash: ["fix", "auth"],
-      hadDoubleDash: true,
-    });
-    expect(parse(["clean", "--force", "demo"])).toMatchObject({
-      flags: { force: true },
-      beforeDoubleDash: ["demo"],
-    });
+    expect(parsed.beforeDoubleDash).toEqual(["fix-auth"]);
   });
 
   it.each([
     [["cache", "list", "--force"], 'Unknown flag "--force"'],
     [["task", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
-    [
-      ["worktree", "create", "front", "fix", "--repo", "front"],
-      'Unknown flag "--repo"',
-    ],
     [["review", "open", "front", "--force"], 'Unknown flag "--force"'],
     [["template", "show", "base", "--json"], 'Unknown flag "--json"'],
-    [["workspace", "open", "--force"], 'Unknown flag "--force"'],
+    [["switch", "--force"], 'Unknown flag "--force"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
   });
 
   it("rejects missing and duplicate flag values", () => {
-    expect(() => parse(["workspace", "add", "--workspace"])).toThrow(
-      'Flag "--workspace" requires dir.',
+    expect(() => parse(["task", "start", "--repo"])).toThrow(
+      'Flag "--repo" requires repository.',
     );
-    expect(() => parseRaw(["workspace", "list"], ["--help", "-h"])).toThrow(
+    expect(() => parseRaw(["list"], ["--help", "-h"])).toThrow(
       'Flag "-h" may only be specified once.',
     );
   });
 
   it.each([
-    [["workspace", "list", "extra"], "Expected no operands"],
-    [["workspace", "delete"], "Expected 1 workspace"],
-    [["workspace", "delete", "one", "two"], "Expected 1 workspace"],
+    [["list", "extra"], "Expected no operands"],
+    [["start"], "Expected 1 or more arguments"],
+    [["status", "one", "two"], "Expected 0-1 selector"],
+    [["add"], "Expected 1 or more sources"],
+    [["switch", "one", "two"], "Expected 0-1 selector"],
+    [["finish", "one", "two"], "Expected 0-1 selector"],
+    [["delete"], "Expected 1 selector"],
+    [["delete", "one", "two"], "Expected 1 selector"],
     [["task", "start"], "Expected 1 or more task names"],
     [["task", "finish"], "Expected 1 or more task names"],
     [["task", "delete"], "Expected 1 or more task names"],
-    [
-      ["worktree", "create", "front"],
-      "Expected 2 repository and worktree name",
-    ],
-    [
-      ["worktree", "create", "front", "fix", "extra"],
-      "Expected 2 repository and worktree name",
-    ],
-    [["worktree", "delete"], "Expected 1 worktree path"],
     [["cache", "add"], "Expected 1 or more repositories"],
     [["cache", "delete"], "Expected 1 or more repositories"],
     [["review", "open"], "Expected 1 repository"],
@@ -91,37 +62,20 @@ describe("parseInvocation", () => {
     expect(() => parse(argv)).toThrow(message);
   });
 
-  it("supports explicit workspace creation modes", () => {
-    expect(parseInteractive(["workspace", "create"]).beforeDoubleDash).toEqual(
-      [],
-    );
-    expect(() => parse(["workspace", "create"])).toThrow(UsageError);
-    expect(
-      parse(["workspace", "create", "vercel/front", "--", "fix", "auth"])
-        .afterDoubleDash,
-    ).toEqual(["fix", "auth"]);
-    expect(
-      parse(["workspace", "create", "--like", "current", "--", "fix-auth"]),
-    ).toMatchObject({
-      flags: { like: "current" },
-      beforeDoubleDash: [],
-      afterDoubleDash: ["fix-auth"],
+  it("parses the final change lifecycle command operands", () => {
+    expect(parse(["start", "fix-auth", "vercel/front"])).toMatchObject({
+      beforeDoubleDash: ["fix-auth", "vercel/front"],
     });
-  });
-
-  it("requires --search to be used without a workspace name", () => {
-    expect(parse(["workspace", "open", "--search"]).flags).toEqual({
-      search: true,
-    });
-    expect(parse(["workspace", "open", "demo"]).beforeDoubleDash).toEqual([
-      "demo",
+    expect(
+      parse(["status", "workforest/cli-redesign"]).beforeDoubleDash,
+    ).toEqual(["workforest/cli-redesign"]);
+    expect(parse(["finish"]).beforeDoubleDash).toEqual([]);
+    expect(parse(["delete", "_adhoc/experiment"]).beforeDoubleDash).toEqual([
+      "_adhoc/experiment",
     ]);
-    expect(() => parse(["workspace", "open", "--search", "demo"])).toThrow(
-      UsageError,
-    );
   });
 
-  it("parses task and standalone worktree flags independently", () => {
+  it("parses task flags independently", () => {
     expect(
       parse(["task", "start", "fix", "--repo", "front", "-n", "-f"]).flags,
     ).toEqual({
@@ -135,18 +89,9 @@ describe("parseInvocation", () => {
       repo: "front",
       dryRun: true,
     });
-    expect(
-      parse(["worktree", "create", "front", "fix", "--dir", "./target", "-n"])
-        .flags,
-    ).toEqual({
-      dir: "./target",
-      dryRun: true,
-    });
   });
 
   it("supports interactive operands only on interactive leaves", () => {
-    expect(() => parse(["workspace", "add"])).toThrow(UsageError);
-    expect(() => parseInteractive(["workspace", "add"])).not.toThrow();
     expect(() => parse(["template", "new"])).toThrow(UsageError);
     expect(() => parseInteractive(["template", "new"])).not.toThrow();
   });
@@ -159,9 +104,18 @@ describe("parseInvocation", () => {
   });
 
   it("does not expose the repository initializer worker as a command", () => {
-    expect(() => parse(["_initialize-repo"])).toThrow(
-      "Unknown command: _initialize-repo",
+    const privateWorkerCommand = ["_initialize", "repo"].join("-");
+    expect(() => parse([privateWorkerCommand])).toThrow(
+      `Unknown command: ${privateWorkerCommand}`,
     );
+  });
+
+  it.each(
+    [["new"], ["clean"], ["workspace"], ["worktree"], ["task", "create"]].map(
+      (argv) => ({ argv }),
+    ),
+  )("does not expose removed command %j", ({ argv }) => {
+    expect(() => parse(argv)).toThrow();
   });
 
   it("lets help bypass operand cardinality", () => {

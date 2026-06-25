@@ -138,9 +138,8 @@ describe("review command directory contexts", () => {
       const fixture = await createReviewFixture();
       const cwd = cwdFor(fixture);
       const cases = [
-        [["workspace", "delete"], "Expected 1 workspace"],
+        [["delete"], "Expected 1 selector"],
         [["task", "delete"], "Expected 1 or more task names"],
-        [["worktree", "delete"], "Expected 1 worktree path"],
         [["cache", "delete"], "Expected 1 or more repositories"],
       ] as const;
 

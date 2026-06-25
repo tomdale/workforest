@@ -235,50 +235,6 @@ describe("task command repository-change context", () => {
   }, 30_000);
 });
 
-describe("standalone worktree command context", () => {
-  it("requires an explicit delete path and does not treat a standalone worktree as a task", async () => {
-    const fixture = await createStandaloneFixture();
-
-    const taskResult = await runCli(
-      fixture.firstWorktreeDir,
-      fixture.env,
-      "task",
-      "list",
-    );
-    expectOperationalFailure(taskResult, "Not inside a Workforest change.");
-
-    const missingTarget = await runCli(
-      fixture.firstWorktreeDir,
-      fixture.env,
-      "worktree",
-      "delete",
-      "--force",
-    );
-    expectUsageFailure(
-      missingTarget,
-      "Invalid operands for wf worktree delete",
-    );
-    await expectPathToExist(fixture.firstWorktreeDir);
-    await expectPathToExist(fixture.secondWorktreeDir);
-
-    const resolvedSecondWorktreeDir = await realpath(fixture.secondWorktreeDir);
-    const deleteSecond = await runCli(
-      fixture.firstWorktreeDir,
-      fixture.env,
-      "worktree",
-      "delete",
-      fixture.secondWorktreeDir,
-      "--force",
-    );
-    expectSuccess(deleteSecond);
-    expect(deleteSecond.stdout).toContain(
-      `Deleted worktree: ${resolvedSecondWorktreeDir}`,
-    );
-    await expectPathToExist(fixture.firstWorktreeDir);
-    await expectPathNotToExist(fixture.secondWorktreeDir);
-  }, 30_000);
-});
-
 type CliEnvironment = NodeJS.ProcessEnv;
 
 type WorkspaceFixture = {
@@ -363,34 +319,6 @@ async function createWorkspaceFixture(): Promise<WorkspaceFixture> {
     frontTaskDir,
     frontSiblingTaskDir,
     docsTaskDir,
-    env: await createCliEnvironment(rootDir),
-  };
-}
-
-async function createStandaloneFixture(): Promise<{
-  firstWorktreeDir: string;
-  secondWorktreeDir: string;
-  env: CliEnvironment;
-}> {
-  const rootDir = await createTempDir("workforest-standalone-context-");
-  const repositoryDir = path.join(rootDir, "repository");
-  const firstWorktreeDir = path.join(rootDir, "first-worktree");
-  const secondWorktreeDir = path.join(rootDir, "second-worktree");
-  await initializeRepository(repositoryDir, "main");
-  await createLinkedWorktree(
-    repositoryDir,
-    firstWorktreeDir,
-    "tomdale/first-worktree",
-  );
-  await createLinkedWorktree(
-    repositoryDir,
-    secondWorktreeDir,
-    "tomdale/second-worktree",
-  );
-
-  return {
-    firstWorktreeDir,
-    secondWorktreeDir,
     env: await createCliEnvironment(rootDir),
   };
 }
