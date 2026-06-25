@@ -100,13 +100,7 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     await copyPackingWorkspace(stagingDir);
     await runChecked(
       "pnpm",
-      [
-        "--config.tokenHelper=",
-        "install",
-        "--offline",
-        "--frozen-lockfile",
-        "--ignore-scripts",
-      ],
+      ["install", "--offline", "--frozen-lockfile", "--ignore-scripts"],
       { cwd: stagingDir, env: packageManagerEnv },
     );
 
@@ -114,14 +108,10 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     for (const relativeDir of PACKAGE_DIRS) {
       const packageDir = path.resolve(stagingDir, relativeDir);
       const manifest = await readManifest(packageDir);
-      await runChecked(
-        "pnpm",
-        ["--config.tokenHelper=", "pack", "--pack-destination", packDir],
-        {
-          cwd: packageDir,
-          env: packageManagerEnv,
-        },
-      );
+      await runChecked("pnpm", ["pack", "--pack-destination", packDir], {
+        cwd: packageDir,
+        env: packageManagerEnv,
+      });
 
       const tarball = path.join(packDir, tarballName(manifest));
       tarballs.set(manifest.name, tarball);
@@ -140,25 +130,22 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
       devDependencies: {
         typescript: "5.9.3",
       },
-      pnpm: {
-        overrides: {
-          ...packedDependencies,
-          semver: "7.7.3",
-        },
-      },
     };
     await writeFile(
       path.join(consumerDir, "package.json"),
       `${JSON.stringify(consumerManifest, null, 2)}\n`,
     );
-    await runChecked(
-      "pnpm",
-      ["--config.tokenHelper=", "install", "--offline", "--ignore-scripts"],
-      {
-        cwd: consumerDir,
-        env: packageManagerEnv,
-      },
+    await writeFile(
+      path.join(consumerDir, "pnpm-workspace.yaml"),
+      renderConsumerWorkspaceConfig({
+        ...packedDependencies,
+        semver: "7.7.3",
+      }),
     );
+    await runChecked("pnpm", ["install", "--offline", "--ignore-scripts"], {
+      cwd: consumerDir,
+      env: packageManagerEnv,
+    });
 
     const rootTarball = requiredTarball(tarballs, "workforest");
     await extractTarball(rootTarball, extractedDir);
@@ -266,6 +253,18 @@ async function readManifest(packageDir: string): Promise<PackageManifest> {
 function tarballName(manifest: PackageManifest): string {
   const packageName = manifest.name.replace(/^@/, "").replaceAll("/", "-");
   return `${packageName}-${manifest.version}.tgz`;
+}
+
+function renderConsumerWorkspaceConfig(
+  overrides: Record<string, string>,
+): string {
+  const lines = ["packages:", '  - "."', "overrides:"];
+  for (const [name, value] of Object.entries(overrides).sort(
+    ([left], [right]) => left.localeCompare(right),
+  )) {
+    lines.push(`  ${JSON.stringify(name)}: ${JSON.stringify(value)}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function requiredTarball(
