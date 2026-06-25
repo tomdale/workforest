@@ -62,6 +62,9 @@ describe("shell integration", () => {
     expect(script).toContain("'start:Start nested task lanes'");
     expect(script).toContain("'--json:option'");
     expect(script).toContain(
+      "_workforest_complete_flags '--repo' '-n' '--dry-run' '-f' '--force' '--json'",
+    );
+    expect(script).toContain(
       "'review:Manage review workspaces and PR worktrees'",
     );
     expect(script).toContain("'checkout:Check out a pull request worktree'");
@@ -84,7 +87,7 @@ describe("shell integration", () => {
       "_workforest_complete_words 'start list finish delete'",
     );
     expect(script).toContain(
-      "_workforest_complete_words '--repo -n --dry-run -f --force'",
+      "_workforest_complete_words '--repo -n --dry-run -f --force --json'",
     );
     expect(script).not.toContain("compdef _workforest_complete");
   });

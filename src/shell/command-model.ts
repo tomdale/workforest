@@ -1,3 +1,4 @@
+import { commandFlags } from "../cli/effective-flags.ts";
 import type {
   CommandGroup,
   CommandLeaf,
@@ -73,7 +74,7 @@ function completionCommand(
       name,
       summary,
       canonicalPath: node.path,
-      flags: node.flags,
+      flags: commandFlags(node),
       children: [],
     };
   }
@@ -82,7 +83,7 @@ function completionCommand(
     name,
     summary,
     canonicalPath: node.path,
-    flags: node.default?.flags ?? [],
+    flags: node.default ? commandFlags(node.default) : [],
     children: visibleInvocations(node.children),
   };
 }

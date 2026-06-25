@@ -69,6 +69,8 @@ describe("registry-derived help", () => {
     expect(start).toContain("Usage: wf task start [options] <task names...>");
     expect(start).toContain("--repo <repository>");
     expect(start).toContain("--dry-run");
+    expect(start).toContain("--json");
+    expect(start).toContain("Emit a machine-readable JSON envelope");
   });
 
   it("hides hidden commands and aliases while showing visible aliases", () => {

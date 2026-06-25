@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { commandRegistry } from "./cli/commands.ts";
+import { commandFlags } from "./cli/effective-flags.ts";
 import type {
   Cardinality,
   CommandExample,
@@ -314,7 +315,7 @@ export function commandUsageLines(
   path: readonly string[] = leaf.path,
 ): string[] {
   const command = formatCommand(path);
-  const options = leaf.flags.length > 0 ? " [options]" : "";
+  const options = commandFlags(leaf).length > 0 ? " [options]" : "";
   const variants = leaf.operands.variants.map((variant) => {
     const before = formatCardinality(variant.beforeDoubleDash);
     const after = variant.afterDoubleDash
@@ -347,14 +348,15 @@ function leafHelp(leaf: CommandLeaf, path: readonly string[]): string {
   const usage = formatUsage(commandUsageLines(leaf, path));
   const description = leaf.description ? ` ${leaf.description}` : "";
   const argumentsSection = formatArgumentsSection(collectOperands(leaf));
+  const flags = commandFlags(leaf);
   const options =
-    leaf.flags.length === 0
+    flags.length === 0
       ? ""
       : `
 
 Options:
 ${formatRows(
-  leaf.flags.map((flag) => ({
+  flags.map((flag) => ({
     key: formatFlag(flag),
     description: flagDescription(flag),
   })),
@@ -433,14 +435,15 @@ function shortcutHelp(
     return null;
   }
   const usage = formatUsage(commandUsageLines(target, [shortcut.name]));
+  const flags = commandFlags(target);
   const options =
-    target.flags.length === 0
+    flags.length === 0
       ? ""
       : `
 
 Options:
 ${formatRows(
-  target.flags.map((flag) => ({
+  flags.map((flag) => ({
     key: formatFlag(flag),
     description: flagDescription(flag),
   })),

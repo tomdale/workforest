@@ -28,8 +28,12 @@ Open the Workforest dashboard.
 Opens the creation-first dashboard in an interactive terminal, or prints a compact dashboard report when a fullscreen terminal is unavailable.
 
 ```text
-wf dashboard
+wf dashboard [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -54,6 +58,7 @@ Arguments:
 Options:
 
 - `--branch <branch>` — Use this exact Git branch name instead of deriving one from `branchPrefix` and <change>.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -127,6 +132,7 @@ Arguments:
 Options:
 
 - `--yes` — Confirm repository-change promotion without prompting.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -141,12 +147,16 @@ Switch to a Workforest change.
 Changes your shell to a Workforest change. Use <group>/<change> to select exactly, a bare change name when unique, or no selector in an interactive terminal to fuzzy-pick from all known changes.
 
 ```text
-wf switch [selector]
+wf switch [options] [selector]
 ```
 
 Arguments:
 
 - `selector` — Change selector as <group>/<change>, or a bare change name when unique.
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -171,6 +181,7 @@ Arguments:
 Options:
 
 - `-f`, `--force` — Skip finish safety blockers for intentional squash merges, cherry-picks, or abandoned work.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -195,6 +206,7 @@ Arguments:
 Options:
 
 - `-f`, `--force` — Skip the confirmation prompt; required to proceed without a terminal.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -260,6 +272,7 @@ Options:
 - `--repo <repository>` — Parent repository in a workspace to branch from; defaults to the one inferred from the current directory.
 - `-n`, `--dry-run` — Show the worktrees and branches that would be created without writing anything.
 - `-f`, `--force` — Create even when the parent repository has uncommitted changes.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -279,6 +292,7 @@ wf task list [options]
 Options:
 
 - `--repo <repository>` — Limit the list to tasks whose parent is this repository in the current workspace.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -303,6 +317,7 @@ Options:
 
 - `--repo <repository>` — Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.
 - `-n`, `--dry-run` — Show which task worktrees and branches would be removed without deleting anything.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -328,6 +343,7 @@ Options:
 - `--repo <repository>` — Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.
 - `-n`, `--dry-run` — Show which task worktrees and branches would be removed without deleting anything.
 - `-f`, `--force` — Delete without the prompt and even when a task is dirty or unmerged; required without a terminal.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -399,12 +415,16 @@ Sync cached repositories.
 Fetches new commits for existing cached mirrors, or clones missing repository specifiers as cached bare mirrors over the network using `--filter=blob:none`. With no repositories, syncs every cached mirror. Each repository is reported independently: a failed sync does not stop the rest, and any failure exits 1.
 
 ```text
-wf cache sync [repositories...]
+wf cache sync [options] [repositories...]
 ```
 
 Arguments:
 
 - `repositories` — Zero or more repositories: a cached name, `org/repo` shorthand, or full git URL.
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -454,6 +474,7 @@ Options:
 
 - `-n`, `--dry-run` — Show which mirrors would be deleted without removing anything.
 - `-f`, `--force` — Skip the prompt and delete even mirrors with active worktrees; required without a terminal.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -474,6 +495,7 @@ Options:
 
 - `-n`, `--dry-run` — Show which unused mirrors would be deleted without removing anything.
 - `-f`, `--force` — Skip the confirmation prompt; required to proceed without a terminal.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -497,12 +519,16 @@ Open a review workspace.
 Sets up a review workspace for a repository: caches its bare mirror and adds a detached worktree under `directory.reviews`, defaulting to `~/Code/Reviews`. Changes your shell's directory to the workspace under shell integration. See also `wf review checkout`.
 
 ```text
-wf review open <repository>
+wf review open [options] <repository>
 ```
 
 Arguments:
 
 - `repository` — The repository to review, as `org/repo`, a cached repo name, or a git URL.
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -515,12 +541,16 @@ Check out a pull request worktree.
 Adds a worktree for one pull request inside its review workspace, running `gh pr checkout` to fetch the PR branch — requires the `gh` CLI and network access. Run from inside a review workspace and you can pass just a PR number, taking the repository from the workspace's metadata. Uses `directory.reviews`, defaulting to `~/Code/Reviews`. Changes your shell's directory to the worktree under shell integration. See also `wf review open`.
 
 ```text
-wf review checkout <review target> [pull request]
+wf review checkout [options] <review target> [pull request]
 ```
 
 Arguments:
 
 - `review targets` — The PR to check out: a GitHub PR URL, `org/repo#<number>`, a bare `org/repo` slug, or — inside a review workspace — a bare `<number>`/`#<number>`. A second `[pull request]` argument gives the number, valid only when the target is a bare `org/repo` slug.
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -545,8 +575,12 @@ List templates.
 Lists every saved template with its description and repository set, and prints the templates directory. Exits 0 with a message when no templates exist. See also `wf template show` and `wf template new`.
 
 ```text
-wf template list
+wf template list [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -559,12 +593,16 @@ Open a template directory.
 Resolves a template to its directory for editing its files by hand, changing your shell's directory there under shell integration; as the bare binary it prints the path instead. Errors if the template does not exist. See also `wf template show`.
 
 ```text
-wf template open <template>
+wf template open [options] <template>
 ```
 
 Arguments:
 
 - `template` — Name of an existing template (lowercase, hyphen-separated).
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -577,12 +615,16 @@ Show template information.
 Prints one template's full configuration: description, effective branch prefix, bundled files directory if present, repository set, and any hooks, plus the path to its `template.jsonc`. Errors if the template does not exist. See also `wf template list` and `wf template edit`.
 
 ```text
-wf template show <template>
+wf template show [options] <template>
 ```
 
 Arguments:
 
 - `template` — Name of an existing template (lowercase, hyphen-separated).
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -595,8 +637,12 @@ Open the template manager.
 Opens an interactive manager to browse, create, edit, copy, and delete templates from one screen. Requires an interactive terminal; without a TTY (or under `$CI`/`$WORKFOREST_NO_TUI`) it falls back to `wf template list` and exits 0. For scripted use, drive the individual subcommands directly.
 
 ```text
-wf template manage
+wf template manage [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -620,6 +666,7 @@ Arguments:
 Options:
 
 - `-d`, `--description <description>` — Set the template's description; otherwise prompted in a terminal.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -633,12 +680,16 @@ Edit a template.
 Opens an interactive editor for one template's repositories, hooks, and branch prefix, saving changes back to its `template.jsonc`. Requires an interactive terminal; errors without one. To change a template in a script, edit its `template.jsonc` directly. See also `wf template show` and `wf template add-file`.
 
 ```text
-wf template edit <template>
+wf template edit [options] <template>
 ```
 
 Arguments:
 
 - `template` — Name of an existing template (lowercase, hyphen-separated).
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -661,6 +712,7 @@ Arguments:
 Options:
 
 - `-t`, `--template <template>` — Template to add files to; otherwise inferred from the current workspace.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -674,12 +726,16 @@ Copy a template.
 Duplicates a template's full configuration under a new name, source then destination. Errors if the source does not exist or the destination name is taken; the new template is independent of the source. See also `wf template new` and `wf template edit`.
 
 ```text
-wf template copy <source template> <destination template>
+wf template copy [options] <source template> <destination template>
 ```
 
 Arguments:
 
 - `templates` — The source template name, then the new destination name (both lowercase, hyphen-separated).
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -702,6 +758,7 @@ Arguments:
 Options:
 
 - `-f`, `--force` — Skip the confirmation prompt; required to delete without a terminal.
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -725,12 +782,16 @@ Print shell integration.
 Prints a shell integration script to stdout for `eval "$(wf shell init zsh)"`; the output is meant to be captured and nothing else is written to stdout. The script defines `wf`/`workforest` wrapper functions and completions and enables auto-cd. Pass `zsh` or `bash`, or omit to detect from `$SHELL`; an unsupported shell is a usage error. Add the `eval` line to your `.zshrc` or `.bashrc`.
 
 ```text
-wf shell init [shell]
+wf shell init [options] [shell]
 ```
 
 Arguments:
 
 - `shell` — `zsh` or `bash`. Omit to detect from `$SHELL`.
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -756,8 +817,12 @@ Show configuration.
 Prints the resolved global configuration, including checkout directories, branch prefix, and any Vercel link settings, followed by the path of the `config.json` it read. Unset keys show their fallback behavior. Reads only; never writes. See also `wf config edit`.
 
 ```text
-wf config show
+wf config show [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -770,8 +835,12 @@ Configure workforest interactively.
 Walks through prompts for the main checkout directories and branch prefix, shows a preview, and on confirmation writes `config.json`. Requires an interactive terminal; errors without one (exit 1). To set values without a TTY or to use the final nested `directory` shape directly, use `wf config edit`. See also `wf config show`.
 
 ```text
-wf config init
+wf config init [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -784,8 +853,12 @@ Open the configuration editor.
 Opens `config.json` in your editor to change settings by hand, then reports when the editor closes. Uses `$EDITOR`, falling back to `$VISUAL`, then `vi`. Requires an interactive terminal; errors without one. See also `wf config init`.
 
 ```text
-wf config edit
+wf config edit [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -891,8 +964,12 @@ Explain core concepts.
 Describes the mental model behind workforest: what workspaces, tasks, templates, cached mirrors, and review workspaces are, and the git operations that underpin them.
 
 ```text
-wf help concepts
+wf help concepts [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -905,8 +982,12 @@ Show recommended workflows.
 Describes recommended day-to-day workflows for both interactive users and AI agents, covering workspace creation, task management, PR review, and orientation patterns.
 
 ```text
-wf help workflow
+wf help workflow [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -919,8 +1000,12 @@ Print the workforest version.
 Prints the installed workforest version to stdout as `workforest <version>`.
 
 ```text
-wf version
+wf version [options]
 ```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
 
 Examples:
 
@@ -935,7 +1020,7 @@ Shortcuts preserve the published command surface while using the same parser and
 Shortcut for `wf dashboard`.
 
 ```text
-wf templates
+wf templates [options]
 ```
 
 ### `wf tasks`
@@ -943,7 +1028,7 @@ wf templates
 Shortcut for `wf dashboard`.
 
 ```text
-wf tasks
+wf tasks [options]
 ```
 
 ### `wf reviews`
@@ -951,5 +1036,5 @@ wf tasks
 Shortcut for `wf dashboard`.
 
 ```text
-wf reviews
+wf reviews [options]
 ```

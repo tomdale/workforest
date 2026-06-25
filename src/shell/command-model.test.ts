@@ -49,6 +49,7 @@ describe("shell command model", () => {
       "--repo",
       "--dry-run",
       "--force",
+      "--json",
     ]);
   });
 

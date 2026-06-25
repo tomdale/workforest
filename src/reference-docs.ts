@@ -1,4 +1,5 @@
 import { commandRegistry } from "./cli/commands.ts";
+import { commandFlags } from "./cli/effective-flags.ts";
 import type {
   CommandGroup,
   CommandLeaf,
@@ -213,6 +214,7 @@ function renderCommandNode(node: CommandNode): string[] {
 function renderLeaf(leaf: CommandLeaf, headingLevel: number): string[] {
   const description = leaf.description ? [leaf.description, ""] : [];
   const argumentRows = collectOperands(leaf);
+  const flags = commandFlags(leaf);
   const argumentsSection =
     argumentRows.length === 0
       ? []
@@ -225,12 +227,12 @@ function renderLeaf(leaf: CommandLeaf, headingLevel: number): string[] {
           "",
         ];
   const options =
-    leaf.flags.length === 0
+    flags.length === 0
       ? []
       : [
           "Options:",
           "",
-          ...leaf.flags.map((flag) => {
+          ...flags.map((flag) => {
             const reference = formatFlagReference(flag);
             return flag.description
               ? `- ${reference} — ${flag.description}`

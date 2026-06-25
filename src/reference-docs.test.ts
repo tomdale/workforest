@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { commandRegistry } from "./cli/commands.ts";
+import { commandFlags } from "./cli/effective-flags.ts";
 import type { CommandGroup, CommandLeaf, CommandNode } from "./cli/types.ts";
 import {
   CONFIGURATION_REGISTRY,
@@ -121,7 +122,7 @@ describe("generated references", () => {
 
     for (const leaf of collectVisibleLeaves(commandRegistry.root)) {
       expect(generated).toContain(`\`${formatCommand(leaf.path)}\``);
-      for (const flag of leaf.flags) {
+      for (const flag of commandFlags(leaf)) {
         expect(generated).toContain(`\`${flag.long}`);
       }
     }
