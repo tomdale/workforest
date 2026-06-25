@@ -1,56 +1,160 @@
-# Subagent Worktree Lifecycle
+# Subagent Task Lifecycle
 
-## 1. Prepare The Primary Repo
+## 1. Prepare The Parent Change
 
-The primary repo is the integration checkout. Commit or stash local changes
-before creating task worktrees. Workforest refuses dirty primary repos by
-default because subagent branches start from committed `HEAD`.
-
-## 2. Create One Worktree Per Task
+The parent change is the integration checkout. It can be a single-repo change:
 
 ```sh
-cd ~/Code/workspaces/my-feature/next.js
-wf task start "fix-tests" "upgrade-dependencies"
+wf switch workforest/cli-redesign
+cd ~/Code/Repos/workforest/cli-redesign
 ```
 
-Expected shape:
+Or a repository inside a workspace change:
+
+```sh
+wf switch _adhoc/billing
+cd ~/Code/Workspaces/_adhoc/billing/front
+```
+
+Before creating tasks, make the parent repository clean:
+
+```sh
+git status --short
+```
+
+Commit or stash unrelated local edits. Task branches start from the parent
+repository's committed `HEAD`; uncommitted parent edits are not copied into task
+worktrees.
+
+## 2. Create One Task Worktree Per Subtask
+
+From inside the parent repository:
+
+```sh
+wf task start fix-tests upgrade-deps
+```
+
+From a workspace root, name the parent repo:
+
+```sh
+wf task start --repo front fix-tests
+```
+
+Expected shapes:
 
 ```text
-~/Code/workspaces/my-feature/_tasks/next.js/fix-tests
-~/Code/workspaces/my-feature/_tasks/next.js/upgrade-dependencies
+~/Code/Repos/workforest/cli-redesign/_tasks/workforest/fix-tests
+~/Code/Workspaces/_adhoc/billing/_tasks/front/fix-tests
 ```
 
-Branches use the current primary branch namespace:
+Task branches use the configured branch prefix:
 
 ```text
 tomdale/fix-tests
-tomdale/upgrade-dependencies
+tomdale/upgrade-deps
+```
+
+List tasks and paths:
+
+```sh
+wf task list
 ```
 
 ## 3. Delegate Carefully
 
 Each subagent should get:
 
-- its own worktree path
-- a narrow task
-- expected verification command
-- instruction not to revert unrelated edits or other agents' work
+- one task worktree path
+- one narrow task
+- one verification command
+- the parent change selector for context
+- instruction not to edit the parent checkout
+- instruction not to touch sibling task worktrees
+- instruction not to revert unrelated changes
 
-## 4. Review And Merge
+Good delegation prompt:
 
-Inspect each worktree's diff and test output. Commit the subagent work on its
-temporary branch, then merge or cherry-pick into the primary checkout using Git.
+```text
+Work only in:
+~/Code/Repos/workforest/cli-redesign/_tasks/workforest/fix-tests
 
-## 5. Remove Temporary Worktrees
+Task:
+Update parser tests for the final command surface.
 
-```sh
-wf task delete "fix-tests"
+Verify:
+pnpm exec vitest run src/cli/parse-invocation.test.ts
+
+Do not edit the parent checkout or any sibling _tasks worktree.
+Do not revert unrelated edits.
 ```
 
-By default removal requires:
+## 4. Review And Integrate
 
-- clean subagent worktree
-- task branch reachable from the current primary branch
+Inspect each task in its own worktree:
 
-Use `--force` only when work was intentionally squash-merged, cherry-picked, or
-discarded.
+```sh
+cd ~/Code/Repos/workforest/cli-redesign/_tasks/workforest/fix-tests
+git status --short
+git diff
+pnpm exec vitest run src/cli/parse-invocation.test.ts
+```
+
+Commit accepted task work on the task branch:
+
+```sh
+git add .
+git commit -m "Update parser tests"
+```
+
+Integrate into the parent checkout with normal Git:
+
+```sh
+cd ~/Code/Repos/workforest/cli-redesign
+git merge tomdale/fix-tests
+```
+
+Use cherry-pick or a squash merge when that is the chosen integration style.
+Workforest does not merge task branches automatically.
+
+## 5. Finish Integrated Tasks
+
+After the task branch is reachable from the parent branch:
+
+```sh
+wf task finish fix-tests
+```
+
+`finish` removes the nested worktree and local task branch after verifying:
+
+- the task worktree is clean
+- the task branch is integrated into the parent branch
+- the task belongs to the current managed change
+
+## 6. Delete Abandoned Tasks
+
+Use `delete` for work that is intentionally discarded, squash-merged,
+cherry-picked without branch reachability, or otherwise not eligible for
+`finish`:
+
+```sh
+wf task delete upgrade-deps --force
+```
+
+Use `--force` only when the task's changes have already been intentionally
+merged, cherry-picked, or abandoned. Without `--force`, deletion refuses dirty
+or unmerged task branches.
+
+## 7. Final Parent Verification
+
+After integrating task work, run verification in the parent checkout:
+
+```sh
+cd ~/Code/Repos/workforest/cli-redesign
+pnpm test
+```
+
+Then finish or delete the parent change according to the normal lifecycle:
+
+```sh
+wf finish workforest/cli-redesign
+```

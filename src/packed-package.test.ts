@@ -68,6 +68,20 @@ describe("packed package", () => {
     expect(files).toContain("package/dist/index.d.mts");
     expect(files).toContain("package/bin/workforest.js");
     expect(files).toContain("package/skill-data/core/SKILL.md");
+    expect(files).toContain("package/skill-data/core/references/commands.md");
+    expect(files).toContain(
+      "package/skill-data/core/references/repository-cache.md",
+    );
+    expect(files).toContain("package/skill-data/parallel-worktrees/SKILL.md");
+    expect(files).toContain(
+      "package/skill-data/parallel-worktrees/references/subagent-lifecycle.md",
+    );
+    expect(files).toContain(
+      "package/skill-data/setup-and-configuration/SKILL.md",
+    );
+    expect(files).toContain(
+      "package/skill-data/setup-and-configuration/references/configuration.md",
+    );
     expect(files.some(containsSourceDirectory)).toBe(false);
     expect(files.some((file) => file.startsWith("package/packages/"))).toBe(
       false,

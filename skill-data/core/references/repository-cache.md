@@ -1,6 +1,6 @@
 # Cached Repository Jobs to Be Done
 
-Workforest keeps bare Git mirrors in its cache so new workspaces and worktrees
+Workforest keeps bare Git mirrors in its cache so new changes and task worktrees
 can start without cloning the same repository repeatedly. Repository management
 supports these jobs:
 
@@ -17,12 +17,12 @@ wf cache manage
 ```
 
 The interactive manager supports search across slugs, remotes, paths, branches,
-issues, and worktrees.
+issues, and active worktrees.
 
 ## Warm the Cache
 
-Before creating a workspace, fetch a repository once so later workspace creation
-is fast and authentication problems are discovered early.
+Before starting a change, fetch repositories once so later `wf start` and
+`wf add` operations are fast and authentication problems are discovered early.
 
 ```sh
 wf cache add vercel/next.js vercel/turbo
@@ -60,8 +60,8 @@ With no selector, `update` operates on every cached repository.
 
 ## Repair Metadata
 
-When a workspace was moved or deleted outside Workforest, prune stale worktree
-registrations and verify Git object connectivity.
+When a managed change was moved or deleted outside Workforest, prune stale
+worktree registrations and verify Git object connectivity.
 
 ```sh
 wf cache repair next.js
@@ -83,8 +83,8 @@ wf cache delete vercel/next.js --force
 ```
 
 Deletion refuses mirrors with active worktrees unless `--force` is passed.
-Forced deletion breaks those worktrees, so remove tracked workspaces and
-worktrees through Workforest first whenever possible.
+Forced deletion breaks those worktrees, so finish or delete tracked changes and
+tasks through Workforest first whenever possible.
 
 ## Automate
 

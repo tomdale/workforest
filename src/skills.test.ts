@@ -252,6 +252,44 @@ hidden: true
     expect(output).toContain("# Commands");
   });
 
+  it("ships bundled skills that teach the final change lifecycle", async () => {
+    const contents = await getSkillContents({
+      skillsDirs: [path.resolve("skill-data")],
+      names: ["core", "parallel-worktrees", "setup-and-configuration"],
+      all: false,
+      full: true,
+    });
+
+    const byName = new Map(contents.map((item) => [item.name, item]));
+    expect(byName.get("core")?.content).toContain(
+      "wf start <change> <repo...|@template>",
+    );
+    expect(byName.get("core")?.content).toContain("wf finish [selector]");
+    expect(byName.get("parallel-worktrees")?.content).toContain(
+      "wf task finish",
+    );
+    expect(byName.get("setup-and-configuration")?.content).toContain(
+      '"directory"',
+    );
+    expect(
+      byName
+        .get("parallel-worktrees")
+        ?.files?.some(
+          (file) => file.path === "references/subagent-lifecycle.md",
+        ),
+    ).toBe(true);
+
+    const allText = contents
+      .flatMap((item) => [
+        item.content,
+        ...(item.files ?? []).map((file) => file.content),
+      ])
+      .join("\n");
+    expect(allText).not.toMatch(
+      /workspace create|worktree create|wf new|wf clean|task create|_initialize-repo|~\/Code\/workspaces|defaultDir|dirPrefix/,
+    );
+  });
+
   it("prints skill paths", async () => {
     const skillsDir = await createTempDir("workforest-skills-");
     const logs: string[] = [];

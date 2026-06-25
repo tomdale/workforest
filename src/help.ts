@@ -199,15 +199,39 @@ wf help workflow - Recommended workflows for users and agents.
 
 Interactive user workflows:
 
-  Start a feature across multiple repos:
+  Start a single-repo change:
+    wf start cli-redesign tomdale/workforest
+    wf status
+    cd ~/Code/Repos/workforest/cli-redesign
+    # ... make changes, commit, open PR ...
+    wf finish workforest/cli-redesign
+
+  Start a template workspace:
+    wf start auth-fix @vercel-agent
+    wf status --watch                   # monitor background setup
+    cd ~/Code/Workspaces/vercel-agent/auth-fix
+    # ... work in the repos ...
+    wf finish vercel-agent/auth-fix
+
+  Start an _adhoc workspace:
     wf start update-docs-build vercel/next.js vercel/turbo
     wf status --watch           # monitor background setup; wait for READY
     cd ~/Code/Workspaces/_adhoc/update-docs-build/next.js
     # ... make changes, commit, open PRs ...
     wf finish _adhoc/update-docs-build
 
+  Promote a repo change when it grows:
+    wf switch workforest/cli-redesign
+    wf add tomdale/workforest-docs --yes
+
   Try a second approach without losing the first:
     wf start try-different-approach
+
+  Switch and inspect:
+    wf switch                           # fuzzy-find a change
+    wf switch workforest/cli-redesign
+    wf list --group _adhoc --paths
+    wf status workforest/cli-redesign
 
   Review a pull request:
     wf review open vercel/next.js       # one-time setup for this repo
@@ -234,9 +258,15 @@ Agent workflows:
     # work inside the worktrees using normal project tooling
     wf finish [selector]                # clean up after integration
 
-  Adding to an existing workspace:
+  Adding to an existing change:
+    wf switch <selector>
     wf add vercel/swr                   # add another repo mid-session
-    wf task start <name>                # add an isolated branch for an experiment
+
+  Parallel work:
+    wf task start <task>
+    wf task list
+    wf task finish <task>               # after integration
+    wf task delete <task> --force       # abandoned or intentionally unmerged
 
   Inspection:
     wf list                             # list known changes

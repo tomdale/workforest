@@ -668,7 +668,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cache"],
         summary: "Manage cached repositories",
         description:
-          "The cached bare mirrors that workforest clones from to create workspaces and worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `add` to clone, `update` to fetch, `doctor`/`repair` to check and fix, and `delete`/`prune` to reclaim space.",
+          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `add` to clone, `update` to fetch, `doctor`/`repair` to check and fix, and `delete`/`prune` to reclaim space.",
         help: { kind: "command", command: "cache" },
         children: [
           leaf({
@@ -1361,7 +1361,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["config"],
         summary: "Manage configuration",
         description:
-          "Inspect and edit workforest's global settings — `defaultDir`, `reviewsDir`, `dirPrefix`, and `branchPrefix`, stored in `config.json` under `$WORKFOREST_CONFIG_DIR`. With no subcommand, `wf config` runs `wf config show`.",
+          "Inspect and edit workforest's global settings, including `directory.base`, optional directory children, `branchPrefix`, and Vercel link settings stored in `config.json` under `$WORKFOREST_CONFIG_DIR`. With no subcommand, `wf config` runs `wf config show`.",
         help: { kind: "command", command: "config" },
         default: configDefault,
         children: [
@@ -1370,7 +1370,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["config", "show"],
             summary: "Show configuration",
             description:
-              "Prints the resolved global configuration — `defaultDir`, `reviewsDir`, `dirPrefix`, `branchPrefix`, and any Vercel link settings — followed by the path of the `config.json` it read. Unset keys show their fallback behavior. Reads only; never writes. See also `wf config edit`.",
+              "Prints the resolved global configuration, including checkout directories, branch prefix, and any Vercel link settings, followed by the path of the `config.json` it read. Unset keys show their fallback behavior. Reads only; never writes. See also `wf config edit`.",
             handler: "config.show",
             help: nestedHelp("config", "show"),
             examples: [
@@ -1387,7 +1387,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["config", "init"],
             summary: "Configure workforest interactively",
             description:
-              "Walks through prompts for `defaultDir`, `reviewsDir`, `dirPrefix`, and `branchPrefix`, shows a preview, and on confirmation writes `config.json`. Requires an interactive terminal; errors without one (exit 1). To set values without a TTY, use `wf config edit`. See also `wf config show`.",
+              "Walks through prompts for the main checkout directories and branch prefix, shows a preview, and on confirmation writes `config.json`. Requires an interactive terminal; errors without one (exit 1). To set values without a TTY or to use the final nested `directory` shape directly, use `wf config edit`. See also `wf config show`.",
             handler: "config.init",
             help: nestedHelp("config", "init"),
             examples: [
