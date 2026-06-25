@@ -11,13 +11,12 @@ referenced by short name and reused without another full clone.
 
 ```sh
 wf cache list
-wf cache info vercel/next.js
-wf cache path vercel/next.js
-wf cache manage
+wf cache show vercel/next.js
+wf cache show vercel/next.js --path
 ```
 
-The interactive manager supports search across slugs, remotes, paths, branches,
-issues, and active worktrees.
+`show --path` prints only the requested filesystem path, which is suitable for
+shell composition.
 
 ## Warm the Cache
 
@@ -25,7 +24,7 @@ Before starting a change, fetch repositories once so later `wf start` and
 `wf add` operations are fast and authentication problems are discovered early.
 
 ```sh
-wf cache add vercel/next.js vercel/turbo
+wf cache sync vercel/next.js vercel/turbo
 ```
 
 Repositories with the same basename under different owners receive distinct
@@ -38,12 +37,12 @@ origin identity, default branch, last fetch time, active worktrees, stale
 registrations, and repository validity.
 
 ```sh
-wf cache info next.js
-wf cache doctor
-wf cache doctor next.js --json
+wf cache show next.js
+wf cache check
+wf cache check next.js --json
 ```
 
-`doctor` exits unsuccessfully when any selected mirror needs attention, making
+`check` exits unsuccessfully when any selected mirror needs attention, making
 it suitable for scripts.
 
 ## Refresh Cached Data
@@ -52,11 +51,12 @@ Before branching from a cached repository, fetch current remote branches and
 prune deleted remote refs.
 
 ```sh
-wf cache update next.js
-wf cache update
+wf cache sync next.js
+wf cache sync
 ```
 
-With no selector, `update` operates on every cached repository.
+With no selector, `sync` operates on every cached repository. With selectors,
+it updates existing cached matches and clones missing repository specifiers.
 
 ## Repair Metadata
 
@@ -64,12 +64,12 @@ When a managed change was moved or deleted outside Workforest, prune stale
 worktree registrations and verify Git object connectivity.
 
 ```sh
-wf cache repair next.js
-wf cache repair
+wf cache check next.js --fix
+wf cache check --fix
 ```
 
 Invalid non-Git cache directories cannot be repaired in place; inspect them,
-then delete and add the repository again.
+then delete and sync the repository again.
 
 ## Reclaim Disk Space
 
@@ -77,7 +77,7 @@ Preview and remove mirrors that have no active worktrees, or delete a selected
 mirror explicitly.
 
 ```sh
-wf cache prune --dry-run
+wf cache clean --dry-run
 wf cache delete vercel/next.js --dry-run
 wf cache delete vercel/next.js --force
 ```
@@ -93,8 +93,8 @@ composition.
 
 ```sh
 wf cache list --json
-wf cache info next.js --json
-wf cache doctor --json
-wf cache path
-wf cache path next.js
+wf cache show next.js --json
+wf cache check --json
+wf cache show --path
+wf cache show next.js --path
 ```

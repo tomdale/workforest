@@ -29,7 +29,6 @@ Status values:
 | Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
 | Template browser and manager | `wf template manage` | `src/ui/template-manager.ts` | Canonical |
-| Cached repository browser and manager | `wf cache manage` | `src/ui/repository-manager.ts` | Canonical |
 | Template create/edit/copy forms | `wf template manage` | Prompt timeline with preview and confirmation in `src/ui/index.ts` | Canonical |
 | Template file conflict resolution | Template manager | Select and confirm prompts in `src/cli.ts` | Canonical |
 | Workspace picker | `wf switch` | Select prompt in `src/cli.ts` | Canonical |
@@ -52,7 +51,7 @@ Status values:
 | Config report | `wf config show` | Canonical |
 | Task inventory | `wf task list` | Canonical |
 | Template details | `wf template show` | Canonical |
-| Cached repository list, info, and health | `wf cache list|info|doctor` | Canonical |
+| Cached repository list, details, and health | `wf cache list|show|check` | Canonical |
 | Skills list | `wf skills list` | Canonical |
 | Dry-run reports for task and cache operations | `--dry-run` variants | Canonical |
 | Non-interactive cleanup preview | Explicit change deletion outside a TTY | Canonical |
@@ -72,8 +71,8 @@ states use the shared semantic logger or prompt timeline.
 | Skill content | `wf skills get` | Exact Markdown content |
 | Skill paths | `wf skills path` | Exact filesystem paths |
 | Skills JSON | `wf skills ... --json` | One JSON value, no decoration |
-| Repository cache JSON | `wf cache list|info|doctor --json` | One JSON value, no decoration |
-| Repository cache paths | `wf cache path [repo]` | Exact filesystem path |
+| Repository cache JSON | `wf cache list|show|check --json` | One JSON value, no decoration |
+| Repository cache paths | `wf cache show [repo] --path` | Exact filesystem path |
 | Unified template file diff | Template manager conflict action | Preserve standard unified diff text |
 | Child command stdout/stderr | Setup commands, hooks, review checkout | Preserve original stream bytes |
 

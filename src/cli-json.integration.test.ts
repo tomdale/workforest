@@ -84,10 +84,10 @@ describe("JSON CLI integration", () => {
     const cacheDir = await createTempDir("workforest-json-info-cache-");
     const mirrorPath = await createMirror(cacheDir, "front.git");
 
-    const success = await runJson(["cache", "info", "vercel/front", "--json"], {
+    const success = await runJson(["cache", "show", "vercel/front", "--json"], {
       cacheDir,
     });
-    const failure = await runJson(["cache", "info", "missing", "--json"], {
+    const failure = await runJson(["cache", "show", "missing", "--json"], {
       cacheDir,
     });
 
@@ -110,7 +110,7 @@ describe("JSON CLI integration", () => {
     });
   });
 
-  it("reports healthy and unhealthy cache doctor results", async () => {
+  it("reports healthy and unhealthy cache check results", async () => {
     const healthyCacheDir = await createTempDir(
       "workforest-json-healthy-cache-",
     );
@@ -126,10 +126,10 @@ describe("JSON CLI integration", () => {
       "utf8",
     );
 
-    const healthy = await runJson(["cache", "doctor", "--json"], {
+    const healthy = await runJson(["cache", "check", "--json"], {
       cacheDir: healthyCacheDir,
     });
-    const unhealthy = await runJson(["cache", "doctor", "--json"], {
+    const unhealthy = await runJson(["cache", "check", "--json"], {
       cacheDir: unhealthyCacheDir,
     });
 
@@ -286,12 +286,16 @@ describe("JSON CLI integration", () => {
       "Invalid operands for wf cache list. Expected no operands.",
     ],
     [
-      ["cache", "info", "--json"],
-      "Invalid operands for wf cache info. Expected 1 repository.",
+      ["cache", "show", "--json"],
+      "Invalid operands for wf cache show. Expected 1 repository.",
     ],
     [
-      ["cache", "doctor", "--force", "--json"],
-      'Unknown flag "--force" for wf cache doctor.',
+      ["cache", "show", "--path", "--json"],
+      'Flag "--json" cannot be combined with "--path".',
+    ],
+    [
+      ["cache", "check", "--force", "--json"],
+      'Unknown flag "--force" for wf cache check.',
     ],
     [
       ["skills", "list", "extra", "--json"],

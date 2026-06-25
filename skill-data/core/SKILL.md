@@ -224,9 +224,9 @@ The cache stores bare mirrors and powers fast starts:
 
 ```sh
 wf cache list
-wf cache info workforest
-wf cache doctor
-wf cache prune --dry-run
+wf cache show workforest
+wf cache check
+wf cache clean --dry-run
 ```
 
 Review workspaces are separate from normal changes:
@@ -242,7 +242,7 @@ wf review checkout vercel/omniagent#123
 - Do not manually delete Workforest-managed directories.
 - Prefer `wf finish <selector>` after integration.
 - Use `wf delete <selector> --force` only for intentional abandonment.
-- Use `wf cache prune --dry-run` before reclaiming cached mirrors.
+- Use `wf cache clean --dry-run` before reclaiming cached mirrors.
 - Do not force-delete a mirror with active worktrees unless those worktrees are
   intentionally abandoned.
 

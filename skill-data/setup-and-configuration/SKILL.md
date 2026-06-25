@@ -150,9 +150,9 @@ If a repository fails during setup, inspect logs under the workspace's
 If a cached mirror looks stale or unhealthy:
 
 ```sh
-wf cache doctor
-wf cache repair <repo>
-wf cache prune --dry-run
+wf cache check
+wf cache check <repo> --fix
+wf cache clean --dry-run
 ```
 
 If a template is wrong, edit the template directly and start a new change.

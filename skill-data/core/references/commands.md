@@ -322,7 +322,7 @@ Examples:
 
 Manage cached repositories.
 
-The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `add` to clone, `update` to fetch, `doctor`/`repair` to check and fix, and `delete`/`prune` to reclaim space.
+The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.
 
 ```text
 wf cache <subcommand>
@@ -332,7 +332,7 @@ wf cache <subcommand>
 
 List cached repositories.
 
-Lists every cached bare mirror with its size, active worktree count, last-fetched time, and health, plus the cache directory and totals. Reads only the local cache; touches no network. Exits 0 with a message when the cache is empty. With `--json` it emits `{ "ok": true, "data": [ … ] }`. See also `wf cache info`.
+Lists every cached bare mirror with its size, active worktree count, last-fetched time, and health, plus the cache directory and totals. Reads only the local cache; touches no network. Exits 0 with a message when the cache is empty. With `--json` it emits `{ "ok": true, "data": [ … ] }`. See also `wf cache show`.
 
 ```text
 wf cache list [options]
@@ -347,14 +347,15 @@ Examples:
 - `wf cache list` — List all cached mirrors with sizes and health.
 - `wf cache list --json` — Emit the cache inventory as a JSON envelope for scripting.
 
-### `wf cache info`
+### `wf cache show`
 
 Show cached repository information.
 
-Shows one cached bare mirror in detail: health, origin remote, default branch, size, last-fetched time, path, any integrity issues, and every registered worktree. Reads only the local cache. Errors (exit 1) if the repository is not cached. With `--json` it emits `{ "ok": true, "data": { … } }`. See also `wf cache list`.
+Shows one cached bare mirror in detail: health, origin remote, default branch, size, last-fetched time, path, any integrity issues, and every registered worktree. Reads only the local cache. Errors (exit 1) if the repository is not cached. With `--json` it emits `{ "ok": true, "data": { … } }`. With `--path`, prints the cache root or selected mirror path with no decoration.
 
 ```text
-wf cache info [options] <repository>
+wf cache show [options] [repository]
+wf cache show [options] <repository>
 ```
 
 Arguments:
@@ -364,77 +365,42 @@ Arguments:
 Options:
 
 - `--json` — Emit the repository's record as a JSON envelope.
+- `--path` — Print the cache root or selected mirror path with no decoration.
 
 Examples:
 
-- `wf cache info vercel/next.js` — Show full detail for one cached mirror.
-- `wf cache info <org/repo> --json` — Emit one repository's record as a JSON envelope.
+- `wf cache show vercel/next.js` — Show full detail for one cached mirror.
+- `wf cache show <org/repo> --json` — Emit one repository's record as a JSON envelope.
+- `wf cache show --path` — Print the cache directory path for capture in a script.
+- `cd "$(wf cache show vercel/next.js --path)"` — Capture one mirror's path and change into it.
 
-### `wf cache path`
+### `wf cache sync`
 
-Print a cached repository path.
+Sync cached repositories.
 
-Prints the absolute path of a cached bare mirror to stdout with no other output, for capture in `$(wf cache path …)`. With no argument, prints the cache directory itself. With a repository, errors (exit 1) if it is not cached. Touches no network.
+Fetches new commits for existing cached mirrors, or clones missing repository specifiers as cached bare mirrors over the network using `--filter=blob:none`. With no repositories, syncs every cached mirror. Each repository is reported independently: a failed sync does not stop the rest, and any failure exits 1.
 
 ```text
-wf cache path [repository]
+wf cache sync [repositories...]
 ```
 
 Arguments:
 
-- `repository` — A cached repo name, `org/repo`, git URL, or directory name; omit for the cache directory.
+- `repositories` — Zero or more repositories: a cached name, `org/repo` shorthand, or full git URL.
 
 Examples:
 
-- `wf cache path` — Print the cache directory path for capture in a script.
-- `cd "$(wf cache path vercel/next.js)"` — Capture one mirror's path and change into it.
+- `wf cache sync` — Fetch new commits for every cached mirror.
+- `wf cache sync vercel/next.js facebook/react` — Update cached matches and clone missing mirrors in one invocation.
 
-### `wf cache add`
-
-Cache repositories.
-
-Clones one or more repositories as cached bare mirrors over the network, using `--filter=blob:none`. Each repository is reported independently: a failed clone does not stop the rest, and any failure exits 1. Run before creating a workspace so the mirror exists locally. See also `wf cache update` and `wf cache delete`.
-
-```text
-wf cache add <repositories...>
-```
-
-Arguments:
-
-- `repositories` — One or more repositories: a cached name, `org/repo` shorthand, or full git URL.
-
-Examples:
-
-- `wf cache add vercel/next.js` — Clone one repository into the cache as a bare mirror.
-- `wf cache add vercel/next.js facebook/react` — Clone several mirrors in one invocation.
-
-### `wf cache update`
-
-Update cached repositories.
-
-Fetches new commits from the origin remote into cached bare mirrors over the network. With no repositories, updates every cached mirror; otherwise updates just those named. A failed fetch is reported and exits 1 but does not stop the others. Exits 0 with a message when the cache is empty. See also `wf cache add`.
-
-```text
-wf cache update [repositories...]
-```
-
-Arguments:
-
-- `repositories` — Zero or more repositories to update; omit to update all cached mirrors.
-
-Examples:
-
-- `wf cache update` — Fetch new commits for every cached mirror.
-- `wf cache update vercel/next.js` — Update one cached mirror.
-
-### `wf cache doctor`
+### `wf cache check`
 
 Check cached repositories.
 
-Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache. Exits 1 if any checked repository is unhealthy (in both report and JSON modes). See also `wf cache repair`.
+Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any checked repository is unhealthy (in both report and JSON modes).
 
 ```text
-wf cache doctor [options] [repositories...]
+wf cache check [options] [repositories...]
 ```
 
 Arguments:
@@ -443,37 +409,20 @@ Arguments:
 
 Options:
 
+- `--fix` — Repair selected mirrors before reporting health.
 - `--json` — Emit health records as a JSON envelope; exit code is still 1 if any are unhealthy.
 
 Examples:
 
-- `wf cache doctor` — Report health for every cached mirror.
-- `wf cache doctor --json` — Emit health records as JSON; nonzero exit flags problems.
-
-### `wf cache repair`
-
-Repair cached repositories.
-
-Repairs cached bare mirrors by pruning stale worktree registrations and running a connectivity-only fsck. With no repositories, repairs every mirror. Touches no network. Cannot repair a mirror that is not a valid bare git repository — that case is reported and the mirror must be deleted and re-added. See also `wf cache doctor`.
-
-```text
-wf cache repair [repositories...]
-```
-
-Arguments:
-
-- `repositories` — Zero or more repositories to repair; omit to repair all cached mirrors.
-
-Examples:
-
-- `wf cache repair` — Prune and fsck every cached mirror.
-- `wf cache repair vercel/next.js` — Repair one cached mirror after doctor flags it.
+- `wf cache check` — Report health for every cached mirror.
+- `wf cache check --json` — Emit health records as JSON; nonzero exit flags problems.
+- `wf cache check vercel/next.js --fix` — Repair one cached mirror before reporting health.
 
 ### `wf cache delete`
 
 Delete cached repositories.
 
-Permanently deletes cached bare mirrors from disk; the data must be re-cloned to use them again. Refuses (exit 1) any mirror that still has active worktrees unless you pass `--force`. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. See also `wf cache prune`.
+Permanently deletes cached bare mirrors from disk; the data must be re-cloned to use them again. Refuses (exit 1) any mirror that still has active worktrees unless you pass `--force`. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. See also `wf cache clean`.
 
 ```text
 wf cache delete [options] <repositories...>
@@ -493,14 +442,14 @@ Examples:
 - `wf cache delete <org/repo>` — Delete one cached mirror after confirming.
 - `wf cache delete <org/repo> --force` — Delete without prompting, even with active worktrees.
 
-### `wf cache prune`
+### `wf cache clean`
 
 Delete unused cached repositories.
 
-Permanently deletes every cached bare mirror that has no active worktrees, reclaiming disk space; pruned data must be re-cloned to use again. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. Exits 0 with a message when nothing is unused. See also `wf cache delete`.
+Permanently deletes every cached bare mirror that has no active worktrees, reclaiming disk space; cleaned data must be re-cloned to use again. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. Exits 0 with a message when nothing is unused. See also `wf cache delete`.
 
 ```text
-wf cache prune [options]
+wf cache clean [options]
 ```
 
 Options:
@@ -510,22 +459,8 @@ Options:
 
 Examples:
 
-- `wf cache prune --dry-run` — List the unused mirrors prune would remove.
-- `wf cache prune --force` — Delete all unused mirrors without prompting.
-
-### `wf cache manage`
-
-Open the repository cache manager.
-
-Opens the interactive cache manager to browse cached bare mirrors and add, update, repair, delete, and prune them from one screen. Requires an interactive terminal; errors without one. For scripted access, use the individual `wf cache` subcommands.
-
-```text
-wf cache manage
-```
-
-Examples:
-
-- `wf cache manage` — Open the interactive manager to inspect and maintain the cache.
+- `wf cache clean --dry-run` — List the unused mirrors clean would remove.
+- `wf cache clean --force` — Delete all unused mirrors without prompting.
 
 ## `wf review`
 

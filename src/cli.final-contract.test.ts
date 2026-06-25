@@ -18,15 +18,11 @@ const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["task", "finish"],
   ["task", "delete"],
   ["cache", "list"],
-  ["cache", "info"],
-  ["cache", "path"],
-  ["cache", "add"],
-  ["cache", "update"],
-  ["cache", "doctor"],
-  ["cache", "repair"],
+  ["cache", "show"],
+  ["cache", "sync"],
+  ["cache", "check"],
   ["cache", "delete"],
-  ["cache", "prune"],
-  ["cache", "manage"],
+  ["cache", "clean"],
   ["review", "open"],
   ["review", "checkout"],
   ["template", "open"],
@@ -45,9 +41,21 @@ describe("final CLI contract", () => {
   });
 
   it.each(
-    [["new"], ["clean"], ["workspace"], ["worktree"], ["task", "create"]].map(
-      (argv) => ({ argv }),
-    ),
+    [
+      ["new"],
+      ["clean"],
+      ["workspace"],
+      ["worktree"],
+      ["task", "create"],
+      ["cache", "info"],
+      ["cache", "path"],
+      ["cache", "add"],
+      ["cache", "update"],
+      ["cache", "doctor"],
+      ["cache", "repair"],
+      ["cache", "prune"],
+      ["cache", "manage"],
+    ].map((argv) => ({ argv })),
   )("does not expose removed command wf %s", ({ argv }) => {
     expect(() => resolve(argv)).toThrow();
   });

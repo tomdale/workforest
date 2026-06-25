@@ -49,6 +49,15 @@ async function createBrokenMirror(
   await writeFile(path.join(mirrorDir, "README"), "broken\n", "utf8");
 }
 
+async function createBareRemote(): Promise<string> {
+  const remoteDir = await mkdtemp(path.join(os.tmpdir(), "workforest-remote-"));
+  tempDirs.push(remoteDir);
+  await execFileAsync("git", ["init", "--bare", "--quiet"], {
+    cwd: remoteDir,
+  });
+  return remoteDir;
+}
+
 async function runCommand(argv: readonly string[]): Promise<CliResult> {
   let stdout = "";
   let stderr = "";
@@ -99,33 +108,18 @@ describe("cache commands", () => {
 
     expect(result).toMatchObject({ exitCode: 0, stderr: "" });
     expect(result.stdout).toContain("Usage: wf cache");
-    expect(result.stdout).toContain("manage");
-  });
-
-  it("routes explicit management through the cache manager", async () => {
-    const cacheDir = await createCache();
-    const result = await runCommand(["cache", "manage"]);
-
-    expect(result).toMatchObject({
-      exitCode: 0,
-      stderr: "",
-    });
-    expect(result.stdout).toContain("No cached repositories.");
-    expect(result.stdout).toContain(cacheDir);
+    expect(result.stdout).toContain("sync");
+    expect(result.stdout).not.toContain("manage");
   });
 
   it.each([
     ["cache", "--help"],
-    ["cache", "manage", "--help"],
     ["cache", "list", "--help"],
-    ["cache", "info", "--help"],
-    ["cache", "path", "--help"],
-    ["cache", "add", "--help"],
-    ["cache", "update", "--help"],
-    ["cache", "doctor", "--help"],
-    ["cache", "repair", "--help"],
+    ["cache", "show", "--help"],
+    ["cache", "sync", "--help"],
+    ["cache", "check", "--help"],
     ["cache", "delete", "--help"],
-    ["cache", "prune", "--help"],
+    ["cache", "clean", "--help"],
   ])("renders cache help successfully for %j", async (...argv) => {
     const result = await runCommand(argv);
 
@@ -136,17 +130,17 @@ describe("cache commands", () => {
 
   it.each([
     [["cache", "list"], 0, "No cached repositories.", ""],
-    [["cache", "add", "unknown"], 1, "", "Unknown repository"],
-    [["cache", "update"], 0, "No cached repositories to update.", ""],
-    [["cache", "doctor"], 0, "No cached repositories.", ""],
-    [["cache", "repair"], 0, "No cached repositories to repair.", ""],
+    [["cache", "sync", "unknown"], 1, "", "Unknown repository"],
+    [["cache", "sync"], 0, "No cached repositories to sync.", ""],
+    [["cache", "check"], 0, "No cached repositories.", ""],
+    [["cache", "check", "--fix"], 0, "No cached repositories.", ""],
     [
       ["cache", "delete", "missing"],
       1,
       "",
       "Cached repository not found: missing",
     ],
-    [["cache", "prune"], 0, "No unused cached repositories.", ""],
+    [["cache", "clean"], 0, "No unused cached repositories.", ""],
   ] as const)("implements canonical cache behavior for %j", async (argv, exitCode, stdout, stderr) => {
     await createCache();
     const result = await runCommand(argv);
@@ -158,14 +152,20 @@ describe("cache commands", () => {
 
   it.each([
     ["cache", "wat"],
-    ["cache", "manage", "extra"],
-    ["cache", "list", "extra"],
     ["cache", "info"],
-    ["cache", "info", "one", "two"],
-    ["cache", "path", "one", "two"],
+    ["cache", "path"],
     ["cache", "add"],
+    ["cache", "update"],
+    ["cache", "doctor"],
+    ["cache", "repair"],
+    ["cache", "prune"],
+    ["cache", "manage"],
+    ["cache", "list", "extra"],
+    ["cache", "show"],
+    ["cache", "show", "one", "two"],
+    ["cache", "show", "one", "two", "--path"],
     ["cache", "delete"],
-    ["cache", "prune", "extra"],
+    ["cache", "clean", "extra"],
   ])("rejects invalid cache operands for %j", async (...argv) => {
     const result = await runCommand(argv);
 
@@ -177,19 +177,16 @@ describe("cache commands", () => {
   });
 
   it.each([
-    ["cache", "manage", "--json"],
     ["cache", "list", "--bogus"],
     ["cache", "list", "--json", "--json"],
     ["cache", "list", "--force"],
-    ["cache", "info", "front", "--force"],
-    ["cache", "path", "--json"],
-    ["cache", "add", "vercel/front", "--json"],
-    ["cache", "update", "--json"],
-    ["cache", "doctor", "--force"],
-    ["cache", "repair", "--json"],
+    ["cache", "show", "front", "--force"],
+    ["cache", "show", "front", "--path", "--json"],
+    ["cache", "sync", "vercel/front", "--json"],
+    ["cache", "check", "--force"],
     ["cache", "delete", "front", "--json"],
     ["cache", "delete", "front", "-n", "--dry-run"],
-    ["cache", "prune", "--json"],
+    ["cache", "clean", "--json"],
   ])("rejects inapplicable cache flags for %j", async (...argv) => {
     const result = await runCommand(argv);
 
@@ -201,7 +198,7 @@ describe("cache commands", () => {
         error: {
           kind: "usage",
           message: expect.stringMatching(
-            /Unknown flag|may only be specified once/,
+            /Unknown flag|may only be specified once|cannot be combined/,
           ),
         },
       });
@@ -222,8 +219,13 @@ describe("cache commands", () => {
 
     const human = await runCommand(["cache", "list"]);
     const list = await runCommand(["cache", "list", "--json"]);
-    const info = await runCommand(["cache", "info", "vercel/front", "--json"]);
-    const selectedPath = await runCommand(["cache", "path", "vercel/front"]);
+    const info = await runCommand(["cache", "show", "vercel/front", "--json"]);
+    const selectedPath = await runCommand([
+      "cache",
+      "show",
+      "vercel/front",
+      "--path",
+    ]);
 
     expect(human).toMatchObject({ exitCode: 0, stderr: "" });
     expect(human.stdout).toContain("Cached repositories");
@@ -253,7 +255,7 @@ describe("cache commands", () => {
 
   it("prints undecorated cache paths", async () => {
     const cacheDir = await createCache();
-    const result = await runCommand(["cache", "path"]);
+    const result = await runCommand(["cache", "show", "--path"]);
 
     expect(result).toEqual({
       exitCode: 0,
@@ -262,14 +264,20 @@ describe("cache commands", () => {
     });
   });
 
-  it("reports unhealthy mirrors and continues partial repairs", async () => {
+  it("reports unhealthy mirrors and continues partial fixes", async () => {
     const cacheDir = await createCache();
     await createBrokenMirror(cacheDir);
     await createBrokenMirror(cacheDir, "damaged.git");
 
-    const human = await runCommand(["cache", "doctor"]);
-    const json = await runCommand(["cache", "doctor", "--json"]);
-    const repair = await runCommand(["cache", "repair", "broken", "damaged"]);
+    const human = await runCommand(["cache", "check"]);
+    const json = await runCommand(["cache", "check", "--json"]);
+    const fixed = await runCommand([
+      "cache",
+      "check",
+      "broken",
+      "damaged",
+      "--fix",
+    ]);
 
     expect(human).toMatchObject({ exitCode: 1, stderr: "" });
     expect(human.stdout).toContain("invalid");
@@ -281,14 +289,23 @@ describe("cache commands", () => {
         expect.objectContaining({ name: "damaged", health: "invalid" }),
       ],
     });
-    expect(repair.exitCode).toBe(1);
-    expect(repair.stderr).toContain(
-      "broken is not a valid bare Git repository",
-    );
-    expect(repair.stderr).toContain(
-      "damaged is not a valid bare Git repository",
-    );
-    expect(repair.stderr).not.toContain("at runRepositoryRepair");
+    expect(fixed).toMatchObject({ exitCode: 1, stderr: "" });
+    expect(fixed.stdout).toContain("broken");
+    expect(fixed.stdout).toContain("damaged");
+    expect(fixed.stdout).toContain("invalid");
+  }, 15_000);
+
+  it("syncs cached selections and continues after missing repository errors", async () => {
+    const cacheDir = await createCache();
+    const remote = await createBareRemote();
+    await createMirror(cacheDir, "front.git", remote);
+
+    const result = await runCommand(["cache", "sync", "front.git", "unknown"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(`Updated ${remote}`);
+    expect(result.stderr).toContain("unknown: Unknown repository");
   }, 15_000);
 
   it("supports destructive flags without deleting repositories", async () => {
@@ -305,7 +322,7 @@ describe("cache commands", () => {
       "vercel/front",
       "-n",
     ]);
-    const pruning = await runCommand(["cache", "prune", "--dry-run", "-f"]);
+    const pruning = await runCommand(["cache", "clean", "--dry-run", "-f"]);
 
     expect(deletion).toMatchObject({ exitCode: 0, stderr: "" });
     expect(deletion.stdout).toContain("Would delete vercel/front");
@@ -321,7 +338,7 @@ describe("cache commands", () => {
   it("reports expected operational failures on stderr without a stack", async () => {
     await createCache();
 
-    const result = await runCommand(["cache", "info", "missing"]);
+    const result = await runCommand(["cache", "show", "missing"]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");

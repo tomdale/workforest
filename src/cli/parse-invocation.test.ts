@@ -47,7 +47,7 @@ describe("parseInvocation", () => {
     [["task", "start"], "Expected 1 or more task names"],
     [["task", "finish"], "Expected 1 or more task names"],
     [["task", "delete"], "Expected 1 or more task names"],
-    [["cache", "add"], "Expected 1 or more repositories"],
+    [["cache", "show"], "Expected 1 repository"],
     [["cache", "delete"], "Expected 1 or more repositories"],
     [["review", "open"], "Expected 1 repository"],
     [["review", "checkout"], "Expected 1-2 review targets"],

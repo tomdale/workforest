@@ -1,10 +1,9 @@
-import { OperationalError } from "./cli/errors.ts";
+import { OperationalError, UsageError } from "./cli/errors.ts";
 import {
   failure,
   humanOutput,
   jsonSuccess,
   pathOutput,
-  renderCommandResult,
   reportOutput,
   success,
 } from "./cli/output.ts";
@@ -28,7 +27,6 @@ import { terminalColor, terminalSymbol } from "./terminal/theme.ts";
 import {
   isInteractive,
   promptConfirm,
-  promptText,
   withSpinner,
 } from "./ui/prompts/index.ts";
 
@@ -38,32 +36,28 @@ export async function runCacheInvocation(
   const operands = [...invocation.beforeDoubleDash];
 
   switch (invocation.command.leaf.handler) {
-    case "cache.manage":
-      return runCacheManagerCommand();
     case "cache.list":
       return runCacheList(flag(invocation, "json"));
-    case "cache.info":
-      return runCacheInfo(
-        requiredOperand(operands, 0),
+    case "cache.show":
+      return runCacheShow(
+        operands[0],
         flag(invocation, "json"),
+        flag(invocation, "path"),
       );
-    case "cache.path":
-      return runCachePath(operands[0]);
-    case "cache.add":
-      return runCacheAdd(operands);
-    case "cache.update":
-      return runCacheUpdate(operands);
-    case "cache.doctor":
-      return runCacheDoctor(operands, flag(invocation, "json"));
-    case "cache.repair":
-      return runCacheRepair(operands);
+    case "cache.sync":
+      return runCacheSync(operands);
+    case "cache.check":
+      return runCacheCheck(operands, {
+        fix: flag(invocation, "fix"),
+        json: flag(invocation, "json"),
+      });
     case "cache.delete":
       return runCacheDelete(operands, {
         dryRun: flag(invocation, "dryRun"),
         force: flag(invocation, "force"),
       });
-    case "cache.prune":
-      return runCachePrune({
+    case "cache.clean":
+      return runCacheClean({
         dryRun: flag(invocation, "dryRun"),
         force: flag(invocation, "force"),
       });
@@ -122,10 +116,21 @@ async function runCacheList(json: boolean): Promise<CommandResult> {
   );
 }
 
-async function runCacheInfo(
-  selector: string,
+async function runCacheShow(
+  selector: string | undefined,
   json: boolean,
+  path: boolean,
 ): Promise<CommandResult> {
+  if (json && path) {
+    throw new UsageError('Flag "--json" cannot be combined with "--path".');
+  }
+  if (path) {
+    return runCachePath(selector);
+  }
+  if (!selector) {
+    throw new Error("The CLI kernel accepted an invalid cache invocation.");
+  }
+
   const repository = await requireRepository(selector);
   if (json) {
     return jsonSuccess(toJson(repository));
@@ -143,49 +148,76 @@ async function runCachePath(
   return success(pathOutput(value));
 }
 
-async function runCacheAdd(
+async function runCacheSync(
   operands: readonly string[],
 ): Promise<CommandResult> {
-  let inputs: string[];
-  try {
-    inputs = await qualifyRepositorySpecifiers(operands);
-  } catch (error) {
-    throw operationalError(error);
+  if (operands.length === 0) {
+    const repositories = await listCachedRepositories();
+    if (repositories.length === 0) {
+      return success(
+        humanOutput(formatMessage("info", "No cached repositories to sync.")),
+      );
+    }
+    return operationResult(await syncRepositoryMessages(repositories));
   }
 
+  const cachedRepositories = await listCachedRepositories();
+  const selected = new Map<string, CachedRepository>();
   const messages: OperationMessage[] = [];
-  for (const [index, input] of inputs.entries()) {
-    const displayInput = operands[index] ?? input;
+
+  for (const operand of operands) {
+    let existing: CachedRepository | null;
+    try {
+      existing = await resolveCachedRepository(operand, cachedRepositories);
+    } catch (error) {
+      messages.push({
+        kind: "error",
+        text: `${operand}: ${getErrorMessage(error)}`,
+      });
+      continue;
+    }
+
+    if (existing) {
+      selected.set(existing.mirrorPath, existing);
+      continue;
+    }
+
+    let input: string;
+    try {
+      input = (await qualifyRepositorySpecifiers([operand]))[0] ?? operand;
+    } catch (error) {
+      messages.push({
+        kind: "error",
+        text: `${operand}: ${getErrorMessage(error)}`,
+      });
+      continue;
+    }
+
     try {
       const repository = await runWithOptionalSpinner(
-        `Caching ${displayInput}`,
+        `Caching ${operand}`,
         () => addCachedRepository(input),
-        `Cached ${displayInput}`,
+        `Cached ${operand}`,
       );
       messages.push({
         kind: "success",
-        text: `${repositoryDisplayName(repository)}: ${repository.mirrorPath}`,
+        text: `Cached ${repositoryDisplayName(repository)}: ${repository.mirrorPath}`,
       });
     } catch (error) {
       messages.push({
         kind: "error",
-        text: `${displayInput}: ${getErrorMessage(error)}`,
+        text: `${operand}: ${getErrorMessage(error)}`,
       });
     }
   }
+
+  messages.push(...(await syncRepositoryMessages([...selected.values()])));
   return operationResult(messages);
 }
 
-async function runCacheUpdate(
-  selectors: readonly string[],
-): Promise<CommandResult> {
-  const repositories = await resolveRepositorySelection(selectors);
-  if (repositories.length === 0) {
-    return success(
-      humanOutput(formatMessage("info", "No cached repositories to update.")),
-    );
-  }
-
+async function syncRepositoryMessages(
+  repositories: readonly CachedRepository[],
+): Promise<OperationMessage[]> {
   const messages: OperationMessage[] = [];
   for (const repository of repositories) {
     const name = repositoryDisplayName(repository);
@@ -195,6 +227,10 @@ async function runCacheUpdate(
         () => updateCachedRepository(repository),
         `Updated ${name}`,
       );
+      messages.push({
+        kind: "success",
+        text: `Updated ${name}`,
+      });
     } catch (error) {
       messages.push({
         kind: "error",
@@ -202,14 +238,26 @@ async function runCacheUpdate(
       });
     }
   }
-  return operationResult(messages);
+  return messages;
 }
 
-async function runCacheDoctor(
+async function runCacheCheck(
   selectors: readonly string[],
-  json: boolean,
+  options: Readonly<{ fix: boolean; json: boolean }>,
 ): Promise<CommandResult> {
-  const repositories = await resolveRepositorySelection(selectors);
+  let repositories = await resolveRepositorySelection(selectors);
+  if (options.fix) {
+    await repairRepositories(repositories);
+    repositories = await refreshRepositories(repositories);
+  }
+
+  return renderCacheHealth(repositories, options.json);
+}
+
+function renderCacheHealth(
+  repositories: readonly CachedRepository[],
+  json: boolean,
+): CommandResult {
   const unhealthy = repositories.some(
     (repository) => repository.health !== "healthy",
   );
@@ -252,39 +300,40 @@ async function runCacheDoctor(
   }
 }
 
-async function runCacheRepair(
-  selectors: readonly string[],
-): Promise<CommandResult> {
-  const repositories = await resolveRepositorySelection(selectors);
-  if (repositories.length === 0) {
-    return success(
-      humanOutput(formatMessage("info", "No cached repositories to repair.")),
-    );
-  }
-
-  const messages: OperationMessage[] = [];
+async function repairRepositories(
+  repositories: readonly CachedRepository[],
+): Promise<void> {
   for (const repository of repositories) {
     const name = repositoryDisplayName(repository);
     try {
-      const repaired = await runWithOptionalSpinner(
+      await runWithOptionalSpinner(
         `Repairing ${name}`,
         () => repairCachedRepository(repository),
         `Repaired ${name}`,
       );
-      if (repaired.health !== "healthy") {
-        messages.push({
-          kind: "warning",
-          text: `${name}: ${repaired.issues.join("; ")}`,
-        });
-      }
-    } catch (error) {
-      messages.push({
-        kind: "error",
-        text: `${name}: ${getErrorMessage(error)}`,
-      });
+    } catch {
+      // `check --fix` keeps the same report/JSON shape as `check`; failures
+      // remain visible through the refreshed repository health record.
     }
   }
-  return operationResult(messages);
+}
+
+async function refreshRepositories(
+  repositories: readonly CachedRepository[],
+): Promise<CachedRepository[]> {
+  const refreshed = await listCachedRepositories();
+  return Promise.all(
+    repositories.map(async (repository) => {
+      try {
+        return (
+          (await resolveCachedRepository(repository.mirrorPath, refreshed)) ??
+          repository
+        );
+      } catch {
+        return repository;
+      }
+    }),
+  );
 }
 
 async function runCacheDelete(
@@ -323,7 +372,7 @@ async function runCacheDelete(
   return operationResult(messages);
 }
 
-async function runCachePrune(
+async function runCacheClean(
   options: Readonly<{ dryRun: boolean; force: boolean }>,
 ): Promise<CommandResult> {
   const repositories = (await listCachedRepositories()).filter(
@@ -354,72 +403,6 @@ async function runCachePrune(
     );
   } catch (error) {
     throw operationalError(error);
-  }
-}
-
-async function runCacheManagerCommand(): Promise<CommandResult> {
-  const { shouldUseRepositoryManager } = await import(
-    "./ui/repository-manager.ts"
-  );
-  if (!shouldUseRepositoryManager()) {
-    return runCacheList(false);
-  }
-
-  let initialMirrorPath: string | undefined;
-  while (true) {
-    const repositories = await listCachedRepositories();
-    const { runRepositoryManager } = await import("./ui/repository-manager.ts");
-    const action = await runRepositoryManager({
-      repositories,
-      cacheDir: getCacheDir(),
-      ...(initialMirrorPath ? { initialMirrorPath } : {}),
-    });
-
-    switch (action.type) {
-      case "quit":
-        return success();
-      case "reload":
-        continue;
-      case "add": {
-        const input = await promptText(
-          "Repository (cached name, owner/repo, or git URL)",
-        );
-        await runManagerOperation(() => runCacheAdd([input]));
-        initialMirrorPath = (await resolveCachedRepository(input))?.mirrorPath;
-        continue;
-      }
-      case "info": {
-        const repository = repositories.find(
-          (candidate) => candidate.mirrorPath === action.mirrorPath,
-        );
-        return repository
-          ? success(reportOutput(renderRepositoryInfo(repository)))
-          : success();
-      }
-      case "update":
-        initialMirrorPath = action.mirrorPath;
-        await runManagerOperation(() => runCacheUpdate([action.mirrorPath]));
-        continue;
-      case "repair":
-        initialMirrorPath = action.mirrorPath;
-        await runManagerOperation(() => runCacheRepair([action.mirrorPath]));
-        continue;
-      case "delete":
-        await runManagerOperation(() =>
-          runCacheDelete([action.mirrorPath], {
-            dryRun: false,
-            force: false,
-          }),
-        );
-        initialMirrorPath = undefined;
-        continue;
-      case "prune":
-        await runManagerOperation(() =>
-          runCachePrune({ dryRun: false, force: false }),
-        );
-        initialMirrorPath = undefined;
-        continue;
-    }
   }
 }
 
@@ -564,39 +547,10 @@ function flag(invocation: ParsedInvocation, name: string): boolean {
   return invocation.flags[name] === true;
 }
 
-function requiredOperand(operands: readonly string[], index: number): string {
-  const operand = operands[index];
-  if (operand === undefined) {
-    throw new Error("The CLI kernel accepted an invalid cache invocation.");
-  }
-  return operand;
-}
-
-function operationalError(error: unknown): OperationalError {
-  return error instanceof OperationalError
+function operationalError(error: unknown): UsageError | OperationalError {
+  return error instanceof UsageError || error instanceof OperationalError
     ? error
     : new OperationalError(getErrorMessage(error), { cause: error });
-}
-
-async function runManagerOperation(
-  operation: () => Promise<CommandResult>,
-): Promise<void> {
-  try {
-    renderCommandResult(await operation());
-  } catch (error) {
-    if (error instanceof OperationalError) {
-      renderCommandResult(
-        failure(
-          1,
-          humanOutput(formatMessage("error", error.message), {
-            stream: "stderr",
-          }),
-        ),
-      );
-      return;
-    }
-    throw error;
-  }
 }
 
 function getErrorMessage(error: unknown): string {

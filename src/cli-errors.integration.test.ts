@@ -37,7 +37,7 @@ afterAll(async () => {
 describe("expected CLI errors", () => {
   it.each([
     [["status"], 1, "Not in a Workforest change."],
-    [["cache", "info", "missing"], 1, "Cached repository not found: missing"],
+    [["cache", "show", "missing"], 1, "Cached repository not found: missing"],
     [["skills", "get", "missing"], 1, "Skill not found: missing"],
     [["wat"], 2, "Unknown command: wat"],
     [["status", "one", "two"], 2, "Invalid operands for wf status."],

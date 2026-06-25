@@ -720,7 +720,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cache"],
         summary: "Manage cached repositories",
         description:
-          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `add` to clone, `update` to fetch, `doctor`/`repair` to check and fix, and `delete`/`prune` to reclaim space.",
+          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
         children: [
           leaf({
@@ -728,7 +728,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["cache", "list"],
             summary: "List cached repositories",
             description:
-              'Lists every cached bare mirror with its size, active worktree count, last-fetched time, and health, plus the cache directory and totals. Reads only the local cache; touches no network. Exits 0 with a message when the cache is empty. With `--json` it emits `{ "ok": true, "data": [ … ] }`. See also `wf cache info`.',
+              'Lists every cached bare mirror with its size, active worktree count, last-fetched time, and health, plus the cache directory and totals. Reads only the local cache; touches no network. Exits 0 with a message when the cache is empty. With `--json` it emits `{ "ok": true, "data": [ … ] }`. See also `wf cache show`.',
             handler: "cache.list",
             help: nestedHelp("cache", "list"),
             flags: [
@@ -753,20 +753,39 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["report", "json"],
           }),
           leaf({
-            name: "info",
-            path: ["cache", "info"],
+            name: "show",
+            path: ["cache", "show"],
             summary: "Show cached repository information",
             description:
-              'Shows one cached bare mirror in detail: health, origin remote, default branch, size, last-fetched time, path, any integrity issues, and every registered worktree. Reads only the local cache. Errors (exit 1) if the repository is not cached. With `--json` it emits `{ "ok": true, "data": { … } }`. See also `wf cache list`.',
-            handler: "cache.info",
-            help: nestedHelp("cache", "info"),
-            operands: operands(
-              1,
-              1,
-              "repository",
-              undefined,
-              "A cached repo name, `org/repo` shorthand, full git URL, or cache directory name.",
-            ),
+              'Shows one cached bare mirror in detail: health, origin remote, default branch, size, last-fetched time, path, any integrity issues, and every registered worktree. Reads only the local cache. Errors (exit 1) if the repository is not cached. With `--json` it emits `{ "ok": true, "data": { … } }`. With `--path`, prints the cache root or selected mirror path with no decoration.',
+            handler: "cache.show",
+            help: nestedHelp("cache", "show"),
+            operands: {
+              variants: [
+                {
+                  beforeDoubleDash: cardinality(
+                    0,
+                    1,
+                    "repository",
+                    "[repository]",
+                    "A cached repo name, `org/repo` shorthand, full git URL, or cache directory name.",
+                  ),
+                  delimiter: "forbidden",
+                  when: { flag: "path", present: true },
+                },
+                {
+                  beforeDoubleDash: cardinality(
+                    1,
+                    1,
+                    "repository",
+                    undefined,
+                    "A cached repo name, `org/repo` shorthand, full git URL, or cache directory name.",
+                  ),
+                  delimiter: "forbidden",
+                  when: { flag: "path", present: false },
+                },
+              ],
+            },
             flags: [
               booleanFlag(
                 "json",
@@ -774,110 +793,70 @@ export const commandRegistry: CommandRegistry = {
                 undefined,
                 "Emit the repository's record as a JSON envelope.",
               ),
+              booleanFlag(
+                "path",
+                "--path",
+                undefined,
+                "Print the cache root or selected mirror path with no decoration.",
+              ),
             ],
             examples: [
               {
-                command: "wf cache info vercel/next.js",
+                command: "wf cache show vercel/next.js",
                 description: "Show full detail for one cached mirror.",
               },
               {
-                command: "wf cache info <org/repo> --json",
+                command: "wf cache show <org/repo> --json",
                 description: "Emit one repository's record as a JSON envelope.",
               },
-            ],
-            outputModes: ["report", "json"],
-          }),
-          leaf({
-            name: "path",
-            path: ["cache", "path"],
-            summary: "Print a cached repository path",
-            description:
-              "Prints the absolute path of a cached bare mirror to stdout with no other output, for capture in `$(wf cache path …)`. With no argument, prints the cache directory itself. With a repository, errors (exit 1) if it is not cached. Touches no network.",
-            handler: "cache.path",
-            help: nestedHelp("cache", "path"),
-            operands: operands(
-              0,
-              1,
-              "repository",
-              undefined,
-              "A cached repo name, `org/repo`, git URL, or directory name; omit for the cache directory.",
-            ),
-            examples: [
               {
-                command: "wf cache path",
+                command: "wf cache show --path",
                 description:
                   "Print the cache directory path for capture in a script.",
               },
               {
-                command: 'cd "$(wf cache path vercel/next.js)"',
+                command: 'cd "$(wf cache show vercel/next.js --path)"',
                 description: "Capture one mirror's path and change into it.",
               },
             ],
-            outputModes: ["path"],
+            outputModes: ["report", "json", "path"],
           }),
           leaf({
-            name: "add",
-            path: ["cache", "add"],
-            summary: "Cache repositories",
+            name: "sync",
+            path: ["cache", "sync"],
+            summary: "Sync cached repositories",
             description:
-              "Clones one or more repositories as cached bare mirrors over the network, using `--filter=blob:none`. Each repository is reported independently: a failed clone does not stop the rest, and any failure exits 1. Run before creating a workspace so the mirror exists locally. See also `wf cache update` and `wf cache delete`.",
-            handler: "cache.add",
-            help: nestedHelp("cache", "add"),
-            operands: operands(
-              1,
-              null,
-              "repositories",
-              undefined,
-              "One or more repositories: a cached name, `org/repo` shorthand, or full git URL.",
-            ),
-            examples: [
-              {
-                command: "wf cache add vercel/next.js",
-                description:
-                  "Clone one repository into the cache as a bare mirror.",
-              },
-              {
-                command: "wf cache add vercel/next.js facebook/react",
-                description: "Clone several mirrors in one invocation.",
-              },
-            ],
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "update",
-            path: ["cache", "update"],
-            summary: "Update cached repositories",
-            description:
-              "Fetches new commits from the origin remote into cached bare mirrors over the network. With no repositories, updates every cached mirror; otherwise updates just those named. A failed fetch is reported and exits 1 but does not stop the others. Exits 0 with a message when the cache is empty. See also `wf cache add`.",
-            handler: "cache.update",
-            help: nestedHelp("cache", "update"),
+              "Fetches new commits for existing cached mirrors, or clones missing repository specifiers as cached bare mirrors over the network using `--filter=blob:none`. With no repositories, syncs every cached mirror. Each repository is reported independently: a failed sync does not stop the rest, and any failure exits 1.",
+            handler: "cache.sync",
+            help: nestedHelp("cache", "sync"),
             operands: operands(
               0,
               null,
               "repositories",
               undefined,
-              "Zero or more repositories to update; omit to update all cached mirrors.",
+              "Zero or more repositories: a cached name, `org/repo` shorthand, or full git URL.",
             ),
             examples: [
               {
-                command: "wf cache update",
+                command: "wf cache sync",
                 description: "Fetch new commits for every cached mirror.",
               },
               {
-                command: "wf cache update vercel/next.js",
-                description: "Update one cached mirror.",
+                command: "wf cache sync vercel/next.js facebook/react",
+                description:
+                  "Update cached matches and clone missing mirrors in one invocation.",
               },
             ],
             tty: optionalStdin,
           }),
           leaf({
-            name: "doctor",
-            path: ["cache", "doctor"],
+            name: "check",
+            path: ["cache", "check"],
             summary: "Check cached repositories",
             description:
-              "Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache. Exits 1 if any checked repository is unhealthy (in both report and JSON modes). See also `wf cache repair`.",
-            handler: "cache.doctor",
-            help: nestedHelp("cache", "doctor"),
+              "Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any checked repository is unhealthy (in both report and JSON modes).",
+            handler: "cache.check",
+            help: nestedHelp("cache", "check"),
             operands: operands(
               0,
               null,
@@ -887,6 +866,12 @@ export const commandRegistry: CommandRegistry = {
             ),
             flags: [
               booleanFlag(
+                "fix",
+                "--fix",
+                undefined,
+                "Repair selected mirrors before reporting health.",
+              ),
+              booleanFlag(
                 "json",
                 "--json",
                 undefined,
@@ -895,50 +880,28 @@ export const commandRegistry: CommandRegistry = {
             ],
             examples: [
               {
-                command: "wf cache doctor",
+                command: "wf cache check",
                 description: "Report health for every cached mirror.",
               },
               {
-                command: "wf cache doctor --json",
+                command: "wf cache check --json",
                 description:
                   "Emit health records as JSON; nonzero exit flags problems.",
               },
+              {
+                command: "wf cache check vercel/next.js --fix",
+                description:
+                  "Repair one cached mirror before reporting health.",
+              },
             ],
             outputModes: ["report", "json"],
-          }),
-          leaf({
-            name: "repair",
-            path: ["cache", "repair"],
-            summary: "Repair cached repositories",
-            description:
-              "Repairs cached bare mirrors by pruning stale worktree registrations and running a connectivity-only fsck. With no repositories, repairs every mirror. Touches no network. Cannot repair a mirror that is not a valid bare git repository — that case is reported and the mirror must be deleted and re-added. See also `wf cache doctor`.",
-            handler: "cache.repair",
-            help: nestedHelp("cache", "repair"),
-            operands: operands(
-              0,
-              null,
-              "repositories",
-              undefined,
-              "Zero or more repositories to repair; omit to repair all cached mirrors.",
-            ),
-            examples: [
-              {
-                command: "wf cache repair",
-                description: "Prune and fsck every cached mirror.",
-              },
-              {
-                command: "wf cache repair vercel/next.js",
-                description: "Repair one cached mirror after doctor flags it.",
-              },
-            ],
-            tty: optionalStdin,
           }),
           leaf({
             name: "delete",
             path: ["cache", "delete"],
             summary: "Delete cached repositories",
             description:
-              "Permanently deletes cached bare mirrors from disk; the data must be re-cloned to use them again. Refuses (exit 1) any mirror that still has active worktrees unless you pass `--force`. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. See also `wf cache prune`.",
+              "Permanently deletes cached bare mirrors from disk; the data must be re-cloned to use them again. Refuses (exit 1) any mirror that still has active worktrees unless you pass `--force`. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. See also `wf cache clean`.",
             handler: "cache.delete",
             help: nestedHelp("cache", "delete"),
             operands: operands(
@@ -976,13 +939,13 @@ export const commandRegistry: CommandRegistry = {
             tty: optionalStdin,
           }),
           leaf({
-            name: "prune",
-            path: ["cache", "prune"],
+            name: "clean",
+            path: ["cache", "clean"],
             summary: "Delete unused cached repositories",
             description:
-              "Permanently deletes every cached bare mirror that has no active worktrees, reclaiming disk space; pruned data must be re-cloned to use again. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. Exits 0 with a message when nothing is unused. See also `wf cache delete`.",
-            handler: "cache.prune",
-            help: nestedHelp("cache", "prune"),
+              "Permanently deletes every cached bare mirror that has no active worktrees, reclaiming disk space; cleaned data must be re-cloned to use again. Without a terminal it cannot prompt and exits 1; pass `--force` or `--dry-run` to proceed. Exits 0 with a message when nothing is unused. See also `wf cache delete`.",
+            handler: "cache.clean",
+            help: nestedHelp("cache", "clean"),
             flags: [
               booleanFlag(
                 "dryRun",
@@ -999,33 +962,15 @@ export const commandRegistry: CommandRegistry = {
             ],
             examples: [
               {
-                command: "wf cache prune --dry-run",
-                description: "List the unused mirrors prune would remove.",
+                command: "wf cache clean --dry-run",
+                description: "List the unused mirrors clean would remove.",
               },
               {
-                command: "wf cache prune --force",
+                command: "wf cache clean --force",
                 description: "Delete all unused mirrors without prompting.",
               },
             ],
             tty: optionalStdin,
-          }),
-          leaf({
-            name: "manage",
-            path: ["cache", "manage"],
-            summary: "Open the repository cache manager",
-            description:
-              "Opens the interactive cache manager to browse cached bare mirrors and add, update, repair, delete, and prune them from one screen. Requires an interactive terminal; errors without one. For scripted access, use the individual `wf cache` subcommands.",
-            handler: "cache.manage",
-            help: nestedHelp("cache", "manage"),
-            examples: [
-              {
-                command: "wf cache manage",
-                description:
-                  "Open the interactive manager to inspect and maintain the cache.",
-              },
-            ],
-            outputModes: ["interactive"],
-            tty: requiredStdin,
           }),
         ],
       }),

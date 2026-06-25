@@ -258,24 +258,18 @@ Common cache workflows:
 
 ```sh
 wf cache list
-wf cache info vercel/front
-wf cache add vercel/front vercel/api
-wf cache update
-wf cache doctor
-wf cache repair vercel/front
-wf cache path vercel/front
-```
-
-Open the interactive cache manager:
-
-```sh
-wf cache manage
+wf cache show vercel/front
+wf cache show vercel/front --path
+wf cache sync vercel/front vercel/api
+wf cache sync
+wf cache check
+wf cache check vercel/front --fix
 ```
 
 Preview unused mirror cleanup before deleting anything:
 
 ```sh
-wf cache prune --dry-run
+wf cache clean --dry-run
 ```
 
 Delete a selected mirror explicitly:
@@ -361,7 +355,7 @@ wf task list           List task worktrees
 wf task finish         Clean up integrated task worktrees
 wf task delete         Delete explicit task worktrees
 
-wf cache manage        Open the cache manager
+wf cache list          Inspect cached mirrors
 wf review open         Open a review workspace
 wf review checkout     Check out a pull request
 wf template manage     Open the template manager
@@ -402,9 +396,9 @@ Run `wf status --watch` inside the change and inspect
 Inspect before repairing or deleting data:
 
 ```sh
-wf cache doctor
-wf cache info <repo>
-wf cache repair <repo>
+wf cache check
+wf cache show <repo>
+wf cache check <repo> --fix
 ```
 
 ### A Template Is Missing

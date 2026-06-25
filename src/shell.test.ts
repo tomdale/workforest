@@ -94,7 +94,7 @@ describe("shell integration", () => {
     const registry = structuredClone(commandRegistry) as MutableCommandRegistry;
     registry.shortcuts.push({
       name: "inspect",
-      target: ["cache", "info"],
+      target: ["cache", "show"],
       visibility: "visible",
       summary: "Inspect a cached repository",
       help: { kind: "command", command: "inspect" },

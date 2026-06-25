@@ -11,7 +11,7 @@ describe("resolveCommand", () => {
     [["delete", "_adhoc/experiment"], ["delete"], "change.delete"],
     [["task", "start", "fix-auth"], ["task", "start"], "task.start"],
     [["task", "finish", "fix-auth"], ["task", "finish"], "task.finish"],
-    [["cache", "doctor", "front"], ["cache", "doctor"], "cache.doctor"],
+    [["cache", "check", "front"], ["cache", "check"], "cache.check"],
     [["review", "checkout", "123"], ["review", "checkout"], "review.checkout"],
     [["template", "manage"], ["template", "manage"], "template.manage"],
     [["shell", "init", "zsh"], ["shell", "init"], "shell.init"],
@@ -86,6 +86,9 @@ describe("resolveCommand", () => {
     );
     expect(() => resolveCommand(commandRegistry, ["cache", "inspect"])).toThrow(
       "Unknown wf cache subcommand: inspect",
+    );
+    expect(() => resolveCommand(commandRegistry, ["cache", "info"])).toThrow(
+      "Unknown wf cache subcommand: info",
     );
     const privateWorkerCommand = ["_initialize", "repo"].join("-");
     expect(() =>
