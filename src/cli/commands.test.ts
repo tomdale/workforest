@@ -27,7 +27,6 @@ describe("commandRegistry", () => {
         "list",
         "open",
         "show",
-        "manage",
         "suggest",
         "new",
         "edit",
@@ -73,6 +72,19 @@ describe("commandRegistry", () => {
     expect(findGroup(commandRegistry.root, "help").default?.handler).toBe(
       "help",
     );
+  });
+
+  it("keeps the legacy templates command hidden but resolvable", () => {
+    const templateGroup = findGroup(commandRegistry.root, "template");
+    const manage = templateGroup.children.find(
+      (child) => child.name === "manage",
+    );
+
+    expect(manage).toMatchObject({
+      kind: "leaf",
+      visibility: "hidden",
+      handler: "template.manage",
+    });
   });
 
   it("defines complete metadata for every leaf", () => {

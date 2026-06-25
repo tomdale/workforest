@@ -80,7 +80,7 @@ Templates define reusable workspace recipes: repositories, optional branch
 prefix, hooks, initializer settings, and bundled files.
 
 ```sh
-wf template manage
+wf templates
 wf template list
 wf template show full-stack
 wf template new full-stack vercel/front vercel/api

@@ -27,7 +27,6 @@ const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["review", "checkout"],
   ["template", "open"],
   ["template", "show"],
-  ["template", "manage"],
   ["shell", "init"],
 ];
 
@@ -58,6 +57,14 @@ describe("final CLI contract", () => {
     ].map((argv) => ({ argv })),
   )("does not expose removed command wf %s", ({ argv }) => {
     expect(() => resolve(argv)).toThrow();
+  });
+
+  it("keeps the legacy templates command resolvable for compatibility", () => {
+    const legacyPath = ["template", "manage"];
+
+    expect(resolve(legacyPath)).toMatchObject({
+      canonicalPath: legacyPath,
+    });
   });
 
   it.each([

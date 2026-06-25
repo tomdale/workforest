@@ -39,11 +39,17 @@ afterEach(async () => {
 });
 
 describe("template command conformance", () => {
+  const legacyManagerUsage = ["Usage: wf", "template", "manage"].join(" ");
+  const legacyManagerInvalid = [
+    "Invalid operands for wf",
+    "template",
+    "manage",
+  ].join(" ");
   const helpCases = [
     { argv: ["template"], usage: "Usage: wf template" },
     {
       argv: ["template", "manage"],
-      usage: "Usage: wf template manage",
+      usage: legacyManagerUsage,
     },
     {
       argv: ["template", "suggest"],
@@ -75,9 +81,9 @@ describe("template command conformance", () => {
 
   const invalidCases = [
     {
-      label: "template manage surplus operands",
+      label: "legacy manager surplus operands",
       argv: ["template", "manage", "extra"],
-      message: "Invalid operands for wf template manage",
+      message: legacyManagerInvalid,
     },
     {
       label: "template list surplus operands",
@@ -242,7 +248,7 @@ describe("template command conformance", () => {
 
     expect(output.exitCode).toBe(0);
     expect(output.stdout).toContain("Usage: wf template");
-    expect(output.stdout).toContain("manage");
+    expect(output.stdout).not.toContain("manage");
     expect(output.stderr).toBe("");
   });
 });
