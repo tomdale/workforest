@@ -45,7 +45,7 @@ export async function runCacheInvocation(
         flag(invocation, "path"),
       );
     case "cache.sync":
-      return runCacheSync(operands);
+      return runCacheSync(operands, flag(invocation, "json"));
     case "cache.check":
       return runCacheCheck(operands, {
         fix: flag(invocation, "fix"),
@@ -55,11 +55,13 @@ export async function runCacheInvocation(
       return runCacheDelete(operands, {
         dryRun: flag(invocation, "dryRun"),
         force: flag(invocation, "force"),
+        json: flag(invocation, "json"),
       });
     case "cache.clean":
       return runCacheClean({
         dryRun: flag(invocation, "dryRun"),
         force: flag(invocation, "force"),
+        json: flag(invocation, "json"),
       });
     default:
       throw new Error(
@@ -150,15 +152,19 @@ async function runCachePath(
 
 async function runCacheSync(
   operands: readonly string[],
+  json: boolean,
 ): Promise<CommandResult> {
   if (operands.length === 0) {
     const repositories = await listCachedRepositories();
     if (repositories.length === 0) {
+      if (json) {
+        return jsonSuccess({ messages: [], repositories: [] });
+      }
       return success(
         humanOutput(formatMessage("info", "No cached repositories to sync.")),
       );
     }
-    return operationResult(await syncRepositoryMessages(repositories));
+    return operationResult(await syncRepositoryMessages(repositories), json);
   }
 
   const cachedRepositories = await listCachedRepositories();
@@ -212,7 +218,7 @@ async function runCacheSync(
   }
 
   messages.push(...(await syncRepositoryMessages([...selected.values()])));
-  return operationResult(messages);
+  return operationResult(messages, json);
 }
 
 async function syncRepositoryMessages(
@@ -338,7 +344,7 @@ async function refreshRepositories(
 
 async function runCacheDelete(
   selectors: readonly string[],
-  options: Readonly<{ dryRun: boolean; force: boolean }>,
+  options: Readonly<{ dryRun: boolean; force: boolean; json: boolean }>,
 ): Promise<CommandResult> {
   const repositories = await resolveRepositorySelection(selectors);
   const activeRepositories = repositories.filter(
@@ -369,16 +375,23 @@ async function runCacheDelete(
       messages.push({ kind: "error", text: getErrorMessage(error) });
     }
   }
-  return operationResult(messages);
+  return operationResult(messages, options.json);
 }
 
 async function runCacheClean(
-  options: Readonly<{ dryRun: boolean; force: boolean }>,
+  options: Readonly<{ dryRun: boolean; force: boolean; json: boolean }>,
 ): Promise<CommandResult> {
   const repositories = (await listCachedRepositories()).filter(
     (repository) => activeWorktreeCount(repository) === 0,
   );
   if (repositories.length === 0) {
+    if (options.json) {
+      return jsonSuccess({
+        dryRun: options.dryRun,
+        deleted: [],
+        message: "No unused cached repositories.",
+      });
+    }
     return success(
       humanOutput(formatMessage("info", "No unused cached repositories.")),
     );
@@ -392,6 +405,13 @@ async function runCacheClean(
       dryRun: options.dryRun,
       force: options.force,
     });
+    if (options.json) {
+      return jsonSuccess({
+        dryRun: options.dryRun,
+        deleted: results.map((result) => toJson(result.repository)),
+        totalSizeBytes: totalSize(results.map((result) => result.repository)),
+      });
+    }
     const verb = options.dryRun ? "Would delete" : "Deleted";
     return success(
       humanOutput(
@@ -570,7 +590,15 @@ type OperationMessage = Readonly<{
   text: string;
 }>;
 
-function operationResult(messages: readonly OperationMessage[]): CommandResult {
+function operationResult(
+  messages: readonly OperationMessage[],
+  json = false,
+): CommandResult {
+  if (json) {
+    const failed = messages.some((message) => message.kind !== "success");
+    return withExitCode(jsonSuccess({ messages }), failed);
+  }
+
   if (messages.length === 0) {
     return success();
   }

@@ -20,10 +20,17 @@ describe("parseInvocation", () => {
     [["cache", "list", "--force"], 'Unknown flag "--force"'],
     [["task", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
     [["review", "open", "front", "--force"], 'Unknown flag "--force"'],
-    [["template", "show", "base", "--json"], 'Unknown flag "--json"'],
     [["switch", "--force"], 'Unknown flag "--force"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
+  });
+
+  it("parses --json as a global output flag", () => {
+    expect(parse(["version", "--json"]).flags).toEqual({ json: true });
+    expect(parse(["template", "show", "base", "--json"]).flags).toEqual({
+      json: true,
+    });
+    expect(parse(["task", "list", "--json"]).flags).toEqual({ json: true });
   });
 
   it("rejects missing and duplicate flag values", () => {

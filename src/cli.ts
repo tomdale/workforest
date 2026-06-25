@@ -32,12 +32,11 @@ import {
 } from "./config.ts";
 import {
   type DashboardRoute,
+  dashboardActionsForRoute,
   dashboardRouteForInvocation,
+  formatDashboardCommand,
   getDashboardRoute,
-  renderDashboardReport,
-  runDashboardTui,
-  shouldUseDashboardTui,
-} from "./dashboard/index.ts";
+} from "./dashboard/routes.ts";
 import {
   commandHelp,
   conceptsPage,
@@ -103,7 +102,7 @@ import {
   getRepositoryChangePath,
   resolveWorkforestDirectories,
 } from "./workspace/paths.ts";
-import type { TaskListEntry } from "./workspace/tasks.ts";
+import type { TaskFailure, TaskListEntry } from "./workspace/tasks.ts";
 
 export { log };
 
@@ -198,7 +197,7 @@ export async function executeCli(
     const workerResult = await runPrivateWorkerIfRequested();
     if (workerResult) return workerResult;
 
-    if (argv.length === 0 && shouldUseDashboardTui()) {
+    if (argv.length === 0 && (await shouldUseDashboardTui())) {
       return runDashboardCommand(getDashboardRoute("home"));
     }
 
@@ -254,7 +253,7 @@ async function runInvocation(
       return runReviewInvocation(invocation);
     case "change.start":
       if (invocation.beforeDoubleDash.length === 0) {
-        if (!shouldUseDashboardTui()) {
+        if (!(await shouldUseDashboardTui())) {
           throw new UsageError("wf start requires a change name.");
         }
         return runDashboardCommand(getDashboardRoute("start"));
@@ -314,18 +313,24 @@ async function runInvocation(
         return runMigrateWorkspacesCommand(invocation);
       });
     case "shell.init":
-      return runShellInitCommand(invocation.beforeDoubleDash[0]);
+      return runShellInitCommand(
+        invocation.beforeDoubleDash[0],
+        jsonRequested(invocation),
+      );
     case "config.show":
       if (
+        !jsonRequested(invocation) &&
         isDefaultInvocation(invocation, "config") &&
-        shouldUseDashboardTui()
+        (await shouldUseDashboardTui())
       ) {
         return runDashboardCommand(getDashboardRoute("config"));
       }
-      return runConfigShow();
+      return runConfigShow(jsonRequested(invocation));
     case "config.init":
+      if (jsonRequested(invocation)) return unsupportedJson(invocation);
       return runConfigInit();
     case "config.edit":
+      if (jsonRequested(invocation)) return unsupportedJson(invocation);
       return runConfigEdit();
     case "skills.list":
     case "skills.get":
@@ -357,25 +362,34 @@ async function runInvocation(
       );
     }
     case "help":
+      if (jsonRequested(invocation)) {
+        return jsonSuccess({ page: "help", content: await help() });
+      }
       return success({
         kind: "text",
         value: await help(),
         stream: "stdout",
       });
     case "help.concepts":
+      if (jsonRequested(invocation)) {
+        return jsonSuccess({ page: "concepts", content: conceptsPage() });
+      }
       return success({
         kind: "text",
         value: conceptsPage(),
         stream: "stdout",
       });
     case "help.workflow":
+      if (jsonRequested(invocation)) {
+        return jsonSuccess({ page: "workflow", content: workflowPage() });
+      }
       return success({
         kind: "text",
         value: workflowPage(),
         stream: "stdout",
       });
     case "version":
-      return runVersionCommand();
+      return runVersionCommand(jsonRequested(invocation));
   }
 
   if (invocation.command.leaf.handler.startsWith("template.")) {
@@ -399,7 +413,15 @@ async function runInvocation(
 async function runDashboardInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
-  if (isDefaultInvocation(invocation, "cache") && !shouldUseDashboardTui()) {
+  const route = dashboardRouteForInvocation(invocation.command.invokedPath);
+  if (jsonRequested(invocation)) {
+    return jsonSuccess(dashboardRouteJson(route));
+  }
+
+  if (
+    isDefaultInvocation(invocation, "cache") &&
+    !(await shouldUseDashboardTui())
+  ) {
     return success({
       kind: "text",
       value: await renderHelpReference({ kind: "command", command: "cache" }, [
@@ -409,20 +431,28 @@ async function runDashboardInvocation(
     });
   }
 
-  return runDashboardCommand(
-    dashboardRouteForInvocation(invocation.command.invokedPath),
-  );
+  return runDashboardCommand(route);
 }
 
 async function runDashboardCommand(
   route: DashboardRoute,
 ): Promise<CommandResult> {
-  if (shouldUseDashboardTui()) {
+  const { renderDashboardReport, runDashboardTui } = await import(
+    "./dashboard/index.ts"
+  );
+  if (await shouldUseDashboardTui()) {
     await runDashboardTui(route);
     return success();
   }
 
   return success(reportOutput(renderDashboardReport(route)));
+}
+
+async function shouldUseDashboardTui(): Promise<boolean> {
+  const { shouldUseDashboardTui: dashboardShouldUseTui } = await import(
+    "./dashboard/index.ts"
+  );
+  return dashboardShouldUseTui();
 }
 
 function isDefaultInvocation(
@@ -494,6 +524,32 @@ function stringInvocationFlag(
 ): string | undefined {
   const value = invocation.flags[name];
   return typeof value === "string" ? value : undefined;
+}
+
+function jsonRequested(invocation: ParsedInvocation): boolean {
+  return booleanInvocationFlag(invocation, "json");
+}
+
+function unsupportedJson(invocation: ParsedInvocation): CommandResult {
+  throw new UsageError(
+    `JSON output is not available for ${formatInvocationCommand(invocation)}.`,
+  );
+}
+
+function formatInvocationCommand(invocation: ParsedInvocation): string {
+  return `wf ${invocation.command.canonicalPath.join(" ")}`;
+}
+
+function dashboardRouteJson(route: DashboardRoute): Record<string, unknown> {
+  return {
+    route,
+    actions: dashboardActionsForRoute(route).map((action) => ({
+      ...action,
+      ...(action.kind === "command"
+        ? { displayCommand: formatDashboardCommand(action.command) }
+        : {}),
+    })),
+  };
 }
 
 async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
@@ -571,6 +627,7 @@ No additional help is available for this internal command.`)
 
 async function runShellInitCommand(
   requestedShell: string | undefined,
+  json: boolean,
 ): Promise<CommandResult> {
   requestedShell ??= process.env["SHELL"];
   const shell = normalizeShellName(requestedShell);
@@ -581,7 +638,8 @@ async function runShellInitCommand(
     );
   }
 
-  return success(shellOutput(renderShellInit(shell)));
+  const script = renderShellInit(shell);
+  return json ? jsonSuccess({ shell, script }) : success(shellOutput(script));
 }
 
 async function runConfigInit(): Promise<CommandResult> {
@@ -647,7 +705,7 @@ async function runConfigInit(): Promise<CommandResult> {
   return success();
 }
 
-async function runConfigShow(): Promise<CommandResult> {
+async function runConfigShow(json: boolean): Promise<CommandResult> {
   const { path: configPath, config } = await loadWorkspaceConfigForCommand();
   const directory = config.directory ?? {};
   const resolvedDirectories = resolveWorkforestDirectories(config);
@@ -656,6 +714,23 @@ async function runConfigShow(): Promise<CommandResult> {
     config.vercelLink?.teamByGitHubOwner ?? {},
   );
   const repoOverrides = Object.entries(config.vercelLink?.repoOverrides ?? {});
+
+  if (json) {
+    return jsonSuccess({
+      path: configPath,
+      config,
+      resolvedDirectories,
+      defaults: {
+        directory: {
+          base: directory.base ?? "~/Code",
+          repos: directory.repos ?? "Repos",
+          workspaces: directory.workspaces ?? "Workspaces",
+          reviews: directory.reviews ?? "Reviews",
+        },
+        branchPrefix: config.branchPrefix ?? "",
+      },
+    });
+  }
 
   printReport({
     title: "Workspace configuration",
@@ -798,12 +873,15 @@ async function saveWorkspaceConfigForCommand(
   }
 }
 
-async function runVersionCommand(): Promise<CommandResult> {
+async function runVersionCommand(json: boolean): Promise<CommandResult> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = path.join(__dirname, "..", "package.json");
   const packageJson = JSON.parse(
     await fs.readFile(packageJsonPath, "utf8"),
   ) as { version: string };
+  if (json) {
+    return jsonSuccess({ version: packageJson.version });
+  }
   return success({
     kind: "text",
     value: `workforest ${packageJson.version}`,
@@ -918,6 +996,7 @@ async function runTaskStartInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   const repo = stringFlag(invocation, "repo");
+  const json = jsonRequested(invocation);
   const workspaceDir = await detectWorkspaceFromCwd();
   if (workspaceDir) {
     return runTaskStart(
@@ -926,6 +1005,7 @@ async function runTaskStartInvocation(
         repo,
         dryRun: booleanFlag(invocation, "dryRun"),
         force: booleanFlag(invocation, "force"),
+        json,
       },
       workspaceDir,
     );
@@ -938,6 +1018,7 @@ async function runTaskStartInvocation(
       context,
       dryRun: booleanFlag(invocation, "dryRun"),
       force: booleanFlag(invocation, "force"),
+      json,
     });
   }
 
@@ -952,6 +1033,7 @@ async function runTaskListInvocation(
   const repo = stringFlag(invocation, "repo");
   return runTaskList({
     repo,
+    json: jsonRequested(invocation),
   });
 }
 
@@ -962,6 +1044,7 @@ async function runTaskFinishInvocation(
     names: [...invocation.beforeDoubleDash],
     repo: stringFlag(invocation, "repo"),
     dryRun: booleanFlag(invocation, "dryRun"),
+    json: jsonRequested(invocation),
   });
 }
 
@@ -973,6 +1056,7 @@ async function runTaskDeleteInvocation(
     repo: stringFlag(invocation, "repo"),
     dryRun: booleanFlag(invocation, "dryRun"),
     force: booleanFlag(invocation, "force"),
+    json: jsonRequested(invocation),
   });
 }
 
@@ -993,9 +1077,15 @@ async function runReviewInvocation(
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
     case "review.open":
-      return runReviewOpen(invocation.beforeDoubleDash[0] ?? "");
+      return runReviewOpen(
+        invocation.beforeDoubleDash[0] ?? "",
+        jsonRequested(invocation),
+      );
     case "review.checkout":
-      return runReviewCheckout(invocation.beforeDoubleDash);
+      return runReviewCheckout(
+        invocation.beforeDoubleDash,
+        jsonRequested(invocation),
+      );
     default:
       throw new Error(
         `Unsupported review handler: ${invocation.command.leaf.handler}`,
@@ -1003,7 +1093,10 @@ async function runReviewInvocation(
   }
 }
 
-async function runReviewOpen(repoInput: string): Promise<CommandResult> {
+async function runReviewOpen(
+  repoInput: string,
+  json: boolean,
+): Promise<CommandResult> {
   try {
     const [qualifiedRepo] = await qualifyReviewRepositorySpecifier([repoInput]);
     const { ensureReviewWorkspace, parseReviewRepoTarget } = await import(
@@ -1014,8 +1107,16 @@ async function runReviewOpen(repoInput: string): Promise<CommandResult> {
     const workspace = await ensureReviewWorkspace({
       target,
       reviewsRoot,
-      onEvent: humanServiceEventSink,
+      ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
+
+    if (json) {
+      return jsonSuccess({
+        target,
+        path: workspace.path,
+        shellHandoffPath: workspace.path,
+      });
+    }
 
     await writeShellCdPath(workspace.path);
     log.success(`Review workspace ready: ${workspace.path}`);
@@ -1030,6 +1131,7 @@ async function runReviewOpen(repoInput: string): Promise<CommandResult> {
 
 async function runReviewCheckout(
   targetArgs: readonly string[],
+  json: boolean,
 ): Promise<CommandResult> {
   try {
     const resolvedTargetArgs =
@@ -1046,8 +1148,17 @@ async function runReviewCheckout(
     const metadata = await createReviewWorktree({
       target,
       reviewsRoot,
-      onEvent: humanServiceEventSink,
+      ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
+
+    if (json) {
+      return jsonSuccess({
+        target,
+        metadata,
+        path: metadata.path,
+        shellHandoffPath: metadata.path,
+      });
+    }
 
     await writeShellCdPath(metadata.path);
     log.success(`Review worktree ready: ${metadata.path}`);
@@ -1200,11 +1311,13 @@ async function runTaskStart(
     repo,
     dryRun,
     force,
+    json,
   }: {
     slugs: string[];
     repo: string | undefined;
     dryRun: boolean;
     force: boolean;
+    json: boolean;
   },
   workspaceDir: string,
 ): Promise<CommandResult> {
@@ -1242,8 +1355,22 @@ async function runTaskStart(
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
         : {}),
-      onEvent: humanServiceEventSink,
+      ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
+
+    if (json) {
+      const failed =
+        result.failures.length > 0 ||
+        result.created.some((w) => w.setupStatus === "failed");
+      return withExitCode(
+        jsonSuccess({
+          dryRun,
+          created: result.created,
+          failures: taskFailuresJson(result.failures),
+        }),
+        failed,
+      );
+    }
 
     if (dryRun) {
       showDryRunReport({
@@ -1302,11 +1429,13 @@ async function runRepositoryTaskStart({
   context,
   dryRun,
   force,
+  json,
 }: {
   slugs: string[];
   context: RepositoryTaskCommandContext;
   dryRun: boolean;
   force: boolean;
+  json: boolean;
 }): Promise<CommandResult> {
   try {
     const { config } = await loadWorkspaceConfig();
@@ -1320,8 +1449,23 @@ async function runRepositoryTaskStart({
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun,
       force,
-      onEvent: humanServiceEventSink,
+      ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
+
+    if (json) {
+      const failed =
+        result.failures.length > 0 ||
+        result.created.some((w) => w.setupStatus === "failed");
+      return withExitCode(
+        jsonSuccess({
+          dryRun,
+          changeName: context.changeName,
+          created: result.created,
+          failures: taskFailuresJson(result.failures),
+        }),
+        failed,
+      );
+    }
 
     if (dryRun) {
       showDryRunReport({
@@ -1378,8 +1522,10 @@ async function runRepositoryTaskStart({
 
 async function runTaskList({
   repo,
+  json,
 }: {
   repo?: string | undefined;
+  json: boolean;
 }): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
@@ -1387,7 +1533,7 @@ async function runTaskList({
     if (!context) {
       throw new OperationalError("Not inside a Workforest change.");
     }
-    return runRepositoryTaskList(context);
+    return runRepositoryTaskList(context, json);
   }
 
   try {
@@ -1407,6 +1553,14 @@ async function runTaskList({
 
     const { listTasks } = await import("./workspace/tasks.ts");
     const entries = await listTasks(workspaceDir, parentRepoName);
+
+    if (json) {
+      return jsonSuccess({
+        workspaceDir,
+        repo: parentRepoName ?? null,
+        tasks: entries,
+      });
+    }
 
     if (entries.length === 0) {
       log.info("No tasks found.");
@@ -1429,6 +1583,7 @@ async function runTaskList({
 
 async function runRepositoryTaskList(
   context: RepositoryTaskCommandContext,
+  json: boolean,
 ): Promise<CommandResult> {
   try {
     const { listRepositoryTasks } = await import("./workspace/tasks.ts");
@@ -1437,6 +1592,17 @@ async function runRepositoryTaskList(
       repoName: context.repoName,
       changeName: context.changeName,
     });
+
+    if (json) {
+      return jsonSuccess({
+        repositoryChange: {
+          repo: context.repoName,
+          changeName: context.changeName,
+          path: context.parentRepoDir,
+        },
+        tasks: entries,
+      });
+    }
 
     if (entries.length === 0) {
       log.info("No tasks found.");
@@ -1495,17 +1661,30 @@ function taskListReportSections(
     }));
 }
 
+function taskFailuresJson(failures: readonly TaskFailure[]) {
+  return failures.map((failure) => ({
+    slug: failure.slug,
+    error: failure.error.message,
+  }));
+}
+
+function withExitCode(result: CommandResult, failed: boolean): CommandResult {
+  return failed ? { ...result, exitCode: 1 } : result;
+}
+
 async function runTaskDelete({
   names,
   repo,
   dryRun,
   force,
+  json,
   skipConfirmation = false,
 }: {
   names: string[];
   repo?: string | undefined;
   dryRun: boolean;
   force: boolean;
+  json: boolean;
   skipConfirmation?: boolean;
 }): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
@@ -1520,6 +1699,7 @@ async function runTaskDelete({
       dryRun,
       force,
       skipConfirmation,
+      json,
     });
   }
 
@@ -1559,6 +1739,19 @@ async function runTaskDelete({
       ...(parentRepoName ? { parentRepoName } : {}),
     });
 
+    const cdTarget = workspaceTaskRemovalCdTarget(
+      result.removed,
+      workspaceDir,
+      invocationCwd,
+    );
+    if (json) {
+      return jsonSuccess({
+        dryRun,
+        removed: result.removed,
+        shellHandoffPath: cdTarget ?? null,
+      });
+    }
+
     if (dryRun) {
       showDryRunReport({
         sections: [
@@ -1581,13 +1774,7 @@ async function runTaskDelete({
       for (const entry of result.removed) {
         log.success(`Removed ${entry.slug}`);
       }
-      await writeTaskRemovalCdTarget(
-        workspaceTaskRemovalCdTarget(
-          result.removed,
-          workspaceDir,
-          invocationCwd,
-        ),
-      );
+      await writeTaskRemovalCdTarget(cdTarget);
     }
     return success();
   } catch (error) {
@@ -1600,12 +1787,14 @@ async function runRepositoryTaskDelete({
   context,
   dryRun,
   force,
+  json,
   skipConfirmation = false,
 }: {
   names: string[];
   context: RepositoryTaskCommandContext;
   dryRun: boolean;
   force: boolean;
+  json: boolean;
   skipConfirmation?: boolean;
 }): Promise<CommandResult> {
   try {
@@ -1631,6 +1820,20 @@ async function runRepositoryTaskDelete({
       force,
     });
 
+    const cdTarget = repositoryTaskRemovalCdTarget(
+      result.removed,
+      context,
+      invocationCwd,
+    );
+    if (json) {
+      return jsonSuccess({
+        dryRun,
+        changeName: context.changeName,
+        removed: result.removed,
+        shellHandoffPath: cdTarget ?? null,
+      });
+    }
+
     if (dryRun) {
       showDryRunReport({
         sections: [
@@ -1654,9 +1857,7 @@ async function runRepositoryTaskDelete({
       for (const entry of result.removed) {
         log.success(`Removed ${entry.slug}`);
       }
-      await writeTaskRemovalCdTarget(
-        repositoryTaskRemovalCdTarget(result.removed, context, invocationCwd),
-      );
+      await writeTaskRemovalCdTarget(cdTarget);
     }
     return success();
   } catch (error) {
@@ -1668,10 +1869,12 @@ async function runTaskFinish({
   names,
   repo,
   dryRun,
+  json,
 }: {
   names: string[];
   repo?: string | undefined;
   dryRun: boolean;
+  json: boolean;
 }): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
@@ -1683,6 +1886,7 @@ async function runTaskFinish({
       names,
       context,
       dryRun,
+      json,
     });
   }
 
@@ -1710,6 +1914,19 @@ async function runTaskFinish({
       ...(parentRepoName ? { parentRepoName } : {}),
     });
 
+    const cdTarget = workspaceTaskRemovalCdTarget(
+      result.removed,
+      workspaceDir,
+      invocationCwd,
+    );
+    if (json) {
+      return jsonSuccess({
+        dryRun,
+        removed: result.removed,
+        shellHandoffPath: cdTarget ?? null,
+      });
+    }
+
     if (dryRun) {
       showDryRunReport({
         sections: [
@@ -1732,13 +1949,7 @@ async function runTaskFinish({
       for (const entry of result.removed) {
         log.success(`Finished ${entry.slug}`);
       }
-      await writeTaskRemovalCdTarget(
-        workspaceTaskRemovalCdTarget(
-          result.removed,
-          workspaceDir,
-          invocationCwd,
-        ),
-      );
+      await writeTaskRemovalCdTarget(cdTarget);
     }
     return success();
   } catch (error) {
@@ -1750,10 +1961,12 @@ async function runRepositoryTaskFinish({
   names,
   context,
   dryRun,
+  json,
 }: {
   names: string[];
   context: RepositoryTaskCommandContext;
   dryRun: boolean;
+  json: boolean;
 }): Promise<CommandResult> {
   try {
     const { finishRepositoryTasks } = await import("./workspace/tasks.ts");
@@ -1765,6 +1978,20 @@ async function runRepositoryTaskFinish({
       slugs: names,
       dryRun,
     });
+
+    const cdTarget = repositoryTaskRemovalCdTarget(
+      result.removed,
+      context,
+      invocationCwd,
+    );
+    if (json) {
+      return jsonSuccess({
+        dryRun,
+        changeName: context.changeName,
+        removed: result.removed,
+        shellHandoffPath: cdTarget ?? null,
+      });
+    }
 
     if (dryRun) {
       showDryRunReport({
@@ -1789,9 +2016,7 @@ async function runRepositoryTaskFinish({
       for (const entry of result.removed) {
         log.success(`Finished ${entry.slug}`);
       }
-      await writeTaskRemovalCdTarget(
-        repositoryTaskRemovalCdTarget(result.removed, context, invocationCwd),
-      );
+      await writeTaskRemovalCdTarget(cdTarget);
     }
     return success();
   } catch (error) {
@@ -1840,30 +2065,35 @@ async function writeTaskRemovalCdTarget(
 async function runTemplateInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
+  const json = jsonRequested(invocation);
   switch (invocation.command.leaf.handler) {
     case "template.manage":
+      if (json) return unsupportedJson(invocation);
       return runTemplateManagerCommand();
     case "template.list":
-      return runTemplateList();
+      return runTemplateList(json);
     case "template.open":
-      return runTemplateOpen(invocation.beforeDoubleDash[0] ?? "");
+      return runTemplateOpen(invocation.beforeDoubleDash[0] ?? "", json);
     case "template.show":
-      return runTemplateShow(invocation.beforeDoubleDash[0] ?? "");
+      return runTemplateShow(invocation.beforeDoubleDash[0] ?? "", json);
     case "template.new":
-      return runTemplateNew(invocation);
+      return runTemplateNew(invocation, json);
     case "template.edit":
+      if (json) return unsupportedJson(invocation);
       return runTemplateEdit(invocation.beforeDoubleDash[0] ?? "");
     case "template.add-file":
-      return runTemplateAddFile(invocation);
+      return runTemplateAddFile(invocation, json);
     case "template.copy":
       return runTemplateCopy(
         invocation.beforeDoubleDash[0] ?? "",
         invocation.beforeDoubleDash[1] ?? "",
+        json,
       );
     case "template.delete":
       return runTemplateDelete(
         invocation.beforeDoubleDash[0] ?? "",
         invocation.flags["force"] === true,
+        json,
       );
     default:
       throw new Error(
@@ -1880,11 +2110,22 @@ function templateFailure(): CommandResult {
   return failure(1, { kind: "none" });
 }
 
+function templateJson(
+  template: NonNullable<Awaited<ReturnType<typeof loadTemplate>>>,
+): Record<string, unknown> {
+  return {
+    id: template.id,
+    path: template.path,
+    directory: path.dirname(template.path),
+    config: template.config,
+  };
+}
+
 async function runTemplateManagerCommand(): Promise<CommandResult> {
   const { shouldUseTemplateManager } = await import("./ui/template-manager.ts");
 
   if (!shouldUseTemplateManager()) {
-    return runTemplateList();
+    return runTemplateList(false);
   }
 
   let initialTemplateId: string | undefined;
@@ -1936,19 +2177,27 @@ async function runTemplateManagerCommand(): Promise<CommandResult> {
       case "delete":
         initialTemplateId = undefined;
         if (
-          (await runTemplateDelete(action.templateId, false)).exitCode !== 0
+          (await runTemplateDelete(action.templateId, false, false))
+            .exitCode !== 0
         ) {
           return templateFailure();
         }
         continue;
       case "show":
-        return runTemplateOpen(action.templateId);
+        return runTemplateOpen(action.templateId, false);
     }
   }
 }
 
-async function runTemplateList(): Promise<CommandResult> {
+async function runTemplateList(json: boolean): Promise<CommandResult> {
   const templates = await listTemplates();
+
+  if (json) {
+    return jsonSuccess({
+      templates: templates.map(templateJson),
+      templatesDir: getTemplatesDir(),
+    });
+  }
 
   if (templates.length === 0) {
     log.info("No templates configured.");
@@ -1982,9 +2231,15 @@ async function runTemplateList(): Promise<CommandResult> {
   return templateSuccess();
 }
 
-async function runTemplateOpen(templateId: string): Promise<CommandResult> {
+async function runTemplateOpen(
+  templateId: string,
+  json: boolean,
+): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
+    if (json) {
+      throw new OperationalError(`Template "${templateId}" not found.`);
+    }
     log.error(`Template "${templateId}" not found.`);
     const templates = await listTemplates();
     if (templates.length > 0) {
@@ -1994,6 +2249,14 @@ async function runTemplateOpen(templateId: string): Promise<CommandResult> {
   }
 
   const templateDir = path.dirname(template.path);
+  if (json) {
+    return jsonSuccess({
+      template: templateJson(template),
+      path: templateDir,
+      shellHandoffPath: templateDir,
+    });
+  }
+
   await writeShellCdPath(templateDir);
 
   if (!isShellAutoCdEnabled()) {
@@ -2002,9 +2265,15 @@ async function runTemplateOpen(templateId: string): Promise<CommandResult> {
   return templateSuccess();
 }
 
-async function runTemplateShow(templateId: string): Promise<CommandResult> {
+async function runTemplateShow(
+  templateId: string,
+  json: boolean,
+): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
+    if (json) {
+      throw new OperationalError(`Template "${templateId}" not found.`);
+    }
     log.error(`Template "${templateId}" not found.`);
     const templates = await listTemplates();
     if (templates.length > 0) {
@@ -2031,6 +2300,14 @@ async function runTemplateShow(templateId: string): Promise<CommandResult> {
         : template.config.branchPrefix;
   const filesDir = path.join(path.dirname(template.path), "files");
   const hasFiles = await pathExists(filesDir);
+
+  if (json) {
+    return jsonSuccess({
+      template: templateJson(template),
+      branchPrefixSummary,
+      filesDir: hasFiles ? filesDir : null,
+    });
+  }
 
   printReport({
     title: `Template ${template.id}`,
@@ -2072,6 +2349,7 @@ async function runTemplateShow(templateId: string): Promise<CommandResult> {
 
 async function runTemplateNew(
   invocation: ParsedInvocation,
+  json: boolean,
 ): Promise<CommandResult> {
   let templateId = invocation.beforeDoubleDash[0];
   let repos = invocation.beforeDoubleDash.slice(1);
@@ -2092,6 +2370,9 @@ async function runTemplateNew(
   // Check if template already exists
   const existing = await loadTemplate(templateId);
   if (existing) {
+    if (json) {
+      throw new OperationalError(`Template "${templateId}" already exists.`);
+    }
     log.error(`Template "${templateId}" already exists.`);
     return templateFailure();
   }
@@ -2119,6 +2400,7 @@ async function runTemplateNew(
   try {
     repos = await qualifyRepositorySpecifiers(repos);
   } catch (error) {
+    if (json) throw operationalError(error);
     log.error(getErrorMessage(error));
     return templateFailure();
   }
@@ -2140,6 +2422,14 @@ async function runTemplateNew(
     ...(trimmedDescription && { description: trimmedDescription }),
   });
 
+  const created = await loadTemplate(templateId);
+  if (json) {
+    return jsonSuccess({
+      action: "created",
+      template: created ? templateJson(created) : { id: templateId, repos },
+    });
+  }
+
   log.success(`Template "${templateId}" created.`);
   log.info(`Location: ${getTemplatesDir()}/${templateId}/template.jsonc`);
   return templateSuccess();
@@ -2148,15 +2438,24 @@ async function runTemplateNew(
 async function runTemplateDelete(
   templateId: string,
   force: boolean,
+  json: boolean,
 ): Promise<CommandResult> {
   const template = await loadTemplate(templateId);
   if (!template) {
+    if (json) {
+      throw new OperationalError(`Template "${templateId}" not found.`);
+    }
     log.error(`Template "${templateId}" not found.`);
     return templateFailure();
   }
 
   // Confirm deletion unless --force is passed
   if (!force) {
+    if (json) {
+      throw new OperationalError(
+        "Cannot confirm deletion in JSON mode. Use --force.",
+      );
+    }
     if (!isInteractive()) {
       log.error(
         "Cannot confirm deletion in non-interactive mode. Use --force.",
@@ -2172,6 +2471,12 @@ async function runTemplateDelete(
   }
 
   await deleteTemplate(templateId);
+  if (json) {
+    return jsonSuccess({
+      action: "deleted",
+      template: templateJson(template),
+    });
+  }
   log.success(`Template "${templateId}" deleted.`);
   return templateSuccess();
 }
@@ -2212,6 +2517,7 @@ async function runTemplateEdit(templateId: string): Promise<CommandResult> {
 
 async function runTemplateAddFile(
   invocation: ParsedInvocation,
+  json: boolean,
 ): Promise<CommandResult> {
   let sourceInputs = [...invocation.beforeDoubleDash];
   const workspaceDir = await detectWorkspaceFromCwd();
@@ -2224,6 +2530,11 @@ async function runTemplateAddFile(
     templateId = sourceInputs[0];
     sourceInputs = sourceInputs.slice(1);
     if (!templateId || sourceInputs.length === 0) {
+      if (json) {
+        throw new UsageError(
+          "Usage: workforest template add-file <template> <path...>",
+        );
+      }
       log.error("Usage: workforest template add-file <template> <path...>");
       return templateFailure();
     }
@@ -2233,12 +2544,18 @@ async function runTemplateAddFile(
 
   if (!templateId) {
     if (!workspaceDir) {
+      if (json) throw new OperationalError("Not inside a workspace.");
       log.error("Not inside a workspace.");
       return templateFailure();
     }
 
     const firstInput = sourceInputs[0];
     if (!firstInput) {
+      if (json) {
+        throw new UsageError(
+          "Usage: workforest template add-file [--template <name>] <path...>",
+        );
+      }
       log.error(
         "Usage: workforest template add-file [--template <name>] <path...>",
       );
@@ -2267,10 +2584,20 @@ async function runTemplateAddFile(
       resolvedTemplate = candidateTemplate;
       sourceInputs = sourceInputs.slice(1);
       if (sourceInputs.length === 0) {
+        if (json) {
+          throw new UsageError(
+            "Usage: workforest template add-file <template> <path...>",
+          );
+        }
         log.error("Usage: workforest template add-file <template> <path...>");
         return templateFailure();
       }
     } else if (!candidateExists) {
+      if (json) {
+        throw new OperationalError(
+          `Could not resolve add-file argument "${firstInput}" as either a template or an existing file or directory.`,
+        );
+      }
       log.error(
         `Could not resolve add-file argument "${firstInput}" as either a template or an existing file or directory.`,
       );
@@ -2280,6 +2607,7 @@ async function runTemplateAddFile(
 
   if (!templateId) {
     if (!workspaceDir) {
+      if (json) throw new OperationalError("Not inside a workspace.");
       log.error("Not inside a workspace.");
       return templateFailure();
     }
@@ -2288,11 +2616,17 @@ async function runTemplateAddFile(
     try {
       metadata = await readWorkspaceMetadata(workspaceDir);
     } catch (error) {
+      if (json) throw operationalError(error);
       log.error(getErrorMessage(error));
       return templateFailure();
     }
 
     if (!metadata?.workspace.template_id) {
+      if (json) {
+        throw new OperationalError(
+          "Current workspace was not created from a template.",
+        );
+      }
       log.error("Current workspace was not created from a template.");
       return templateFailure();
     }
@@ -2302,6 +2636,9 @@ async function runTemplateAddFile(
 
   const template = resolvedTemplate ?? (await loadTemplate(templateId));
   if (!template) {
+    if (json) {
+      throw new OperationalError(`Template "${templateId}" not found.`);
+    }
     log.error(`Template "${templateId}" not found.`);
     return templateFailure();
   }
@@ -2312,8 +2649,14 @@ async function runTemplateAddFile(
       sourceInput,
       sourceRoot,
       templatePath: template.path,
+      quiet: json,
     });
     if (!resolved) {
+      if (json) {
+        throw new OperationalError(
+          `Could not resolve template file entry: ${sourceInput}`,
+        );
+      }
       return templateFailure();
     }
     entries.push(...resolved);
@@ -2331,6 +2674,11 @@ async function runTemplateAddFile(
       if (await pathExists(entry.targetPath)) {
         const targetStat = await fs.stat(entry.targetPath);
         if (!targetStat.isDirectory()) {
+          if (json) {
+            throw new OperationalError(
+              `Template path already exists: ${entry.targetPath}`,
+            );
+          }
           log.error(`Template path already exists: ${entry.targetPath}`);
           return templateFailure();
         }
@@ -2341,6 +2689,11 @@ async function runTemplateAddFile(
     if (await pathExists(entry.targetPath)) {
       const targetStat = await fs.stat(entry.targetPath);
       if (!targetStat.isFile()) {
+        if (json) {
+          throw new OperationalError(
+            `Template path already exists: ${entry.targetPath}`,
+          );
+        }
         log.error(`Template path already exists: ${entry.targetPath}`);
         return templateFailure();
       }
@@ -2355,6 +2708,7 @@ async function runTemplateAddFile(
         entry,
         totalFileCount,
         diff,
+        json,
       );
 
       if (action === "cancel") {
@@ -2389,6 +2743,23 @@ async function runTemplateAddFile(
     sourceInputs.length === 1
       ? entries[0]?.relativePath
       : `${sourceInputs.length} paths`;
+  if (json) {
+    return jsonSuccess({
+      action: "added-files",
+      template: templateJson(template),
+      copiedCount,
+      skippedCount,
+      entries: entries.map(
+        ({ sourcePath, targetPath, relativePath, type }) => ({
+          sourcePath,
+          targetPath,
+          relativePath,
+          type,
+          skipped: skippedTargetPaths.has(targetPath),
+        }),
+      ),
+    });
+  }
   log.success(`Added ${sourceSummary} to template "${template.id}".${suffix}`);
   return templateSuccess();
 }
@@ -2397,10 +2768,12 @@ async function resolveTemplateAddFileEntries({
   sourceInput,
   sourceRoot,
   templatePath,
+  quiet = false,
 }: {
   sourceInput: string;
   sourceRoot: string;
   templatePath: string;
+  quiet?: boolean;
 }): Promise<TemplateAddFileEntry[] | null> {
   const sourcePath = path.resolve(sourceInput);
   const relativePath = path.relative(sourceRoot, sourcePath);
@@ -2410,7 +2783,7 @@ async function resolveTemplateAddFileEntries({
     relativePath.startsWith("..") ||
     path.isAbsolute(relativePath)
   ) {
-    log.error(`File must be inside ${sourceRoot}: ${sourcePath}`);
+    if (!quiet) log.error(`File must be inside ${sourceRoot}: ${sourcePath}`);
     return null;
   }
 
@@ -2418,12 +2791,12 @@ async function resolveTemplateAddFileEntries({
   try {
     sourceStat = await fs.stat(sourcePath);
   } catch {
-    log.error(`File not found: ${sourcePath}`);
+    if (!quiet) log.error(`File not found: ${sourcePath}`);
     return null;
   }
 
   if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
-    log.error(`Not a file or directory: ${sourcePath}`);
+    if (!quiet) log.error(`Not a file or directory: ${sourcePath}`);
     return null;
   }
 
@@ -2511,8 +2884,14 @@ async function resolveTemplateAddFileConflict(
   entry: TemplateAddFileEntry,
   totalFileCount: number,
   diff: string,
+  json: boolean,
 ): Promise<Exclude<TemplateAddFileConflictAction, "diff">> {
   if (!isInteractive()) {
+    if (json) {
+      throw new OperationalError(
+        `Template file already exists: ${entry.targetPath}`,
+      );
+    }
     log.error(`Template file already exists: ${entry.targetPath}`);
     return "cancel";
   }
@@ -2596,10 +2975,14 @@ function runNoIndexDiff(oldPath: string, newPath: string): Promise<string> {
 async function runTemplateCopy(
   sourceId: string,
   destId: string,
+  json: boolean,
 ): Promise<CommandResult> {
   // Load source template
   const sourceTemplate = await loadTemplate(sourceId);
   if (!sourceTemplate) {
+    if (json) {
+      throw new OperationalError(`Source template "${sourceId}" not found.`);
+    }
     log.error(`Source template "${sourceId}" not found.`);
     const templates = await listTemplates();
     if (templates.length > 0) {
@@ -2611,12 +2994,23 @@ async function runTemplateCopy(
   // Check destination doesn't exist
   const destTemplate = await loadTemplate(destId);
   if (destTemplate) {
+    if (json) {
+      throw new OperationalError(`Template "${destId}" already exists.`);
+    }
     log.error(`Template "${destId}" already exists.`);
     return templateFailure();
   }
 
   // Create the copy
   await createTemplate(destId, sourceTemplate.config);
+  const copied = await loadTemplate(destId);
+  if (json) {
+    return jsonSuccess({
+      action: "copied",
+      source: templateJson(sourceTemplate),
+      template: copied ? templateJson(copied) : { id: destId },
+    });
+  }
   log.success(`Template "${sourceId}" copied to "${destId}".`);
   return templateSuccess();
 }

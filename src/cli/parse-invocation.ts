@@ -9,12 +9,20 @@ import type {
 } from "./types.ts";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
+const GLOBAL_FLAGS: readonly FlagDefinition[] = [
+  {
+    name: "json",
+    long: "--json",
+    kind: "boolean",
+    description: "Emit a machine-readable JSON envelope.",
+  },
+];
 
 export function parseInvocation(
   command: ResolvedCommand,
   context: InvocationContext = { interactive: false },
 ): ParsedInvocation {
-  const byToken = buildFlagTokenMap(command.leaf.flags);
+  const byToken = buildFlagTokenMap([...GLOBAL_FLAGS, ...command.leaf.flags]);
   const flags: Record<string, boolean | string | undefined> = {};
   const beforeDoubleDash: string[] = [];
   const afterDoubleDash: string[] = [];

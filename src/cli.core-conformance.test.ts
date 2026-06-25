@@ -72,11 +72,16 @@ describe("core command family conformance", () => {
 
   it("renders version output raw on stdout", async () => {
     const canonical = await runCommand(["version"]);
+    const json = await runCommand(["version", "--json"]);
 
     expect(canonical).toMatchObject({
       exitCode: 0,
       stdout: "workforest 0.0.1\n",
       stderr: "",
+    });
+    expect(JSON.parse(json.stdout)).toEqual({
+      ok: true,
+      data: { version: "0.0.1" },
     });
   });
 
@@ -100,11 +105,40 @@ describe("core command family conformance", () => {
 
   it("renders shell init source without stderr decoration", async () => {
     const result = await runCommand(["shell", "init", "bash"]);
+    const json = await runCommand(["shell", "init", "bash", "--json"]);
 
     expect(result).toMatchObject({ exitCode: 0, stderr: "" });
     expect(result.stdout).toMatch(
       /^# workforest shell integration for bash\n__workforest_invoke\(\)/,
     );
+    expect(json).toMatchObject({ exitCode: 0, stderr: "" });
+    expect(JSON.parse(json.stdout)).toEqual({
+      ok: true,
+      data: {
+        shell: "bash",
+        script: expect.stringMatching(
+          /^# workforest shell integration for bash\n__workforest_invoke\(\)/,
+        ),
+      },
+    });
+  });
+
+  it("renders config show as a JSON envelope", async () => {
+    const result = await runCommand(["config", "show", "--json"]);
+
+    expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        path: path.join(configDir, "config.json"),
+        config: expect.any(Object),
+        resolvedDirectories: expect.objectContaining({
+          repos: expect.any(String),
+          workspaces: expect.any(String),
+          reviews: expect.any(String),
+        }),
+      }),
+    });
   });
 
   it("keeps skills get and path raw on stdout", async () => {
@@ -152,11 +186,6 @@ describe("core command family conformance", () => {
   });
 
   it.each([
-    [["version", "--json"], 'Unknown flag "--json" for wf version'],
-    [["shell", "init", "--json"], 'Unknown flag "--json" for wf shell init'],
-    [["config", "show", "--json"], 'Unknown flag "--json" for wf config show'],
-    [["config", "init", "--json"], 'Unknown flag "--json" for wf config init'],
-    [["config", "edit", "--json"], 'Unknown flag "--json" for wf config edit'],
     [["skills", "list", "--full"], 'Unknown flag "--full" for wf skills list'],
     [["skills", "get", "--bogus"], 'Unknown flag "--bogus" for wf skills get'],
     [["skills", "path", "--full"], 'Unknown flag "--full" for wf skills path'],
@@ -166,6 +195,22 @@ describe("core command family conformance", () => {
     } else {
       await expectUsageError(argv, message);
     }
+  });
+
+  it.each([
+    ["config", "init"],
+    ["config", "edit"],
+  ])("returns JSON usage errors for interactive-only wf %s %s", async (...argv) => {
+    const result = await runCommand([...argv, "--json"]);
+
+    expect(result).toMatchObject({ exitCode: 2, stderr: "" });
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      error: {
+        kind: "usage",
+        message: `JSON output is not available for wf ${argv.join(" ")}.`,
+      },
+    });
   });
 
   it("reports valid non-interactive config init as an operational failure", async () => {

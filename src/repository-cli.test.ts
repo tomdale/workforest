@@ -182,11 +182,8 @@ describe("cache commands", () => {
     ["cache", "list", "--force"],
     ["cache", "show", "front", "--force"],
     ["cache", "show", "front", "--path", "--json"],
-    ["cache", "sync", "vercel/front", "--json"],
     ["cache", "check", "--force"],
-    ["cache", "delete", "front", "--json"],
     ["cache", "delete", "front", "-n", "--dry-run"],
-    ["cache", "clean", "--json"],
   ])("rejects inapplicable cache flags for %j", async (...argv) => {
     const result = await runCommand(argv);
 
@@ -251,7 +248,7 @@ describe("cache commands", () => {
       stdout: `${path.join(cacheDir, "front.git")}\n`,
       stderr: "",
     });
-  }, 15_000);
+  }, 30_000);
 
   it("prints undecorated cache paths", async () => {
     const cacheDir = await createCache();

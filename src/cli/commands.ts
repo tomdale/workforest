@@ -127,11 +127,22 @@ function leaf(options: {
     operands: options.operands ?? operands(0, 0),
     flags: options.flags ?? [],
     examples: options.examples ?? [],
-    outputModes: options.outputModes ?? ["human"],
+    outputModes: normalizeOutputModes(
+      options.outputModes ?? ["human"],
+      options.visibility ?? visible,
+    ),
     tty: options.tty ?? noTty,
     shellHandoff: options.shellHandoff ?? "none",
     handler: options.handler,
   };
+}
+
+function normalizeOutputModes(
+  modes: readonly OutputMode[],
+  visibility: Visibility,
+): readonly OutputMode[] {
+  if (visibility !== "visible" || modes.includes("json")) return modes;
+  return [...modes, "json"];
 }
 
 function group(options: {

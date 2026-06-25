@@ -5,6 +5,7 @@ import { parse as parseJsonc } from "jsonc-parser";
 import {
   readEnvironmentVariable,
   STANDARD_ENVIRONMENT_VARIABLES,
+  WORKFOREST_ENVIRONMENT_VARIABLES,
 } from "../environment.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { TemplateConfig } from "../types.ts";
@@ -26,6 +27,13 @@ export type Template = {
 };
 
 export function getTemplatesDir(): string {
+  const configDir = readEnvironmentVariable(
+    WORKFOREST_ENVIRONMENT_VARIABLES.configDir,
+  );
+  if (configDir) {
+    return path.join(configDir, "templates");
+  }
+
   const xdgHome =
     readEnvironmentVariable(STANDARD_ENVIRONMENT_VARIABLES.xdgConfigHome) ??
     path.join(os.homedir(), ".config");

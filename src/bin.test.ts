@@ -113,6 +113,30 @@ describe("bin/workforest.js", () => {
     );
   });
 
+  it("keeps JSON output as a single envelope before dashboard preload", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      NO_COLOR: "1",
+    };
+    Reflect.deleteProperty(env, "FORCE_COLOR");
+    Reflect.deleteProperty(env, "WORKFOREST_NO_TUI");
+    Reflect.deleteProperty(env, "WORKFOREST_USE_SOURCE_CLI");
+
+    const result = await execFileAsync(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), "version", "--json"],
+      { env, timeout: 10_000 },
+    );
+
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed).toEqual({
+      ok: true,
+      data: { version: expect.any(String) },
+    });
+    expect(result.stdout).toBe(`${JSON.stringify(parsed)}\n`);
+    expect(result.stderr).toBe("");
+  });
+
   it.each([
     [["wat"], "Unknown command: wat"],
     [["list", "--bogus"], 'Unknown flag "--bogus" for wf list'],
@@ -134,7 +158,7 @@ describe("bin/workforest.js", () => {
   it("renders JSON invocation errors as valid envelopes", async () => {
     const result = await runSubprocess(
       process.execPath,
-      [path.resolve("bin/workforest.js"), "task", "list", "--json"],
+      [path.resolve("bin/workforest.js"), "list", "--bogus", "--json"],
       { timeout: 10_000 },
     );
 
@@ -143,7 +167,7 @@ describe("bin/workforest.js", () => {
       ok: false,
       error: {
         kind: "usage",
-        message: 'Unknown flag "--json" for wf task list.',
+        message: 'Unknown flag "--bogus" for wf list.',
       },
     });
     expect(result.stdout).not.toContain("Running local copy");

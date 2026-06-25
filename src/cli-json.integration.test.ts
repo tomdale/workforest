@@ -158,6 +158,153 @@ describe("JSON CLI integration", () => {
     });
   });
 
+  it("emits JSON for dashboard and help routes", async () => {
+    const dashboard = await runJson(["dashboard", "--json"]);
+    const workflowHelp = await runJson(["help", "workflow", "--json"]);
+
+    expectJsonResult(dashboard, 0, {
+      ok: true,
+      data: expect.objectContaining({
+        route: expect.objectContaining({ id: "home" }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({ id: "home.start" }),
+        ]),
+      }),
+    });
+    expectJsonResult(workflowHelp, 0, {
+      ok: true,
+      data: {
+        page: "workflow",
+        content: expect.stringContaining("wf help workflow"),
+      },
+    });
+  });
+
+  it("emits JSON for cache mutation reports without ANSI", async () => {
+    const cacheDir = await createTempDir("workforest-json-mutation-cache-");
+    const sync = await runJson(["cache", "sync", "--json"], { cacheDir });
+    const clean = await runJson(["cache", "clean", "--json"], { cacheDir });
+
+    expectJsonResult(sync, 0, {
+      ok: true,
+      data: { messages: [], repositories: [] },
+    });
+    expectJsonResult(clean, 0, {
+      ok: true,
+      data: {
+        dryRun: false,
+        deleted: [],
+        message: "No unused cached repositories.",
+      },
+    });
+  });
+
+  it("emits JSON for task listing inside a workspace", async () => {
+    const workspaceDir = await createWorkspaceFixture();
+    const result = await runJson(["task", "list", "--json"], {
+      cwd: path.join(workspaceDir, "front"),
+    });
+
+    expectJsonResult(result, 0, {
+      ok: true,
+      data: {
+        workspaceDir: expect.stringMatching(/json-status$/),
+        repo: "front",
+        tasks: [],
+      },
+    });
+  });
+
+  it("emits JSON for template read and mutation commands", async () => {
+    const created = await runJson([
+      "template",
+      "new",
+      "json-template",
+      "vercel/front",
+      "--description",
+      "JSON template",
+      "--json",
+    ]);
+    const listed = await runJson(["template", "list", "--json"]);
+    const shown = await runJson([
+      "template",
+      "show",
+      "json-template",
+      "--json",
+    ]);
+    const copied = await runJson([
+      "template",
+      "copy",
+      "json-template",
+      "json-copy",
+      "--json",
+    ]);
+    const deleted = await runJson([
+      "template",
+      "delete",
+      "json-copy",
+      "--force",
+      "--json",
+    ]);
+
+    expectJsonResult(created, 0, {
+      ok: true,
+      data: {
+        action: "created",
+        template: expect.objectContaining({
+          id: "json-template",
+          config: {
+            repos: ["vercel/front"],
+            description: "JSON template",
+          },
+        }),
+      },
+    });
+    expectJsonResult(listed, 0, {
+      ok: true,
+      data: {
+        templates: expect.arrayContaining([
+          expect.objectContaining({ id: "json-template" }),
+        ]),
+        templatesDir: path.join(baseConfigDir, "templates"),
+      },
+    });
+    expectJsonResult(shown, 0, {
+      ok: true,
+      data: expect.objectContaining({
+        template: expect.objectContaining({ id: "json-template" }),
+        filesDir: null,
+      }),
+    });
+    expectJsonResult(copied, 0, {
+      ok: true,
+      data: expect.objectContaining({
+        action: "copied",
+        source: expect.objectContaining({ id: "json-template" }),
+        template: expect.objectContaining({ id: "json-copy" }),
+      }),
+    });
+    expectJsonResult(deleted, 0, {
+      ok: true,
+      data: expect.objectContaining({
+        action: "deleted",
+        template: expect.objectContaining({ id: "json-copy" }),
+      }),
+    });
+  });
+
+  it("returns JSON usage errors for interactive-only raw paths", async () => {
+    const manager = await runJson(["template", "manage", "--json"]);
+
+    expectJsonResult(manager, 2, {
+      ok: false,
+      error: {
+        kind: "usage",
+        message: "JSON output is not available for wf template manage.",
+      },
+    });
+  });
+
   it("lists skills and reports a missing skills directory", async () => {
     const missingSkillsDir = path.join(
       await createTempDir("workforest-json-missing-skills-"),
