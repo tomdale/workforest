@@ -204,10 +204,10 @@ Review worktrees are stored below `directory.reviews`, which defaults to
 Templates capture repeated repository sets, branch prefixes, setup hooks, and
 default files.
 
-Open the interactive manager to create, edit, copy, or delete templates:
+Open the templates dashboard to create, edit, copy, or delete templates:
 
 ```sh
-wf template manage
+wf templates
 ```
 
 Inspect a template non-interactively:
@@ -358,7 +358,7 @@ wf task delete         Delete explicit task worktrees
 wf cache list          Inspect cached mirrors
 wf review open         Open a review workspace
 wf review checkout     Check out a pull request
-wf template manage     Open the template manager
+wf templates           Open the templates dashboard
 wf template show       Show template details
 wf template open       Open a template directory
 wf shell init          Print shell integration
@@ -403,5 +403,5 @@ wf cache doctor <repo> --fix
 
 ### A Template Is Missing
 
-Use `wf template manage` to inspect saved templates or
+Use `wf templates` to inspect saved templates or
 `wf template show <name>` for a non-interactive lookup.

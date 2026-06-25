@@ -294,14 +294,15 @@ describe("JSON CLI integration", () => {
   });
 
   it("returns JSON usage errors for interactive-only raw paths", async () => {
-    const manager = await runJson(["template", "manage", "--json"]);
+    const legacyManagerCommand = ["template", "manage"];
+    const manager = await runJson([...legacyManagerCommand, "--json"]);
     const suggest = await runJson(["template", "suggest", "--json"]);
 
     expectJsonResult(manager, 2, {
       ok: false,
       error: {
         kind: "usage",
-        message: "JSON output is not available for wf template manage.",
+        message: `JSON output is not available for wf ${legacyManagerCommand.join(" ")}.`,
       },
     });
     expectJsonResult(suggest, 2, {

@@ -189,8 +189,8 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
   },
   {
     id: "templates.screen",
-    label: "Open manager",
-    description: "Open dashboard-native template management.",
+    label: "Templates dashboard",
+    description: "Open the dashboard-native templates screen.",
     kind: "command",
     command: ["templates"],
     shellHandoff: false,

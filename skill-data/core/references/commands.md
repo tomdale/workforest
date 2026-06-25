@@ -659,24 +659,6 @@ Examples:
 
 - `wf template show <template>` — Print one template's repositories, hooks, and branch prefix.
 
-### `wf template manage`
-
-Open the template manager.
-
-Opens an interactive manager to browse, create, edit, copy, and delete templates from one screen. Requires an interactive terminal; without a TTY (or under `$CI`/`$WORKFOREST_NO_TUI`) it falls back to `wf template list` and exits 0. For scripted use, drive the individual subcommands directly.
-
-```text
-wf template manage [options]
-```
-
-Options:
-
-- `--json` — Emit a machine-readable JSON envelope.
-
-Examples:
-
-- `wf template manage` — Browse and edit all templates in an interactive screen.
-
 ### `wf template suggest`
 
 Suggest templates from PR history.

@@ -303,7 +303,6 @@ describe("cli", () => {
     [["template", "list", "--help"], "Usage: wf template list"],
     [["template", "open", "--help"], "Usage: wf template open"],
     [["template", "show", "--help"], "Usage: wf template show"],
-    [["template", "manage", "--help"], "Usage: wf template manage"],
     [["template", "new", "--help"], "Usage: wf template new"],
     [["template", "delete", "--help"], "Usage: wf template delete"],
     [["template", "add-file", "--help"], "Usage: wf template add-file"],
@@ -358,7 +357,7 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("opens the interactive template manager for wf template manage", async () => {
+  it("opens the interactive templates UI for the legacy command", async () => {
     const xdgConfigHome = await createTempDir("workforest-xdg-");
     process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
     Object.defineProperty(process.stdin, "isTTY", {

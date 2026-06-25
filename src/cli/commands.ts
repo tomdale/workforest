@@ -16,6 +16,7 @@ import type {
 } from "./types.ts";
 
 const visible: Visibility = "visible";
+const hidden: Visibility = "hidden";
 const noTty: TtyRequirement = { kind: "none" };
 const optionalStdin: TtyRequirement = {
   kind: "optional",
@@ -1268,14 +1269,15 @@ export const commandRegistry: CommandRegistry = {
           leaf({
             name: "manage",
             path: ["template", "manage"],
-            summary: "Open the template manager",
+            visibility: hidden,
+            summary: "Open the templates dashboard",
             description:
-              "Opens an interactive manager to browse, create, edit, copy, and delete templates from one screen. Requires an interactive terminal; without a TTY (or under `$CI`/`$WORKFOREST_NO_TUI`) it falls back to `wf template list` and exits 0. For scripted use, drive the individual subcommands directly.",
+              "Legacy compatibility entrypoint for the templates dashboard. Requires an interactive terminal; without a TTY (or under `$CI`/`$WORKFOREST_NO_TUI`) it falls back to `wf template list` and exits 0. For scripted use, drive the individual subcommands directly.",
             handler: "template.manage",
             help: nestedHelp("template", "manage"),
             examples: [
               {
-                command: "wf template manage",
+                command: "wf templates",
                 description:
                   "Browse and edit all templates in an interactive screen.",
               },

@@ -84,7 +84,7 @@ export async function runTemplateManager({
     const screen = new Screen({
       smartCSR: true,
       fullUnicode: true,
-      title: "wf template manage",
+      title: "wf templates",
     });
 
     const listBox = new Box({
