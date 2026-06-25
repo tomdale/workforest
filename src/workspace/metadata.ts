@@ -272,6 +272,51 @@ export async function updateWorkspaceRepo(
   });
 }
 
+export async function updateRepositoryChangeRepo(
+  repoRootDir: string,
+  changeName: string,
+  repo: WorkspaceRepoMetadata,
+): Promise<WorkspaceMetadata> {
+  const safeChangeName = validateResourceName(changeName, "Change name");
+  return withWorkspaceMetadataLock(repoRootDir, async () => {
+    const metadata = await readRepositoryChangeMetadata(
+      repoRootDir,
+      safeChangeName,
+    );
+
+    if (!metadata) {
+      throw new Error(
+        `Repository change metadata not found at ${getRepositoryChangeMetadataPath(repoRootDir, safeChangeName)}`,
+      );
+    }
+
+    const existingIndex = metadata.repos.findIndex(
+      (entry) => entry.name === repo.name,
+    );
+    const repos =
+      existingIndex === -1
+        ? [...metadata.repos, repo]
+        : metadata.repos.map((entry, index) =>
+            index === existingIndex ? repo : entry,
+          );
+    const nextMetadata = { ...metadata, repos };
+    const metadataPath = getRepositoryChangeMetadataPath(
+      repoRootDir,
+      safeChangeName,
+    );
+
+    await writeMetadataFile(metadataPath, repoRootDir, nextMetadata, {
+      source: "repository change metadata",
+      ensureParent: async () => {
+        await assertRepositoryMetadataPathNotSymlink(repoRootDir);
+        await fs.mkdir(path.dirname(metadataPath), { recursive: true });
+        await assertRepositoryMetadataPathNotSymlink(repoRootDir);
+      },
+    });
+    return nextMetadata;
+  });
+}
+
 export async function appendTasks(
   workspaceDir: string,
   tasks: readonly TaskMetadata[],

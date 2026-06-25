@@ -6,10 +6,13 @@ import type { RepoConfig } from "../types.ts";
 import {
   buildRepoInitializerWorkerEnvironment,
   cancelRepoInitializations,
+  getInitializationDir,
+  initializeRepositoryChangeSetup,
   initializeWorkspaceInitialization,
   REPO_INITIALIZER_WORKER,
   readRepoInitializationState,
   readWorkspaceInitializationState,
+  repositoryChangeInitializationScope,
   retryRepoInitializations,
   runRepoInitializationWorker,
   startRepoInitialization,
@@ -61,6 +64,7 @@ describe("background repository initialization", () => {
       EXISTING: "value",
       WORKFOREST_BACKGROUND_WORKER: "1",
       WORKFOREST_WORKER: REPO_INITIALIZER_WORKER,
+      WORKFOREST_WORKER_SCOPE: "workspace",
       WORKFOREST_WORKER_WORKSPACE: "/tmp/workspace",
       WORKFOREST_WORKER_REPO: "front",
       WORKFOREST_WORKER_RUN_ID: "run-1",
@@ -134,6 +138,56 @@ describe("background repository initialization", () => {
       readWorkspaceInitializationState(workspaceDir),
     ).resolves.toMatchObject({
       status: "initializing",
+    });
+  });
+
+  it("stores repository change setup state independently per change", async () => {
+    const repoRootDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-repo-initialization-"),
+    );
+    tempDirs.push(repoRootDir);
+    const firstScope = repositoryChangeInitializationScope({
+      repoRootDir,
+      changeName: "first-change",
+    });
+    const secondScope = repositoryChangeInitializationScope({
+      repoRootDir,
+      changeName: "second-change",
+    });
+
+    await initializeRepositoryChangeSetup({
+      repoRootDir,
+      changeName: "first-change",
+      repo,
+    });
+    await initializeRepositoryChangeSetup({
+      repoRootDir,
+      changeName: "second-change",
+      repo,
+    });
+    await startRepoInitialization(
+      { scope: firstScope, repo },
+      async () => 4242,
+    );
+
+    expect(getInitializationDir(firstScope)).toBe(
+      path.join(repoRootDir, ".workforest", "initialization", "first-change"),
+    );
+    expect(getInitializationDir(secondScope)).toBe(
+      path.join(repoRootDir, ".workforest", "initialization", "second-change"),
+    );
+    await expect(
+      readRepoInitializationState(firstScope, repo.name),
+    ).resolves.toMatchObject({
+      status: "queued",
+      attempt: 1,
+      pid: 4242,
+    });
+    await expect(
+      readRepoInitializationState(secondScope, repo.name),
+    ).resolves.toMatchObject({
+      status: "pending",
+      attempt: 0,
     });
   });
 });

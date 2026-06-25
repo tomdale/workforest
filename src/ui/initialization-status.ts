@@ -11,6 +11,7 @@ import {
 import { fullscreenColor } from "../terminal/theme.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
+  type InitializationTarget,
   readWorkspaceInitializationState,
   watchRepoInitialization,
 } from "../workspace/initialization.ts";
@@ -26,7 +27,7 @@ const STATUS_ICONS = {
 };
 
 export async function renderInitializationStatus(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoNames: readonly string[],
 ): Promise<void> {
   const screen = createFullscreenScreen();
@@ -57,7 +58,9 @@ export async function renderInitializationStatus(
     repoNames.map((repoName) => [
       repoName,
       watchRepoInitialization({
-        workspaceDir,
+        ...(typeof target === "string"
+          ? { workspaceDir: target }
+          : { scope: target }),
         repoName,
         includeExistingLog: true,
       }),
@@ -67,7 +70,7 @@ export async function renderInitializationStatus(
   let nextUpdate = updates.next();
 
   const updateStatusLine = async (): Promise<void> => {
-    const workspaceState = await readWorkspaceInitializationState(workspaceDir);
+    const workspaceState = await readWorkspaceInitializationState(target);
     const message = workspaceState?.message ?? "Initialization status";
     const warningCount = workspaceState?.warnings?.length ?? 0;
     const warningSuffix =

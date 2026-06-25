@@ -436,24 +436,46 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
     throw new OperationalError(`Unknown Workforest worker: ${worker}`);
   }
 
-  const workspaceDir = process.env["WORKFOREST_WORKER_WORKSPACE"];
+  const workerScope = process.env["WORKFOREST_WORKER_SCOPE"] ?? "workspace";
   const repoName = process.env["WORKFOREST_WORKER_REPO"];
   const runId = process.env["WORKFOREST_WORKER_RUN_ID"];
-  if (!workspaceDir || !repoName || !runId) {
+  if (!repoName || !runId) {
     throw new OperationalError(
-      "Repository initialization worker requires WORKFOREST_WORKER_WORKSPACE, WORKFOREST_WORKER_REPO, and WORKFOREST_WORKER_RUN_ID.",
+      "Repository initialization worker requires WORKFOREST_WORKER_REPO and WORKFOREST_WORKER_RUN_ID.",
     );
   }
 
-  const { runRepoInitializationWorker } = await import(
-    "./workspace/initialization.ts"
-  );
+  const {
+    runRepoInitializationWorker,
+    repositoryChangeInitializationScope,
+    workspaceInitializationScope,
+  } = await import("./workspace/initialization.ts");
+  const scope =
+    workerScope === "repository-change"
+      ? repositoryChangeInitializationScope({
+          repoRootDir: requiredWorkerEnv("WORKFOREST_WORKER_REPO_ROOT"),
+          changeName: requiredWorkerEnv("WORKFOREST_WORKER_CHANGE"),
+        })
+      : workspaceInitializationScope(
+          requiredWorkerEnv("WORKFOREST_WORKER_WORKSPACE"),
+        );
+
   try {
-    await runRepoInitializationWorker({ workspaceDir, repoName, runId });
+    await runRepoInitializationWorker({ scope, repoName, runId });
     return success();
   } catch (error) {
     throw new OperationalError(getErrorMessage(error), { cause: error });
   }
+}
+
+function requiredWorkerEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new OperationalError(
+      `Repository initialization worker requires ${name}.`,
+    );
+  }
+  return value;
 }
 
 async function renderHelpReference(
@@ -785,9 +807,8 @@ async function runChangeStatusCommand(
     );
   }
 
-  const { buildChangeStatus, renderChangeStatus } = await import(
-    "./workspace/status.ts"
-  );
+  const { buildChangeStatus, changeInitializationScope, renderChangeStatus } =
+    await import("./workspace/status.ts");
   const status = await buildChangeStatus(resolution.entry);
 
   if (booleanInvocationFlag(invocation, "watch")) {
@@ -815,7 +836,7 @@ async function runChangeStatusCommand(
       "./ui/initialization-status.ts"
     );
     await renderInitializationStatus(
-      resolution.entry.path,
+      changeInitializationScope(resolution.entry),
       status.initialization.repos.map((state) => state.repo),
     );
     return success();

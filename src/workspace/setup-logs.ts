@@ -7,6 +7,12 @@ import {
   resolveContainedPath,
   validateResourceName,
 } from "../utils/path-safety.ts";
+import {
+  getInitializationRootDir,
+  getInitializationStateDir,
+  type InitializationScope,
+  workspaceInitializationScope,
+} from "./initialization-scope.ts";
 import { ensureWorkspaceMetadataDir } from "./metadata.ts";
 import type { RepoPipelineState } from "./pipeline.ts";
 
@@ -16,19 +22,30 @@ export type RepoSetupLogOptions = {
   workspaceDir: string;
   repoName: string;
   repoDir: string;
+  initializationScope?: InitializationScope;
 };
 
 export async function getRepoSetupLogPath({
   workspaceDir,
   repoName,
-}: Pick<RepoSetupLogOptions, "workspaceDir" | "repoName">): Promise<string> {
-  const metadataDir = await ensureWorkspaceMetadataDir(workspaceDir);
+  initializationScope,
+}: Pick<
+  RepoSetupLogOptions,
+  "workspaceDir" | "repoName" | "initializationScope"
+>): Promise<string> {
+  const scope =
+    initializationScope ?? workspaceInitializationScope(workspaceDir);
+  const rootDir = getInitializationRootDir(scope);
+  const logDir =
+    scope.kind === "workspace"
+      ? path.join(await ensureWorkspaceMetadataDir(scope.workspaceDir), "logs")
+      : path.join(getInitializationStateDir(scope), "logs");
   const safeName = validateResourceName(
     sanitizeLogName(repoName),
     "Repository log name",
   );
-  const logPath = resolveContainedPath(metadataDir, "logs", `${safeName}.log`);
-  await assertContainedPathWithoutSymlinks(workspaceDir, logPath);
+  const logPath = resolveContainedPath(logDir, `${safeName}.log`);
+  await assertContainedPathWithoutSymlinks(rootDir, logPath);
   return logPath;
 }
 
@@ -37,8 +54,12 @@ export async function startRepoSetupLog(
 ): Promise<string> {
   const logPath = await getRepoSetupLogPath(options);
   const logDir = path.dirname(logPath);
+  const scope =
+    options.initializationScope ??
+    workspaceInitializationScope(options.workspaceDir);
+  const rootDir = getInitializationRootDir(scope);
   await fs.mkdir(logDir, { recursive: true });
-  await assertContainedPathWithoutSymlinks(options.workspaceDir, logPath);
+  await assertContainedPathWithoutSymlinks(rootDir, logPath);
   await fs.rm(logPath, { force: true });
 
   await appendRepoSetupLog(
@@ -101,23 +122,33 @@ class RepoSetupLogWriter {
 export async function removeRepoSetupLog(
   workspaceDir: string,
   logPath: string,
+  initializationScope?: InitializationScope,
 ): Promise<void> {
+  const scope =
+    initializationScope ?? workspaceInitializationScope(workspaceDir);
+  const rootDir = getInitializationRootDir(scope);
   const safeLogPath = resolveContainedPath(
-    workspaceDir,
-    path.relative(path.resolve(workspaceDir), path.resolve(logPath)),
+    rootDir,
+    path.relative(path.resolve(rootDir), path.resolve(logPath)),
   );
-  await assertContainedPathWithoutSymlinks(workspaceDir, safeLogPath);
+  await assertContainedPathWithoutSymlinks(rootDir, safeLogPath);
   await fs.rm(safeLogPath, { force: true });
 }
 
 export async function readRepoSetupLogExcerpt({
   workspaceDir,
   repoName,
+  initializationScope,
   maxChars = DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS,
 }: Pick<RepoSetupLogOptions, "workspaceDir" | "repoName"> & {
+  initializationScope?: InitializationScope;
   maxChars?: number;
 }): Promise<string | null> {
-  const logPath = await getRepoSetupLogPath({ workspaceDir, repoName });
+  const logPath = await getRepoSetupLogPath({
+    workspaceDir,
+    repoName,
+    ...(initializationScope ? { initializationScope } : {}),
+  });
 
   let handle: FileHandle | undefined;
   try {
@@ -178,7 +209,11 @@ export async function* withRepoSetupLog(
   } finally {
     await logWriter.close();
     if (!shouldKeepLog) {
-      await removeRepoSetupLog(options.workspaceDir, logPath);
+      await removeRepoSetupLog(
+        options.workspaceDir,
+        logPath,
+        options.initializationScope,
+      );
     }
   }
 }

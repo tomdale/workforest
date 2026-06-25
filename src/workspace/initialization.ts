@@ -8,22 +8,41 @@ import { validateRepositoryComponent } from "../repository-components.ts";
 import { applyTemplateGenerator } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
-import { resolveContainedPath } from "../utils/path-safety.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
-import { readWorkspaceMetadata, updateWorkspaceRepo } from "./metadata.ts";
+import {
+  getInitializationRepoDir,
+  getInitializationRootDir,
+  getInitializationStateDir,
+  type InitializationScope,
+  type InitializationTarget,
+  normalizeInitializationTarget,
+  repositoryChangeInitializationScope,
+  workspaceInitializationScope,
+} from "./initialization-scope.ts";
+import {
+  readRepositoryChangeMetadata,
+  readWorkspaceMetadata,
+  updateRepositoryChangeRepo,
+  updateWorkspaceRepo,
+} from "./metadata.ts";
 import {
   type RepoPipelineState,
   repoInitializationGenerator,
 } from "./pipeline.ts";
 import { getRepoSetupLogPath, withRepoSetupLog } from "./setup-logs.ts";
 
-const INITIALIZATION_DIR = "initialization";
 const WORKSPACE_STATE_FILENAME = "workspace.json";
 const LOCK_RETRY_MS = 20;
 const LOCK_TIMEOUT_MS = 10_000;
 const STALE_LOCK_MS = 30_000;
 const QUEUED_STALE_MS = 2_000;
 export const REPO_INITIALIZER_WORKER = "repo-initializer";
+
+export {
+  type InitializationTarget,
+  repositoryChangeInitializationScope,
+  workspaceInitializationScope,
+} from "./initialization-scope.ts";
 
 export type RepoInitializationStatus =
   | "pending"
@@ -72,33 +91,46 @@ export type WorkspaceInitializationState = {
 };
 
 export type StartRepoInitializationOptions = {
-  workspaceDir: string;
+  workspaceDir?: string;
+  scope?: InitializationScope;
   repo: RepoConfig;
   disabledInitializers?: boolean | string[];
 };
 
 type WorkerLaunch = (options: {
-  workspaceDir: string;
+  scope: InitializationScope;
   repoName: string;
   runId: string;
 }) => Promise<number>;
 
 export function buildRepoInitializerWorkerEnvironment({
+  scope: explicitScope,
   workspaceDir,
   repoName,
   runId,
   environment = process.env,
 }: {
-  workspaceDir: string;
+  scope?: InitializationScope;
+  workspaceDir?: string;
   repoName: string;
   runId: string;
   environment?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
+  const scope = resolveInitializationScope({
+    workspaceDir,
+    scope: explicitScope,
+  });
   return {
     ...environment,
     WORKFOREST_BACKGROUND_WORKER: "1",
     WORKFOREST_WORKER: REPO_INITIALIZER_WORKER,
-    WORKFOREST_WORKER_WORKSPACE: workspaceDir,
+    WORKFOREST_WORKER_SCOPE: scope.kind,
+    ...(scope.kind === "workspace"
+      ? { WORKFOREST_WORKER_WORKSPACE: scope.workspaceDir }
+      : {
+          WORKFOREST_WORKER_REPO_ROOT: scope.repoRootDir,
+          WORKFOREST_WORKER_CHANGE: scope.changeName,
+        }),
     WORKFOREST_WORKER_REPO: repoName,
     WORKFOREST_WORKER_RUN_ID: runId,
   };
@@ -111,19 +143,51 @@ export async function initializeWorkspaceInitialization({
   workspaceDir: string;
   repos: readonly RepoConfig[];
 }): Promise<void> {
-  await fs.mkdir(getInitializationDir(workspaceDir), { recursive: true });
+  await initializeScopedInitialization({
+    scope: workspaceInitializationScope(workspaceDir),
+    repos,
+    message: "Creating repository worktrees",
+  });
+}
+
+export async function initializeRepositoryChangeSetup({
+  repoRootDir,
+  changeName,
+  repo,
+}: {
+  repoRootDir: string;
+  changeName: string;
+  repo: RepoConfig;
+}): Promise<void> {
+  await initializeScopedInitialization({
+    scope: repositoryChangeInitializationScope({ repoRootDir, changeName }),
+    repos: [repo],
+    message: "Creating repository worktree",
+  });
+}
+
+async function initializeScopedInitialization({
+  scope,
+  repos,
+  message,
+}: {
+  scope: InitializationScope;
+  repos: readonly RepoConfig[];
+  message: string;
+}): Promise<void> {
+  await fs.mkdir(getInitializationDir(scope), { recursive: true });
   const now = new Date().toISOString();
 
-  await writeWorkspaceInitializationState(workspaceDir, {
+  await writeWorkspaceInitializationState(scope, {
     version: 1,
     status: "creating",
-    message: "Creating repository worktrees",
+    message,
     updated_at: now,
   });
 
   await Promise.all(
     repos.map((repo) =>
-      writeRepoInitializationState(workspaceDir, {
+      writeRepoInitializationState(scope, {
         version: 1,
         repo: repo.name,
         status: "pending",
@@ -136,11 +200,12 @@ export async function initializeWorkspaceInitialization({
 }
 
 export async function readRepoInitializationState(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoName: string,
 ): Promise<RepoInitializationState | null> {
+  const scope = normalizeInitializationTarget(target);
   const state = await readJsonFile<RepoInitializationState>(
-    getRepoStatePath(workspaceDir, repoName),
+    getRepoStatePath(scope, repoName),
   );
   if (!state) return null;
 
@@ -151,7 +216,7 @@ export async function readRepoInitializationState(
     (state.status === "running" ||
       Date.now() - Date.parse(state.updated_at) > QUEUED_STALE_MS)
   ) {
-    return updateRepoInitializationState(workspaceDir, repoName, (current) => {
+    return updateRepoInitializationState(scope, repoName, (current) => {
       if (
         current.run_id !== state.run_id ||
         (current.status !== "running" && current.status !== "queued")
@@ -175,15 +240,14 @@ export async function readRepoInitializationState(
 }
 
 export async function readRepoInitializationStates(
-  workspaceDir: string,
+  target: InitializationTarget,
 ): Promise<RepoInitializationState[]> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
+  const scope = normalizeInitializationTarget(target);
+  const metadata = await readInitializationMetadata(scope);
   if (!metadata) return [];
 
   const states = await Promise.all(
-    metadata.repos.map((repo) =>
-      readRepoInitializationState(workspaceDir, repo.name),
-    ),
+    metadata.repos.map((repo) => readRepoInitializationState(scope, repo.name)),
   );
 
   return states.filter(
@@ -192,25 +256,31 @@ export async function readRepoInitializationStates(
 }
 
 export async function readWorkspaceInitializationState(
-  workspaceDir: string,
+  target: InitializationTarget,
 ): Promise<WorkspaceInitializationState | null> {
   return readJsonFile<WorkspaceInitializationState>(
-    getWorkspaceStatePath(workspaceDir),
+    getWorkspaceStatePath(normalizeInitializationTarget(target)),
   );
 }
 
 export async function* watchRepoInitialization({
   workspaceDir,
+  scope: explicitScope,
   repoName,
   includeExistingLog = false,
   pollIntervalMs = 100,
 }: {
-  workspaceDir: string;
+  workspaceDir?: string;
+  scope?: InitializationScope;
   repoName: string;
   includeExistingLog?: boolean;
   pollIntervalMs?: number;
 }): AsyncGenerator<RepoPipelineState> {
-  const logPath = await getRepoInitializationLogPath(workspaceDir, repoName);
+  const scope = resolveInitializationScope({
+    workspaceDir,
+    scope: explicitScope,
+  });
+  const logPath = await getRepoInitializationLogPath(scope, repoName);
   let logOffset = includeExistingLog
     ? Math.max((await fileSize(logPath)) - 64 * 1024, 0)
     : await fileSize(logPath);
@@ -228,7 +298,7 @@ export async function* watchRepoInitialization({
       };
     }
 
-    const state = await readRepoInitializationState(workspaceDir, repoName);
+    const state = await readRepoInitializationState(scope, repoName);
     if (!state) {
       yield {
         phase: "failed",
@@ -274,11 +344,12 @@ export async function* watchRepoInitialization({
 }
 
 export async function recordRepoGitState(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoName: string,
   state: Extract<RepoPipelineState, { phase: "git" }>,
 ): Promise<void> {
-  await updateRepoInitializationState(workspaceDir, repoName, (current) => {
+  const scope = normalizeInitializationTarget(target);
+  await updateRepoInitializationState(scope, repoName, (current) => {
     if (isTerminalRepoStatus(current.status)) return current;
 
     return {
@@ -293,13 +364,14 @@ export async function recordRepoGitState(
 }
 
 export async function recordRepoSetupFailure(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoName: string,
   error: Error,
   step?: string,
 ): Promise<void> {
+  const scope = normalizeInitializationTarget(target);
   const now = new Date().toISOString();
-  await updateRepoInitializationState(workspaceDir, repoName, (current) => ({
+  await updateRepoInitializationState(scope, repoName, (current) => ({
     ...current,
     status: "failed",
     ...(step ? { step } : {}),
@@ -311,9 +383,10 @@ export async function recordRepoSetupFailure(
 }
 
 export async function markWorkspaceInitializing(
-  workspaceDir: string,
+  target: InitializationTarget,
 ): Promise<void> {
-  await updateWorkspaceInitializationState(workspaceDir, () => ({
+  const scope = normalizeInitializationTarget(target);
+  await updateWorkspaceInitializationState(scope, () => ({
     version: 1,
     status: "initializing",
     message: "Repository initialization continues in the background",
@@ -325,10 +398,8 @@ export async function startRepoInitialization(
   options: StartRepoInitializationOptions,
   launchWorker: WorkerLaunch = launchDetachedWorker,
 ): Promise<RepoInitializationState> {
-  const previous = await readRepoInitializationState(
-    options.workspaceDir,
-    options.repo.name,
-  );
+  const scope = resolveInitializationScope(options);
+  const previous = await readRepoInitializationState(scope, options.repo.name);
   const runId = randomUUID();
   const now = new Date().toISOString();
   const queued: RepoInitializationState = {
@@ -344,33 +415,30 @@ export async function startRepoInitialization(
     updated_at: now,
   };
 
-  await writeRepoInitializationState(options.workspaceDir, queued);
-  await markWorkspaceInitializing(options.workspaceDir);
+  await writeRepoInitializationState(scope, queued);
+  await markWorkspaceInitializing(scope);
 
   try {
     const pid = await launchWorker({
-      workspaceDir: options.workspaceDir,
+      scope,
       repoName: options.repo.name,
       runId,
     });
 
-    return updateRepoInitializationState(
-      options.workspaceDir,
-      options.repo.name,
-      (current) =>
-        current.run_id === runId
-          ? {
-              ...current,
-              pid,
-              updated_at: new Date().toISOString(),
-            }
-          : current,
+    return updateRepoInitializationState(scope, options.repo.name, (current) =>
+      current.run_id === runId
+        ? {
+            ...current,
+            pid,
+            updated_at: new Date().toISOString(),
+          }
+        : current,
     );
   } catch (error) {
     const setupError =
       error instanceof Error ? error : new Error(String(error));
     await recordRepoSetupFailure(
-      options.workspaceDir,
+      scope,
       options.repo.name,
       setupError,
       "initializer:launch",
@@ -381,14 +449,22 @@ export async function startRepoInitialization(
 
 export async function runRepoInitializationWorker({
   workspaceDir,
+  scope: explicitScope,
   repoName,
   runId,
 }: {
-  workspaceDir: string;
+  workspaceDir?: string;
+  scope?: InitializationScope;
   repoName: string;
   runId: string;
 }): Promise<void> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
+  const scope = resolveInitializationScope({
+    workspaceDir,
+    scope: explicitScope,
+  });
+  const rootDir = getInitializationRootDir(scope);
+  const repoDir = getInitializationRepoDir(scope, repoName);
+  const metadata = await readInitializationMetadata(scope);
   const repoMetadata = metadata?.repos.find((repo) => repo.name === repoName);
   if (!metadata || !repoMetadata) {
     throw new Error(`Workspace repository not found: ${repoName}`);
@@ -409,8 +485,8 @@ export async function runRepoInitializationWorker({
     if (stopping) return;
     stopping = true;
     await terminateRunningCommands();
-    await markRepoCancelled(workspaceDir, repoName, runId);
-    await finalizeWorkspaceInitialization(workspaceDir);
+    await markRepoCancelled(scope, repoName, runId);
+    await finalizeWorkspaceInitialization(scope);
     process.exit(0);
   };
   const onSignal = (): void => {
@@ -421,7 +497,7 @@ export async function runRepoInitializationWorker({
   const cancellationTimer = setInterval(() => {
     if (checkingCancellation || stopping) return;
     checkingCancellation = true;
-    void readRepoInitializationState(workspaceDir, repoName)
+    void readRepoInitializationState(scope, repoName)
       .then(async (state) => {
         if (
           state?.run_id === runId &&
@@ -438,7 +514,7 @@ export async function runRepoInitializationWorker({
 
   try {
     const started = await updateRepoInitializationState(
-      workspaceDir,
+      scope,
       repoName,
       (current) => {
         if (current.run_id !== runId || current.status === "cancelled") {
@@ -460,34 +536,33 @@ export async function runRepoInitializationWorker({
     );
 
     if (started.run_id !== runId || started.status === "cancelled") {
-      await finalizeWorkspaceInitialization(workspaceDir);
+      await finalizeWorkspaceInitialization(scope);
       return;
     }
 
     const pipeline = withRepoSetupLog(
       repoInitializationGenerator({
         repo,
-        workspaceDir,
+        workspaceDir: rootDir,
+        repoDir,
         ...(template?.config.disableInitializers !== undefined
           ? { disabledInitializers: template.config.disableInitializers }
           : {}),
       }),
       {
-        workspaceDir,
+        workspaceDir: rootDir,
+        initializationScope: scope,
         repoName,
-        repoDir: resolveContainedPath(
-          workspaceDir,
-          validateRepositoryComponent(repoName, "Repository name"),
-        ),
+        repoDir,
       },
     );
 
     for await (const state of pipeline) {
       if (stopping) return;
-      await recordWorkerPipelineState(workspaceDir, repo, runId, state);
+      await recordWorkerPipelineState(scope, repo, runId, state);
     }
 
-    await finalizeWorkspaceInitialization(workspaceDir);
+    await finalizeWorkspaceInitialization(scope);
   } finally {
     clearInterval(cancellationTimer);
     process.off("SIGTERM", onSignal);
@@ -496,13 +571,14 @@ export async function runRepoInitializationWorker({
 }
 
 export async function cancelRepoInitializations(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoNames: readonly string[],
 ): Promise<RepoInitializationState[]> {
+  const scope = normalizeInitializationTarget(target);
   const results: RepoInitializationState[] = [];
 
   for (const repoName of repoNames) {
-    const state = await readRepoInitializationState(workspaceDir, repoName);
+    const state = await readRepoInitializationState(scope, repoName);
     if (!state) {
       throw new Error(`No initialization state found for "${repoName}".`);
     }
@@ -512,11 +588,7 @@ export async function cancelRepoInitializations(
       );
     }
 
-    const cancelled = await markRepoCancelled(
-      workspaceDir,
-      repoName,
-      state.run_id,
-    );
+    const cancelled = await markRepoCancelled(scope, repoName, state.run_id);
     results.push(cancelled);
   }
 
@@ -524,18 +596,21 @@ export async function cancelRepoInitializations(
 }
 
 export async function retryRepoInitializations(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoNames: readonly string[],
   launchWorker: WorkerLaunch = launchDetachedWorker,
 ): Promise<RepoInitializationState[]> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
+  const scope = normalizeInitializationTarget(target);
+  const metadata = await readInitializationMetadata(scope);
   if (!metadata) {
-    throw new Error(`Workspace metadata not found: ${workspaceDir}`);
+    throw new Error(
+      `Initialization metadata not found: ${getInitializationRootDir(scope)}`,
+    );
   }
 
   const results: RepoInitializationState[] = [];
   for (const repoName of repoNames) {
-    const current = await readRepoInitializationState(workspaceDir, repoName);
+    const current = await readRepoInitializationState(scope, repoName);
     if (!current) {
       throw new Error(`No initialization state found for "${repoName}".`);
     }
@@ -553,7 +628,7 @@ export async function retryRepoInitializations(
     results.push(
       await startRepoInitialization(
         {
-          workspaceDir,
+          scope,
           repo: {
             name: repoMetadata.name,
             remote: repoMetadata.remote,
@@ -569,10 +644,11 @@ export async function retryRepoInitializations(
 }
 
 export async function finalizeWorkspaceInitialization(
-  workspaceDir: string,
+  target: InitializationTarget,
 ): Promise<void> {
-  await withExclusiveLock(getFinalizeLockPath(workspaceDir), async () => {
-    const workspaceState = await readWorkspaceInitializationState(workspaceDir);
+  const scope = normalizeInitializationTarget(target);
+  await withExclusiveLock(getFinalizeLockPath(scope), async () => {
+    const workspaceState = await readWorkspaceInitializationState(scope);
     if (
       workspaceState?.status === "ready" ||
       workspaceState?.status === "failed" ||
@@ -581,7 +657,7 @@ export async function finalizeWorkspaceInitialization(
       return;
     }
 
-    const states = await readRepoInitializationStates(workspaceDir);
+    const states = await readRepoInitializationStates(scope);
     if (
       states.length === 0 ||
       states.some((state) => !isTerminalRepoStatus(state.status))
@@ -589,7 +665,7 @@ export async function finalizeWorkspaceInitialization(
       return;
     }
 
-    const metadata = await readWorkspaceMetadata(workspaceDir);
+    const metadata = await readInitializationMetadata(scope);
     if (!metadata) return;
 
     const warnings: string[] = [];
@@ -602,37 +678,31 @@ export async function finalizeWorkspaceInitialization(
       : null;
 
     if (template?.config.hooks && template.config.hooks.length > 0) {
-      await updateWorkspaceInitializationState(workspaceDir, (current) => ({
+      await updateWorkspaceInitializationState(scope, (current) => ({
         ...current,
         status: "hooks",
         message: "Running workspace hooks",
         updated_at: new Date().toISOString(),
       }));
 
-      const hookLogPath = path.join(
-        getInitializationDir(workspaceDir),
-        "hooks.log",
-      );
+      const hookLogPath = path.join(getInitializationDir(scope), "hooks.log");
       await fs.rm(hookLogPath, { force: true });
 
       try {
         for await (const hookState of applyTemplateGenerator({
           template,
-          workspaceDir,
+          workspaceDir: getInitializationRootDir(scope),
           repoDirs: states
             .filter((state) => state.status === "ready")
             .map((state) => state.repo),
         })) {
           if (hookState.phase === "hook-start") {
-            await updateWorkspaceInitializationState(
-              workspaceDir,
-              (current) => ({
-                ...current,
-                current_hook: hookState.hookName,
-                message: `Running hook: ${hookState.hookName}`,
-                updated_at: new Date().toISOString(),
-              }),
-            );
+            await updateWorkspaceInitializationState(scope, (current) => ({
+              ...current,
+              current_hook: hookState.hookName,
+              message: `Running hook: ${hookState.hookName}`,
+              updated_at: new Date().toISOString(),
+            }));
             await fs.appendFile(
               hookLogPath,
               `[hook:${hookState.hookName}] started\n`,
@@ -661,7 +731,7 @@ export async function finalizeWorkspaceInitialization(
       } catch (error) {
         const hookError =
           error instanceof Error ? error : new Error(String(error));
-        await writeWorkspaceInitializationState(workspaceDir, {
+        await writeWorkspaceInitializationState(scope, {
           version: 1,
           status: "failed",
           message: "Workspace hook failed",
@@ -688,7 +758,7 @@ export async function finalizeWorkspaceInitialization(
           ? `${failedRepos.length} repository initializer${failedRepos.length === 1 ? "" : "s"} failed`
           : `${cancelledRepos.length} repository initializer${cancelledRepos.length === 1 ? "" : "s"} cancelled`;
 
-    await writeWorkspaceInitializationState(workspaceDir, {
+    await writeWorkspaceInitializationState(scope, {
       version: 1,
       status,
       message,
@@ -699,43 +769,48 @@ export async function finalizeWorkspaceInitialization(
   });
 }
 
-export function getInitializationDir(workspaceDir: string): string {
-  return path.join(workspaceDir, ".workforest", INITIALIZATION_DIR);
+export function getInitializationDir(target: InitializationTarget): string {
+  return getInitializationStateDir(normalizeInitializationTarget(target));
 }
 
 export function getRepoInitializationLogPath(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoName: string,
 ): Promise<string> {
-  return getRepoSetupLogPath({ workspaceDir, repoName });
+  const scope = normalizeInitializationTarget(target);
+  return getRepoSetupLogPath({
+    workspaceDir: getInitializationRootDir(scope),
+    initializationScope: scope,
+    repoName,
+  });
 }
 
-function getRepoStatePath(workspaceDir: string, repoName: string): string {
+function getRepoStatePath(
+  scope: InitializationScope,
+  repoName: string,
+): string {
   const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
   return path.join(
-    getInitializationDir(workspaceDir),
+    getInitializationDir(scope),
     "repos",
     `${encodeURIComponent(safeRepoName)}.json`,
   );
 }
 
-function getWorkspaceStatePath(workspaceDir: string): string {
-  return path.join(
-    getInitializationDir(workspaceDir),
-    WORKSPACE_STATE_FILENAME,
-  );
+function getWorkspaceStatePath(scope: InitializationScope): string {
+  return path.join(getInitializationDir(scope), WORKSPACE_STATE_FILENAME);
 }
 
-function getFinalizeLockPath(workspaceDir: string): string {
-  return path.join(getInitializationDir(workspaceDir), "finalize.lock");
+function getFinalizeLockPath(scope: InitializationScope): string {
+  return path.join(getInitializationDir(scope), "finalize.lock");
 }
 
 async function launchDetachedWorker({
-  workspaceDir,
+  scope,
   repoName,
   runId,
 }: {
-  workspaceDir: string;
+  scope: InitializationScope;
   repoName: string;
   runId: string;
 }): Promise<number> {
@@ -745,11 +820,11 @@ async function launchDetachedWorker({
   }
 
   const child = spawn(process.execPath, [path.resolve(entrypoint)], {
-    cwd: workspaceDir,
+    cwd: getInitializationRootDir(scope),
     detached: true,
     stdio: "ignore",
     env: buildRepoInitializerWorkerEnvironment({
-      workspaceDir,
+      scope,
       repoName,
       runId,
     }),
@@ -771,13 +846,13 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
 }
 
 async function recordWorkerPipelineState(
-  workspaceDir: string,
+  scope: InitializationScope,
   repo: RepoConfig,
   runId: string,
   state: RepoPipelineState,
 ): Promise<void> {
   if (state.phase === "initializer") {
-    await updateRepoInitializationState(workspaceDir, repo.name, (current) => {
+    await updateRepoInitializationState(scope, repo.name, (current) => {
       if (
         current.run_id !== runId ||
         current.status === "cancelled" ||
@@ -800,7 +875,7 @@ async function recordWorkerPipelineState(
 
   if (state.phase === "complete") {
     const now = new Date().toISOString();
-    await updateRepoInitializationState(workspaceDir, repo.name, (current) => {
+    await updateRepoInitializationState(scope, repo.name, (current) => {
       if (current.run_id !== runId || current.status === "cancelled") {
         return current;
       }
@@ -813,11 +888,8 @@ async function recordWorkerPipelineState(
         updated_at: now,
       };
     });
-    const featureBranch = await repoMetadataFeatureBranch(
-      workspaceDir,
-      repo.name,
-    );
-    await updateWorkspaceRepo(workspaceDir, {
+    const featureBranch = await repoMetadataFeatureBranch(scope, repo.name);
+    await updateInitializationRepoMetadata(scope, {
       name: repo.name,
       remote: repo.remote,
       default_branch: repo.defaultBranch,
@@ -829,7 +901,7 @@ async function recordWorkerPipelineState(
 
   if (state.phase === "failed") {
     const now = new Date().toISOString();
-    await updateRepoInitializationState(workspaceDir, repo.name, (current) => {
+    await updateRepoInitializationState(scope, repo.name, (current) => {
       if (current.run_id !== runId || current.status === "cancelled") {
         return current;
       }
@@ -847,12 +919,13 @@ async function recordWorkerPipelineState(
 }
 
 async function markRepoCancelled(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoName: string,
   runId?: string,
 ): Promise<RepoInitializationState> {
+  const scope = normalizeInitializationTarget(target);
   const now = new Date().toISOString();
-  return updateRepoInitializationState(workspaceDir, repoName, (current) => {
+  return updateRepoInitializationState(scope, repoName, (current) => {
     if (runId !== undefined && current.run_id !== runId) {
       return current;
     }
@@ -867,11 +940,11 @@ async function markRepoCancelled(
 }
 
 async function updateRepoInitializationState(
-  workspaceDir: string,
+  scope: InitializationScope,
   repoName: string,
   update: (state: RepoInitializationState) => RepoInitializationState,
 ): Promise<RepoInitializationState> {
-  const statePath = getRepoStatePath(workspaceDir, repoName);
+  const statePath = getRepoStatePath(scope, repoName);
   return withExclusiveLock(`${statePath}.lock`, async () => {
     const current = await readJsonFile<RepoInitializationState>(statePath);
     if (!current) {
@@ -884,20 +957,20 @@ async function updateRepoInitializationState(
 }
 
 async function writeRepoInitializationState(
-  workspaceDir: string,
+  scope: InitializationScope,
   state: RepoInitializationState,
 ): Promise<void> {
-  const statePath = getRepoStatePath(workspaceDir, state.repo);
+  const statePath = getRepoStatePath(scope, state.repo);
   await withExclusiveLock(`${statePath}.lock`, () =>
     writeJsonFile(statePath, state),
   );
 }
 
 async function updateWorkspaceInitializationState(
-  workspaceDir: string,
+  scope: InitializationScope,
   update: (state: WorkspaceInitializationState) => WorkspaceInitializationState,
 ): Promise<WorkspaceInitializationState> {
-  const statePath = getWorkspaceStatePath(workspaceDir);
+  const statePath = getWorkspaceStatePath(scope);
   return withExclusiveLock(`${statePath}.lock`, async () => {
     const current = await readJsonFile<WorkspaceInitializationState>(statePath);
     if (!current) {
@@ -910,10 +983,10 @@ async function updateWorkspaceInitializationState(
 }
 
 async function writeWorkspaceInitializationState(
-  workspaceDir: string,
+  scope: InitializationScope,
   state: WorkspaceInitializationState,
 ): Promise<void> {
-  const statePath = getWorkspaceStatePath(workspaceDir);
+  const statePath = getWorkspaceStatePath(scope);
   await withExclusiveLock(`${statePath}.lock`, () =>
     writeJsonFile(statePath, state),
   );
@@ -1075,11 +1148,45 @@ async function readLogChunk(
 }
 
 async function repoMetadataFeatureBranch(
-  workspaceDir: string,
+  target: InitializationTarget,
   repoName: string,
 ): Promise<string | undefined> {
-  const metadata = await readWorkspaceMetadata(workspaceDir);
+  const metadata = await readInitializationMetadata(
+    normalizeInitializationTarget(target),
+  );
   return metadata?.repos.find((repo) => repo.name === repoName)?.feature_branch;
+}
+
+async function readInitializationMetadata(
+  scope: InitializationScope,
+): Promise<Awaited<ReturnType<typeof readWorkspaceMetadata>>> {
+  return scope.kind === "workspace"
+    ? readWorkspaceMetadata(scope.workspaceDir)
+    : readRepositoryChangeMetadata(scope.repoRootDir, scope.changeName);
+}
+
+async function updateInitializationRepoMetadata(
+  scope: InitializationScope,
+  repo: Parameters<typeof updateWorkspaceRepo>[1],
+): Promise<void> {
+  if (scope.kind === "workspace") {
+    await updateWorkspaceRepo(scope.workspaceDir, repo);
+    return;
+  }
+
+  await updateRepositoryChangeRepo(scope.repoRootDir, scope.changeName, repo);
+}
+
+function resolveInitializationScope({
+  workspaceDir,
+  scope,
+}: {
+  workspaceDir?: string;
+  scope?: InitializationScope;
+}): InitializationScope {
+  if (scope) return scope;
+  if (workspaceDir) return workspaceInitializationScope(workspaceDir);
+  throw new Error("Initialization scope is required.");
 }
 
 function isProcessAlive(pid: number): boolean {

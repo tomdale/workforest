@@ -14,6 +14,10 @@ import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { createTemplate } from "./templates/index.ts";
 import {
+  type RepoInitializationState,
+  readRepoInitializationState,
+} from "./workspace/initialization.ts";
+import {
   readRepositoryChangeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
@@ -26,6 +30,9 @@ const ORIGINAL_CWD = process.cwd();
 const tempDirs: string[] = [];
 type CreateSingleWorktree = NonNullable<
   RunStartCommandOptions["createSingleWorktree"]
+>;
+type StartRepoInitialization = NonNullable<
+  RunStartCommandOptions["startRepoInitialization"]
 >;
 type StampWorkspace = NonNullable<RunStartCommandOptions["stampWorkspace"]>;
 
@@ -81,13 +88,42 @@ describe("wf start", () => {
       "git@github.com:vercel/front.git",
     );
     const created = fakeCreateSingleWorktree();
+    const events: string[] = [];
+    created.mockImplementation(async (options) => {
+      events.push("create");
+      return {
+        repo: options.repo,
+        branchName: options.branchName,
+        targetDir: options.targetDir,
+      };
+    });
+    const started = vi.fn(
+      async (
+        options: Parameters<StartRepoInitialization>[0],
+      ): Promise<RepoInitializationState> => {
+        events.push("start");
+        const state = await readRepoInitializationState(
+          options.scope ?? "",
+          options.repo.name,
+        );
+        expect(state).toMatchObject({
+          repo: "front",
+          status: "pending",
+          attempt: 0,
+        });
+        if (!state) throw new Error("Expected initialization state");
+        return state;
+      },
+    );
 
     await runStartCommand(invocation(["redesign-cli", "front"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       createSingleWorktree: created,
+      startRepoInitialization: started,
     });
 
+    expect(events).toEqual(["create", "start"]);
     expect(created).toHaveBeenCalledWith({
       repo: {
         name: "front",
@@ -96,6 +132,18 @@ describe("wf start", () => {
       },
       branchName: "tomdale/redesign-cli",
       targetDir: path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
+    });
+    expect(started).toHaveBeenCalledWith({
+      scope: {
+        kind: "repository-change",
+        repoRootDir: path.join(fixture.baseDir, "Repos", "front"),
+        changeName: "redesign-cli",
+      },
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
     });
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
@@ -136,6 +184,7 @@ describe("wf start", () => {
         interactive: false,
         writeShellCdPath: fixture.writeShellCdPath,
         createSingleWorktree: created,
+        startRepoInitialization: fakeStartRepoInitialization(),
       },
     );
 
@@ -363,6 +412,7 @@ describe("wf start", () => {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       createSingleWorktree: created,
+      startRepoInitialization: fakeStartRepoInitialization(),
     });
 
     expect(created).toHaveBeenCalledWith(
@@ -543,6 +593,21 @@ function fakeCreateSingleWorktree() {
     branchName: options.branchName,
     targetDir: options.targetDir,
   }));
+}
+
+function fakeStartRepoInitialization() {
+  return vi.fn(
+    async (
+      options: Parameters<StartRepoInitialization>[0],
+    ): Promise<RepoInitializationState> => {
+      const state = await readRepoInitializationState(
+        options.scope ?? "",
+        options.repo.name,
+      );
+      if (!state) throw new Error("Expected initialization state");
+      return state;
+    },
+  );
 }
 
 function fakeStampWorkspace() {

@@ -7,10 +7,13 @@ import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
   finalizeWorkspaceInitialization,
   getRepoInitializationLogPath,
+  type InitializationScope,
   type RepoInitializationState,
   readRepoInitializationStates,
   readWorkspaceInitializationState,
+  repositoryChangeInitializationScope,
   type WorkspaceInitializationState,
+  workspaceInitializationScope,
 } from "./initialization.ts";
 import { readWorkspaceMetadata } from "./metadata.ts";
 import { listRepositoryTasks, listTasks, type TaskListEntry } from "./tasks.ts";
@@ -184,7 +187,12 @@ export function renderChangeStatus(
 
   if (status.initialization) {
     lines.push("", "Initialization");
-    lines.push(...renderFields(initializationFields(status.initialization), 2));
+    lines.push(
+      ...renderFields(
+        initializationFields(status.initialization, status.type),
+        2,
+      ),
+    );
   }
 
   lines.push("", "Next steps");
@@ -214,11 +222,21 @@ async function getRepositoryTargets(
 ): Promise<RepositoryTarget[]> {
   const setupByRepo = new Map(setupStates.map((state) => [state.repo, state]));
   if (entry.type === "repository-change") {
+    const setup = setupByRepo.get(entry.repository);
+    const setupLogPath =
+      setup?.status === "failed"
+        ? await getRepoInitializationLogPath(
+            changeInitializationScope(entry),
+            entry.repository,
+          ).catch(() => undefined)
+        : undefined;
     return [
       {
         name: entry.repository,
         path: entry.path,
         defaultBranch: await inferDefaultBranch(entry.path),
+        ...(setup ? { setup } : {}),
+        ...(setupLogPath ? { setupLogPath } : {}),
       },
     ];
   }
@@ -240,9 +258,10 @@ async function getRepositoryTargets(
       const setup = setupByRepo.get(repo.name);
       const setupLogPath =
         setup?.status === "failed"
-          ? await getRepoInitializationLogPath(entry.path, repo.name).catch(
-              () => undefined,
-            )
+          ? await getRepoInitializationLogPath(
+              changeInitializationScope(entry),
+              repo.name,
+            ).catch(() => undefined)
           : undefined;
       return {
         name: repo.name,
@@ -495,14 +514,11 @@ function setupDetails(setup: RepoSetupSummary): StatusDetail[] {
 async function readInitializationStatus(
   entry: ChangeInventoryEntry,
 ): Promise<ChangeInitializationStatus | null> {
-  if (entry.type === "repository-change") {
-    return null;
-  }
-
-  await finalizeWorkspaceInitialization(entry.path).catch(() => undefined);
+  const scope = changeInitializationScope(entry);
+  await finalizeWorkspaceInitialization(scope).catch(() => undefined);
   const [workspace, repos] = await Promise.all([
-    readWorkspaceInitializationState(entry.path),
-    readRepoInitializationStates(entry.path),
+    readWorkspaceInitializationState(scope),
+    readRepoInitializationStates(scope),
   ]);
 
   if (!workspace && repos.length === 0) {
@@ -640,10 +656,16 @@ function summaryFields(summary: ChangeStatusSummary): StatusDetail[] {
 
 function initializationFields(
   initialization: ChangeInitializationStatus,
+  type: ChangeInventoryEntry["type"],
 ): StatusDetail[] {
   return [
     ...(initialization.workspace
-      ? [{ label: "Workspace", value: initialization.workspace.status }]
+      ? [
+          {
+            label: type === "repository-change" ? "Change" : "Workspace",
+            value: initialization.workspace.status,
+          },
+        ]
       : []),
     ...(initialization.workspace?.error
       ? [{ label: "Error", value: initialization.workspace.error }]
@@ -674,6 +696,17 @@ function initializationFields(
         ]
       : []),
   ];
+}
+
+export function changeInitializationScope(
+  entry: ChangeInventoryEntry,
+): InitializationScope {
+  return entry.type === "repository-change"
+    ? repositoryChangeInitializationScope({
+        repoRootDir: path.dirname(entry.path),
+        changeName: entry.changeName,
+      })
+    : workspaceInitializationScope(entry.path);
 }
 
 function deriveNextSteps(

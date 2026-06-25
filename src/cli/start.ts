@@ -20,6 +20,11 @@ import {
   stampWorkspaceInteractive,
 } from "../workspace/index.ts";
 import {
+  initializeRepositoryChangeSetup,
+  repositoryChangeInitializationScope,
+  startRepoInitialization,
+} from "../workspace/initialization.ts";
+import {
   readWorkspaceMetadata,
   writeRepositoryChangeMetadata,
 } from "../workspace/metadata.ts";
@@ -58,6 +63,8 @@ export type RunStartCommandOptions = Readonly<{
   onEvent?: ServiceEventSink;
   writeShellCdPath: (targetDir: string) => Promise<void>;
   createSingleWorktree?: typeof createSingleWorktree;
+  initializeRepositoryChangeSetup?: typeof initializeRepositoryChangeSetup;
+  startRepoInitialization?: typeof startRepoInitialization;
   stampWorkspace?: typeof stampWorkspace;
   stampWorkspaceInteractive?: typeof stampWorkspaceInteractive;
 }>;
@@ -98,13 +105,14 @@ export async function runStartCommand(
       source.repo.name,
       changeName,
     );
-    await fs.mkdir(path.dirname(targetDir), { recursive: true });
+    const repoRootDir = path.dirname(targetDir);
+    await fs.mkdir(repoRootDir, { recursive: true });
     await (options.createSingleWorktree ?? createSingleWorktree)({
       repo: source.repo,
       branchName,
       targetDir,
     });
-    await writeRepositoryChangeMetadata(path.dirname(targetDir), {
+    await writeRepositoryChangeMetadata(repoRootDir, {
       featureName: changeName,
       branchName,
       repos: [
@@ -113,6 +121,17 @@ export async function runStartCommand(
           hasLockfile: await hasLockfile(targetDir),
         },
       ],
+    });
+    await (
+      options.initializeRepositoryChangeSetup ?? initializeRepositoryChangeSetup
+    )({
+      repoRootDir,
+      changeName,
+      repo: source.repo,
+    });
+    await (options.startRepoInitialization ?? startRepoInitialization)({
+      scope: repositoryChangeInitializationScope({ repoRootDir, changeName }),
+      repo: source.repo,
     });
     await options.writeShellCdPath(targetDir);
     log.success(`Change ready: ${targetDir}`);

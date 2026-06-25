@@ -65,6 +65,54 @@ describe("wf status", () => {
     expect(rendered.stdout).toContain("Run: git status");
   });
 
+  it("renders repository change initialization state and failed setup logs", async () => {
+    const { repoChange } = await createStatusFixture({
+      repositoryInitialization: {
+        workspace: {
+          version: 1,
+          status: "failed",
+          message: "1 repository initializer failed",
+          updated_at: new Date().toISOString(),
+        },
+        repo: {
+          version: 1,
+          repo: "workforest",
+          status: "failed",
+          phase: "initializer",
+          step: "initializer:pnpm install",
+          message: "pnpm install failed",
+          error: "pnpm install failed",
+          attempt: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        log: "ERR_PNPM_FETCH_404 package not found\n",
+      },
+    });
+
+    const result = await executeCli(["status", "workforest/cli-redesign"]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
+    expect(rendered.stdout).toContain("workforest - dirty: 1 untracked");
+    expect(rendered.stdout).toContain("setup failed");
+    expect(rendered.stdout).toContain("Error: pnpm install failed");
+    expect(rendered.stdout).toContain(
+      path.join(
+        path.dirname(repoChange),
+        ".workforest",
+        "initialization",
+        "cli-redesign",
+        "logs",
+        "workforest.log",
+      ),
+    );
+    expect(rendered.stdout).toContain("Initialization");
+    expect(rendered.stdout).toContain("Change: failed");
+    expect(rendered.stdout).toContain("Failed: workforest");
+    expect(rendered.stdout).toContain("Inspect initialization details above.");
+  });
+
   it("surfaces workspace initialization failures as blockers", async () => {
     await createStatusFixture({
       workspaceInitialization: {
@@ -238,6 +286,28 @@ async function createStatusFixture(
       created_at: string;
       updated_at: string;
     }>;
+    repositoryInitialization?: {
+      workspace?: {
+        version: 1;
+        status: "creating" | "initializing" | "ready" | "failed";
+        message?: string;
+        error?: string;
+        updated_at: string;
+      };
+      repo: {
+        version: 1;
+        repo: string;
+        status: "pending" | "git" | "queued" | "running" | "ready" | "failed";
+        phase?: "git" | "initializer";
+        step?: string;
+        message?: string;
+        error?: string;
+        attempt: number;
+        created_at: string;
+        updated_at: string;
+      };
+      log?: string;
+    };
   } = {},
 ): Promise<{
   workspace: string;
@@ -358,6 +428,43 @@ async function createStatusFixture(
         ),
       ),
     );
+  }
+  if (options.repositoryInitialization) {
+    const initializationDir = path.join(
+      path.dirname(repoChange),
+      ".workforest",
+      "initialization",
+      "cli-redesign",
+    );
+    await mkdir(path.join(initializationDir, "repos"), { recursive: true });
+    if (options.repositoryInitialization.workspace) {
+      await writeFile(
+        path.join(initializationDir, "workspace.json"),
+        JSON.stringify(options.repositoryInitialization.workspace, null, 2),
+        "utf8",
+      );
+    }
+    await writeFile(
+      path.join(
+        initializationDir,
+        "repos",
+        `${encodeURIComponent(options.repositoryInitialization.repo.repo)}.json`,
+      ),
+      JSON.stringify(options.repositoryInitialization.repo, null, 2),
+      "utf8",
+    );
+    if (options.repositoryInitialization.log) {
+      await mkdir(path.join(initializationDir, "logs"), { recursive: true });
+      await writeFile(
+        path.join(
+          initializationDir,
+          "logs",
+          `${options.repositoryInitialization.repo.repo}.log`,
+        ),
+        options.repositoryInitialization.log,
+        "utf8",
+      );
+    }
   }
 
   return { workspace, apiRepo, repoChange };

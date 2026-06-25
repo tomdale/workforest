@@ -1,3 +1,4 @@
+import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
@@ -42,6 +43,7 @@ export type RepoPipelineState =
 export type RepoPipelineOptions = {
   repo: RepoConfig;
   workspaceDir: string;
+  repoDir?: string;
   branchName: string;
   isNewWorkspace: boolean;
   disabledInitializers?: boolean | string[];
@@ -56,6 +58,7 @@ export type RepoPipelineOptions = {
 export type RepoInitializationOptions = {
   repo: RepoConfig;
   workspaceDir: string;
+  repoDir?: string;
   disabledInitializers?: boolean | string[];
 };
 
@@ -69,6 +72,7 @@ export type RepoInitializationOptions = {
 export async function* repoPipelineGenerator({
   repo,
   workspaceDir,
+  repoDir,
   branchName,
   isNewWorkspace,
   disabledInitializers,
@@ -78,7 +82,9 @@ export async function* repoPipelineGenerator({
   const repoName = validateRepositoryComponent(repo.name, "Repository name");
   const cacheDir = getCacheDir();
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
-  const targetDir = resolveContainedPath(workspaceDir, repoName);
+  const targetDir = repoDir
+    ? path.resolve(repoDir)
+    : resolveContainedPath(workspaceDir, repoName);
   let currentStep = "starting setup";
 
   try {
@@ -174,17 +180,20 @@ export async function* repoPipelineGenerator({
 export async function* repoInitializationGenerator({
   repo,
   workspaceDir,
+  repoDir,
   disabledInitializers,
 }: RepoInitializationOptions): AsyncGenerator<RepoPipelineState> {
-  const repoDir = resolveContainedPath(
-    workspaceDir,
-    validateRepositoryComponent(repo.name, "Repository name"),
-  );
+  const resolvedRepoDir = repoDir
+    ? path.resolve(repoDir)
+    : resolveContainedPath(
+        workspaceDir,
+        validateRepositoryComponent(repo.name, "Repository name"),
+      );
   let currentStep = "initializer:detection";
 
   try {
     for await (const state of runSingleRepoInitializersGenerator({
-      context: { repoDir, workspaceDir, repo },
+      context: { repoDir: resolvedRepoDir, workspaceDir, repo },
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     })) {
       if (state.phase === "running") {
@@ -207,7 +216,7 @@ export async function* repoInitializationGenerator({
     }
 
     currentStep = "detect lockfile";
-    const hasLockfile = await hasAny(repoDir, [
+    const hasLockfile = await hasAny(resolvedRepoDir, [
       "pnpm-lock.yaml",
       "pnpm-lock.yml",
     ]);
