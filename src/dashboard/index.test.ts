@@ -81,22 +81,19 @@ describe("dashboard rendering", () => {
       ["skills", "get", "core", "--full"],
       "wf skills get core --full",
     ],
-  ] as const)(
-    "returns %s dashboard command actions for CLI execution",
-    (routeId, actionOffset, command, displayCommand) => {
-      let state = createDashboardState(getDashboardRoute(routeId));
-      for (let count = 0; count < actionOffset; count += 1) {
-        state = moveDashboardAction(state, 1);
-      }
+  ] as const)("returns %s dashboard command actions for CLI execution", (routeId, actionOffset, command, displayCommand) => {
+    let state = createDashboardState(getDashboardRoute(routeId));
+    for (let count = 0; count < actionOffset; count += 1) {
+      state = moveDashboardAction(state, 1);
+    }
 
-      const selected = activateDashboardAction(state);
+    const selected = activateDashboardAction(state);
 
-      expect(selected.command).toEqual(command);
-      expect(selected.state.operationMessage).toBe(
-        `Exiting to run ${displayCommand}`,
-      );
-    },
-  );
+    expect(selected.command).toEqual(command);
+    expect(selected.state.operationMessage).toBe(
+      `Exiting to run ${displayCommand}`,
+    );
+  });
 
   it("keeps dashboard shortcut actions inside the dashboard", () => {
     const selected = activateDashboardAction(

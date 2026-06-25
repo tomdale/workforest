@@ -176,9 +176,7 @@ export function closeDashboardPalette(state: DashboardState): DashboardState {
   };
 }
 
-export function selectDashboardAction(
-  state: DashboardState,
-): DashboardState {
+export function selectDashboardAction(state: DashboardState): DashboardState {
   return activateDashboardAction(state).state;
 }
 
@@ -313,7 +311,7 @@ export async function runDashboardTui(
       screen.render();
     };
 
-    screen.key(["q", "C-c"], finish);
+    screen.key(["q", "C-c"], () => finish());
     screen.key(["escape"], () => {
       if (!state.paletteOpen) {
         finish();
