@@ -18,6 +18,8 @@ import { runSubprocess } from "./test-utils/subprocess.ts";
 
 const PACKAGE_NAMES = [
   "workforest",
+  "@wf-plugin/claude-cli",
+  "@wf-plugin/codex-cli",
   "@wf-plugin/core",
   "@wf-plugin/package-managers",
   "@wf-plugin/turbo",

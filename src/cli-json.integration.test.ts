@@ -110,7 +110,7 @@ describe("JSON CLI integration", () => {
     });
   });
 
-  it("reports healthy and unhealthy cache check results", async () => {
+  it("reports healthy and unhealthy cache doctor results", async () => {
     const healthyCacheDir = await createTempDir(
       "workforest-json-healthy-cache-",
     );
@@ -126,10 +126,10 @@ describe("JSON CLI integration", () => {
       "utf8",
     );
 
-    const healthy = await runJson(["cache", "check", "--json"], {
+    const healthy = await runJson(["cache", "doctor", "--json"], {
       cacheDir: healthyCacheDir,
     });
-    const unhealthy = await runJson(["cache", "check", "--json"], {
+    const unhealthy = await runJson(["cache", "doctor", "--json"], {
       cacheDir: unhealthyCacheDir,
     });
 
@@ -295,12 +295,20 @@ describe("JSON CLI integration", () => {
 
   it("returns JSON usage errors for interactive-only raw paths", async () => {
     const manager = await runJson(["template", "manage", "--json"]);
+    const suggest = await runJson(["template", "suggest", "--json"]);
 
     expectJsonResult(manager, 2, {
       ok: false,
       error: {
         kind: "usage",
         message: "JSON output is not available for wf template manage.",
+      },
+    });
+    expectJsonResult(suggest, 2, {
+      ok: false,
+      error: {
+        kind: "usage",
+        message: "JSON output is not available for wf template suggest.",
       },
     });
   });
@@ -441,8 +449,8 @@ describe("JSON CLI integration", () => {
       'Flag "--json" cannot be combined with "--path".',
     ],
     [
-      ["cache", "check", "--force", "--json"],
-      'Unknown flag "--force" for wf cache check.',
+      ["cache", "doctor", "--force", "--json"],
+      'Unknown flag "--force" for wf cache doctor.',
     ],
     [
       ["skills", "list", "extra", "--json"],

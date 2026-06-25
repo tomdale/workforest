@@ -225,7 +225,7 @@ The cache stores bare mirrors and powers fast starts:
 ```sh
 wf cache list
 wf cache show workforest
-wf cache check
+wf cache doctor
 wf cache clean --dry-run
 ```
 

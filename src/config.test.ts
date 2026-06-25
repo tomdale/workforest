@@ -169,6 +169,56 @@ describe("workspace config", () => {
     });
   });
 
+  it("loads AI config", async () => {
+    const configDir = await createConfigDir();
+    await writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        ai: {
+          provider: "codex-cli",
+          model: "gpt-5",
+          timeoutMs: 90000,
+          disabled: false,
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkspaceConfig();
+
+    expect(loaded.config.ai).toEqual({
+      provider: "codex-cli",
+      model: "gpt-5",
+      timeoutMs: 90000,
+      disabled: false,
+    });
+  });
+
+  it("persists AI config when saving", async () => {
+    const configDir = await createConfigDir();
+    const configPath = path.join(configDir, "config.json");
+
+    await saveWorkspaceConfig(configPath, {
+      ai: {
+        provider: "claude-cli",
+        model: "sonnet",
+        timeoutMs: 45000,
+        disabled: true,
+      },
+    });
+
+    const saved = JSON.parse(await readFile(configPath, "utf8")) as {
+      ai?: unknown;
+    };
+
+    expect(saved.ai).toEqual({
+      provider: "claude-cli",
+      model: "sonnet",
+      timeoutMs: 45000,
+      disabled: true,
+    });
+  });
+
   it("preserves branch prefixes when loading", async () => {
     const configDir = await createConfigDir();
     await writeFile(
@@ -215,6 +265,23 @@ describe("workspace config", () => {
 
     await expect(loadWorkspaceConfig()).rejects.toThrow(
       "config.json.vercelLink.teamByGitHubOwner.vercel must be a string.",
+    );
+  });
+
+  it("rejects invalid AI config", async () => {
+    const configDir = await createConfigDir();
+    await writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        ai: {
+          timeoutMs: -1,
+        },
+      }),
+      "utf8",
+    );
+
+    await expect(loadWorkspaceConfig()).rejects.toThrow(
+      "config.json.ai.timeoutMs must be a positive integer.",
     );
   });
 });

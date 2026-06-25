@@ -220,11 +220,11 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     shellHandoff: false,
   },
   {
-    id: "cache.check",
+    id: "cache.doctor",
     label: "Cache health",
-    description: "Check cached mirrors for integrity problems.",
+    description: "Diagnose cached mirrors for integrity problems.",
     kind: "command",
-    command: ["cache", "check"],
+    command: ["cache", "doctor"],
     shellHandoff: false,
   },
   {

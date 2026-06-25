@@ -9,6 +9,10 @@ export type EnvironmentVariableDefinition = Readonly<{
 }>;
 
 export const WORKFOREST_ENVIRONMENT_VARIABLES = {
+  aiDisabled: "WORKFOREST_AI_DISABLED",
+  aiModel: "WORKFOREST_AI_MODEL",
+  aiProvider: "WORKFOREST_AI_PROVIDER",
+  aiTimeoutMs: "WORKFOREST_AI_TIMEOUT_MS",
   cacheDir: "WORKFOREST_CACHE_DIR",
   cdPathFile: "WORKFOREST_CD_PATH_FILE",
   configDir: "WORKFOREST_CONFIG_DIR",
@@ -71,6 +75,39 @@ export const ENVIRONMENT_VARIABLE_REGISTRY: readonly EnvironmentVariableDefiniti
         "Disables fullscreen and grid terminal interfaces and uses their non-TUI fallbacks.",
       defaultBehavior:
         "TUI surfaces are enabled when the terminal supports them and CI is not set.",
+    },
+    {
+      name: WORKFOREST_ENVIRONMENT_VARIABLES.aiProvider,
+      value: "provider id",
+      audience: "user",
+      description:
+        "Selects the AI provider for AI-backed Workforest features, overriding ai.provider in config.",
+      defaultBehavior:
+        "Uses ai.provider from config, or auto-detects available providers.",
+    },
+    {
+      name: WORKFOREST_ENVIRONMENT_VARIABLES.aiModel,
+      value: "model name",
+      audience: "user",
+      description:
+        "Selects the model passed to the chosen AI provider, overriding ai.model in config.",
+      defaultBehavior: "Uses ai.model from config, or the provider default.",
+    },
+    {
+      name: WORKFOREST_ENVIRONMENT_VARIABLES.aiTimeoutMs,
+      value: "positive integer milliseconds",
+      audience: "user",
+      description:
+        "Sets the timeout for a single AI generation, overriding ai.timeoutMs in config.",
+      defaultBehavior: "Uses ai.timeoutMs from config, or 120000.",
+    },
+    {
+      name: WORKFOREST_ENVIRONMENT_VARIABLES.aiDisabled,
+      value: "true/false",
+      audience: "user",
+      description:
+        "Disables AI-backed Workforest features, overriding ai.disabled in config.",
+      defaultBehavior: "Uses ai.disabled from config, or false.",
     },
     {
       name: WORKFOREST_ENVIRONMENT_VARIABLES.timingFile,

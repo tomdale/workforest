@@ -30,7 +30,7 @@ describe("dashboard routes", () => {
       dashboardActionsForRoute(getDashboardRoute("cache")).map(
         (action) => action.id,
       ),
-    ).toEqual(["cache.list", "cache.check", "cache.sync"]);
+    ).toEqual(["cache.list", "cache.doctor", "cache.sync"]);
 
     expect(
       dashboardActionsForRoute(getDashboardRoute("help")).map(

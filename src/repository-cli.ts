@@ -46,8 +46,8 @@ export async function runCacheInvocation(
       );
     case "cache.sync":
       return runCacheSync(operands, flag(invocation, "json"));
-    case "cache.check":
-      return runCacheCheck(operands, {
+    case "cache.doctor":
+      return runCacheDoctor(operands, {
         fix: flag(invocation, "fix"),
         json: flag(invocation, "json"),
       });
@@ -247,7 +247,7 @@ async function syncRepositoryMessages(
   return messages;
 }
 
-async function runCacheCheck(
+async function runCacheDoctor(
   selectors: readonly string[],
   options: Readonly<{ fix: boolean; json: boolean }>,
 ): Promise<CommandResult> {
@@ -318,7 +318,7 @@ async function repairRepositories(
         `Repaired ${name}`,
       );
     } catch {
-      // `check --fix` keeps the same report/JSON shape as `check`; failures
+      // `doctor --fix` keeps the same report/JSON shape as `doctor`; failures
       // remain visible through the refreshed repository health record.
     }
   }

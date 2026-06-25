@@ -213,6 +213,35 @@ Examples:
 - `wf delete _adhoc/experiment` — Delete a change after confirming.
 - `wf delete _adhoc/experiment --force` — Delete without prompting.
 
+## `wf ai`
+
+Inspect AI provider setup.
+
+Reports the built-in provider adapters available to AI-backed Workforest features.
+
+```text
+wf ai <subcommand>
+```
+
+### `wf ai status`
+
+Show AI provider status.
+
+Shows built-in AI provider detection results, the selected provider, model, timeout, and setup hints. With --json it emits the same status model as a JSON envelope.
+
+```text
+wf ai status [options]
+```
+
+Options:
+
+- `--json` — Emit AI provider status as a JSON envelope instead of the report.
+
+Examples:
+
+- `wf ai status` — Show detected AI providers and the selected provider.
+- `wf ai status --json` — Emit AI provider status as a JSON envelope.
+
 ## `wf migrate`
 
 Migrate Workforest layouts.
@@ -354,7 +383,7 @@ Examples:
 
 Manage cached repositories.
 
-The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.
+The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.
 
 ```text
 wf cache [subcommand]
@@ -424,21 +453,21 @@ Arguments:
 
 Options:
 
-- `--json` — Emit a machine-readable JSON envelope.
+- `--json` — Emit sync results as a JSON envelope.
 
 Examples:
 
 - `wf cache sync` — Fetch new commits for every cached mirror.
 - `wf cache sync vercel/next.js facebook/react` — Update cached matches and clone missing mirrors in one invocation.
 
-### `wf cache check`
+### `wf cache doctor`
 
-Check cached repositories.
+Diagnose cached repositories.
 
-Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any checked repository is unhealthy (in both report and JSON modes).
+Diagnoses cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, diagnoses every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any diagnosed repository is unhealthy (in both report and JSON modes).
 
 ```text
-wf cache check [options] [repositories...]
+wf cache doctor [options] [repositories...]
 ```
 
 Arguments:
@@ -452,9 +481,9 @@ Options:
 
 Examples:
 
-- `wf cache check` — Report health for every cached mirror.
-- `wf cache check --json` — Emit health records as JSON; nonzero exit flags problems.
-- `wf cache check vercel/next.js --fix` — Repair one cached mirror before reporting health.
+- `wf cache doctor` — Report health for every cached mirror.
+- `wf cache doctor --json` — Emit health records as JSON; nonzero exit flags problems.
+- `wf cache doctor vercel/next.js --fix` — Repair one cached mirror before reporting health.
 
 ### `wf cache delete`
 
@@ -474,7 +503,7 @@ Options:
 
 - `-n`, `--dry-run` — Show which mirrors would be deleted without removing anything.
 - `-f`, `--force` — Skip the prompt and delete even mirrors with active worktrees; required without a terminal.
-- `--json` — Emit a machine-readable JSON envelope.
+- `--json` — Emit deletion results as a JSON envelope.
 
 Examples:
 
@@ -495,7 +524,7 @@ Options:
 
 - `-n`, `--dry-run` — Show which unused mirrors would be deleted without removing anything.
 - `-f`, `--force` — Skip the confirmation prompt; required to proceed without a terminal.
-- `--json` — Emit a machine-readable JSON envelope.
+- `--json` — Emit cleanup results as a JSON envelope.
 
 Examples:
 
@@ -647,6 +676,24 @@ Options:
 Examples:
 
 - `wf template manage` — Browse and edit all templates in an interactive screen.
+
+### `wf template suggest`
+
+Suggest templates from PR history.
+
+Analyzes recent authored, reviewed, and commented GitHub pull requests with the configured AI provider, then lets you review and save suggested workspace templates. Requires an interactive terminal.
+
+```text
+wf template suggest [options]
+```
+
+Options:
+
+- `--json` — Emit a machine-readable JSON envelope.
+
+Examples:
+
+- `wf template suggest` — Analyze recent GitHub PR activity and choose suggested templates to save.
 
 ### `wf template new`
 

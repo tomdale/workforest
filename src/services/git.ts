@@ -19,6 +19,35 @@ export function runGitWithStdin(
 
 type CloneResult = { stdout: string; stderr: string };
 
+function parseCheckedOutBranchRefs(worktreeList: string): Set<string> {
+  const branches = new Set<string>();
+
+  for (const rawLine of worktreeList.split("\n")) {
+    const line = rawLine.trim();
+    if (!line.startsWith("branch ")) continue;
+
+    const branch = line.slice("branch ".length).trim();
+    if (branch.startsWith("refs/heads/")) {
+      branches.add(branch);
+    }
+  }
+
+  return branches;
+}
+
+async function readCheckedOutBranchRefs(
+  cwd: string,
+): Promise<Set<string> | null> {
+  try {
+    const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
+      cwd,
+    });
+    return parseCheckedOutBranchRefs(stdout);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Generator version of cloneRepository that yields log messages.
  * Tries GitHub CLI first, then falls back to git clone.
@@ -99,16 +128,28 @@ export async function* fixBareRepoRefsGenerator(
   const lines = stdout.trim().split("\n").filter(Boolean);
   if (lines.length === 0) return;
 
+  const checkedOutBranchRefs = await readCheckedOutBranchRefs(cwd);
+
   yield {
     status: "log",
     level: "info",
-    message: `Moving ${lines.length} refs from refs/heads/* to refs/remotes/origin/*`,
+    message: `Normalizing ${lines.length} refs from refs/heads/* to refs/remotes/origin/*`,
   };
+
+  if (checkedOutBranchRefs === null) {
+    yield {
+      status: "log",
+      level: "warn",
+      message:
+        "Unable to inspect linked worktrees; preserving local branch refs while updating remote-tracking refs",
+    };
+  }
 
   // Build stdin commands for batched update-ref
   // Format: "update <newref> <newsha> [<oldsha>]\ndelete <oldref>\n"
   // Using "update" without oldsha allows creating or updating existing refs
   const stdinLines: string[] = [];
+  const preservedRefs: string[] = [];
   for (const line of lines) {
     const [ref, sha] = line.split(" ");
     if (!ref || !sha) continue;
@@ -118,8 +159,24 @@ export async function* fixBareRepoRefsGenerator(
 
     // Use update without oldsha to create-or-update the remote ref
     stdinLines.push(`update ${newRef} ${sha}`);
+
+    if (checkedOutBranchRefs === null || checkedOutBranchRefs.has(ref)) {
+      preservedRefs.push(ref);
+      continue;
+    }
+
     stdinLines.push(`delete ${ref}`);
   }
+
+  if (checkedOutBranchRefs !== null && preservedRefs.length > 0) {
+    yield {
+      status: "log",
+      level: "warn",
+      message: `Preserving checked-out local branch refs during bare repo normalization: ${preservedRefs.join(", ")}`,
+    };
+  }
+
+  if (stdinLines.length === 0) return;
 
   // Execute all ref updates in a single git call
   // Each line must end with newline, and we need a final newline

@@ -575,6 +575,35 @@ const migrateWorkspaces = leaf({
   outputModes: ["report", "json"],
 });
 
+const aiStatus = leaf({
+  name: "status",
+  path: ["ai", "status"],
+  summary: "Show AI provider status",
+  description:
+    "Shows built-in AI provider detection results, the selected provider, model, timeout, and setup hints. With --json it emits the same status model as a JSON envelope.",
+  handler: "ai.status",
+  help: nestedHelp("ai", "status"),
+  flags: [
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit AI provider status as a JSON envelope instead of the report.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf ai status",
+      description: "Show detected AI providers and the selected provider.",
+    },
+    {
+      command: "wf ai status --json",
+      description: "Emit AI provider status as a JSON envelope.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
 export const commandRegistry: CommandRegistry = {
   shortcuts: [
     {
@@ -613,6 +642,15 @@ export const commandRegistry: CommandRegistry = {
       changeSwitch,
       changeFinish,
       changeDelete,
+      group({
+        name: "ai",
+        path: ["ai"],
+        summary: "Inspect AI provider setup",
+        description:
+          "Reports the built-in provider adapters available to AI-backed Workforest features.",
+        help: { kind: "command", command: "ai" },
+        children: [aiStatus],
+      }),
       group({
         name: "migrate",
         path: ["migrate"],
@@ -804,7 +842,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cache"],
         summary: "Manage cached repositories",
         description:
-          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
+          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
         default: cacheDefault,
         children: [
@@ -921,6 +959,14 @@ export const commandRegistry: CommandRegistry = {
               undefined,
               "Zero or more repositories: a cached name, `org/repo` shorthand, or full git URL.",
             ),
+            flags: [
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit sync results as a JSON envelope.",
+              ),
+            ],
             examples: [
               {
                 command: "wf cache sync",
@@ -932,16 +978,17 @@ export const commandRegistry: CommandRegistry = {
                   "Update cached matches and clone missing mirrors in one invocation.",
               },
             ],
+            outputModes: ["report", "json"],
             tty: optionalStdin,
           }),
           leaf({
-            name: "check",
-            path: ["cache", "check"],
-            summary: "Check cached repositories",
+            name: "doctor",
+            path: ["cache", "doctor"],
+            summary: "Diagnose cached repositories",
             description:
-              "Checks cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, checks every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any checked repository is unhealthy (in both report and JSON modes).",
-            handler: "cache.check",
-            help: nestedHelp("cache", "check"),
+              "Diagnoses cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, diagnoses every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any diagnosed repository is unhealthy (in both report and JSON modes).",
+            handler: "cache.doctor",
+            help: nestedHelp("cache", "doctor"),
             operands: operands(
               0,
               null,
@@ -965,16 +1012,16 @@ export const commandRegistry: CommandRegistry = {
             ],
             examples: [
               {
-                command: "wf cache check",
+                command: "wf cache doctor",
                 description: "Report health for every cached mirror.",
               },
               {
-                command: "wf cache check --json",
+                command: "wf cache doctor --json",
                 description:
                   "Emit health records as JSON; nonzero exit flags problems.",
               },
               {
-                command: "wf cache check vercel/next.js --fix",
+                command: "wf cache doctor vercel/next.js --fix",
                 description:
                   "Repair one cached mirror before reporting health.",
               },
@@ -1009,6 +1056,12 @@ export const commandRegistry: CommandRegistry = {
                 "-f",
                 "Skip the prompt and delete even mirrors with active worktrees; required without a terminal.",
               ),
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit deletion results as a JSON envelope.",
+              ),
             ],
             examples: [
               {
@@ -1021,6 +1074,7 @@ export const commandRegistry: CommandRegistry = {
                   "Delete without prompting, even with active worktrees.",
               },
             ],
+            outputModes: ["report", "json"],
             tty: optionalStdin,
           }),
           leaf({
@@ -1044,6 +1098,12 @@ export const commandRegistry: CommandRegistry = {
                 "-f",
                 "Skip the confirmation prompt; required to proceed without a terminal.",
               ),
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit cleanup results as a JSON envelope.",
+              ),
             ],
             examples: [
               {
@@ -1055,6 +1115,7 @@ export const commandRegistry: CommandRegistry = {
                 description: "Delete all unused mirrors without prompting.",
               },
             ],
+            outputModes: ["report", "json"],
             tty: optionalStdin,
           }),
         ],
@@ -1217,6 +1278,24 @@ export const commandRegistry: CommandRegistry = {
                 command: "wf template manage",
                 description:
                   "Browse and edit all templates in an interactive screen.",
+              },
+            ],
+            outputModes: ["interactive"],
+            tty: requiredStdin,
+          }),
+          leaf({
+            name: "suggest",
+            path: ["template", "suggest"],
+            summary: "Suggest templates from PR history",
+            description:
+              "Analyzes recent authored, reviewed, and commented GitHub pull requests with the configured AI provider, then lets you review and save suggested workspace templates. Requires an interactive terminal.",
+            handler: "template.suggest",
+            help: nestedHelp("template", "suggest"),
+            examples: [
+              {
+                command: "wf template suggest",
+                description:
+                  "Analyze recent GitHub PR activity and choose suggested templates to save.",
               },
             ],
             outputModes: ["interactive"],

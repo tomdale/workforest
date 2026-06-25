@@ -117,7 +117,7 @@ describe("cache commands", () => {
     ["cache", "list", "--help"],
     ["cache", "show", "--help"],
     ["cache", "sync", "--help"],
-    ["cache", "check", "--help"],
+    ["cache", "doctor", "--help"],
     ["cache", "delete", "--help"],
     ["cache", "clean", "--help"],
   ])("renders cache help successfully for %j", async (...argv) => {
@@ -132,8 +132,8 @@ describe("cache commands", () => {
     [["cache", "list"], 0, "No cached repositories.", ""],
     [["cache", "sync", "unknown"], 1, "", "Unknown repository"],
     [["cache", "sync"], 0, "No cached repositories to sync.", ""],
-    [["cache", "check"], 0, "No cached repositories.", ""],
-    [["cache", "check", "--fix"], 0, "No cached repositories.", ""],
+    [["cache", "doctor"], 0, "No cached repositories.", ""],
+    [["cache", "doctor", "--fix"], 0, "No cached repositories.", ""],
     [
       ["cache", "delete", "missing"],
       1,
@@ -156,7 +156,7 @@ describe("cache commands", () => {
     ["cache", "path"],
     ["cache", "add"],
     ["cache", "update"],
-    ["cache", "doctor"],
+    ["cache", "check"],
     ["cache", "repair"],
     ["cache", "prune"],
     ["cache", "manage"],
@@ -182,7 +182,7 @@ describe("cache commands", () => {
     ["cache", "list", "--force"],
     ["cache", "show", "front", "--force"],
     ["cache", "show", "front", "--path", "--json"],
-    ["cache", "check", "--force"],
+    ["cache", "doctor", "--force"],
     ["cache", "delete", "front", "-n", "--dry-run"],
   ])("rejects inapplicable cache flags for %j", async (...argv) => {
     const result = await runCommand(argv);
@@ -266,11 +266,11 @@ describe("cache commands", () => {
     await createBrokenMirror(cacheDir);
     await createBrokenMirror(cacheDir, "damaged.git");
 
-    const human = await runCommand(["cache", "check"]);
-    const json = await runCommand(["cache", "check", "--json"]);
+    const human = await runCommand(["cache", "doctor"]);
+    const json = await runCommand(["cache", "doctor", "--json"]);
     const fixed = await runCommand([
       "cache",
-      "check",
+      "doctor",
       "broken",
       "damaged",
       "--fix",

@@ -35,6 +35,7 @@ describe("configuration registry", () => {
       "directory",
       "branchPrefix",
       "vercelLink",
+      "ai",
     ]);
   });
 
@@ -52,6 +53,12 @@ describe("configuration registry", () => {
           vercelLink: {
             teamByGitHubOwner: { " vercel ": " vercel " },
           },
+          ai: {
+            provider: " codex-cli ",
+            model: " gpt-5 ",
+            timeoutMs: 90000,
+            disabled: false,
+          },
         },
         "config.json",
       ),
@@ -67,6 +74,12 @@ describe("configuration registry", () => {
         teamByGitHubOwner: {
           vercel: "vercel",
         },
+      },
+      ai: {
+        provider: "codex-cli",
+        model: "gpt-5",
+        timeoutMs: 90000,
+        disabled: false,
       },
     });
   });
