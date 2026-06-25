@@ -80,7 +80,7 @@ export async function runStartCommand(
 ): Promise<CommandResult> {
   const parsed = parseStartOperands(invocation.beforeDoubleDash);
   const explicitBranchName = await parseExplicitBranchFlag(
-    invocation.flags.branch,
+    invocation.flags["branch"],
   );
   const { config } = await loadWorkspaceConfig();
   const directories = resolveWorkforestDirectories(config);

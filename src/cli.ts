@@ -31,6 +31,14 @@ import {
   saveWorkspaceConfig,
 } from "./config.ts";
 import {
+  type DashboardRoute,
+  dashboardRouteForInvocation,
+  getDashboardRoute,
+  renderDashboardReport,
+  runDashboardTui,
+  shouldUseDashboardTui,
+} from "./dashboard/index.ts";
+import {
   commandHelp,
   conceptsPage,
   help,
@@ -190,6 +198,10 @@ export async function executeCli(
     const workerResult = await runPrivateWorkerIfRequested();
     if (workerResult) return workerResult;
 
+    if (argv.length === 0 && shouldUseDashboardTui()) {
+      return runDashboardCommand(getDashboardRoute("home"));
+    }
+
     const resolution = resolveCommand(commandRegistry, argv);
     if (resolution.kind === "help") {
       return success({
@@ -235,10 +247,18 @@ async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
+    case "dashboard.open":
+      return runDashboardInvocation(invocation);
     case "review.open":
     case "review.checkout":
       return runReviewInvocation(invocation);
     case "change.start":
+      if (invocation.beforeDoubleDash.length === 0) {
+        if (!shouldUseDashboardTui()) {
+          throw new UsageError("wf start requires a change name.");
+        }
+        return runDashboardCommand(getDashboardRoute("start"));
+      }
       return runTypedCommand(async () => {
         const { runStartCommand } = await import("./cli/start.ts");
         return runStartCommand(invocation, {
@@ -296,6 +316,12 @@ async function runInvocation(
     case "shell.init":
       return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":
+      if (
+        isDefaultInvocation(invocation, "config") &&
+        shouldUseDashboardTui()
+      ) {
+        return runDashboardCommand(getDashboardRoute("config"));
+      }
       return runConfigShow();
     case "config.init":
       return runConfigInit();
@@ -367,6 +393,47 @@ async function runInvocation(
 
   throw new Error(
     `No CLI handler registered for ${invocation.command.leaf.handler}.`,
+  );
+}
+
+async function runDashboardInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  if (isDefaultInvocation(invocation, "cache") && !shouldUseDashboardTui()) {
+    return success({
+      kind: "text",
+      value: await renderHelpReference({ kind: "command", command: "cache" }, [
+        "cache",
+      ]),
+      stream: "stdout",
+    });
+  }
+
+  return runDashboardCommand(
+    dashboardRouteForInvocation(invocation.command.invokedPath),
+  );
+}
+
+async function runDashboardCommand(
+  route: DashboardRoute,
+): Promise<CommandResult> {
+  if (shouldUseDashboardTui()) {
+    await runDashboardTui(route);
+    return success();
+  }
+
+  return success(reportOutput(renderDashboardReport(route)));
+}
+
+function isDefaultInvocation(
+  invocation: ParsedInvocation,
+  command: string,
+): boolean {
+  return (
+    invocation.command.canonicalPath.length === 1 &&
+    invocation.command.canonicalPath[0] === command &&
+    invocation.command.invokedPath.length === 1 &&
+    invocation.command.invokedPath[0] === command
   );
 }
 

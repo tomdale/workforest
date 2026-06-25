@@ -111,8 +111,7 @@ export async function renderInitializationStatus(
     while (true) {
       await updateStatusLine();
       grid.render();
-      const workspaceState =
-        await readWorkspaceInitializationState(workspaceDir);
+      const workspaceState = await readWorkspaceInitializationState(target);
       if (
         workspaceState?.status === "ready" ||
         workspaceState?.status === "failed" ||

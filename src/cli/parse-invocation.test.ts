@@ -98,6 +98,8 @@ describe("parseInvocation", () => {
   });
 
   it("supports interactive operands only on interactive leaves", () => {
+    expect(() => parse(["start"])).toThrow(UsageError);
+    expect(() => parseInteractive(["start"])).not.toThrow();
     expect(() => parse(["template", "new"])).toThrow(UsageError);
     expect(() => parseInteractive(["template", "new"])).not.toThrow();
   });

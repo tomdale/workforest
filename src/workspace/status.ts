@@ -7,7 +7,6 @@ import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
   finalizeWorkspaceInitialization,
   getRepoInitializationLogPath,
-  type InitializationScope,
   type RepoInitializationState,
   readRepoInitializationStates,
   readWorkspaceInitializationState,
@@ -15,6 +14,7 @@ import {
   type WorkspaceInitializationState,
   workspaceInitializationScope,
 } from "./initialization.ts";
+import type { InitializationScope } from "./initialization-scope.ts";
 import { readWorkspaceMetadata } from "./metadata.ts";
 import { listRepositoryTasks, listTasks, type TaskListEntry } from "./tasks.ts";
 

@@ -21,13 +21,29 @@ Exit codes: `0` success, `2` usage error (invalid arguments or flags), `1` opera
 
 Commands whose options include `--json` emit a machine-readable envelope: `{ "ok": true, "data": ... }` on success, or `{ "ok": false, "error": { "kind": "operational" | "usage", "message": ... } }` on failure.
 
+## `wf dashboard`
+
+Open the Workforest dashboard.
+
+Opens the creation-first dashboard in an interactive terminal, or prints a compact dashboard report when a fullscreen terminal is unavailable.
+
+```text
+wf dashboard
+```
+
+Examples:
+
+- `wf dashboard` — Open the dashboard home.
+- `wf templates` — Open the Templates dashboard screen.
+
 ## `wf start`
 
 Start a change.
 
-Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context.
+Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context. With no operands in an interactive terminal, opens the new change dashboard flow; outside an interactive terminal a change name is required.
 
 ```text
+wf start [options]
 wf start [options] <change> [source...]
 ```
 
@@ -325,8 +341,10 @@ Manage cached repositories.
 The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.
 
 ```text
-wf cache <subcommand>
+wf cache [subcommand]
 ```
+
+Without a subcommand: Open the cache dashboard.
 
 ### `wf cache list`
 
@@ -907,3 +925,31 @@ wf version
 Examples:
 
 - `wf version` — Print the installed version.
+
+## Shortcuts
+
+Shortcuts preserve the published command surface while using the same parser and handler as their canonical commands.
+
+### `wf templates`
+
+Shortcut for `wf dashboard`.
+
+```text
+wf templates
+```
+
+### `wf tasks`
+
+Shortcut for `wf dashboard`.
+
+```text
+wf tasks
+```
+
+### `wf reviews`
+
+Shortcut for `wf dashboard`.
+
+```text
+wf reviews
+```

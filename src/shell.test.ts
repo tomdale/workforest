@@ -67,7 +67,6 @@ describe("shell integration", () => {
     expect(script).toContain("'checkout:Check out a pull request worktree'");
     expect(script).toContain("'add-file:Add files to a template'");
     expect(script).not.toContain("'fork:");
-    expect(script).not.toContain("'templates:");
     expect(script).not.toContain("'wt:");
     expect(script).not.toContain("\n      'init:");
     expect(script).not.toContain(" promote ");
@@ -79,7 +78,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'start list status add switch finish delete migrate task cache review template shell config skills help version'",
+      "_workforest_complete_words 'templates tasks reviews dashboard start list status add switch finish delete migrate task cache review template shell config skills help version'",
     );
     expect(script).toContain(
       "_workforest_complete_words 'start list finish delete'",
@@ -110,7 +109,7 @@ describe("shell integration", () => {
     const script = renderShellInit("bash", registry);
 
     expect(script).toContain(
-      "_workforest_complete_words 'inspect visit start list status add switch finish delete migrate task",
+      "_workforest_complete_words 'templates tasks reviews inspect visit dashboard start list status add switch finish delete migrate task",
     );
     expect(script).toContain(
       "visit|start|add|switch|finish|delete|task|review|template)",

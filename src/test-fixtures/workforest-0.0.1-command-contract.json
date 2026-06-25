@@ -3,6 +3,10 @@
   "bins": ["wf", "workforest"],
   "rootCommands": [
     {
+      "name": "dashboard",
+      "summary": "Open the Workforest dashboard"
+    },
+    {
       "name": "start",
       "summary": "Start a change"
     },

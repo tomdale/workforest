@@ -7,6 +7,10 @@ describe("shell command model", () => {
     const model = createShellCommandModel(commandRegistry);
 
     expect(model.commands.map((command) => command.name)).toEqual([
+      "templates",
+      "tasks",
+      "reviews",
+      "dashboard",
       "start",
       "list",
       "status",

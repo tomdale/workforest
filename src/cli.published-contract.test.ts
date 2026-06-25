@@ -30,6 +30,7 @@ describe("final command contract", () => {
     const contract = await loadPublishedContract();
 
     expect(contract.rootCommands.map(({ name }) => name)).toEqual([
+      "dashboard",
       "start",
       "add",
       "switch",

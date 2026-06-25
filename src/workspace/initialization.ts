@@ -1181,8 +1181,8 @@ function resolveInitializationScope({
   workspaceDir,
   scope,
 }: {
-  workspaceDir?: string;
-  scope?: InitializationScope;
+  workspaceDir?: string | undefined;
+  scope?: InitializationScope | undefined;
 }): InitializationScope {
   if (scope) return scope;
   if (workspaceDir) return workspaceInitializationScope(workspaceDir);

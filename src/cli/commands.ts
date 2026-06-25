@@ -21,6 +21,10 @@ const optionalStdin: TtyRequirement = {
   kind: "optional",
   streams: ["stdin"],
 };
+const optionalTerminal: TtyRequirement = {
+  kind: "optional",
+  streams: ["stdin", "stdout"],
+};
 const requiredStdin: TtyRequirement = {
   kind: "required",
   streams: ["stdin"],
@@ -189,12 +193,34 @@ const skillsDefault = leaf({
   outputModes: ["report", "json"],
 });
 
+const dashboardOpen = leaf({
+  name: "dashboard",
+  path: ["dashboard"],
+  summary: "Open the Workforest dashboard",
+  description:
+    "Opens the creation-first dashboard in an interactive terminal, or prints a compact dashboard report when a fullscreen terminal is unavailable.",
+  handler: "dashboard.open",
+  help: { kind: "command", command: "dashboard" },
+  outputModes: ["interactive", "report"],
+  tty: optionalTerminal,
+  examples: [
+    {
+      command: "wf dashboard",
+      description: "Open the dashboard home.",
+    },
+    {
+      command: "wf templates",
+      description: "Open the Templates dashboard screen.",
+    },
+  ],
+});
+
 const changeStart = leaf({
   name: "start",
   path: ["start"],
   summary: "Start a change",
   description:
-    "Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context.",
+    "Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context. With no operands in an interactive terminal, opens the new change dashboard flow; outside an interactive terminal a change name is required.",
   handler: "change.start",
   help: { kind: "command", command: "start" },
   flags: [
@@ -203,13 +229,25 @@ const changeStart = leaf({
         "Use this exact Git branch name instead of deriving one from `branchPrefix` and <change>.",
     }),
   ],
-  operands: operands(
-    1,
-    null,
-    "arguments",
-    "<change> [source...]",
-    "A change name, optionally followed by one repository, multiple repositories, or one @template source.",
-  ),
+  operands: {
+    variants: [
+      {
+        beforeDoubleDash: cardinality(0, 0, "arguments", undefined, undefined),
+        delimiter: "forbidden",
+        when: { interactive: true },
+      },
+      {
+        beforeDoubleDash: cardinality(
+          1,
+          null,
+          "arguments",
+          "<change> [source...]",
+          "A change name, optionally followed by one repository, multiple repositories, or one @template source.",
+        ),
+        delimiter: "forbidden",
+      },
+    ],
+  },
   examples: [
     {
       command: "wf start redesign-cli tomdale/workforest",
@@ -230,6 +268,18 @@ const changeStart = leaf({
   ],
   outputModes: ["human"],
   shellHandoff: "optional-cd",
+});
+
+const cacheDefault = leaf({
+  name: "",
+  path: ["cache"],
+  summary: "Open the cache dashboard",
+  description:
+    "Opens the Cache dashboard screen in an interactive terminal. Scriptable cache operations remain available as explicit subcommands.",
+  handler: "dashboard.open",
+  help: { kind: "command", command: "cache" },
+  outputModes: ["interactive", "report"],
+  tty: optionalTerminal,
 });
 
 const changeList = leaf({
@@ -515,13 +565,36 @@ const migrateWorkspaces = leaf({
 });
 
 export const commandRegistry: CommandRegistry = {
-  shortcuts: [],
+  shortcuts: [
+    {
+      name: "templates",
+      target: ["dashboard"],
+      visibility: visible,
+      summary: "Open the Templates dashboard screen",
+      help: { kind: "command", command: "templates" },
+    },
+    {
+      name: "tasks",
+      target: ["dashboard"],
+      visibility: visible,
+      summary: "Open the Tasks dashboard screen",
+      help: { kind: "command", command: "tasks" },
+    },
+    {
+      name: "reviews",
+      target: ["dashboard"],
+      visibility: visible,
+      summary: "Open the Reviews dashboard screen",
+      help: { kind: "command", command: "reviews" },
+    },
+  ],
   root: group({
     name: "",
     path: [],
     summary: "Workforest command line interface",
     help: { kind: "root" },
     children: [
+      dashboardOpen,
       changeStart,
       changeList,
       changeStatus,
@@ -722,6 +795,7 @@ export const commandRegistry: CommandRegistry = {
         description:
           "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `check --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
+        default: cacheDefault,
         children: [
           leaf({
             name: "list",

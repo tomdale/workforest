@@ -253,6 +253,10 @@ describe("cli", () => {
   });
 
   it.each([
+    ["dashboard", "Usage: wf dashboard"],
+    ["templates", "Usage: wf templates"],
+    ["tasks", "Usage: wf tasks"],
+    ["reviews", "Usage: wf reviews"],
     ["start", "Usage: wf start"],
     ["add", "Usage: wf add"],
     ["switch", "Usage: wf switch"],
