@@ -59,9 +59,9 @@ export const ENVIRONMENT_VARIABLE_REGISTRY: readonly EnvironmentVariableDefiniti
       value: "directory path",
       audience: "user",
       description:
-        "Loads skills exclusively from this directory instead of discovering the packaged skill directories.",
+        "Loads skills exclusively from this directory instead of discovering the packaged skill-data directory.",
       defaultBehavior:
-        "Discovers the skills and skill-data directories beside the installed package.",
+        "Discovers the skill-data directory beside the installed package.",
     },
     {
       name: WORKFOREST_ENVIRONMENT_VARIABLES.noTui,

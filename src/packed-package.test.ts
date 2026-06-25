@@ -86,6 +86,12 @@ describe("packed package", () => {
     expect(files.some((file) => file.startsWith("package/packages/"))).toBe(
       false,
     );
+    expect(files.some((file) => file.startsWith("package/skills/"))).toBe(
+      false,
+    );
+    expect(files.some((file) => file.startsWith("package/.agents/"))).toBe(
+      false,
+    );
   });
 
   it("publishes valid runtime, declaration, and bin targets", async () => {

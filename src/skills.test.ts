@@ -6,6 +6,7 @@ import { renderCommandResult } from "./cli/output.ts";
 import { cli } from "./cli.ts";
 import {
   discoverSkills,
+  findSkillsDirs,
   getSkillContents,
   parseSkillFrontmatter,
   runSkillsCommand,
@@ -78,6 +79,14 @@ afterEach(async () => {
 });
 
 describe("skills", () => {
+  it("discovers only packaged runtime skill data by default", async () => {
+    delete process.env["WORKFOREST_SKILLS_DIR"];
+
+    await expect(findSkillsDirs()).resolves.toEqual([
+      path.resolve("skill-data"),
+    ]);
+  });
+
   it("parses frontmatter with multiline descriptions and hidden flag", () => {
     expect(
       parseSkillFrontmatter(`---

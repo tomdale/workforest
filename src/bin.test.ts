@@ -81,7 +81,7 @@ describe("bin/workforest.js", () => {
   it("keeps bundled skill content undecorated on stdout", async () => {
     const result = await execFileAsync(
       process.execPath,
-      [path.resolve("bin/workforest.js"), "skills", "get", "terminal-ui"],
+      [path.resolve("bin/workforest.js"), "skills", "get", "core"],
       {
         env: {
           ...process.env,
@@ -91,7 +91,7 @@ describe("bin/workforest.js", () => {
       },
     );
 
-    expect(result.stdout).toMatch(/^---\nname: terminal-ui\n/);
+    expect(result.stdout).toMatch(/^---\nname: core\n/);
     expect(result.stdout).not.toContain("Running local copy");
   });
 

@@ -828,7 +828,7 @@ Options:
 Examples:
 
 - `wf skills get core` — Print the `core` skill — the recommended starting point.
-- `wf skills get core terminal-ui` — Print several named skills, separated by `---`.
+- `wf skills get core parallel-worktrees` — Print several named skills, separated by `---`.
 - `wf skills get --all --full` — Print every skill, including its reference and template files.
 
 ### `wf skills path`

@@ -1511,7 +1511,7 @@ export const commandRegistry: CommandRegistry = {
                   "Print the `core` skill — the recommended starting point.",
               },
               {
-                command: "wf skills get core terminal-ui",
+                command: "wf skills get core parallel-worktrees",
                 description: "Print several named skills, separated by `---`.",
               },
               {

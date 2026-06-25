@@ -17,7 +17,7 @@ import {
 } from "./environment.ts";
 import { renderReport } from "./terminal/report.ts";
 
-const SKILL_DIR_NAMES = ["skills", "skill-data"] as const;
+const SKILL_DIR_NAMES = ["skill-data"] as const;
 const SUPPLEMENTARY_DIR_NAMES = ["references", "templates"] as const;
 
 export type SkillInfo = {

@@ -26,9 +26,9 @@ When unset: Uses $XDG_CACHE_HOME/workforest, or ~/.cache/workforest when XDG_CAC
 
 Value: directory path.
 
-Loads skills exclusively from this directory instead of discovering the packaged skill directories.
+Loads skills exclusively from this directory instead of discovering the packaged skill-data directory.
 
-When unset: Discovers the skills and skill-data directories beside the installed package.
+When unset: Discovers the skill-data directory beside the installed package.
 
 ### `WORKFOREST_NO_TUI`
 

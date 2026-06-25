@@ -53,12 +53,8 @@ Long-running operations use async generators that yield state updates, enabling 
 
 ## Testing the CLI in Interactive Mode
 
-Before changing terminal output or interaction, load the bundled design and
-verification guidance:
-
-```bash
-pnpm exec tsx bin/workforest.js skills get terminal-ui --full
-```
+Before changing terminal output or interaction, use the in-project terminal UI
+skill at `.agents/skills/terminal-ui/SKILL.md`.
 
 `pnpm test` and the Bash tool both run in non-interactive shells without a real TTY.
 This silently bypasses large parts of the CLI:
