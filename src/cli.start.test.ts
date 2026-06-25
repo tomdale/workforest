@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { UsageError } from "./cli/errors.ts";
 import {
   parseStartOperands,
   type RunStartCommandOptions,
@@ -120,6 +121,51 @@ describe("wf start", () => {
     });
   });
 
+  it("uses an explicit branch for a single repository without renaming the change", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const created = fakeCreateSingleWorktree();
+
+    await runStartCommand(
+      invocation(["fix-auth", "front"], { branch: "tomdale/custom" }),
+      {
+        interactive: false,
+        writeShellCdPath: fixture.writeShellCdPath,
+        createSingleWorktree: created,
+      },
+    );
+
+    expect(created).toHaveBeenCalledWith({
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      branchName: "tomdale/custom",
+      targetDir: path.join(fixture.baseDir, "Repos", "front", "fix-auth"),
+    });
+    await expect(
+      readRepositoryChangeMetadata(
+        path.join(fixture.baseDir, "Repos", "front"),
+        "fix-auth",
+      ),
+    ).resolves.toMatchObject({
+      workspace: {
+        feature_name: "fix-auth",
+      },
+      repos: [
+        {
+          name: "front",
+          feature_branch: "tomdale/custom",
+        },
+      ],
+    });
+  });
+
   it("routes a template source to the template workspace layout", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
@@ -162,6 +208,48 @@ describe("wf start", () => {
     ]);
   });
 
+  it("uses an explicit branch for a template start instead of the template branch prefix", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    await createTemplate("vercel-agent", {
+      repos: ["front"],
+      branchPrefix: "agent",
+    });
+    const stamped = fakeStampWorkspace();
+
+    await runStartCommand(
+      invocation(["auth-fix", "@vercel-agent"], { branch: "tomdale/custom" }),
+      {
+        interactive: false,
+        writeShellCdPath: fixture.writeShellCdPath,
+        stampWorkspace: stamped,
+      },
+    );
+
+    expect(stamped).toHaveBeenCalledWith({
+      featureName: "auth-fix",
+      branchName: "tomdale/custom",
+      workspaceDir: path.join(
+        fixture.baseDir,
+        "Workspaces",
+        "vercel-agent",
+        "auth-fix",
+      ),
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+        },
+      ],
+      templateId: "vercel-agent",
+    });
+  });
+
   it("routes multiple repository sources to the _adhoc workspace layout", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
@@ -185,6 +273,53 @@ describe("wf start", () => {
     expect(stamped).toHaveBeenCalledWith({
       featureName: "billing",
       branchName: "tomdale/billing",
+      workspaceDir: path.join(
+        fixture.baseDir,
+        "Workspaces",
+        "_adhoc",
+        "billing",
+      ),
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+        },
+        {
+          name: "api",
+          remote: "git@github.com:vercel/api.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+  });
+
+  it("uses an explicit branch for multiple repository sources instead of the global branch prefix", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    await createCachedMirror(
+      fixture.cacheDir,
+      "api.git",
+      "git@github.com:vercel/api.git",
+    );
+    const stamped = fakeStampWorkspace();
+
+    await runStartCommand(
+      invocation(["billing", "front", "api"], { branch: "tomdale/custom" }),
+      {
+        interactive: false,
+        writeShellCdPath: fixture.writeShellCdPath,
+        stampWorkspace: stamped,
+      },
+    );
+
+    expect(stamped).toHaveBeenCalledWith({
+      featureName: "billing",
+      branchName: "tomdale/custom",
       workspaceDir: path.join(
         fixture.baseDir,
         "Workspaces",
@@ -306,6 +441,19 @@ describe("wf start", () => {
       ].join("\n"),
     );
   });
+
+  it.each([
+    ["   ", 'Flag "--branch" requires a non-empty branch name.'],
+    ["bad..name", "Invalid Git branch name: bad..name"],
+  ])("rejects invalid explicit branch values %#", async (branch, message) => {
+    const result = runStartCommand(
+      invocation(["fix-auth", "front"], { branch }),
+      noOpStartOptions(),
+    );
+
+    await expect(result).rejects.toBeInstanceOf(UsageError);
+    await expect(result).rejects.toThrow(message);
+  });
 });
 
 async function createStartFixture(): Promise<{
@@ -363,8 +511,18 @@ async function createTempDir(prefix: string): Promise<string> {
   return dir;
 }
 
-function invocation(beforeDoubleDash: readonly string[]): ParsedInvocation {
-  return { beforeDoubleDash } as ParsedInvocation;
+function invocation(
+  beforeDoubleDash: readonly string[],
+  flags: ParsedInvocation["flags"] = {},
+): ParsedInvocation {
+  return { beforeDoubleDash, flags } as ParsedInvocation;
+}
+
+function noOpStartOptions(): RunStartCommandOptions {
+  return {
+    interactive: false,
+    writeShellCdPath: async () => undefined,
+  };
 }
 
 function metadataRepo(

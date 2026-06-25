@@ -4,6 +4,7 @@ import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
+import { runGit } from "../services/git.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
@@ -71,6 +72,9 @@ export async function runStartCommand(
   options: RunStartCommandOptions,
 ): Promise<CommandResult> {
   const parsed = parseStartOperands(invocation.beforeDoubleDash);
+  const explicitBranchName = await parseExplicitBranchFlag(
+    invocation.flags.branch,
+  );
   const { config } = await loadWorkspaceConfig();
   const directories = resolveWorkforestDirectories(config);
   const source =
@@ -79,12 +83,14 @@ export async function runStartCommand(
       : await resolveExplicitStartSource(parsed.source);
 
   const changeName = validateResourceName(parsed.changeName, "Change name");
-  const branchName = buildBranchName(
-    changeName,
-    source.kind === "template"
-      ? resolveBranchPrefix(config.branchPrefix, source.branchPrefix)
-      : config.branchPrefix,
-  );
+  const branchName =
+    explicitBranchName ??
+    buildBranchName(
+      changeName,
+      source.kind === "template"
+        ? resolveBranchPrefix(config.branchPrefix, source.branchPrefix)
+        : config.branchPrefix,
+    );
 
   if (source.kind === "repository") {
     const targetDir = getRepositoryChangePath(
@@ -179,6 +185,30 @@ export function parseStartOperands(
   }
 
   return { changeName, source: { kind: "repositories", tokens: sourceTokens } };
+}
+
+async function parseExplicitBranchFlag(
+  value: boolean | string | undefined,
+): Promise<string | undefined> {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new UsageError('Flag "--branch" requires a branch name.');
+  }
+
+  const branchName = value.trim();
+  if (branchName.length === 0) {
+    throw new UsageError('Flag "--branch" requires a non-empty branch name.');
+  }
+
+  try {
+    await runGit(["check-ref-format", "--branch", branchName]);
+  } catch {
+    throw new UsageError(`Invalid Git branch name: ${branchName}`);
+  }
+
+  return branchName;
 }
 
 async function resolveExplicitStartSource(

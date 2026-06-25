@@ -197,6 +197,12 @@ const changeStart = leaf({
     "Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context.",
   handler: "change.start",
   help: { kind: "command", command: "start" },
+  flags: [
+    stringFlag("branch", "--branch", "branch", {
+      description:
+        "Use this exact Git branch name instead of deriving one from `branchPrefix` and <change>.",
+    }),
+  ],
   operands: operands(
     1,
     null,

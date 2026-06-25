@@ -67,6 +67,12 @@ describe("parseInvocation", () => {
       beforeDoubleDash: ["fix-auth", "vercel/front"],
     });
     expect(
+      parse(["start", "--branch", "tomdale/custom", "fix-auth", "front"]),
+    ).toMatchObject({
+      flags: { branch: "tomdale/custom" },
+      beforeDoubleDash: ["fix-auth", "front"],
+    });
+    expect(
       parse(["status", "workforest/cli-redesign"]).beforeDoubleDash,
     ).toEqual(["workforest/cli-redesign"]);
     expect(parse(["finish"]).beforeDoubleDash).toEqual([]);
