@@ -119,7 +119,7 @@ describe("dashboard rendering", () => {
     const report = renderDashboardReport(getDashboardRoute("templates"));
 
     expect(report).toContain("Workforest Templates");
-    expect(report).toContain("Open manager");
+    expect(report).toContain("Templates dashboard");
     expect(report).toContain("Operations");
     expect(report).toContain("Interactive dashboard opens in a capable TTY");
   });
