@@ -181,6 +181,36 @@ Examples:
 - `wf delete _adhoc/experiment` — Delete a change after confirming.
 - `wf delete _adhoc/experiment --force` — Delete without prompting.
 
+## `wf migrate`
+
+Migrate Workforest layouts.
+
+Runs one-time migrations for Workforest-managed data layouts.
+
+```text
+wf migrate <subcommand>
+```
+
+### `wf migrate workspaces`
+
+Migrate workspace layouts and repository metadata.
+
+Moves metadata-bearing direct workspace directories into the grouped workspace layout and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.
+
+```text
+wf migrate workspaces [options]
+```
+
+Options:
+
+- `--apply` — Move directories and write repository metadata. Omit to preview the migration plan only.
+- `--json` — Emit the migration result as a JSON envelope instead of the report.
+
+Examples:
+
+- `wf migrate workspaces` — Preview workspace moves and repository metadata backfills.
+- `wf migrate workspaces --apply` — Apply workspace moves and repository metadata backfills.
+
 ## `wf task`
 
 Manage temporary task worktrees.

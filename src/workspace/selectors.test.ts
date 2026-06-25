@@ -2,6 +2,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  writeRepositoryChangeMetadata,
+  writeWorkspaceMetadata,
+} from "./metadata.ts";
 import { resolveChangeSelector } from "./selectors.ts";
 
 const tempDirs: string[] = [];
@@ -61,6 +65,15 @@ describe("resolveChangeSelector", () => {
         recursive: true,
       },
     );
+    await writeWorkspaceMetadata(
+      path.join(base, "Workspaces", "workforest", "cli-redesign"),
+      {
+        featureName: "cli-redesign",
+        branchName: "tomdale/cli-redesign",
+        templateId: "workforest",
+        repos: [metadataRepo("front", "git@github.com:vercel/front.git")],
+      },
+    );
 
     const resolution = await resolveChangeSelector(
       { directory: { base } },
@@ -97,6 +110,15 @@ describe("resolveChangeSelector", () => {
       path.join(base, "Workspaces", "workforest", "cli-redesign", "front"),
       {
         recursive: true,
+      },
+    );
+    await writeWorkspaceMetadata(
+      path.join(base, "Workspaces", "workforest", "cli-redesign"),
+      {
+        featureName: "cli-redesign",
+        branchName: "tomdale/cli-redesign",
+        templateId: "workforest",
+        repos: [metadataRepo("front", "git@github.com:vercel/front.git")],
       },
     );
 
@@ -157,10 +179,43 @@ async function createInventoryFixture(): Promise<string> {
     mkdir(path.join(base, "Workspaces", "_adhoc", "auth-fix", "api"), {
       recursive: true,
     }),
+    mkdir(path.join(base, "Workspaces", "_adhoc", "auth-fix", "front"), {
+      recursive: true,
+    }),
     mkdir(path.join(base, "Repos", "workforest", "cli-redesign"), {
       recursive: true,
     }),
   ]);
+  await writeWorkspaceMetadata(
+    path.join(base, "Workspaces", "vercel-agent", "auth-fix"),
+    {
+      featureName: "auth-fix",
+      branchName: "tomdale/auth-fix",
+      templateId: "vercel-agent",
+      repos: [
+        metadataRepo("agents", "git@github.com:vercel/agents.git"),
+        metadataRepo("api", "git@github.com:vercel/api.git"),
+      ],
+    },
+  );
+  await writeWorkspaceMetadata(
+    path.join(base, "Workspaces", "_adhoc", "auth-fix"),
+    {
+      featureName: "auth-fix",
+      branchName: "tomdale/auth-fix",
+      repos: [
+        metadataRepo("front", "git@github.com:vercel/front.git"),
+        metadataRepo("api", "git@github.com:vercel/api.git"),
+      ],
+    },
+  );
+  await writeRepositoryChangeMetadata(path.join(base, "Repos", "workforest"), {
+    featureName: "cli-redesign",
+    branchName: "tomdale/cli-redesign",
+    repos: [
+      metadataRepo("workforest", "git@github.com:tomdale/workforest.git"),
+    ],
+  });
   return base;
 }
 
@@ -168,4 +223,16 @@ async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+function metadataRepo(
+  name: string,
+  remote: string,
+): {
+  name: string;
+  remote: string;
+  defaultBranch: string;
+  hasLockfile: boolean;
+} {
+  return { name, remote, defaultBranch: "main", hasLockfile: false };
 }

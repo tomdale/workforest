@@ -471,6 +471,41 @@ const changeDelete = leaf({
   shellHandoff: "optional-cd",
 });
 
+const migrateWorkspaces = leaf({
+  name: "workspaces",
+  path: ["migrate", "workspaces"],
+  summary: "Migrate workspace layouts and repository metadata",
+  description:
+    "Moves metadata-bearing direct workspace directories into the grouped workspace layout and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.",
+  handler: "migrate.workspaces",
+  help: nestedHelp("migrate", "workspaces"),
+  flags: [
+    booleanFlag(
+      "apply",
+      "--apply",
+      undefined,
+      "Move directories and write repository metadata. Omit to preview the migration plan only.",
+    ),
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit the migration result as a JSON envelope instead of the report.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf migrate workspaces",
+      description: "Preview workspace moves and repository metadata backfills.",
+    },
+    {
+      command: "wf migrate workspaces --apply",
+      description: "Apply workspace moves and repository metadata backfills.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
 export const commandRegistry: CommandRegistry = {
   shortcuts: [],
   root: group({
@@ -486,6 +521,15 @@ export const commandRegistry: CommandRegistry = {
       changeSwitch,
       changeFinish,
       changeDelete,
+      group({
+        name: "migrate",
+        path: ["migrate"],
+        summary: "Migrate Workforest layouts",
+        description:
+          "Runs one-time migrations for Workforest-managed data layouts.",
+        help: { kind: "command", command: "migrate" },
+        children: [migrateWorkspaces],
+      }),
       group({
         name: "task",
         path: ["task"],

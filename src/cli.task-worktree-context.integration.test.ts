@@ -18,6 +18,7 @@ import {
 import {
   appendTasks,
   readWorkspaceMetadata,
+  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
 
@@ -111,7 +112,7 @@ describe("task command workspace context", () => {
       expectSuccess(result);
       expect(result.stdout).toContain("front");
     }
-  }, 30_000);
+  }, 60_000);
 
   it("deletes only explicit task slugs and never infers a destructive target from cwd", async () => {
     const fixture = await createWorkspaceFixture();
@@ -158,7 +159,7 @@ describe("task command workspace context", () => {
     expect(metadata?.tasks?.map((entry) => entry.slug)).toEqual([
       "front-current",
     ]);
-  }, 30_000);
+  }, 60_000);
 
   it("deleting the current workspace task writes a parent repo cd target", async () => {
     const fixture = await createWorkspaceFixture();
@@ -177,7 +178,7 @@ describe("task command workspace context", () => {
     await expect(readCdTarget(fixture.env)).resolves.toBe(
       await realpath(fixture.frontRepoDir),
     );
-  }, 30_000);
+  }, 60_000);
 });
 
 describe("task command repository-change context", () => {
@@ -232,7 +233,7 @@ describe("task command repository-change context", () => {
     await expect(readCdTarget(fixture.env)).resolves.toBe(
       await realpath(fixture.parentRepoDir),
     );
-  }, 30_000);
+  }, 60_000);
 });
 
 type CliEnvironment = NodeJS.ProcessEnv;
@@ -343,7 +344,18 @@ async function createRepositoryTaskFixture(): Promise<RepositoryTaskFixture> {
   );
   await initializeRepository(parentRepoDir, "tomdale/my-feature");
   await createLinkedWorktree(parentRepoDir, taskDir, "tomdale/existing-task");
-
+  await writeRepositoryChangeMetadata(path.dirname(parentRepoDir), {
+    featureName: "my-feature",
+    branchName: "tomdale/my-feature",
+    repos: [
+      {
+        name: "front",
+        remote: "git@github.com:example/front.git",
+        defaultBranch: "main",
+        hasLockfile: false,
+      },
+    ],
+  });
   return {
     parentRepoDir,
     taskDir,

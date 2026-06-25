@@ -2,21 +2,20 @@ import { type Dirent, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { validateRepositoryComponent } from "../repository-components.ts";
-import { runGit } from "../services/git.ts";
-import type { WorkspaceConfig } from "../types.ts";
+import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
-import { readWorkspaceMetadata } from "./metadata.ts";
+import {
+  listRepositoryChangeMetadata,
+  readWorkspaceMetadata,
+} from "./metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
   resolveWorkforestDirectories,
-  TASKS_DIRECTORY_NAME,
   type WorkforestDirectories,
 } from "./paths.ts";
 
-const GIT_STATUS_TIMEOUT_MS = 5_000;
-
-export type ChangeState = "clean" | "dirty" | "stale";
+export type ChangeState = "ready" | "stale";
 
 export type WorkspaceChangeInventoryEntry = Readonly<{
   type: "template-workspace" | "adhoc-workspace";
@@ -151,10 +150,27 @@ export function renderChangeList(
 async function collectWorkspaceChanges(
   directories: WorkforestDirectories,
 ): Promise<WorkspaceChangeInventoryEntry[]> {
-  const groups = await readChildDirectories(directories.workspaces);
+  const candidates = await readChildDirectories(directories.workspaces);
   const entries: WorkspaceChangeInventoryEntry[] = [];
 
-  for (const group of groups) {
+  for (const candidate of candidates) {
+    const directMetadata = await readWorkspaceMetadata(candidate.path).catch(
+      () => null,
+    );
+    if (directMetadata) {
+      entries.push(
+        await workspaceInventoryEntryFromMetadata({
+          metadata: directMetadata,
+          path: candidate.path,
+          groupName:
+            directMetadata.workspace.template_id ?? ADHOC_WORKSPACE_GROUP,
+          changeName: directMetadata.workspace.feature_name,
+        }),
+      );
+      continue;
+    }
+
+    const group = candidate;
     const groupName = safeWorkspaceGroupName(group.name);
     if (!groupName) continue;
 
@@ -169,33 +185,54 @@ async function collectWorkspaceChanges(
       );
       if (!metadata) continue;
 
-      const repos = metadata.repos.map((repo) => repo.name);
-      const repoPaths = repos.map((repo) => path.join(changePath, repo));
-      const modifiedAtMs = await newestMtimeMs([
-        changePath,
-        path.join(changePath, ".workforest"),
-        ...repoPaths,
-      ]);
-
-      entries.push({
-        type:
-          groupName === ADHOC_WORKSPACE_GROUP
-            ? "adhoc-workspace"
-            : "template-workspace",
-        selector: `${groupName}/${changeName}`,
-        groupName,
-        changeName,
-        repos,
-        repoSummary: summarizeRepos(repos),
-        state: await aggregateRepoState(repoPaths),
-        modifiedAt: new Date(modifiedAtMs).toISOString(),
-        modifiedAtMs,
-        path: changePath,
-      });
+      entries.push(
+        await workspaceInventoryEntryFromMetadata({
+          metadata,
+          path: changePath,
+          groupName,
+          changeName,
+        }),
+      );
     }
   }
 
   return entries;
+}
+
+async function workspaceInventoryEntryFromMetadata({
+  metadata,
+  path: changePath,
+  groupName,
+  changeName,
+}: {
+  metadata: WorkspaceMetadata;
+  path: string;
+  groupName: string;
+  changeName: string;
+}): Promise<WorkspaceChangeInventoryEntry> {
+  const repos = metadata.repos.map((repo) => repo.name);
+  const repoPaths = repos.map((repo) => path.join(changePath, repo));
+  const modifiedAtMs = await newestMtimeMs([
+    changePath,
+    path.join(changePath, ".workforest"),
+    ...repoPaths,
+  ]);
+
+  return {
+    type:
+      groupName === ADHOC_WORKSPACE_GROUP
+        ? "adhoc-workspace"
+        : "template-workspace",
+    selector: `${groupName}/${changeName}`,
+    groupName,
+    changeName,
+    repos,
+    repoSummary: summarizeRepos(repos),
+    state: await aggregatePathState(repoPaths),
+    modifiedAt: new Date(modifiedAtMs).toISOString(),
+    modifiedAtMs,
+    path: changePath,
+  };
 }
 
 async function collectRepositoryChanges(
@@ -208,21 +245,16 @@ async function collectRepositoryChanges(
     const repoName = safeRepositoryName(repository.name);
     if (!repoName) continue;
 
-    const changes = await readChildDirectories(repository.path);
+    const changes = await listRepositoryChangeMetadata(repository.path).catch(
+      () => [],
+    );
     for (const change of changes) {
-      if (change.name === TASKS_DIRECTORY_NAME) continue;
-      const changeName = safeResourceName(change.name);
-      if (!changeName) continue;
-
+      const changeName = change.metadata.workspace.feature_name;
       const changePath = path.join(repository.path, changeName);
-      const metadata = await readWorkspaceMetadata(changePath).catch(
-        () => null,
-      );
-      if (!metadata) continue;
 
       const modifiedAtMs = await newestMtimeMs([
         changePath,
-        path.join(changePath, ".workforest"),
+        change.metadataPath,
       ]);
       entries.push({
         type: "repository-change",
@@ -230,7 +262,7 @@ async function collectRepositoryChanges(
         groupName: repoName,
         changeName,
         repository: repoName,
-        state: await detectRepoState(changePath),
+        state: await aggregatePathState([changePath]),
         modifiedAt: new Date(modifiedAtMs).toISOString(),
         modifiedAtMs,
         path: changePath,
@@ -241,37 +273,15 @@ async function collectRepositoryChanges(
   return entries;
 }
 
-async function aggregateRepoState(
+async function aggregatePathState(
   repoPaths: readonly string[],
 ): Promise<ChangeState> {
   if (repoPaths.length === 0) {
     return "stale";
   }
 
-  const states = await Promise.all(repoPaths.map(detectRepoState));
-  if (states.includes("dirty")) {
-    return "dirty";
-  }
-  if (states.includes("stale")) {
-    return "stale";
-  }
-  return "clean";
-}
-
-async function detectRepoState(repoPath: string): Promise<ChangeState> {
-  if (!(await pathExists(repoPath))) {
-    return "stale";
-  }
-
-  try {
-    const { stdout } = await runGit(["status", "--porcelain"], {
-      cwd: repoPath,
-      timeout: GIT_STATUS_TIMEOUT_MS,
-    });
-    return stdout.trim().length > 0 ? "dirty" : "clean";
-  } catch {
-    return "stale";
-  }
+  const states = await Promise.all(repoPaths.map(pathExists));
+  return states.every(Boolean) ? "ready" : "stale";
 }
 
 async function readChildDirectories(

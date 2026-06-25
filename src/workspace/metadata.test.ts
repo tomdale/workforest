@@ -14,8 +14,13 @@ import {
   appendTasks,
   appendWorkspaceRepos,
   getMetadataPath,
+  getRepositoryChangeMetadataPath,
+  listRepositoryChangeMetadata,
+  readRepositoryChangeMetadata,
   readWorkspaceMetadata,
+  removeRepositoryChangeMetadata,
   removeTasks,
+  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 
@@ -465,6 +470,86 @@ describe("workspace metadata", () => {
         },
       ]),
     ).rejects.toThrow("Repository name");
+  });
+});
+
+describe("repository change metadata", () => {
+  it("writes repository change metadata under the repo root", async () => {
+    const repoRootDir = await createWorkspaceDir();
+
+    await writeRepositoryChangeMetadata(repoRootDir, {
+      featureName: "fix-auth-bug",
+      branchName: "tomdale/fix-auth-bug",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    const metadataPath = getRepositoryChangeMetadataPath(
+      repoRootDir,
+      "fix-auth-bug",
+    );
+    await expect(
+      readRepositoryChangeMetadata(repoRootDir, "fix-auth-bug"),
+    ).resolves.toMatchObject({
+      workspace: { feature_name: "fix-auth-bug" },
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          feature_branch: "tomdale/fix-auth-bug",
+          has_lockfile: true,
+        },
+      ],
+    });
+    await expect(readFile(metadataPath, "utf8")).resolves.toContain(
+      '"feature_name": "fix-auth-bug"',
+    );
+  });
+
+  it("lists and removes repository change metadata", async () => {
+    const repoRootDir = await createWorkspaceDir();
+    await writeRepositoryChangeMetadata(repoRootDir, {
+      featureName: "alpha",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+    await writeRepositoryChangeMetadata(repoRootDir, {
+      featureName: "beta",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+          hasLockfile: false,
+        },
+      ],
+    });
+
+    await expect(listRepositoryChangeMetadata(repoRootDir)).resolves.toEqual([
+      expect.objectContaining({ changeName: "alpha" }),
+      expect.objectContaining({ changeName: "beta" }),
+    ]);
+
+    await removeRepositoryChangeMetadata(repoRootDir, "alpha");
+
+    await expect(
+      readRepositoryChangeMetadata(repoRootDir, "alpha"),
+    ).resolves.toBeNull();
+    await expect(listRepositoryChangeMetadata(repoRootDir)).resolves.toEqual([
+      expect.objectContaining({ changeName: "beta" }),
+    ]);
   });
 });
 

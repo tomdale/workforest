@@ -37,6 +37,7 @@ describe("final command contract", () => {
       "status",
       "finish",
       "delete",
+      "migrate",
       "task",
       "cache",
       "review",

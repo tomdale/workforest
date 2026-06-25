@@ -31,6 +31,10 @@
       "summary": "Delete a Workforest change"
     },
     {
+      "name": "migrate",
+      "summary": "Migrate Workforest layouts"
+    },
+    {
       "name": "task",
       "summary": "Manage temporary task worktrees"
     },

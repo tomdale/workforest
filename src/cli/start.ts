@@ -17,9 +17,11 @@ import {
   printRepoSetupFailures,
   stampWorkspace,
   stampWorkspaceInteractive,
-  writeInitialWorkspaceMetadata,
 } from "../workspace/index.ts";
-import { readWorkspaceMetadata } from "../workspace/metadata.ts";
+import {
+  readWorkspaceMetadata,
+  writeRepositoryChangeMetadata,
+} from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
   getRepositoryChangePath,
@@ -96,11 +98,15 @@ export async function runStartCommand(
       branchName,
       targetDir,
     });
-    await writeInitialWorkspaceMetadata({
-      workspaceDir: targetDir,
+    await writeRepositoryChangeMetadata(path.dirname(targetDir), {
       featureName: changeName,
       branchName,
-      repos: [source.repo],
+      repos: [
+        {
+          ...source.repo,
+          hasLockfile: await hasLockfile(targetDir),
+        },
+      ],
     });
     await options.writeShellCdPath(targetDir);
     log.success(`Change ready: ${targetDir}`);
@@ -311,5 +317,21 @@ async function comparablePath(value: string): Promise<string> {
     return await fs.realpath(value);
   } catch {
     return path.resolve(value);
+  }
+}
+
+async function hasLockfile(repoDir: string): Promise<boolean> {
+  return (
+    (await fileExists(path.join(repoDir, "pnpm-lock.yaml"))) ||
+    (await fileExists(path.join(repoDir, "pnpm-lock.yml")))
+  );
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }

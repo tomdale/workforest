@@ -286,6 +286,13 @@ async function runInvocation(
           onCleanupState: (state) => renderCleanupState(state, false),
         });
       });
+    case "migrate.workspaces":
+      return runTypedCommand(async () => {
+        const { runMigrateWorkspacesCommand } = await import(
+          "./cli/migrate.ts"
+        );
+        return runMigrateWorkspacesCommand(invocation);
+      });
     case "shell.init":
       return runShellInitCommand(invocation.beforeDoubleDash[0]);
     case "config.show":

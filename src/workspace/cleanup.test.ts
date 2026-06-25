@@ -8,6 +8,7 @@ const {
   cleanupWorkspaceWorktreesGeneratorMock,
   pathExistsMock,
   readWorkspaceMetadataMock,
+  removeRepositoryChangeMetadataMock,
 } = vi.hoisted(() => ({
   accessMock: vi.fn(),
   rmMock: vi.fn(),
@@ -16,6 +17,7 @@ const {
   cleanupWorkspaceWorktreesGeneratorMock: vi.fn(),
   pathExistsMock: vi.fn(),
   readWorkspaceMetadataMock: vi.fn(),
+  removeRepositoryChangeMetadataMock: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -37,6 +39,7 @@ vi.mock("./index.ts", () => ({
 vi.mock("./metadata.ts", () => ({
   hasWorkspaceMetadata: vi.fn(async () => true),
   readWorkspaceMetadata: readWorkspaceMetadataMock,
+  removeRepositoryChangeMetadata: removeRepositoryChangeMetadataMock,
 }));
 
 vi.mock("./repository.ts", () => ({
@@ -94,6 +97,7 @@ beforeEach(() => {
       },
     ],
   });
+  removeRepositoryChangeMetadataMock.mockResolvedValue(undefined);
 });
 
 describe("cleanupWorkspaceGenerator", () => {
@@ -191,6 +195,10 @@ describe("cleanupRepositoryChange", () => {
       recursive: true,
       force: true,
     });
+    expect(removeRepositoryChangeMetadataMock).toHaveBeenCalledWith(
+      "/tmp/repos/api",
+      "demo",
+    );
     expect(rmMock).not.toHaveBeenCalledWith(
       "/tmp/cache/api.git",
       expect.anything(),
@@ -229,6 +237,7 @@ describe("cleanupRepositoryChange", () => {
 
     expect(cleanupWorkspaceWorktreesGeneratorMock).not.toHaveBeenCalled();
     expect(rmMock).not.toHaveBeenCalled();
+    expect(removeRepositoryChangeMetadataMock).not.toHaveBeenCalled();
     expect(states).toContainEqual({
       phase: "remove-dir",
       message: "Would remove directory: /tmp/repos/api/demo (dry-run)",

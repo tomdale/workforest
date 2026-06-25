@@ -12,6 +12,7 @@ const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["status"],
   ["finish"],
   ["delete"],
+  ["migrate", "workspaces"],
   ["task", "start"],
   ["task", "list"],
   ["task", "finish"],

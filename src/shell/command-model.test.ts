@@ -14,6 +14,7 @@ describe("shell command model", () => {
       "switch",
       "finish",
       "delete",
+      "migrate",
       "task",
       "cache",
       "review",

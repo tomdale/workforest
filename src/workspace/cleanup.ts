@@ -8,7 +8,11 @@ import { pathExists } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";
-import { hasWorkspaceMetadata, readWorkspaceMetadata } from "./metadata.ts";
+import {
+  hasWorkspaceMetadata,
+  readWorkspaceMetadata,
+  removeRepositoryChangeMetadata,
+} from "./metadata.ts";
 import { cleanupWorkspaceWorktreesGenerator } from "./repository.ts";
 
 /**
@@ -612,6 +616,10 @@ export async function cleanupRepositoryChange({
       message: `Removing directory: ${resolvedChangePath}`,
     });
     await fs.rm(resolvedChangePath, { recursive: true, force: true });
+    await removeRepositoryChangeMetadata(
+      path.dirname(resolvedChangePath),
+      path.basename(resolvedChangePath),
+    );
   }
 
   await onState?.({ phase: "complete", removedRepos });
