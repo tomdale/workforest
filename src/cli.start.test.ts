@@ -13,7 +13,7 @@ import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { createTemplate } from "./templates/index.ts";
 import {
-  readWorkspaceMetadata,
+  readRepositoryChangeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
 
@@ -100,8 +100,9 @@ describe("wf start", () => {
       path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
     ]);
     await expect(
-      readWorkspaceMetadata(
-        path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
+      readRepositoryChangeMetadata(
+        path.join(fixture.baseDir, "Repos", "front"),
+        "redesign-cli",
       ),
     ).resolves.toMatchObject({
       workspace: {

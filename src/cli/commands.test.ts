@@ -17,6 +17,7 @@ describe("commandRegistry", () => {
       switch: null,
       finish: null,
       delete: null,
+      migrate: ["workspaces"],
       task: ["start", "list", "finish", "delete"],
       cache: [
         "list",
@@ -58,7 +59,14 @@ describe("commandRegistry", () => {
   });
 
   it("uses explicit resource leaves without contextual defaults", () => {
-    for (const name of ["task", "cache", "review", "template", "shell"]) {
+    for (const name of [
+      "migrate",
+      "task",
+      "cache",
+      "review",
+      "template",
+      "shell",
+    ]) {
       expect(findGroup(commandRegistry.root, name).default).toBeUndefined();
     }
     expect(findGroup(commandRegistry.root, "config").default?.handler).toBe(

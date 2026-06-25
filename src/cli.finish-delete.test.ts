@@ -7,7 +7,10 @@ import { runChangeDeleteCommand, runFinishCommand } from "./cli/finish.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import type { ChangeInventoryEntry } from "./workspace/change-inventory.ts";
-import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
+import {
+  writeRepositoryChangeMetadata,
+  writeWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 import type {
   ChangeRepositoryStatus,
   ChangeStatus,
@@ -229,6 +232,18 @@ async function createCleanupFixture(): Promise<{
     mkdir(path.join(workspace, "api"), { recursive: true }),
     mkdir(path.join(workspace, "front"), { recursive: true }),
   ]);
+  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+    featureName: "cli-redesign",
+    branchName: "tomdale/cli-redesign",
+    repos: [
+      {
+        name: "workforest",
+        remote: "git@github.com:tomdale/workforest.git",
+        defaultBranch: "main",
+        hasLockfile: true,
+      },
+    ],
+  });
   await writeWorkspaceMetadata(workspace, {
     featureName: "experiment",
     branchName: "tomdale/experiment",

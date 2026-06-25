@@ -20,6 +20,7 @@ import {
 } from "../workspace/index.ts";
 import {
   readWorkspaceMetadata,
+  removeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
 } from "../workspace/metadata.ts";
 import {
@@ -237,6 +238,10 @@ async function promoteRepositoryChange(
   await writeVSCodeWorkspaceFile(workspaceDir, [currentRepo], {
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
+  await removeRepositoryChangeMetadata(
+    path.dirname(target.sourcePath),
+    target.changeName,
+  );
 
   if (sourceRepos.repos.length > 0) {
     const result = await (options.addReposToWorkspace ?? addReposToWorkspace)({

@@ -12,7 +12,10 @@ import {
 import type { ParsedInvocation } from "./cli/types.ts";
 import { executeCli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
-import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
+import {
+  writeRepositoryChangeMetadata,
+  writeWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
 const ORIGINAL_CWD = process.cwd();
@@ -77,6 +80,15 @@ describe("wf switch", () => {
         "front",
       ),
       { recursive: true },
+    );
+    await writeWorkspaceMetadata(
+      path.join(fixture.baseDir, "Workspaces", "workforest", "cli-redesign"),
+      {
+        featureName: "cli-redesign",
+        branchName: "tomdale/cli-redesign",
+        templateId: "workforest",
+        repos: [metadataRepo("front", "git@github.com:vercel/front.git")],
+      },
     );
 
     const result = await executeCli(["switch", "workforest/cli-redesign"]);
@@ -151,7 +163,7 @@ describe("buildSwitchCandidates", () => {
         changeName: "change",
         repos: ["front", "api"],
         repoSummary: "front, api",
-        state: "clean",
+        state: "ready",
         modifiedAt: "2026-01-01T00:00:00.000Z",
         modifiedAtMs: 1,
         path: "/tmp/workforest/Workspaces/template/change",
@@ -195,6 +207,13 @@ async function createSwitchFixture(): Promise<{
     mkdir(repoChange, { recursive: true }),
   ]);
   await writeFile(path.join(repoChange, "README.md"), "fixture\n", "utf8");
+  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+    featureName: "cli-redesign",
+    branchName: "tomdale/cli-redesign",
+    repos: [
+      metadataRepo("workforest", "git@github.com:tomdale/workforest.git"),
+    ],
+  });
   await writeWorkspaceMetadata(adhocWorkspace, {
     featureName: "auth-fix",
     branchName: "tomdale/auth-fix",

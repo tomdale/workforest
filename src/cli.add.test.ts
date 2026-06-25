@@ -22,7 +22,9 @@ import { createTemplate } from "./templates/index.ts";
 import type { AddReposOptions, AddReposResult } from "./workspace/index.ts";
 import {
   appendWorkspaceRepos,
+  readRepositoryChangeMetadata,
   readWorkspaceMetadata,
+  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
 
@@ -190,6 +192,12 @@ describe("wf add", () => {
         { name: "api", feature_branch: "billing" },
       ],
     });
+    await expect(
+      readRepositoryChangeMetadata(
+        path.join(fixture.baseDir, "Repos", "front"),
+        "billing",
+      ),
+    ).resolves.toBeNull();
     expect(fixture.cdTargets).toEqual([workspaceDir]);
   });
 
@@ -323,6 +331,11 @@ async function createRepositoryChange(fixture: {
   const sourcePath = path.join(fixture.baseDir, "Repos", "front", "billing");
   await mkdir(sourcePath, { recursive: true });
   await writeFile(path.join(sourcePath, "README.md"), "fixture\n", "utf8");
+  await writeRepositoryChangeMetadata(path.dirname(sourcePath), {
+    featureName: "billing",
+    branchName: "billing",
+    repos: [metadataRepo("front", "git@github.com:vercel/front.git")],
+  });
   return sourcePath;
 }
 

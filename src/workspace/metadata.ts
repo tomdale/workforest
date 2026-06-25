@@ -20,6 +20,7 @@ import { TASKS_DIRECTORY_NAME } from "./paths.ts";
 const METADATA_FILENAME = ".workforest";
 const WORKSPACE_METADATA_FILENAME = "workspace.json";
 const WORKSPACE_METADATA_LOCK_FILENAME = ".workforest.lock";
+const REPOSITORY_CHANGES_METADATA_DIR = "changes";
 const SCHEMA_VERSION = "1";
 const LOCK_RETRY_MS = 20;
 const LOCK_TIMEOUT_MS = 10_000;
@@ -43,14 +44,14 @@ export type WriteMetadataOptions = {
   }[];
 };
 
-/**
- * Write workspace metadata to .workforest/workspace.json.
- */
-export async function writeWorkspaceMetadata(
-  workspaceDir: string,
-  options: WriteMetadataOptions,
-): Promise<void> {
-  const metadata: WorkspaceMetadata = {
+export type RepositoryChangeMetadataEntry = Readonly<{
+  changeName: string;
+  metadataPath: string;
+  metadata: WorkspaceMetadata;
+}>;
+
+function metadataFromOptions(options: WriteMetadataOptions): WorkspaceMetadata {
+  return {
     workspace: {
       version: SCHEMA_VERSION,
       created_at: new Date().toISOString(),
@@ -68,8 +69,115 @@ export async function writeWorkspaceMetadata(
       ...(options.branchName ? { feature_branch: options.branchName } : {}),
     })),
   };
+}
 
-  await saveWorkspaceMetadata(workspaceDir, metadata);
+/**
+ * Write workspace metadata to .workforest/workspace.json.
+ */
+export async function writeWorkspaceMetadata(
+  workspaceDir: string,
+  options: WriteMetadataOptions,
+): Promise<void> {
+  await saveWorkspaceMetadata(workspaceDir, metadataFromOptions(options));
+}
+
+export async function writeRepositoryChangeMetadata(
+  repoRootDir: string,
+  options: WriteMetadataOptions,
+): Promise<void> {
+  const changeName = validateResourceName(options.featureName, "Change name");
+  const metadata = metadataFromOptions({ ...options, featureName: changeName });
+  const metadataPath = getRepositoryChangeMetadataPath(repoRootDir, changeName);
+
+  await withWorkspaceMetadataLock(repoRootDir, async () => {
+    await writeMetadataFile(metadataPath, repoRootDir, metadata, {
+      source: "repository change metadata",
+      ensureParent: async () => {
+        await assertRepositoryMetadataPathNotSymlink(repoRootDir);
+        await fs.mkdir(path.dirname(metadataPath), { recursive: true });
+        await assertRepositoryMetadataPathNotSymlink(repoRootDir);
+      },
+    });
+  });
+}
+
+export async function readRepositoryChangeMetadata(
+  repoRootDir: string,
+  changeName: string,
+): Promise<WorkspaceMetadata | null> {
+  const safeChangeName = validateResourceName(changeName, "Change name");
+  const metadataPath = getRepositoryChangeMetadataPath(
+    repoRootDir,
+    safeChangeName,
+  );
+  const metadata = await readMetadataFile(
+    metadataPath,
+    repoRootDir,
+    "repository change metadata",
+  );
+  if (!metadata) {
+    return null;
+  }
+  if (metadata.workspace.feature_name !== safeChangeName) {
+    throw new Error(
+      `${metadataPath}.workspace.feature_name must match "${safeChangeName}".`,
+    );
+  }
+  return metadata;
+}
+
+export async function removeRepositoryChangeMetadata(
+  repoRootDir: string,
+  changeName: string,
+): Promise<void> {
+  const metadataPath = getRepositoryChangeMetadataPath(repoRootDir, changeName);
+  await withWorkspaceMetadataLock(repoRootDir, async () => {
+    await fs.rm(metadataPath, { force: true });
+  });
+}
+
+export async function listRepositoryChangeMetadata(
+  repoRootDir: string,
+): Promise<RepositoryChangeMetadataEntry[]> {
+  const metadataRoot =
+    await assertRepositoryMetadataPathNotSymlink(repoRootDir);
+  const changesDir = path.join(metadataRoot, REPOSITORY_CHANGES_METADATA_DIR);
+  let entries: Array<{ isFile(): boolean; name: string }>;
+
+  try {
+    entries = await fs.readdir(changesDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const changes: RepositoryChangeMetadataEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const changeName = safeResourceName(entry.name.slice(0, -".json".length));
+    if (!changeName) continue;
+
+    const metadataPath = path.join(changesDir, entry.name);
+    const metadata = await readMetadataFile(
+      metadataPath,
+      repoRootDir,
+      "repository change metadata",
+    );
+    if (!metadata) continue;
+    if (metadata.workspace.feature_name !== changeName) {
+      throw new Error(
+        `${metadataPath}.workspace.feature_name must match "${changeName}".`,
+      );
+    }
+
+    changes.push({ changeName, metadataPath, metadata });
+  }
+
+  return changes.sort((left, right) =>
+    left.changeName.localeCompare(right.changeName),
+  );
 }
 
 export async function upsertReviewWorktree(
@@ -254,11 +362,26 @@ export function getMetadataPath(workspaceDir: string): string {
   );
 }
 
+export function getRepositoryChangeMetadataPath(
+  repoRootDir: string,
+  changeName: string,
+): string {
+  return path.join(
+    getRepositoryMetadataDirPath(repoRootDir),
+    REPOSITORY_CHANGES_METADATA_DIR,
+    `${validateResourceName(changeName, "Change name")}.json`,
+  );
+}
+
 /**
  * Get the path to the workspace metadata directory.
  */
 export function getWorkspaceMetadataDirPath(workspaceDir: string): string {
   return assertWorkspaceMetadataPathNotSymlinkSync(workspaceDir);
+}
+
+export function getRepositoryMetadataDirPath(repoRootDir: string): string {
+  return assertRepositoryMetadataPathNotSymlinkSync(repoRootDir);
 }
 
 /**
@@ -341,16 +464,65 @@ async function writeWorkspaceMetadataFile(
   workspaceDir: string,
   metadata: WorkspaceMetadata,
 ): Promise<void> {
+  const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
+  await writeMetadataFile(metadataPath, workspaceDir, metadata, {
+    source: "workspace metadata",
+    ensureParent: async () => {
+      await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
+    },
+  });
+}
+
+async function readMetadataFile(
+  metadataPath: string,
+  rootDir: string,
+  source: string,
+): Promise<WorkspaceMetadata | null> {
+  await assertContainedPathWithoutSymlinks(rootDir, metadataPath);
+
+  let contents: string;
+  try {
+    contents = await fs.readFile(metadataPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    throw new Error(
+      `Unable to parse ${source} at ${metadataPath}. Expected JSON format.`,
+    );
+  }
+
+  const metadata = validateWorkspaceMetadata(parsed, rootDir, metadataPath);
+  await validateWorkspaceMetadataFilesystemPaths(metadata, rootDir);
+  return metadata;
+}
+
+async function writeMetadataFile(
+  metadataPath: string,
+  rootDir: string,
+  metadata: WorkspaceMetadata,
+  options: Readonly<{
+    source: string;
+    ensureParent: () => Promise<void>;
+  }>,
+): Promise<void> {
   const validated = validateWorkspaceMetadata(
     metadata,
-    workspaceDir,
-    "workspace metadata",
+    rootDir,
+    options.source,
   );
-  await validateWorkspaceMetadataFilesystemPaths(validated, workspaceDir);
-  const metadataPath = await ensureWorkspaceMetadataFilePath(workspaceDir);
-  await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
+  await validateWorkspaceMetadataFilesystemPaths(validated, rootDir);
+  await options.ensureParent();
+  await assertContainedPathWithoutSymlinks(rootDir, path.dirname(metadataPath));
   const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
-  const contents = `${JSON.stringify(metadata, null, 2)}\n`;
+  const contents = `${JSON.stringify(validated, null, 2)}\n`;
 
   try {
     await fs.writeFile(temporaryPath, contents, "utf8");
@@ -493,6 +665,46 @@ async function assertWorkspaceMetadataPathNotSymlink(
   return metadataPath;
 }
 
+function assertRepositoryMetadataPathNotSymlinkSync(
+  repoRootDir: string,
+): string {
+  const metadataPath = path.join(repoRootDir, METADATA_FILENAME);
+
+  try {
+    if (lstatSync(metadataPath).isSymbolicLink()) {
+      throw new Error(
+        `Repository metadata path must not be a symbolic link: ${path.resolve(metadataPath)}`,
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return metadataPath;
+}
+
+async function assertRepositoryMetadataPathNotSymlink(
+  repoRootDir: string,
+): Promise<string> {
+  const metadataPath = path.join(repoRootDir, METADATA_FILENAME);
+
+  try {
+    if ((await fs.lstat(metadataPath)).isSymbolicLink()) {
+      throw new Error(
+        `Repository metadata path must not be a symbolic link: ${path.resolve(metadataPath)}`,
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return metadataPath;
+}
+
 /**
  * Check if content looks like TOML format (legacy).
  * TOML files typically have [section] headers and key = value pairs.
@@ -507,6 +719,14 @@ function looksLikeToml(content: string): boolean {
     return true;
   }
   return false;
+}
+
+function safeResourceName(value: string): string | null {
+  try {
+    return validateResourceName(value, "Change name");
+  } catch {
+    return null;
+  }
 }
 
 function validateWorkspaceMetadata(

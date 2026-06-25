@@ -7,7 +7,10 @@ import stripAnsi from "strip-ansi";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
-import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
+import {
+  writeRepositoryChangeMetadata,
+  writeWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -53,14 +56,14 @@ describe("wf list", () => {
     expect(rendered.stdout).toContain("  vercel-agent");
     expect(rendered.stdout).toContain("auth-fix");
     expect(rendered.stdout).toContain("agents, api");
-    expect(rendered.stdout).toContain("dirty");
+    expect(rendered.stdout).toContain("ready");
     expect(rendered.stdout).toContain("  _adhoc");
     expect(rendered.stdout).toContain("billing");
     expect(rendered.stdout).toContain("front, api");
     expect(rendered.stdout).toContain("Repositories");
     expect(rendered.stdout).toContain("  workforest");
     expect(rendered.stdout).toContain("cli-redesign");
-    expect(rendered.stdout).toContain("clean");
+    expect(rendered.stdout).toContain("ready");
     expect(rendered.stdout).toContain("2 workspaces, 1 repository change");
     expect(rendered.stdout).not.toContain(fixture.baseDir);
   });
@@ -107,7 +110,7 @@ describe("wf list", () => {
             changeName: "auth-fix",
             repos: ["agents", "api"],
             repoSummary: "agents, api",
-            state: "dirty",
+            state: "ready",
             path: expect.stringContaining(
               path.join("Workspaces", "vercel-agent", "auth-fix"),
             ),
@@ -119,7 +122,7 @@ describe("wf list", () => {
             changeName: "billing",
             repos: ["front", "api"],
             repoSummary: "front, api",
-            state: "clean",
+            state: "ready",
           }),
         ],
         repositories: [],
@@ -254,7 +257,7 @@ async function createInventoryFixture(): Promise<{ baseDir: string }> {
       },
     ],
   });
-  await writeWorkspaceMetadata(repoChange, {
+  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [

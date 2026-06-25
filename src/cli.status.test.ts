@@ -8,7 +8,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
 import { loadWorkspaceConfig } from "./config.ts";
-import { appendTasks, writeWorkspaceMetadata } from "./workspace/metadata.ts";
+import {
+  appendTasks,
+  writeRepositoryChangeMetadata,
+  writeWorkspaceMetadata,
+} from "./workspace/metadata.ts";
 import { resolveChangeSelector } from "./workspace/selectors.ts";
 
 const execFileAsync = promisify(execFile);
@@ -283,6 +287,30 @@ async function createStatusFixture(
       {
         name: "api",
         remote: "git@github.com:vercel/api.git",
+        defaultBranch: "main",
+        hasLockfile: true,
+      },
+    ],
+  });
+  await writeWorkspaceMetadata(duplicateWorkspace, {
+    featureName: "auth-fix",
+    branchName: "tomdale/auth-fix",
+    repos: [
+      {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+        hasLockfile: true,
+      },
+    ],
+  });
+  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+    featureName: "cli-redesign",
+    branchName: "tomdale/cli-redesign",
+    repos: [
+      {
+        name: "workforest",
+        remote: "git@github.com:tomdale/workforest.git",
         defaultBranch: "main",
         hasLockfile: true,
       },
