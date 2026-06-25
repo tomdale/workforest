@@ -285,9 +285,18 @@ hidden: true
         ...(item.files ?? []).map((file) => file.content),
       ])
       .join("\n");
-    expect(allText).not.toMatch(
-      /workspace create|worktree create|wf new|wf clean|task create|_initialize-repo|~\/Code\/workspaces|defaultDir|dirPrefix/,
-    );
+    const stalePatterns = [
+      "workspace" + " create",
+      "worktree" + " create",
+      "wf" + " new",
+      "wf" + " clean",
+      "task" + " create",
+      "_initialize" + "-repo",
+      "~/" + "Code/workspaces",
+      "default" + "Dir",
+      "dir" + "Prefix",
+    ];
+    expect(allText).not.toMatch(new RegExp(stalePatterns.join("|")));
   });
 
   it("prints skill paths", async () => {

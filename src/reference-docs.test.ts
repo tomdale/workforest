@@ -47,9 +47,6 @@ describe("configuration registry", () => {
             workspaces: "",
             reviews: "/tmp/reviews",
           },
-          defaultDir: "  ~/Code/workspaces ",
-          reviewsDir: "",
-          dirPrefix: " wf- ",
           branchPrefix: "tomdale",
           vercelLink: {
             teamByGitHubOwner: { " vercel ": " vercel " },
@@ -64,8 +61,6 @@ describe("configuration registry", () => {
         workspaces: "Workspaces",
         reviews: "/tmp/reviews",
       },
-      defaultDir: "~/Code/workspaces",
-      dirPrefix: "wf-",
       branchPrefix: "tomdale",
       vercelLink: {
         teamByGitHubOwner: {

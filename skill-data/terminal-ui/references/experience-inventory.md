@@ -24,7 +24,7 @@ Status values:
 
 | Experience | Entry point | Implementation | Status |
 | --- | --- | --- | --- |
-| New workspace wizard | `wf start` interactive setup | `src/ui/new-wizard.ts` | Canonical |
+| Change start flow | `wf start` setup output | `src/cli/start.ts` | Canonical |
 | Parallel repository setup grid | `wf start`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
@@ -50,7 +50,7 @@ Status values:
 | Version | `wf version` | Canonical |
 | Change list | `wf list` | Canonical |
 | Config report | `wf config show` | Canonical |
-| Task worktree list | `wf task list` | Canonical |
+| Task inventory | `wf task list` | Canonical |
 | Template details | `wf template show` | Canonical |
 | Cached repository list, info, and health | `wf cache list|info|doctor` | Canonical |
 | Skills list | `wf skills list` | Canonical |

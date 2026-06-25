@@ -150,7 +150,7 @@ describe("resolveReviewTarget", () => {
 
 describe("review worktrees", () => {
   it("creates a repo review workspace when no pull request is specified", async () => {
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
@@ -171,11 +171,11 @@ describe("review worktrees", () => {
 
     const { ensureReviewWorkspace } = await importReviewWithMocks();
     const result = await ensureReviewWorkspace({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent" },
     });
 
-    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
     const repoDir = path.join(workspaceDir, "omniagent");
     expect(runGitMock).toHaveBeenCalledWith(
       ["worktree", "add", "--detach", repoDir, "origin/main"],
@@ -210,7 +210,7 @@ describe("review worktrees", () => {
   });
 
   it("creates a detached worktree and checks out the pull request", async () => {
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
@@ -240,12 +240,12 @@ describe("review worktrees", () => {
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
     const result = await createReviewWorktree({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
       onEvent: (event) => events.push(event),
     });
 
-    const targetDir = path.join(reviewsDir, "omniagent", "pr-123");
+    const targetDir = path.join(reviewsRoot, "omniagent", "pr-123");
     expect(runGitMock).toHaveBeenCalledWith(
       ["worktree", "add", "--detach", targetDir, "origin/main"],
       { cwd: path.join(cacheDir, "omniagent.git") },
@@ -278,7 +278,7 @@ describe("review worktrees", () => {
           defaultBranch: "main",
         },
         repoDir: targetDir,
-        workspaceDir: path.join(reviewsDir, "omniagent"),
+        workspaceDir: path.join(reviewsRoot, "omniagent"),
       },
     });
     expect(result.path).toBe(targetDir);
@@ -286,7 +286,7 @@ describe("review worktrees", () => {
 
     const workspaceMetadata = JSON.parse(
       await readFile(
-        path.join(reviewsDir, "omniagent", ".workforest", "workspace.json"),
+        path.join(reviewsRoot, "omniagent", ".workforest", "workspace.json"),
         "utf8",
       ),
     ) as {
@@ -303,7 +303,7 @@ describe("review worktrees", () => {
     await expect(
       readFile(
         path.join(
-          reviewsDir,
+          reviewsRoot,
           "omniagent",
           ".workforest-reviews",
           "pr-123.json",
@@ -314,7 +314,7 @@ describe("review worktrees", () => {
   });
 
   it("removes the created worktree if gh checkout fails", async () => {
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
@@ -337,7 +337,7 @@ describe("review worktrees", () => {
     const { createReviewWorktree } = await importReviewWithMocks();
     await expect(
       createReviewWorktree({
-        reviewsDir,
+        reviewsRoot,
         target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
       }),
     ).rejects.toThrow("checkout failed");
@@ -347,14 +347,14 @@ describe("review worktrees", () => {
         "worktree",
         "remove",
         "--force",
-        path.join(reviewsDir, "omniagent", "pr-123"),
+        path.join(reviewsRoot, "omniagent", "pr-123"),
       ],
       { cwd: path.join(cacheDir, "omniagent.git"), timeout: 30_000 },
     );
   });
 
   it("preserves the checkout failure when cleanup also fails", async () => {
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
@@ -382,19 +382,19 @@ describe("review worktrees", () => {
     const { createReviewWorktree } = await importReviewWithMocks();
     await expect(
       createReviewWorktree({
-        reviewsDir,
+        reviewsRoot,
         target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
       }),
     ).rejects.toThrow("checkout failed");
   });
 
   it("refuses to remove dirty review worktrees unless forced", async () => {
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
-    const targetDir = path.join(reviewsDir, "omniagent", "pr-123");
+    const targetDir = path.join(reviewsRoot, "omniagent", "pr-123");
     await mkdir(targetDir, { recursive: true });
-    await mkdir(path.join(reviewsDir, "omniagent", ".workforest-reviews"), {
+    await mkdir(path.join(reviewsRoot, "omniagent", ".workforest-reviews"), {
       recursive: true,
     });
 
@@ -409,7 +409,7 @@ describe("review worktrees", () => {
     const { removeReviewWorktree } = await importReviewWithMocks();
     await expect(
       removeReviewWorktree({
-        reviewsDir,
+        reviewsRoot,
         target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
       }),
     ).rejects.toThrow("has uncommitted changes");

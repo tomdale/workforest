@@ -184,13 +184,13 @@ describe("wf review", () => {
   it("infers the owner for a cached repository name", async () => {
     const configDir = await createTempDir("workforest-config-");
     const cacheDir = await createTempDir("workforest-cache-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
-    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     await createCachedMirror(
       cacheDir,
@@ -212,7 +212,7 @@ describe("wf review", () => {
     await cli();
 
     expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent" },
       onEvent: expect.any(Function),
     });
@@ -221,16 +221,16 @@ describe("wf review", () => {
 
   it("creates a repo review workspace and writes the shell cd target when no PR is specified", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cdDir = await createTempDir("workforest-cd-");
-    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
     const repoDir = path.join(workspaceDir, "omniagent");
     const cdPathFile = path.join(cdDir, "target");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     ensureReviewWorkspaceMock.mockResolvedValue({
       owner: "vercel",
@@ -247,7 +247,7 @@ describe("wf review", () => {
     await cli();
 
     expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent" },
       onEvent: expect.any(Function),
     });
@@ -261,15 +261,15 @@ describe("wf review", () => {
 
   it("creates a review worktree and writes the shell cd target", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const cdDir = await createTempDir("workforest-cd-");
-    const targetDir = path.join(reviewsDir, "omniagent", "pr-123");
+    const targetDir = path.join(reviewsRoot, "omniagent", "pr-123");
     const cdPathFile = path.join(cdDir, "target");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     createReviewWorktreeMock.mockResolvedValue({
       owner: "vercel",
@@ -294,7 +294,7 @@ describe("wf review", () => {
     await cli();
 
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
       onEvent: expect.any(Function),
     });
@@ -307,13 +307,13 @@ describe("wf review", () => {
 
   it("infers the repo for numeric review targets inside a review workspace", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
-    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
     const targetDir = path.join(workspaceDir, "pr-123");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
     await writeWorkspaceMetadata(workspaceDir, {
@@ -346,7 +346,7 @@ describe("wf review", () => {
     await cli();
 
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
       onEvent: expect.any(Function),
     });
@@ -359,14 +359,14 @@ describe("wf review", () => {
     "fix-tests",
   ])("infers numeric review targets from %s inside a review workspace", async (childDirName) => {
     const configDir = await createTempDir("workforest-config-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
-    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
     const cwd = path.join(workspaceDir, childDirName);
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await mkdir(cwd, { recursive: true });
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     const { appendTasks, upsertReviewWorktree, writeWorkspaceMetadata } =
       await import("./workspace/metadata.ts");
@@ -418,7 +418,7 @@ describe("wf review", () => {
     await cli();
 
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "vercel", repo: "omniagent", prNumber: 456 },
       onEvent: expect.any(Function),
     });
@@ -427,12 +427,12 @@ describe("wf review", () => {
 
   it("uses an explicitly qualified PR target over the current review workspace", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
-    const workspaceDir = path.join(reviewsDir, "omniagent");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     const { writeWorkspaceMetadata } = await import("./workspace/metadata.ts");
     await writeWorkspaceMetadata(workspaceDir, {
@@ -453,7 +453,7 @@ describe("wf review", () => {
       owner: "other",
       repo: "repo",
       prNumber: 456,
-      path: path.join(reviewsDir, "repo", "pr-456"),
+      path: path.join(reviewsRoot, "repo", "pr-456"),
       created_at: new Date().toISOString(),
     });
 
@@ -471,32 +471,26 @@ describe("wf review", () => {
     await cli();
 
     expect(createReviewWorktreeMock).toHaveBeenCalledWith({
-      reviewsDir,
+      reviewsRoot,
       target: { owner: "other", repo: "repo", prNumber: 456 },
       onEvent: expect.any(Function),
     });
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("prompts for reviewsDir on first use and saves it", async () => {
+  it("uses configured directory.reviews", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const workspaceRoot = path.join(
-      await createTempDir("workforest-code-"),
-      "workspaces",
-    );
-    const reviewsDir = path.join(path.dirname(workspaceRoot), "reviews");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      defaultDir: workspaceRoot,
+      directory: { reviews: reviewsRoot },
     });
-    isInteractiveMock.mockReturnValue(true);
-    promptTextMock.mockResolvedValue(reviewsDir);
     createReviewWorktreeMock.mockResolvedValue({
       owner: "vercel",
       repo: "omniagent",
       prNumber: 123,
-      path: path.join(reviewsDir, "omniagent", "pr-123"),
+      path: path.join(reviewsRoot, "omniagent", "pr-123"),
       created_at: new Date().toISOString(),
     });
 
@@ -507,47 +501,56 @@ describe("wf review", () => {
 
     await cli();
 
-    expect(promptTextMock).toHaveBeenCalledWith(
-      "Reviews directory",
-      expect.objectContaining({ defaultValue: reviewsDir }),
-    );
-    const saved = JSON.parse(
-      await readFile(path.join(configDir, "config.json"), "utf8"),
-    ) as { reviewsDir?: string };
-    expect(saved.reviewsDir).toBe(reviewsDir);
+    expect(promptTextMock).not.toHaveBeenCalled();
+    expect(createReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsRoot,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      onEvent: expect.any(Function),
+    });
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("fails non-interactively when reviewsDir is missing", async () => {
+  it("uses the default review directory when unset", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const errors: string[] = [];
+    const base = await createTempDir("workforest-code-");
+    const reviewsRoot = path.join(base, "Reviews");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
-    await saveWorkspaceConfig(path.join(configDir, "config.json"), {});
-    isInteractiveMock.mockReturnValue(false);
-    vi.spyOn(console, "error").mockImplementation((...args) => {
-      errors.push(args.join(" "));
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      directory: { base },
+    });
+    createReviewWorktreeMock.mockResolvedValue({
+      owner: "vercel",
+      repo: "omniagent",
+      prNumber: 123,
+      path: path.join(reviewsRoot, "omniagent", "pr-123"),
+      created_at: new Date().toISOString(),
     });
 
+    vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
     process.argv = ["node", "wf", "review", "checkout", "vercel/omniagent#123"];
     process.exitCode = undefined;
 
     await cli();
 
-    expect(createReviewWorktreeMock).not.toHaveBeenCalled();
-    expect(errors.join("\n")).toContain("No reviewsDir configured");
-    expect(process.exitCode).toBe(1);
+    expect(promptTextMock).not.toHaveBeenCalled();
+    expect(createReviewWorktreeMock).toHaveBeenCalledWith({
+      reviewsRoot,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+      onEvent: expect.any(Function),
+    });
+    expect(process.exitCode).toBeUndefined();
   });
 
   it("renders review operational failures on stderr without a stack", async () => {
     const configDir = await createTempDir("workforest-config-");
-    const reviewsDir = await createTempDir("workforest-reviews-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
     const errors: string[] = [];
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-      reviewsDir,
+      directory: { reviews: reviewsRoot },
     });
     createReviewWorktreeMock.mockRejectedValue(new Error("checkout failed"));
     vi.spyOn(console, "error").mockImplementation((...args) => {

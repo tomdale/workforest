@@ -27,7 +27,6 @@ export type ConfigurationChildFieldDefinition = Readonly<{
 
 export const DEFAULT_WORKSPACE_CONFIG: {
   directory: Required<WorkforestDirectoryConfig>;
-  dirPrefix: string;
   branchPrefix: string;
 } = {
   directory: {
@@ -36,7 +35,6 @@ export const DEFAULT_WORKSPACE_CONFIG: {
     workspaces: "Workspaces",
     reviews: "Reviews",
   },
-  dirPrefix: "",
   branchPrefix: "",
 };
 
@@ -181,23 +179,7 @@ export function normalizeWorkspaceConfig(
       field.normalize(source[field.key], `${configPath}.${field.key}`),
     );
   }
-  Object.assign(result, normalizeLegacyConfigFields(source));
-
   return result;
-}
-
-function normalizeLegacyConfigFields(
-  source: Record<string, unknown>,
-): Readonly<Partial<WorkspaceConfig>> {
-  const defaultDir = normalizeString(source["defaultDir"]);
-  const reviewsDir = normalizeString(source["reviewsDir"]);
-  return {
-    ...(defaultDir ? { defaultDir } : {}),
-    ...(reviewsDir ? { reviewsDir } : {}),
-    dirPrefix:
-      normalizeString(source["dirPrefix"]) ??
-      DEFAULT_WORKSPACE_CONFIG.dirPrefix,
-  };
 }
 
 function normalizeDirectoryConfig(

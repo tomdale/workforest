@@ -36,7 +36,7 @@ type ReviewFixture = {
   rootDir: string;
   configDir: string;
   cacheDir: string;
-  reviewsDir: string;
+  reviewsRoot: string;
   workspaceDir: string;
   repoDir: string;
   checkoutDir: string;
@@ -117,10 +117,10 @@ describe("review command directory contexts", () => {
       "acme/tools#789",
     ]);
 
-    const targetDir = path.join(fixture.reviewsDir, "tools", "pr-789");
+    const targetDir = path.join(fixture.reviewsRoot, "tools", "pr-789");
     expectSuccessfulReviewCheckout(result, targetDir);
     const metadata = await readWorkspaceMetadata(
-      path.join(fixture.reviewsDir, "tools"),
+      path.join(fixture.reviewsRoot, "tools"),
     );
     expect(metadata?.workspace.review).toEqual({
       owner: "acme",
@@ -164,8 +164,8 @@ async function createReviewFixture(): Promise<ReviewFixture> {
 
   const configDir = path.join(rootDir, "config");
   const cacheDir = path.join(rootDir, "cache");
-  const reviewsDir = path.join(rootDir, "reviews");
-  const workspaceDir = path.join(reviewsDir, "omniagent");
+  const reviewsRoot = path.join(rootDir, "reviews");
+  const workspaceDir = path.join(reviewsRoot, "omniagent");
   const repoDir = path.join(workspaceDir, "omniagent");
   const checkoutDir = path.join(workspaceDir, "pr-123");
   const binDir = path.join(rootDir, "bin");
@@ -176,18 +176,18 @@ async function createReviewFixture(): Promise<ReviewFixture> {
   await Promise.all([
     mkdir(configDir, { recursive: true }),
     mkdir(cacheDir, { recursive: true }),
-    mkdir(reviewsDir, { recursive: true }),
+    mkdir(reviewsRoot, { recursive: true }),
     mkdir(binDir, { recursive: true }),
   ]);
   await saveWorkspaceConfig(path.join(configDir, "config.json"), {
-    reviewsDir,
+    directory: { reviews: reviewsRoot },
   });
 
   const fixture = {
     rootDir,
     configDir,
     cacheDir,
-    reviewsDir,
+    reviewsRoot,
     workspaceDir,
     repoDir,
     checkoutDir,

@@ -39,13 +39,13 @@ export type ReviewListEntry = ReviewMetadata & {
 
 export type CreateReviewWorktreeOptions = {
   target: ReviewTarget;
-  reviewsDir: string;
+  reviewsRoot: string;
   onEvent?: ServiceEventSink;
 };
 
 export type EnsureReviewWorkspaceOptions = {
   target: ReviewRepoTarget;
-  reviewsDir: string;
+  reviewsRoot: string;
   onEvent?: ServiceEventSink;
 };
 
@@ -61,7 +61,7 @@ export type ReviewTargetContext = {
 
 export type RemoveReviewWorktreeOptions = {
   target: ReviewTarget;
-  reviewsDir: string;
+  reviewsRoot: string;
   dryRun?: boolean;
   force?: boolean;
 };
@@ -116,7 +116,7 @@ export function parseReviewRepoTarget(
 
 export async function createReviewWorktree({
   target,
-  reviewsDir,
+  reviewsRoot,
   onEvent,
 }: CreateReviewWorktreeOptions): Promise<ReviewMetadata> {
   validateReviewTarget(target);
@@ -125,11 +125,11 @@ export async function createReviewWorktree({
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
   const workspace = await ensureReviewWorkspace({
     target: { owner: target.owner, repo: target.repo },
-    reviewsDir,
+    reviewsRoot,
     ...(onEvent ? { onEvent } : {}),
   });
   const repoReviewsDir = workspace.path;
-  const targetDir = getReviewWorktreePath(reviewsDir, target);
+  const targetDir = getReviewWorktreePath(reviewsRoot, target);
 
   if (await pathExists(targetDir)) {
     throw new Error(`Review worktree already exists: ${targetDir}`);
@@ -185,14 +185,14 @@ export async function createReviewWorktree({
 
 export async function ensureReviewWorkspace({
   target,
-  reviewsDir,
+  reviewsRoot,
   onEvent,
 }: EnsureReviewWorkspaceOptions): Promise<ReviewWorkspace> {
   validateReviewRepoTarget(target);
   const repo = targetToRepoConfig(target);
   const cacheDir = getCacheDir();
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
-  const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
+  const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
   const repoDir = resolveContainedPath(workspaceDir, target.repo);
 
   await ensureDir(workspaceDir);
@@ -336,10 +336,10 @@ async function runReviewInitializers({
 }
 
 export async function listReviewWorktrees(
-  reviewsDir: string,
+  reviewsRoot: string,
   repo?: string,
 ): Promise<ReviewListEntry[]> {
-  const resolvedReviewsDir = path.resolve(reviewsDir);
+  const resolvedReviewsDir = path.resolve(reviewsRoot);
   if (!(await pathExists(resolvedReviewsDir))) {
     return [];
   }
@@ -380,13 +380,13 @@ export async function listReviewWorktrees(
 
 export async function removeReviewWorktree({
   target,
-  reviewsDir,
+  reviewsRoot,
   dryRun = false,
   force = false,
 }: RemoveReviewWorktreeOptions): Promise<RemoveReviewWorktreeResult> {
   validateReviewTarget(target);
-  const targetDir = getReviewWorktreePath(reviewsDir, target);
-  const workspaceDir = getRepoReviewsDir(reviewsDir, target.repo);
+  const targetDir = getReviewWorktreePath(reviewsRoot, target);
+  const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
   const metadata = await readReviewWorktreeMetadata(workspaceDir, target);
   const branch =
     metadata?.branch ?? (await getCurrentBranchIfExists(targetDir));
@@ -586,19 +586,19 @@ async function deleteBranchIfPossible(
   }
 }
 
-function getRepoReviewsDir(reviewsDir: string, repo: string): string {
+function getRepoReviewsDir(reviewsRoot: string, repo: string): string {
   return resolveContainedPath(
-    path.resolve(reviewsDir),
+    path.resolve(reviewsRoot),
     validateRepositoryComponent(repo, "Repository name"),
   );
 }
 
 function getReviewWorktreePath(
-  reviewsDir: string,
+  reviewsRoot: string,
   target: ReviewTarget,
 ): string {
   return resolveContainedPath(
-    getRepoReviewsDir(reviewsDir, target.repo),
+    getRepoReviewsDir(reviewsRoot, target.repo),
     `pr-${target.prNumber}`,
   );
 }

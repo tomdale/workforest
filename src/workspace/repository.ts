@@ -70,12 +70,12 @@ async function hasBrokenWorktreeLink(worktreePath: string): Promise<boolean> {
     return false;
   }
 
-  const gitdirPrefix = "gitdir:";
-  if (!contents.startsWith(gitdirPrefix)) {
+  const gitDirPrefix = "gitdir:";
+  if (!contents.startsWith(gitDirPrefix)) {
     return false;
   }
 
-  const gitDir = contents.slice(gitdirPrefix.length).trim();
+  const gitDir = contents.slice(gitDirPrefix.length).trim();
   if (!gitDir) {
     return true;
   }
@@ -558,7 +558,7 @@ export async function listMirrorsWithWorktrees(
       const mirrorPath = path.join(cacheDir, entry.name);
 
       try {
-        // Get worktree list using --porcelain format for easier parsing
+        // Ask Git for porcelain worktree data so path parsing stays stable.
         const { stdout } = await runGit(["worktree", "list", "--porcelain"], {
           cwd: mirrorPath,
         });
@@ -574,7 +574,7 @@ export async function listMirrorsWithWorktrees(
 
         mirrors.push({ mirrorPath, worktrees });
       } catch {
-        // If git worktree list fails (e.g., corrupted repo), skip this mirror
+        // If Git cannot list worktrees for a corrupted repo, skip this mirror.
       }
     }
   }

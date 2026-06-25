@@ -982,7 +982,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["review"],
         summary: "Manage review workspaces and PR worktrees",
         description:
-          "Set up review workspaces and check out pull request worktrees inside them, for reviewing someone else's PR without disturbing your own workspaces. `wf review open` creates the per-repository review workspace; `wf review checkout` adds a worktree for a specific PR. Both store worktrees under the configured `reviewsDir`.",
+          "Set up review workspaces and check out pull request worktrees inside them, for reviewing someone else's PR without disturbing your own workspaces. `wf review open` creates the per-repository review workspace; `wf review checkout` adds a worktree for a specific PR. Both store worktrees under `directory.reviews`.",
         help: { kind: "command", command: "review" },
         children: [
           leaf({
@@ -990,7 +990,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["review", "open"],
             summary: "Open a review workspace",
             description:
-              "Sets up a review workspace for a repository: caches its bare mirror and adds a detached worktree under the configured `reviewsDir`. Reads `reviewsDir` from config; in a terminal it prompts for and saves the directory when unset, but without a TTY an unset `reviewsDir` is an operational failure (exit 1). Changes your shell's directory to the workspace under shell integration. See also `wf review checkout`.",
+              "Sets up a review workspace for a repository: caches its bare mirror and adds a detached worktree under `directory.reviews`, defaulting to `~/Code/Reviews`. Changes your shell's directory to the workspace under shell integration. See also `wf review checkout`.",
             handler: "review.open",
             help: nestedHelp("review", "open"),
             operands: operands(
@@ -1016,7 +1016,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["review", "checkout"],
             summary: "Check out a pull request worktree",
             description:
-              "Adds a worktree for one pull request inside its review workspace, running `gh pr checkout` to fetch the PR branch — requires the `gh` CLI and network access. Run from inside a review workspace and you can pass just a PR number, taking the repository from the workspace's metadata. Reads `reviewsDir` from config (errors exit 1 without a TTY when unset). Changes your shell's directory to the worktree under shell integration. See also `wf review open`.",
+              "Adds a worktree for one pull request inside its review workspace, running `gh pr checkout` to fetch the PR branch — requires the `gh` CLI and network access. Run from inside a review workspace and you can pass just a PR number, taking the repository from the workspace's metadata. Uses `directory.reviews`, defaulting to `~/Code/Reviews`. Changes your shell's directory to the worktree under shell integration. See also `wf review open`.",
             handler: "review.checkout",
             help: nestedHelp("review", "checkout"),
             operands: operands(

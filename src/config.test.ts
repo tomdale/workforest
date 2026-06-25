@@ -111,7 +111,6 @@ describe("workspace config", () => {
     await writeFile(
       path.join(configDir, "config.json"),
       JSON.stringify({
-        defaultDir: "~/Code/workspaces",
         vercelLink: {
           teamByGitHubOwner: {
             vercel: "vercel",
@@ -145,7 +144,6 @@ describe("workspace config", () => {
     const configPath = path.join(configDir, "config.json");
 
     await saveWorkspaceConfig(configPath, {
-      defaultDir: "~/Code/workspaces",
       branchPrefix: "feature/",
       vercelLink: {
         teamByGitHubOwner: {
@@ -169,24 +167,6 @@ describe("workspace config", () => {
         "vercel/omniagent": { disabled: true },
       },
     });
-  });
-
-  it("loads and saves reviewsDir", async () => {
-    const configDir = await createConfigDir();
-    const configPath = path.join(configDir, "config.json");
-
-    await saveWorkspaceConfig(configPath, {
-      defaultDir: "~/Code/workspaces",
-      reviewsDir: "  ~/Code/reviews  ",
-    });
-
-    const loaded = await loadWorkspaceConfig();
-    expect(loaded.config.reviewsDir).toBe("~/Code/reviews");
-
-    const saved = JSON.parse(await readFile(configPath, "utf8")) as {
-      reviewsDir?: unknown;
-    };
-    expect(saved.reviewsDir).toBe("~/Code/reviews");
   });
 
   it("preserves branch prefixes when loading", async () => {

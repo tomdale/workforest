@@ -167,9 +167,10 @@ describe("cli", () => {
       value: true,
     });
     promptTextMock
-      .mockResolvedValueOnce("~/Code/workspaces")
-      .mockResolvedValueOnce("~/Code/reviews")
-      .mockResolvedValueOnce("wf-")
+      .mockResolvedValueOnce("~/Code")
+      .mockResolvedValueOnce("Repos")
+      .mockResolvedValueOnce("Workspaces")
+      .mockResolvedValueOnce("Reviews")
       .mockResolvedValueOnce("tomdale/");
     promptConfirmMock.mockResolvedValue(true);
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -189,9 +190,6 @@ describe("cli", () => {
         workspaces: "Workspaces",
         reviews: "Reviews",
       },
-      defaultDir: "~/Code/workspaces",
-      reviewsDir: "~/Code/reviews",
-      dirPrefix: "wf-",
       branchPrefix: "tomdale/",
     });
   });

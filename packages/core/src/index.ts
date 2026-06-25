@@ -20,9 +20,15 @@ export type VercelLinkConfig = {
   repoOverrides?: Record<string, VercelRepoOverride>;
 };
 
+export type WorkforestDirectoryConfig = {
+  base?: string;
+  repos?: string;
+  workspaces?: string;
+  reviews?: string;
+};
+
 export type WorkspaceConfig = {
-  defaultDir?: string;
-  dirPrefix?: string;
+  directory?: WorkforestDirectoryConfig;
   branchPrefix?: string;
   vercelLink?: VercelLinkConfig;
 };

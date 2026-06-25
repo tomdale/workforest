@@ -23,9 +23,6 @@ export type WorkforestDirectoryConfig = {
 
 export type WorkspaceConfig = {
   directory?: WorkforestDirectoryConfig;
-  defaultDir?: string;
-  reviewsDir?: string;
-  dirPrefix?: string;
   branchPrefix?: string;
   vercelLink?: VercelLinkConfig;
 };

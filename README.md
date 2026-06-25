@@ -196,9 +196,8 @@ wf review checkout vercel/omniagent#123
 wf review checkout https://github.com/vercel/omniagent/pull/123
 ```
 
-On first use, Workforest prompts for `reviewsDir` and saves it to the global
-configuration. Review worktrees are stored below that directory and use the
-cached repository mirror.
+Review worktrees are stored below `directory.reviews`, which defaults to
+`~/Code/Reviews`, and use the cached repository mirror.
 
 ## Templates
 
@@ -321,9 +320,12 @@ Global settings live in `~/.workforest/config.json` by default:
 
 ```jsonc
 {
-  "defaultDir": "~/Code/workspaces",
-  "reviewsDir": "~/Code/reviews",
-  "dirPrefix": "workspace-",
+  "directory": {
+    "base": "~/Code",
+    "repos": "Repos",
+    "workspaces": "Workspaces",
+    "reviews": "Reviews"
+  },
   "branchPrefix": "feature/",
   "vercelLink": {
     "teamByGitHubOwner": {

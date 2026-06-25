@@ -35,7 +35,7 @@ Long-running operations use async generators that yield state updates, enabling 
 ### Key Components
 - **Repository caching** (`src/workspace/repository.ts`): Bare git mirrors in `~/.cache/workforest/` with `--filter=blob:none`. Creates worktrees per workspace.
 - **Templates** (`src/templates/`): User-defined workspace configurations stored in `~/.config/workforest/templates/<name>/template.jsonc`. Support JSONC format with comments.
-- **Config** (`src/config.ts`): Global settings at `~/.config/workforest/config.json` (defaultDir, branchPrefix, dirPrefix).
+- **Config** (`src/config.ts`): Global settings at `~/.config/workforest/config.json` (`directory.*`, `branchPrefix`, Vercel link settings).
 - **Hooks** (`src/services/hooks.ts`): Shell commands run after workspace setup, defined in templates.
 
 ### Types (`src/types.ts`)

@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { commandRegistry } from "./cli/commands.ts";
@@ -500,28 +499,19 @@ async function runConfigInit(): Promise<CommandResult> {
 
   intro("Configure workforest");
 
-  // Default directory
-  const currentDefaultDir = config.defaultDir ?? "";
-  const defaultDir = await promptText(
-    "Default workspace directory (where workspaces are created)",
-    { defaultValue: currentDefaultDir || "~/Code/workspaces" },
-  );
-
-  // Reviews directory
-  const currentReviewsDir = config.reviewsDir ?? "";
-  const reviewsDir = await promptText(
-    "Reviews directory (where PR review worktrees are created)",
-    { defaultValue: currentReviewsDir || deriveDefaultReviewsDir(defaultDir) },
-  );
-
-  // Directory prefix
-  const currentDirPrefix = config.dirPrefix ?? "";
-  const dirPrefix = await promptText(
-    'Directory prefix (e.g., "wf-" for wf-feature-name)',
-    { defaultValue: currentDirPrefix },
-  );
-
-  // Branch prefix
+  const currentDirectory = config.directory ?? {};
+  const directoryBase = await promptText("Directory base", {
+    defaultValue: currentDirectory.base ?? "~/Code",
+  });
+  const directoryRepos = await promptText("Repository changes directory", {
+    defaultValue: currentDirectory.repos ?? "Repos",
+  });
+  const directoryWorkspaces = await promptText("Workspace changes directory", {
+    defaultValue: currentDirectory.workspaces ?? "Workspaces",
+  });
+  const directoryReviews = await promptText("Review checkouts directory", {
+    defaultValue: currentDirectory.reviews ?? "Reviews",
+  });
   const currentBranchPrefix = config.branchPrefix ?? "";
   const branchPrefix = await promptText(
     'Branch prefix (e.g., "feature/" for feature/name)',
@@ -530,17 +520,21 @@ async function runConfigInit(): Promise<CommandResult> {
 
   const newConfig: WorkspaceConfig = {
     ...(config.vercelLink ? { vercelLink: config.vercelLink } : {}),
-    ...(defaultDir ? { defaultDir } : {}),
-    ...(reviewsDir ? { reviewsDir } : {}),
-    ...(dirPrefix ? { dirPrefix } : {}),
+    directory: {
+      base: directoryBase,
+      repos: directoryRepos,
+      workspaces: directoryWorkspaces,
+      reviews: directoryReviews,
+    },
     ...(branchPrefix ? { branchPrefix } : {}),
   };
 
   note(
     [
-      `Default directory: ${defaultDir || "(not set)"}`,
-      `Reviews directory: ${reviewsDir || "(not set)"}`,
-      `Directory prefix: "${dirPrefix}"`,
+      `directory.base: ${directoryBase || "(default)"}`,
+      `directory.repos: ${directoryRepos || "(default)"}`,
+      `directory.workspaces: ${directoryWorkspaces || "(default)"}`,
+      `directory.reviews: ${directoryReviews || "(default)"}`,
       `Branch prefix: "${branchPrefix}"`,
     ].join("\n"),
     "Configuration preview",
@@ -559,6 +553,8 @@ async function runConfigInit(): Promise<CommandResult> {
 
 async function runConfigShow(): Promise<CommandResult> {
   const { path: configPath, config } = await loadWorkspaceConfigForCommand();
+  const directory = config.directory ?? {};
+  const resolvedDirectories = resolveWorkforestDirectories(config);
 
   const ownerMappings = Object.entries(
     config.vercelLink?.teamByGitHubOwner ?? {},
@@ -571,18 +567,20 @@ async function runConfigShow(): Promise<CommandResult> {
       {
         fields: [
           {
-            label: "Default directory",
-            value:
-              config.defaultDir ??
-              "(not set; required for workspaces and default worktree paths)",
+            label: "directory.base",
+            value: directory.base ?? "~/Code",
           },
           {
-            label: "Reviews directory",
-            value: config.reviewsDir ?? "(not set; prompts on first review)",
+            label: "directory.repos",
+            value: directory.repos ?? "Repos",
           },
           {
-            label: "Directory prefix",
-            value: `"${config.dirPrefix ?? ""}"`,
+            label: "directory.workspaces",
+            value: directory.workspaces ?? "Workspaces",
+          },
+          {
+            label: "directory.reviews",
+            value: directory.reviews ?? "Reviews",
           },
           {
             label: "Branch prefix",
@@ -593,16 +591,28 @@ async function runConfigShow(): Promise<CommandResult> {
       {
         title: "Examples",
         fields: [
-          { label: "Default directory", value: "~/Code/workspaces" },
-          { label: "Reviews directory", value: "~/Code/reviews" },
+          { label: "directory.base", value: "~/Code" },
+          { label: "directory.repos", value: "Repos" },
           {
-            label: "Directory prefix",
-            value: '"wf-" creates wf-my-feature',
+            label: "directory.workspaces",
+            value: "Workspaces",
+          },
+          {
+            label: "directory.reviews",
+            value: "Reviews",
           },
           {
             label: "Branch prefix",
             value: '"tom/" creates tom/my-feature',
           },
+        ],
+      },
+      {
+        title: "Resolved directories",
+        fields: [
+          { label: "Repos", value: resolvedDirectories.repos },
+          { label: "Workspaces", value: resolvedDirectories.workspaces },
+          { label: "Reviews", value: resolvedDirectories.reviews },
         ],
       },
       ...(config.vercelLink
@@ -905,10 +915,10 @@ async function runReviewOpen(repoInput: string): Promise<CommandResult> {
       "./review.ts"
     );
     const target = parseReviewRepoTarget([qualifiedRepo ?? repoInput]);
-    const reviewsDir = await resolveReviewsDir();
+    const reviewsRoot = await resolveReviewsDir();
     const workspace = await ensureReviewWorkspace({
       target,
-      reviewsDir,
+      reviewsRoot,
       onEvent: humanServiceEventSink,
     });
 
@@ -937,10 +947,10 @@ async function runReviewCheckout(
       resolvedTargetArgs,
       context ?? undefined,
     );
-    const reviewsDir = await resolveReviewsDir();
+    const reviewsRoot = await resolveReviewsDir();
     const metadata = await createReviewWorktree({
       target,
-      reviewsDir,
+      reviewsRoot,
       onEvent: humanServiceEventSink,
     });
 
@@ -1009,42 +1019,8 @@ async function resolveCurrentReviewWorkspaceContext(): Promise<{
 }
 
 async function resolveReviewsDir(): Promise<string> {
-  const { path: configPath, config } = await loadWorkspaceConfig();
-  if (config.reviewsDir) {
-    return path.resolve(expandHome(config.reviewsDir));
-  }
-
-  const defaultValue = deriveDefaultReviewsDir(config.defaultDir);
-  if (!isInteractive()) {
-    throw new Error(
-      `No reviewsDir configured. Run 'wf config init' or set reviewsDir in ${configPath}. Suggested value: ${defaultValue}`,
-    );
-  }
-
-  const reviewsDir = await promptText("Reviews directory", {
-    defaultValue,
-    validate: (input) =>
-      input.trim().length > 0 ? null : "Reviews directory is required",
-  });
-  await saveWorkspaceConfig(configPath, { ...config, reviewsDir });
-  log.success(`Saved reviewsDir to ${configPath}`);
-  return path.resolve(expandHome(reviewsDir));
-}
-
-function deriveDefaultReviewsDir(defaultDir: string | undefined): string {
-  if (!defaultDir) {
-    return "~/Code/reviews";
-  }
-
-  const expanded = expandHome(defaultDir);
-  const parent = path.dirname(expanded);
-  const derived = path.join(parent, "reviews");
-  const home = os.homedir();
-  return derived === home
-    ? "~"
-    : derived.startsWith(`${home}${path.sep}`)
-      ? `~/${path.relative(home, derived)}`
-      : derived;
+  const { config } = await loadWorkspaceConfig();
+  return resolveWorkforestDirectories(config).reviews;
 }
 
 async function resolveRepositoryTaskCommandContext(
@@ -2724,16 +2700,6 @@ async function wizardCloneLoadedTemplate(
   });
 
   return savedTemplateId;
-}
-
-function expandHome(value: string): string {
-  if (value === "~") {
-    return os.homedir();
-  }
-  if (value.startsWith("~/")) {
-    return path.join(os.homedir(), value.slice(2));
-  }
-  return value;
 }
 
 function getErrorMessage(error: unknown): string {
