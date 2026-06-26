@@ -35,7 +35,17 @@ Use `bash` instead of `zsh` for Bash.
 
 ## Quick Start
 
+In an interactive terminal, run `wf` with no arguments to open the change entry
+surface — a single fullscreen front door that fuzzy-searches your existing
+changes (Enter to jump straight into one) and, for a new name, walks you through
+picking sources before handing off to the live setup grid. `wf start` with no
+arguments opens the same surface in create-only mode. Both fall back to plain
+output outside a TTY, and the explicit forms below stay fully scriptable.
+
 ```sh
+# Go to an existing change or create a new one (interactive front door).
+wf
+
 # Create a multi-repository workspace.
 wf start fix-authentication vercel/front vercel/api
 

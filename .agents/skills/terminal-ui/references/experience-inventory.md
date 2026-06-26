@@ -24,7 +24,8 @@ Status values:
 
 | Experience | Entry point | Implementation | Status |
 | --- | --- | --- | --- |
-| Change start flow | `wf start` setup output | `src/cli/start.ts` | Canonical |
+| Change entry surface (go to or create a change) | bare `wf` (go-or-create), `wf start` (create-only) | `src/change-entry/surface.ts` (Phase 1 name/existing-change omni-prompt → Phase 2 source accumulation), `src/terminal/fuzzy-list.ts`, `src/change-entry/{changes-data,sources-data}.ts`, hands off to the setup grid via `src/workspace/create-change.ts` | Audit needed |
+| Change start flow | `wf start <change> <source…>` setup output | `src/cli/start.ts` → `src/workspace/create-change.ts` | Canonical |
 | Parallel repository setup grid | `wf start`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
