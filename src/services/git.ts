@@ -49,7 +49,7 @@ async function readCheckedOutBranchRefs(
 }
 
 /**
- * Generator version of cloneRepository that yields log messages.
+ * Clone a repository while yielding progress messages.
  * Tries GitHub CLI first, then falls back to git clone.
  */
 export async function* cloneRepositoryGenerator(
@@ -88,27 +88,6 @@ export async function* cloneRepositoryGenerator(
   }
 
   return await runGit(["clone", ...gitArgs, remote, targetDir], options);
-}
-
-/**
- * Try to clone a repository using GitHub CLI first, then fall back to git clone.
- * Supports git remotes like git@github.com:org/repo.git and https URLs.
- * Additional git arguments can be passed via the gitArgs parameter (e.g., ["--mirror"]).
- * @deprecated Use cloneRepositoryGenerator for generator-based workflows.
- */
-export async function cloneRepository(
-  remote: string,
-  targetDir: string,
-  gitArgs: string[] = [],
-  options: RunCommandOptions = {},
-): Promise<CloneResult> {
-  const gen = cloneRepositoryGenerator(remote, targetDir, gitArgs, options);
-  // Consume the generator, discarding log messages
-  let result = await gen.next();
-  while (!result.done) {
-    result = await gen.next();
-  }
-  return result.value;
 }
 
 /**
