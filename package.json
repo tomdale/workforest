@@ -36,8 +36,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "prepack": "pnpm build:plugins && tsdown",
-    "test": "pnpm build && vitest run --testTimeout=15000",
-    "test:watch": "vitest --testTimeout=15000",
+    "test": "pnpm build && vitest run",
+    "test:watch": "vitest",
     "typecheck": "pnpm build:plugins && tsc --noEmit",
     "wf": "WORKFOREST_USE_SOURCE_CLI=1 node bin/workforest.js"
   },
