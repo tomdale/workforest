@@ -16,6 +16,12 @@ export type RepositoryChangeContext = Readonly<{
   path: string;
 }>;
 
+export type RepositoryRootContext = Readonly<{
+  kind: "repository-root";
+  repoName: string;
+  path: string;
+}>;
+
 export type TemplateWorkspaceChangeContext = Readonly<{
   kind: "template-workspace-change";
   selector: string;
@@ -66,6 +72,7 @@ export type OutsideWorkforestContext = Readonly<{
 
 export type WorkforestManagedContext =
   | RepositoryChangeContext
+  | RepositoryRootContext
   | TemplateWorkspaceChangeContext
   | AdhocWorkspaceChangeContext
   | WorkspaceRepoContext
@@ -114,16 +121,28 @@ function resolveRepositoryContext(
   directories: WorkforestDirectories,
 ): WorkforestManagedContext | null {
   const parts = relativeParts(directories.repos, currentDirectory);
-  if (!parts || parts.length < 2) {
+  if (!parts || parts.length < 1) {
     return null;
   }
 
   const [repoName, second, third, fourth] = parts;
-  if (!repoName || !second) {
+  if (!repoName) {
     return null;
   }
   const safeRepoName = safeRepositoryComponent(repoName);
   if (!safeRepoName) {
+    return null;
+  }
+
+  const repositoryRootPath = path.join(directories.repos, safeRepoName);
+  if (parts.length === 1) {
+    return {
+      kind: "repository-root",
+      repoName: safeRepoName,
+      path: repositoryRootPath,
+    };
+  }
+  if (!second) {
     return null;
   }
 
@@ -158,7 +177,7 @@ function resolveRepositoryContext(
   if (!safeChangeName) {
     return null;
   }
-  const changePath = path.join(directories.repos, safeRepoName, safeChangeName);
+  const changePath = path.join(repositoryRootPath, safeChangeName);
   return {
     kind: "repository-change",
     selector: `${safeRepoName}/${safeChangeName}`,

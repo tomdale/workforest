@@ -463,6 +463,49 @@ describe("wf start", () => {
     );
   });
 
+  it("uses the repository root as the source when no source is provided", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const currentDir = path.join(fixture.baseDir, "Repos", "front");
+    await mkdir(currentDir, { recursive: true });
+    process.chdir(currentDir);
+    const created = fakeCreateSingleWorktree();
+    const started = fakeStartRepoInitialization();
+
+    await runStartCommand(invocation(["follow-up"]), {
+      interactive: false,
+      writeShellCdPath: fixture.writeShellCdPath,
+      createSingleWorktree: created,
+      startRepoInitialization: started,
+    });
+
+    expect(created).toHaveBeenCalledWith({
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      branchName: "tomdale/follow-up",
+      targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
+    });
+    expect(started).toHaveBeenCalledWith({
+      scope: {
+        kind: "repository-change",
+        repoRootDir: currentDir,
+        changeName: "follow-up",
+      },
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+    });
+  });
+
   it("reuses the recorded repo set from the current _adhoc workspace", async () => {
     const fixture = await createStartFixture();
     const workspaceDir = path.join(
