@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -282,9 +289,7 @@ hidden: true
     expect(byName.get("keep-cache-healthy")?.content).toContain("wf cache");
     expect(byName.get("review-prs")?.content).toContain("wf review");
 
-    const allText = contents
-      .map((item) => item.content)
-      .join("\n");
+    const allText = contents.map((item) => item.content).join("\n");
     const stalePatterns = [
       "workspace" + " create",
       "worktree" + " create",

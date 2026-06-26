@@ -74,12 +74,8 @@ describe("packed package", () => {
     expect(files).toContain("package/skill-data/coordinate-agents/SKILL.md");
     expect(files).toContain("package/skill-data/finish-work/SKILL.md");
     expect(files).toContain("package/skill-data/create-templates/SKILL.md");
-    expect(files).toContain(
-      "package/skill-data/configure-workforest/SKILL.md",
-    );
-    expect(files).toContain(
-      "package/skill-data/keep-cache-healthy/SKILL.md",
-    );
+    expect(files).toContain("package/skill-data/configure-workforest/SKILL.md");
+    expect(files).toContain("package/skill-data/keep-cache-healthy/SKILL.md");
     expect(files).toContain("package/skill-data/review-prs/SKILL.md");
     expect(files.some((file) => file.includes("/references/"))).toBe(false);
     expect(

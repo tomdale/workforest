@@ -191,7 +191,10 @@ describe("core command family conformance", () => {
   });
 
   it.each([
-    [["version", "--unsupported"], 'Unknown flag "--unsupported" for wf version'],
+    [
+      ["version", "--unsupported"],
+      'Unknown flag "--unsupported" for wf version',
+    ],
     [
       ["shell", "init", "--unsupported"],
       'Unknown flag "--unsupported" for wf shell init',

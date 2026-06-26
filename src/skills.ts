@@ -173,7 +173,9 @@ export async function getSkillContents({
   });
 
   if (targets.length === 0) {
-    throw new Error("No skill names provided. Usage: wf skills get <skill names...>");
+    throw new Error(
+      "No skill names provided. Usage: wf skills get <skill names...>",
+    );
   }
 
   const contents: SkillContent[] = [];

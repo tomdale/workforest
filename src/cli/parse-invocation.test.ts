@@ -114,10 +114,9 @@ describe("parseInvocation", () => {
 
   it("supports named skills get operands", () => {
     expect(parse(["skills", "get", "core"]).beforeDoubleDash).toEqual(["core"]);
-    expect(parse(["skills", "get", "core", "start-work"]).beforeDoubleDash).toEqual([
-      "core",
-      "start-work",
-    ]);
+    expect(
+      parse(["skills", "get", "core", "start-work"]).beforeDoubleDash,
+    ).toEqual(["core", "start-work"]);
     expect(() => parse(["skills", "get"])).toThrow(UsageError);
     expect(() => parse(["skills", "get", "--unsupported"])).toThrow(UsageError);
   });
