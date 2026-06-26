@@ -40,42 +40,46 @@ describe("listChangeCandidates", () => {
   it("flattens workspaces and repositories sorted by most-recently modified", async () => {
     const { baseDir } = await createInventoryFixture();
 
-    // Pin each change directory's mtime well past its children so the aggregate
-    // newest-mtime is deterministic, then assert descending order.
-    const future = Date.now() / 1000 + 86_400;
+    // Pin each change directory's mtime well past its children (so the
+    // aggregate newest-mtime is deterministic) and at known deltas before a
+    // fixed `now`, so both the descending order and the relative-time hints
+    // are deterministic. `now` is 10 days ahead of the real clock, keeping the
+    // pinned mtimes newer than the just-created child files.
+    const now = (Date.now() / 1000 + 10 * 86_400) * 1000;
+    const nowSec = now / 1000;
     await utimes(
-      path.join(baseDir, "Workspaces", "vercel-agent", "auth-fix"),
-      future + 10,
-      future + 10,
+      path.join(baseDir, "Repos", "workforest", "cli-redesign"),
+      nowSec - 300, // 5m ago — newest
+      nowSec - 300,
     );
     await utimes(
       path.join(baseDir, "Workspaces", "_adhoc", "billing"),
-      future + 20,
-      future + 20,
+      nowSec - 7_200, // 2h ago
+      nowSec - 7_200,
     );
     await utimes(
-      path.join(baseDir, "Repos", "workforest", "cli-redesign"),
-      future + 30,
-      future + 30,
+      path.join(baseDir, "Workspaces", "vercel-agent", "auth-fix"),
+      nowSec - 259_200, // 3d ago — oldest
+      nowSec - 259_200,
     );
 
-    const candidates = await listChangeCandidates();
+    const candidates = await listChangeCandidates(now);
     const bySelector = new Map(candidates.map((c) => [c.selector, c]));
 
     expect(bySelector.get("vercel-agent/auth-fix")).toMatchObject({
       kind: "workspace",
       changeName: "auth-fix",
-      statusHint: "ready · agents, api",
+      statusHint: "3d ago · agents, api",
       path: path.join(baseDir, "Workspaces", "vercel-agent", "auth-fix"),
     });
     expect(bySelector.get("_adhoc/billing")).toMatchObject({
       kind: "workspace",
-      statusHint: "ready · front, api",
+      statusHint: "2h ago · front, api",
     });
     expect(bySelector.get("workforest/cli-redesign")).toMatchObject({
       kind: "repository",
       changeName: "cli-redesign",
-      statusHint: "ready · workforest",
+      statusHint: "5m ago · workforest",
     });
 
     expect(candidates.map((c) => c.selector)).toEqual([

@@ -100,24 +100,29 @@ async function runPhase1(
   const candidates = mode === "go" ? await listChangeCandidates() : [];
   const items: FuzzyItem<ChangeCandidate>[] = candidates.map((candidate) => ({
     value: candidate,
-    label: candidate.selector,
+    label: candidate.changeName,
     hint: candidate.statusHint,
   }));
-  const prompt = mode === "go" ? "go to a change" : "name a new change";
+  const prompt =
+    mode === "go" ? "go to or create a change" : "name a new change";
+  const placeholder =
+    mode === "go"
+      ? "Type to find a change, or a new name to create one…"
+      : "Type a name for the new change…";
 
   while (true) {
     const list = createFuzzyList<ChangeCandidate>({
       screen,
       prompt,
       items,
+      placeholder,
       actionRow: {
         label: (query) => {
           const name = query.trim();
-          return name
-            ? `✛ New change named "${name}"`
-            : mode === "go"
-              ? "✛ New change"
-              : "✛ Type a name for the new change";
+          if (name) return `✛ Create "${name}"`;
+          return mode === "go"
+            ? "✛ Create a new change"
+            : "✛ Type a name to create a change";
         },
       },
     });

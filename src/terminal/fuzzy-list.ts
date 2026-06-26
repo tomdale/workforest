@@ -55,6 +55,8 @@ export type FuzzyListOptions<T> = {
   /** Defaults to {@link fuzzyFilter} (case-insensitive subsequence, stable). */
   filter?: FuzzyFilter<T>;
   initialQuery?: string;
+  /** Empty-input hint. Defaults to "Type to filter…". */
+  placeholder?: string;
 };
 
 export type FuzzyList<T> = {
@@ -116,6 +118,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
   const { screen, prompt, items, actionRow } = options;
   const parent = options.parent ?? screen;
   const filter = options.filter ?? fuzzyFilter;
+  const placeholder = options.placeholder ?? PLACEHOLDER;
   const hasAction = actionRow !== undefined;
 
   const theme = activeTheme();
@@ -160,7 +163,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     if (query.length > 0) {
       lines[1] = `${fg(palette.primary, escapeBlessedTags(query))}${caret}`;
     } else {
-      lines[1] = `${caret} ${fg(palette.muted, PLACEHOLDER)}`;
+      lines[1] = `${caret} ${fg(palette.muted, placeholder)}`;
     }
 
     const footerRow = Math.max(2, height - 1);

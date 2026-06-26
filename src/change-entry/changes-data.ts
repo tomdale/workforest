@@ -23,9 +23,12 @@ export type ChangeCandidate = {
 
 /**
  * Load every existing change and flatten it into render-ready candidates,
- * sorted most-recently-modified first.
+ * sorted most-recently-modified first. `now` is injectable so relative-time
+ * hints are deterministic in tests.
  */
-export async function listChangeCandidates(): Promise<ChangeCandidate[]> {
+export async function listChangeCandidates(
+  now: number = Date.now(),
+): Promise<ChangeCandidate[]> {
   const { config } = await loadWorkspaceConfig();
   const inventory = await collectChangeInventory(config);
 
@@ -35,7 +38,7 @@ export async function listChangeCandidates(): Promise<ChangeCandidate[]> {
   ];
   entries.sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
 
-  return entries.map(toChangeCandidate);
+  return entries.map((entry) => toChangeCandidate(entry, now));
 }
 
 /**
@@ -84,29 +87,59 @@ export async function dirtyHintFor(path: string): Promise<string | null> {
   }
 }
 
-function toChangeCandidate(entry: ChangeInventoryEntry): ChangeCandidate {
-  if (entry.type === "repository-change") {
-    return {
-      selector: entry.selector,
-      changeName: entry.changeName,
-      kind: "repository",
-      statusHint: buildStatusHint(entry.state, entry.repository),
-      path: entry.path,
-    };
-  }
-
+function toChangeCandidate(
+  entry: ChangeInventoryEntry,
+  now: number,
+): ChangeCandidate {
+  const repoInfo =
+    entry.type === "repository-change" ? entry.repository : entry.repoSummary;
   return {
     selector: entry.selector,
     changeName: entry.changeName,
-    kind: "workspace",
-    statusHint: buildStatusHint(entry.state, entry.repoSummary),
+    kind: entry.type === "repository-change" ? "repository" : "workspace",
+    statusHint: buildStatusHint({
+      modifiedAtMs: entry.modifiedAtMs,
+      now,
+      repoInfo,
+      state: entry.state,
+    }),
     path: entry.path,
   };
 }
 
-function buildStatusHint(state: string, repoInfo: string): string {
-  const detail = repoInfo.trim();
-  return detail.length > 0 ? `${state} · ${detail}` : state;
+/**
+ * The secondary line for a change row: relative last-modified time first, then
+ * the repositories involved, and a `stale` marker only when the worktree is
+ * missing (the common `ready` state is left implicit to reduce noise).
+ */
+function buildStatusHint(opts: {
+  modifiedAtMs: number;
+  now: number;
+  repoInfo: string;
+  state: string;
+}): string {
+  const parts = [formatRelativeTime(opts.modifiedAtMs, opts.now)];
+  const detail = opts.repoInfo.trim();
+  if (detail.length > 0) parts.push(detail);
+  if (opts.state === "stale") parts.push("stale");
+  return parts.join(" · ");
+}
+
+/** Compact relative time, e.g. "just now", "5m ago", "2h ago", "3d ago". */
+function formatRelativeTime(modifiedAtMs: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - modifiedAtMs) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
 }
 
 function matchesSubsequence(haystack: string, query: string): boolean {
