@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import process from "node:process";
 
 const QUEUE_PREFIX = "refs/workforest/integration-ready";
+const BRANCH_PREFIX = "tomdale/";
+const MAIN_BRANCH = "main";
 
 function runGit(args, options = {}) {
   return execFileSync("git", args, {
@@ -19,6 +21,18 @@ function runGitAllowEmpty(args, options = {}) {
   } catch (error) {
     if (error && typeof error === "object" && "status" in error && error.status === 1) {
       return "";
+    }
+    throw error;
+  }
+}
+
+function gitSucceeds(args, options = {}) {
+  try {
+    runGit(args, options);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error && error.status === 1) {
+      return false;
     }
     throw error;
   }
@@ -62,39 +76,83 @@ function queueEntries() {
       const sha = line.slice(space + 1);
       return parseEntry(refName, sha);
     })
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => compareEntries(a, b));
 }
 
 function branchHead(branch) {
-  return runGitAllowEmpty(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) || null;
+  return (
+    runGitAllowEmpty(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) || null
+  );
+}
+
+function refExists(refName) {
+  return gitSucceeds(["rev-parse", "--verify", "--quiet", refName]);
+}
+
+function timestampSortKey(timestamp) {
+  const match = timestamp.match(/^(\d{8})T(\d{6})(\d{3})?Z$/);
+  if (!match) return "99999999999999999";
+  const [, date, time, milliseconds = "000"] = match;
+  return `${date}${time}${milliseconds}`;
+}
+
+function compareEntries(a, b) {
+  const byTimestamp = timestampSortKey(a.timestamp).localeCompare(
+    timestampSortKey(b.timestamp),
+  );
+  if (byTimestamp !== 0) return byTimestamp;
+  return a.id.localeCompare(b.id);
 }
 
 function statusFor(entry) {
   const head = branchHead(entry.branch);
   if (!head) return { state: "missing", head: null };
   if (head !== entry.sha) return { state: "stale", head };
-  const merged = runGitAllowEmpty(["merge-base", "--is-ancestor", entry.sha, "main"]);
-  if (merged === "") {
-    return { state: "ready", head };
-  }
-  return { state: "integrated", head };
-}
-
-function ensureTimestamp() {
-  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const merged = gitSucceeds(["merge-base", "--is-ancestor", entry.sha, "main"]);
+  return { state: merged ? "integrated" : "ready", head };
 }
 
 function refNameFor(branch, timestamp) {
   return `${QUEUE_PREFIX}/${timestamp}/${branch}`;
 }
 
+function formatTimestamp(date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(".", "");
+}
+
+function ensureUniqueTimestamp(branch) {
+  const start = new Date();
+  for (let offset = 0; offset < 1000; offset += 1) {
+    const timestamp = formatTimestamp(new Date(start.getTime() + offset));
+    if (!refExists(refNameFor(branch, timestamp))) return timestamp;
+  }
+  throw new Error(`Could not allocate a unique queue timestamp for ${branch}`);
+}
+
+function assertQueueableBranch(branch) {
+  if (branch === MAIN_BRANCH) {
+    throw new Error("Cannot enqueue main for integration.");
+  }
+  if (!branch.startsWith(BRANCH_PREFIX)) {
+    throw new Error(`Cannot enqueue ${branch}; branch names must start with ${BRANCH_PREFIX}`);
+  }
+}
+
 function findEntry(identifier) {
   const entries = queueEntries();
-  return (
+  const exactEntry =
     entries.find((entry) => entry.id === identifier) ||
-    entries.find((entry) => entry.branch === identifier) ||
-    entries.find((entry) => shortRefName(entry.id) === identifier)
-  );
+    entries.find((entry) => shortRefName(entry.id) === identifier);
+  if (exactEntry) return exactEntry;
+
+  const branchMatches = entries.filter((entry) => entry.branch === identifier);
+  if (branchMatches.length > 1) {
+    const ids = branchMatches.map((entry) => entry.id).join(", ");
+    throw new Error(
+      `Multiple queue entries found for ${identifier}; use the full queue id: ${ids}`,
+    );
+  }
+  return branchMatches[0];
 }
 
 function printHelp() {
@@ -110,6 +168,7 @@ function enqueue(branchArg) {
   if (!branch) {
     throw new Error("Cannot enqueue a detached HEAD without an explicit branch name.");
   }
+  assertQueueableBranch(branch);
 
   const sha = branchArg
     ? runGit(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])
@@ -117,7 +176,7 @@ function enqueue(branchArg) {
   if (!sha) {
     throw new Error(`Branch ${branch} does not exist`);
   }
-  const timestamp = ensureTimestamp();
+  const timestamp = ensureUniqueTimestamp(branch);
   const refName = refNameFor(branch, timestamp);
   runGit(["update-ref", refName, sha]);
   return { branch, sha, refName, timestamp };
