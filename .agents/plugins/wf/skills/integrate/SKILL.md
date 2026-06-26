@@ -13,6 +13,8 @@ Use this skill when processing queued branches into local `main`.
 2. Detect stale queue entries before integration.
 3. Compare incoming branch changes against the merge base with the current `main`.
 4. Use the bundled integration auditor for read-only semantic risk review when the diff is non-trivial.
+   Tell the auditor to report progress after its initial diff scan and at least every
+   60 seconds during long audits.
 5. Preserve linear history where possible and resolve conflicts conservatively.
 6. Run `pnpm build` before fast-forwarding `main`.
 7. Hold `workforest-main.lock` while fast-forwarding local `main`.
@@ -25,6 +27,9 @@ Use this skill when processing queued branches into local `main`.
 3. Verify the queued SHA still matches the branch `HEAD`.
 4. Inspect the change set relative to the current merge base and current `main`.
 5. If the change is risky or broad, run the bundled auditor in read-only mode before editing.
+   Include an explicit progress contract in the auditor prompt: report files reviewed,
+   remaining scope, and provisional blockers after the initial scan and every 60
+   seconds while still running.
 6. Rebase or cherry-pick the queued work onto the current integration base.
 7. Resolve conflicts narrowly. Do not discard unrelated local `main` changes.
 8. Run `pnpm build`.
