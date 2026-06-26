@@ -7,7 +7,14 @@ import {
 import { escapeBlessedTags } from "../terminal/command-stream-adapter.ts";
 import { createFullscreenScreen } from "../terminal/fullscreen-surface.ts";
 import { renderReport } from "../terminal/report.ts";
-import { fullscreenColor } from "../terminal/theme.ts";
+import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
+
+/** Chrome tokens for the legacy dashboard, resolved from the active theme. */
+function chromeTokens(): { accent: string; muted: string } {
+  const { palette } = activeTheme();
+  return { accent: toBlessed(palette.focus), muted: toBlessed(palette.muted) };
+}
+
 import {
   DASHBOARD_ACTIONS,
   DASHBOARD_ROUTES,
@@ -369,7 +376,7 @@ function createDashboardBoxes(
     tags: true,
     padding: { left: 1 },
     style: {
-      border: { fg: fullscreenColor.muted },
+      border: { fg: chromeTokens().muted },
     },
   });
   const footer = new Box({
@@ -380,7 +387,7 @@ function createDashboardBoxes(
     height: 1,
     tags: true,
     padding: { left: 1 },
-    style: { fg: fullscreenColor.muted },
+    style: { fg: chromeTokens().muted },
   });
   if (layout === "compact") {
     const workbench = new Box({
@@ -394,7 +401,7 @@ function createDashboardBoxes(
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: fullscreenColor.accent },
+        border: { fg: chromeTokens().accent },
       },
     });
     const palette = createDashboardPalette(screen);
@@ -412,7 +419,7 @@ function createDashboardBoxes(
     tags: true,
     padding: { left: 1, top: 1 },
     style: {
-      border: { fg: fullscreenColor.accent },
+      border: { fg: chromeTokens().accent },
     },
   });
   const workbench = new Box({
@@ -425,7 +432,7 @@ function createDashboardBoxes(
     tags: true,
     padding: { left: 1, top: 1 },
     style: {
-      border: { fg: fullscreenColor.accent },
+      border: { fg: chromeTokens().accent },
     },
   });
   const inspector = new Box({
@@ -439,7 +446,7 @@ function createDashboardBoxes(
     tags: true,
     padding: { left: 1, top: 1 },
     style: {
-      border: { fg: fullscreenColor.muted },
+      border: { fg: chromeTokens().muted },
     },
   });
 
@@ -462,7 +469,7 @@ function createDashboardPalette(
     padding: { left: 1, top: 1 },
     hidden: true,
     style: {
-      border: { fg: fullscreenColor.accent },
+      border: { fg: chromeTokens().accent },
     },
   });
 }
