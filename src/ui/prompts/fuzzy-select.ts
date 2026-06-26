@@ -1,7 +1,4 @@
-import {
-  filterFuzzyChoices,
-  fuzzySelectPrompt,
-} from "../../terminal/inline-widgets.ts";
+import { fuzzySelectPrompt } from "../../terminal/inline-widgets.ts";
 import { printCancelled } from "./symbols.ts";
 import { terminalSymbols } from "./terminal-symbols.ts";
 import { CancelError, type PromptBaseOptions } from "./types.ts";
@@ -15,13 +12,6 @@ export type FuzzySelectOption<T> = {
 export type FuzzySelectOptions<T> = PromptBaseOptions & {
   options: FuzzySelectOption<T>[];
 };
-
-export function filterFuzzySelectOptions<T>(
-  options: FuzzySelectOption<T>[],
-  query: string,
-): FuzzySelectOption<T>[] {
-  return filterFuzzyChoices(options, query);
-}
 
 export async function fuzzySelect<T>(
   message: string,
