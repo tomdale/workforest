@@ -107,7 +107,7 @@ Usage: wf <command> [options]
 ${wrapText(ROOT_OVERVIEW, 80)}
 
 Start here (for AI agents):
-  wf skills get core --full
+  wf skills get core
 
 Commands:
 ${formatRows([...commands, ...shortcuts])}
@@ -252,7 +252,7 @@ Interactive user workflows:
 Agent workflows:
 
   Orientation (do this first in every new session):
-    wf skills get core --full           # complete lifecycle reference for agents
+    wf skills get core                  # complete lifecycle reference for agents
 
   Typical lifecycle:
     wf start <change> <repo...|@template>

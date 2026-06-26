@@ -6,7 +6,6 @@ import {
   humanOutput,
   jsonFailure,
   jsonSuccess,
-  pathOutput,
   reportOutput,
   success,
 } from "./cli/output.ts";
@@ -18,7 +17,6 @@ import {
 import { renderReport } from "./terminal/report.ts";
 
 const SKILL_DIR_NAMES = ["skill-data"] as const;
-const SUPPLEMENTARY_DIR_NAMES = ["references", "templates"] as const;
 
 export type SkillInfo = {
   name: string;
@@ -27,15 +25,9 @@ export type SkillInfo = {
   hidden: boolean;
 };
 
-export type SkillFile = {
-  path: string;
-  content: string;
-};
-
 export type SkillContent = {
   name: string;
   content: string;
-  files?: SkillFile[];
 };
 
 export type SkillsCommandInvocation =
@@ -43,13 +35,6 @@ export type SkillsCommandInvocation =
   | Readonly<{
       command: "get";
       names: readonly string[];
-      all: boolean;
-      full: boolean;
-      json: boolean;
-    }>
-  | Readonly<{
-      command: "path";
-      name: string | undefined;
       json: boolean;
     }>;
 
@@ -174,45 +159,29 @@ export async function discoverSkills(
 export async function getSkillContents({
   skillsDirs,
   names,
-  all,
-  full,
 }: {
   skillsDirs: readonly string[];
   names: readonly string[];
-  all: boolean;
-  full: boolean;
 }): Promise<SkillContent[]> {
   const skills = await discoverSkills(skillsDirs);
-  const targets = all
-    ? skills.filter((skill) => !skill.hidden)
-    : names.map((name) => {
-        const skill = skills.find((candidate) => candidate.name === name);
-        if (!skill) {
-          throw new Error(`Skill not found: ${name}`);
-        }
-        return skill;
-      });
+  const targets = names.map((name) => {
+    const skill = skills.find((candidate) => candidate.name === name);
+    if (!skill) {
+      throw new Error(`Skill not found: ${name}`);
+    }
+    return skill;
+  });
 
   if (targets.length === 0) {
-    throw new Error("No skill name provided. Usage: wf skills get <name>");
+    throw new Error("No skill names provided. Usage: wf skills get <skill names...>");
   }
 
   const contents: SkillContent[] = [];
   for (const skill of targets) {
-    const content = await fs.readFile(path.join(skill.dir, "SKILL.md"), "utf8");
-    const item: SkillContent = {
+    contents.push({
       name: skill.name,
-      content,
-    };
-
-    if (full) {
-      const files = await collectSupplementaryFiles(skill.dir);
-      if (files.length > 0) {
-        item.files = files;
-      }
-    }
-
-    contents.push(item);
+      content: await fs.readFile(path.join(skill.dir, "SKILL.md"), "utf8"),
+    });
   }
 
   return contents;
@@ -236,12 +205,6 @@ export async function runSkillsCommand(
         return await runSkillsList(skillsDirs, invocation.json);
       case "get":
         return await runSkillsGet(skillsDirs, invocation);
-      case "path":
-        return await runSkillsPath(
-          skillsDirs,
-          invocation.name,
-          invocation.json,
-        );
     }
   } catch (error) {
     return failSkillsCommand(
@@ -299,8 +262,6 @@ async function runSkillsGet(
   const contents = await getSkillContents({
     skillsDirs,
     names: invocation.names,
-    all: invocation.all,
-    full: invocation.full,
   });
 
   if (invocation.json) {
@@ -310,60 +271,6 @@ async function runSkillsGet(
   return success(
     humanOutput(renderSkillContents(contents), { trailingNewline: false }),
   );
-}
-
-async function runSkillsPath(
-  skillsDirs: readonly string[],
-  name: string | undefined,
-  jsonMode: boolean,
-): Promise<CommandResult> {
-  if (!name) {
-    if (jsonMode) {
-      return jsonSuccess({ paths: skillsDirs });
-    }
-
-    return success(pathOutput(skillsDirs.join("\n")));
-  }
-
-  const skills = await discoverSkills(skillsDirs);
-  const skill = skills.find((candidate) => candidate.name === name);
-  if (!skill) {
-    throw new Error(`Skill not found: ${name}`);
-  }
-
-  if (jsonMode) {
-    return jsonSuccess({ name: skill.name, path: skill.dir });
-  }
-
-  return success(pathOutput(skill.dir));
-}
-
-async function collectSupplementaryFiles(
-  skillDir: string,
-): Promise<SkillFile[]> {
-  const files: SkillFile[] = [];
-
-  for (const dirName of SUPPLEMENTARY_DIR_NAMES) {
-    const dir = path.join(skillDir, dirName);
-    if (!(await isDirectory(dir))) {
-      continue;
-    }
-
-    const entries = (await fs.readdir(dir)).sort();
-    for (const entry of entries) {
-      const filePath = path.join(dir, entry);
-      if (!(await isFile(filePath))) {
-        continue;
-      }
-
-      files.push({
-        path: `${dirName}/${entry}`,
-        content: await fs.readFile(filePath, "utf8"),
-      });
-    }
-  }
-
-  return files;
 }
 
 async function findPackageRoot(): Promise<string | null> {
@@ -394,14 +301,6 @@ async function hasSkillDirectory(dir: string): Promise<boolean> {
 async function isDirectory(target: string): Promise<boolean> {
   try {
     return (await fs.stat(target)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-async function isFile(target: string): Promise<boolean> {
-  try {
-    return (await fs.stat(target)).isFile();
   } catch {
     return false;
   }

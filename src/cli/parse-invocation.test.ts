@@ -21,6 +21,7 @@ describe("parseInvocation", () => {
     [["task", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
     [["review", "open", "front", "--force"], 'Unknown flag "--force"'],
     [["switch", "--force"], 'Unknown flag "--force"'],
+    [["skills", "get", "--full"], 'Unknown flag "--full"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
   });
@@ -111,11 +112,14 @@ describe("parseInvocation", () => {
     expect(() => parseInteractive(["template", "new"])).not.toThrow();
   });
 
-  it("supports skills get names or --all, but not both", () => {
+  it("supports named skills get operands", () => {
     expect(parse(["skills", "get", "core"]).beforeDoubleDash).toEqual(["core"]);
-    expect(parse(["skills", "get", "--all"]).flags).toEqual({ all: true });
+    expect(parse(["skills", "get", "core", "start-work"]).beforeDoubleDash).toEqual([
+      "core",
+      "start-work",
+    ]);
     expect(() => parse(["skills", "get"])).toThrow(UsageError);
-    expect(() => parse(["skills", "get", "--all", "core"])).toThrow(UsageError);
+    expect(() => parse(["skills", "get", "--all"])).toThrow(UsageError);
   });
 
   it("does not expose the repository initializer worker as a command", () => {
@@ -126,9 +130,14 @@ describe("parseInvocation", () => {
   });
 
   it.each(
-    [["new"], ["clean"], ["workspace"], ["worktree"], ["task", "create"]].map(
-      (argv) => ({ argv }),
-    ),
+    [
+      ["new"],
+      ["clean"],
+      ["workspace"],
+      ["worktree"],
+      ["task", "create"],
+      ["skills", "path"],
+    ].map((argv) => ({ argv })),
   )("does not expose removed command %j", ({ argv }) => {
     expect(() => parse(argv)).toThrow();
   });

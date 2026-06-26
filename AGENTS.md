@@ -112,5 +112,5 @@ instead of ad hoc branches or shared directories.
 14. Clean up finished tasks with `wf task list` and `wf task delete <task>`.
    Use `--force` only when work has already been intentionally merged,
    cherry-picked, or abandoned.
-15. For orientation, read `wf help workflow` and `wf skills get core --full`
+15. For orientation, read `wf help workflow` and `wf skills get core`
    before starting a new multi-agent session.

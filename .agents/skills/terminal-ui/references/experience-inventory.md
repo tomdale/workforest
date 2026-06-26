@@ -69,7 +69,6 @@ states use the shared semantic logger or prompt timeline.
 | Shell integration source | `wf shell init zsh|bash` | Exact shell program on stdout |
 | Auto-cd handoff | Shell wrapper path file | Exact path data |
 | Skill content | `wf skills get` | Exact Markdown content |
-| Skill paths | `wf skills path` | Exact filesystem paths |
 | Skills JSON | `wf skills ... --json` | One JSON value, no decoration |
 | Repository cache JSON | `wf cache list|show|check --json` | One JSON value, no decoration |
 | Repository cache paths | `wf cache show [repo] --path` | Exact filesystem path |

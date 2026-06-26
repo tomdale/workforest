@@ -1588,7 +1588,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["skills"],
         summary: "Inspect bundled agent skills",
         description:
-          "List and read the agent skills bundled with workforest. These skills are written for AI coding agents driving `wf`, not for interactive use; start with the `core` skill. With no subcommand, `wf skills` runs `wf skills list`.",
+          "List and read the bundled agent skills. These skills are written for AI coding agents driving `wf`, not for interactive use; start with `core`. With no subcommand, `wf skills` runs `wf skills list`.",
         help: { kind: "command", command: "skills" },
         default: skillsDefault,
         children: [
@@ -1627,42 +1627,17 @@ export const commandRegistry: CommandRegistry = {
             path: ["skills", "get"],
             summary: "Print bundled skill content",
             description:
-              "Prints the full content of one or more skills to stdout, separated by `---`. Name one or more skills, or pass `--all` for every non-hidden skill (with no skill names). Naming an unknown skill exits 1. For an agent getting oriented, start with `get core`. With `--json` it emits the envelope instead of plain text. See also `wf skills list`.",
+              "Prints the full content of one or more skills to stdout, separated by `---`. Name one or more skills. Naming an unknown skill exits 1. For an agent getting oriented, start with `get core`. With `--json` it emits the envelope instead of plain text. See also `wf skills list`.",
             handler: "skills.get",
             help: nestedHelp("skills", "get"),
-            operands: {
-              variants: [
-                {
-                  beforeDoubleDash: cardinality(
-                    1,
-                    null,
-                    "skill names",
-                    undefined,
-                    "One or more skill names to print. Omit only when using `--all`.",
-                  ),
-                  delimiter: "forbidden",
-                  when: { flag: "all", present: false },
-                },
-                {
-                  beforeDoubleDash: cardinality(0, 0, "skill names"),
-                  delimiter: "forbidden",
-                  when: { flag: "all", present: true },
-                },
-              ],
-            },
+            operands: operands(
+              1,
+              null,
+              "skill names",
+              "<skill names...>",
+              "One or more skill names to print.",
+            ),
             flags: [
-              booleanFlag(
-                "full",
-                "--full",
-                undefined,
-                "Also include the skill's supplementary `references/` and `templates/` files.",
-              ),
-              booleanFlag(
-                "all",
-                "--all",
-                undefined,
-                "Print every non-hidden skill; takes no skill-name arguments.",
-              ),
               booleanFlag(
                 "json",
                 "--json",
@@ -1677,53 +1652,11 @@ export const commandRegistry: CommandRegistry = {
                   "Print the `core` skill — the recommended starting point.",
               },
               {
-                command: "wf skills get core parallel-worktrees",
+                command: "wf skills get core start-work",
                 description: "Print several named skills, separated by `---`.",
-              },
-              {
-                command: "wf skills get --all --full",
-                description:
-                  "Print every skill, including its reference and template files.",
               },
             ],
             outputModes: ["human", "json"],
-          }),
-          leaf({
-            name: "path",
-            path: ["skills", "path"],
-            summary: "Print bundled skill paths",
-            description:
-              "Prints filesystem paths to stdout for capture in `$(…)`. With a skill name, prints that skill's directory; an unknown skill exits 1. With no name, prints the bundled skills directories, one per line. Nothing else is written to stdout. See also `wf skills get`.",
-            handler: "skills.path",
-            help: nestedHelp("skills", "path"),
-            operands: operands(
-              0,
-              1,
-              "skill",
-              undefined,
-              "A skill name whose directory to print. Omit to print the skills directories.",
-            ),
-            flags: [
-              booleanFlag(
-                "json",
-                "--json",
-                undefined,
-                "Emit a JSON envelope instead of bare paths.",
-              ),
-            ],
-            examples: [
-              {
-                command: "wf skills path core",
-                description:
-                  "Print the `core` skill's directory for use in a script.",
-              },
-              {
-                command: 'cat "$(wf skills path core)/SKILL.md"',
-                description:
-                  "Capture a skill's directory and read a file from it.",
-              },
-            ],
-            outputModes: ["path", "json"],
           }),
         ],
       }),

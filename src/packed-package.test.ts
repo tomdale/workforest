@@ -70,20 +70,30 @@ describe("packed package", () => {
     expect(files).toContain("package/dist/index.d.mts");
     expect(files).toContain("package/bin/workforest.js");
     expect(files).toContain("package/skill-data/core/SKILL.md");
-    expect(files).toContain("package/skill-data/core/references/commands.md");
+    expect(files).toContain("package/skill-data/start-work/SKILL.md");
+    expect(files).toContain("package/skill-data/coordinate-agents/SKILL.md");
+    expect(files).toContain("package/skill-data/finish-work/SKILL.md");
+    expect(files).toContain("package/skill-data/create-templates/SKILL.md");
     expect(files).toContain(
-      "package/skill-data/core/references/repository-cache.md",
-    );
-    expect(files).toContain("package/skill-data/parallel-worktrees/SKILL.md");
-    expect(files).toContain(
-      "package/skill-data/parallel-worktrees/references/subagent-lifecycle.md",
-    );
-    expect(files).toContain(
-      "package/skill-data/setup-and-configuration/SKILL.md",
+      "package/skill-data/configure-workforest/SKILL.md",
     );
     expect(files).toContain(
-      "package/skill-data/setup-and-configuration/references/configuration.md",
+      "package/skill-data/keep-cache-healthy/SKILL.md",
     );
+    expect(files).toContain("package/skill-data/review-prs/SKILL.md");
+    expect(files.some((file) => file.includes("/references/"))).toBe(false);
+    expect(
+      files.filter((file) => file.startsWith("package/skill-data/")),
+    ).toEqual([
+      "package/skill-data/configure-workforest/SKILL.md",
+      "package/skill-data/coordinate-agents/SKILL.md",
+      "package/skill-data/core/SKILL.md",
+      "package/skill-data/create-templates/SKILL.md",
+      "package/skill-data/finish-work/SKILL.md",
+      "package/skill-data/keep-cache-healthy/SKILL.md",
+      "package/skill-data/review-prs/SKILL.md",
+      "package/skill-data/start-work/SKILL.md",
+    ]);
     expect(files.some(containsSourceDirectory)).toBe(false);
     expect(files.some((file) => file.startsWith("package/packages/"))).toBe(
       false,

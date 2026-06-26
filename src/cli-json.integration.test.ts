@@ -364,66 +364,10 @@ describe("JSON CLI integration", () => {
     });
   });
 
-  it("gets all visible skills and full supplementary files as JSON", async () => {
-    const all = await runJson(["skills", "get", "--all", "--json"]);
-    const full = await runJson(["skills", "get", "alpha", "--full", "--json"]);
-
-    expectJsonResult(all, 0, {
-      ok: true,
-      data: [
-        {
-          name: "alpha",
-          content: skillContent("alpha", "Alpha skill"),
-        },
-        {
-          name: "beta",
-          content: skillContent("beta", "Beta skill"),
-        },
-      ],
-    });
-    expectJsonResult(full, 0, {
-      ok: true,
-      data: [
-        {
-          name: "alpha",
-          content: skillContent("alpha", "Alpha skill"),
-          files: [
-            {
-              path: "references/guide.md",
-              content: "# Alpha guide\n",
-            },
-          ],
-        },
-      ],
-    });
-  });
-
   it("reports missing skills from get as operational JSON", async () => {
     const result = await runJson(["skills", "get", "missing", "--json"]);
 
     expectJsonResult(result, 1, {
-      ok: false,
-      error: {
-        kind: "operational",
-        message: "Skill not found: missing",
-      },
-    });
-  });
-
-  it("returns root, named, and missing skill paths as JSON", async () => {
-    const root = await runJson(["skills", "path", "--json"]);
-    const named = await runJson(["skills", "path", "alpha", "--json"]);
-    const missing = await runJson(["skills", "path", "missing", "--json"]);
-
-    expectJsonResult(root, 0, {
-      ok: true,
-      data: { paths: [skillsDir] },
-    });
-    expectJsonResult(named, 0, {
-      ok: true,
-      data: { name: "alpha", path: path.join(skillsDir, "alpha") },
-    });
-    expectJsonResult(missing, 1, {
       ok: false,
       error: {
         kind: "operational",
@@ -461,10 +405,6 @@ describe("JSON CLI integration", () => {
       ["skills", "get", "--json"],
       "Invalid operands for wf skills get. Expected 1 or more skill names.",
     ],
-    [
-      ["skills", "path", "alpha", "beta", "--json"],
-      "Invalid operands for wf skills path. Expected 0-1 skill.",
-    ],
   ])("renders JSON usage failure for %j", async (argv, message) => {
     const result = await runJson(argv);
 
@@ -484,9 +424,7 @@ async function createTempDir(prefix: string): Promise<string> {
 async function createSkillsFixture(): Promise<string> {
   const root = await createTempDir("workforest-json-skills-");
   await Promise.all([
-    createSkill(root, "alpha", "Alpha skill", {
-      "references/guide.md": "# Alpha guide\n",
-    }),
+    createSkill(root, "alpha", "Alpha skill"),
     createSkill(root, "beta", "Beta skill"),
     createSkill(root, "hidden", "Hidden skill", {}, true),
   ]);

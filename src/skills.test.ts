@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -134,38 +134,34 @@ hidden: true
     ]);
   });
 
-  it("loads skill content with references for --full", async () => {
+  it("loads named skills in the requested order", async () => {
     const skillsDir = await createTempDir("workforest-skills-");
-    const skillDir = await writeSkill({
+    await writeSkill({
       root: skillsDir,
       name: "core",
       description: "Core skill",
       body: "Skill body.",
     });
-    await mkdir(path.join(skillDir, "references"));
-    await writeFile(
-      path.join(skillDir, "references", "commands.md"),
-      "# Commands\n",
-      "utf8",
-    );
+    await writeSkill({
+      root: skillsDir,
+      name: "start-work",
+      description: "Start work skill",
+      body: "Second body.",
+    });
 
     await expect(
       getSkillContents({
         skillsDirs: [skillsDir],
-        names: ["core"],
-        all: false,
-        full: true,
+        names: ["start-work", "core"],
       }),
     ).resolves.toEqual([
       {
+        name: "start-work",
+        content: expect.stringContaining("Second body."),
+      },
+      {
         name: "core",
         content: expect.stringContaining("Skill body."),
-        files: [
-          {
-            path: "references/commands.md",
-            content: "# Commands\n",
-          },
-        ],
       },
     ]);
   });
@@ -226,22 +222,22 @@ hidden: true
     });
   });
 
-  it("gets a skill with full supplementary files through the CLI", async () => {
+  it("gets multiple skills through the CLI", async () => {
     const skillsDir = await createTempDir("workforest-skills-");
-    const skillDir = await writeSkill({
+    await writeSkill({
       root: skillsDir,
       name: "core",
       description: "Core skill",
       body: "Skill body.",
     });
+    await writeSkill({
+      root: skillsDir,
+      name: "start-work",
+      description: "Start work skill",
+      body: "Start body.",
+    });
     const writes: string[] = [];
     process.env["WORKFOREST_SKILLS_DIR"] = skillsDir;
-    await mkdir(path.join(skillDir, "references"));
-    await writeFile(
-      path.join(skillDir, "references", "commands.md"),
-      "# Commands\n",
-      "utf8",
-    );
     vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
       writes.push(String(chunk));
       return true;
@@ -250,49 +246,44 @@ hidden: true
       writes.push(`${args.join(" ")}\n`);
     });
 
-    process.argv = ["node", "wf", "skills", "get", "core", "--full"];
+    process.argv = ["node", "wf", "skills", "get", "core", "start-work"];
     process.exitCode = undefined;
 
     await cli();
 
     const output = writes.join("");
     expect(output).toContain("Skill body.");
-    expect(output).toContain("--- references/commands.md ---");
-    expect(output).toContain("# Commands");
+    expect(output).toContain("Start body.");
+    expect(output).toContain("\n---\n\n");
   });
 
   it("ships bundled skills that teach the final change lifecycle", async () => {
     const contents = await getSkillContents({
       skillsDirs: [path.resolve("skill-data")],
-      names: ["core", "parallel-worktrees", "setup-and-configuration"],
-      all: false,
-      full: true,
+      names: [
+        "core",
+        "start-work",
+        "coordinate-agents",
+        "finish-work",
+        "create-templates",
+        "configure-workforest",
+        "keep-cache-healthy",
+        "review-prs",
+      ],
     });
 
     const byName = new Map(contents.map((item) => [item.name, item]));
-    expect(byName.get("core")?.content).toContain(
-      "wf start <change> <repo...|@template>",
-    );
-    expect(byName.get("core")?.content).toContain("wf finish [selector]");
-    expect(byName.get("parallel-worktrees")?.content).toContain(
-      "wf task finish",
-    );
-    expect(byName.get("setup-and-configuration")?.content).toContain(
-      '"directory"',
-    );
-    expect(
-      byName
-        .get("parallel-worktrees")
-        ?.files?.some(
-          (file) => file.path === "references/subagent-lifecycle.md",
-        ),
-    ).toBe(true);
+    expect(byName.get("core")?.content).toContain("wf start");
+    expect(byName.get("start-work")?.content).toContain("wf start");
+    expect(byName.get("coordinate-agents")?.content).toContain("wf task start");
+    expect(byName.get("finish-work")?.content).toContain("wf finish");
+    expect(byName.get("create-templates")?.content).toContain("wf template");
+    expect(byName.get("configure-workforest")?.content).toContain("wf config");
+    expect(byName.get("keep-cache-healthy")?.content).toContain("wf cache");
+    expect(byName.get("review-prs")?.content).toContain("wf review");
 
     const allText = contents
-      .flatMap((item) => [
-        item.content,
-        ...(item.files ?? []).map((file) => file.content),
-      ])
+      .map((item) => item.content)
       .join("\n");
     const stalePatterns = [
       "workspace" + " create",
@@ -304,29 +295,22 @@ hidden: true
       "~/" + "Code/workspaces",
       "default" + "Dir",
       "dir" + "Prefix",
+      "--full",
+      "--all",
     ];
     expect(allText).not.toMatch(new RegExp(stalePatterns.join("|")));
   });
 
-  it("prints skill paths", async () => {
-    const skillsDir = await createTempDir("workforest-skills-");
-    const logs: string[] = [];
-    const skillDir = await writeSkill({
-      root: skillsDir,
-      name: "core",
-      description: "Core skill",
-    });
-    process.env["WORKFOREST_SKILLS_DIR"] = skillsDir;
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args.join(" "));
-    });
+  it("ships skills without references directories and under the line budget", async () => {
+    const contents = await discoverSkills([path.resolve("skill-data")]);
 
-    process.argv = ["node", "wf", "skills", "path", "core"];
-    process.exitCode = undefined;
+    for (const skill of contents) {
+      const stats = await readdir(skill.dir);
+      expect(stats).not.toContain("references");
 
-    await cli();
-
-    expect(logs).toEqual([skillDir]);
+      const content = await readFile(path.join(skill.dir, "SKILL.md"), "utf8");
+      expect(content.split("\n").length).toBeLessThan(100);
+    }
   });
 
   it("prints JSON errors", async () => {

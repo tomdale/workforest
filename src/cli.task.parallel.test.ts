@@ -98,7 +98,7 @@ async function createFixture(): Promise<Fixture> {
   await runGit(["commit", "-q", "-m", "Initial commit"], repoDir);
 
   await writeWorkspaceMetadata(workspaceDir, {
-    featureName: "parallel-worktrees",
+    featureName: "coordinate-agents",
     repos: [
       {
         name: "front",

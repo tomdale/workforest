@@ -36,7 +36,7 @@ describe("commandRegistry", () => {
       ],
       shell: ["init"],
       config: ["show", "init", "edit"],
-      skills: ["list", "get", "path"],
+      skills: ["list", "get"],
       help: ["concepts", "workflow"],
       version: null,
     });

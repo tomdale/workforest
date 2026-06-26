@@ -10,7 +10,6 @@ const ORIGINAL_SKILLS_DIR = process.env["WORKFOREST_SKILLS_DIR"];
 const tempDirs: string[] = [];
 let configDir: string;
 let skillsDir: string;
-let skillDir: string;
 
 type CommandExecution = {
   exitCode: number;
@@ -21,10 +20,9 @@ type CommandExecution = {
 beforeAll(async () => {
   configDir = await createTempDir("workforest-core-config-");
   skillsDir = await createTempDir("workforest-core-skills-");
-  skillDir = path.join(skillsDir, "core");
-  await mkdir(skillDir, { recursive: true });
+  await mkdir(path.join(skillsDir, "core"), { recursive: true });
   await writeFile(
-    path.join(skillDir, "SKILL.md"),
+    path.join(skillsDir, "core", "SKILL.md"),
     [
       "---",
       "name: core",
@@ -34,6 +32,22 @@ beforeAll(async () => {
       "# Core",
       "",
       "Core content.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await mkdir(path.join(skillsDir, "start-work"), { recursive: true });
+  await writeFile(
+    path.join(skillsDir, "start-work", "SKILL.md"),
+    [
+      "---",
+      "name: start-work",
+      "description: Start a change skill",
+      "---",
+      "",
+      "# Start Work",
+      "",
+      "Start content.",
       "",
     ].join("\n"),
     "utf8",
@@ -62,7 +76,6 @@ describe("core command family conformance", () => {
     [["skills", "--help"], "Usage: wf skills"],
     [["skills", "list", "--help"], "Usage: wf skills list"],
     [["skills", "get", "--help"], "Usage: wf skills get"],
-    [["skills", "path", "--help"], "Usage: wf skills path"],
   ])("renders scoped help for %j", async (argv, usage) => {
     const result = await runCommand(argv);
 
@@ -99,7 +112,10 @@ describe("core command family conformance", () => {
     expect(bareSkills).toEqual(listedSkills);
     expect(JSON.parse(bareSkills.stdout)).toEqual({
       ok: true,
-      data: [{ name: "core", description: "Core command guide" }],
+      data: [
+        { name: "core", description: "Core command guide" },
+        { name: "start-work", description: "Start a change skill" },
+      ],
     });
   });
 
@@ -141,19 +157,12 @@ describe("core command family conformance", () => {
     });
   });
 
-  it("keeps skills get and path raw on stdout", async () => {
-    const [getResult, pathResult] = await Promise.all([
-      runCommand(["skills", "get", "core"]),
-      runCommand(["skills", "path", "core"]),
-    ]);
+  it("keeps skills get raw on stdout", async () => {
+    const getResult = await runCommand(["skills", "get", "core", "start-work"]);
 
     expect(getResult).toMatchObject({ exitCode: 0, stderr: "" });
     expect(getResult.stdout).toMatch(/^---\nname: core\n/);
-    expect(pathResult).toEqual({
-      exitCode: 0,
-      stdout: `${skillDir}\n`,
-      stderr: "",
-    });
+    expect(getResult.stdout).toContain("\n---\n\n---\nname: start-work\n");
   });
 
   it("keeps skills JSON failures parseable on stdout", async () => {
@@ -176,19 +185,20 @@ describe("core command family conformance", () => {
     [["config", "init", "extra"], "Invalid operands for wf config init"],
     [["config", "edit", "extra"], "Invalid operands for wf config edit"],
     [["skills", "list", "extra"], "Invalid operands for wf skills list"],
-    [
-      ["skills", "path", "core", "extra"],
-      "Invalid operands for wf skills path",
-    ],
-    [["skills", "get", "--all", "core"], "Invalid operands for wf skills get"],
+    [["skills", "get"], "Invalid operands for wf skills get"],
   ])("rejects surplus operands for %j", async (argv, message) => {
     await expectUsageError(argv, message);
   });
 
   it.each([
-    [["skills", "list", "--full"], 'Unknown flag "--full" for wf skills list'],
+    [["version", "--json"], 'Unknown flag "--json" for wf version'],
+    [["shell", "init", "--json"], 'Unknown flag "--json" for wf shell init'],
+    [["config", "show", "--json"], 'Unknown flag "--json" for wf config show'],
+    [["config", "init", "--json"], 'Unknown flag "--json" for wf config init'],
+    [["config", "edit", "--json"], 'Unknown flag "--json" for wf config edit'],
+    [["skills", "get", "--full"], 'Unknown flag "--full" for wf skills get'],
     [["skills", "get", "--bogus"], 'Unknown flag "--bogus" for wf skills get'],
-    [["skills", "path", "--full"], 'Unknown flag "--full" for wf skills path'],
+    [["skills", "get", "--all"], 'Unknown flag "--all" for wf skills get'],
   ])("rejects unknown or inapplicable flags for %j", async (argv, message) => {
     if (argv.includes("--json")) {
       await expectJsonUsageError(argv, message);
