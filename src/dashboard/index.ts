@@ -599,7 +599,6 @@ function renderInspectorLines(
       `{gray-fg}Command{/gray-fg} ${escapeBlessedTags(
         formatDashboardCommand(action.command),
       )}`,
-      `{gray-fg}Shell handoff{/gray-fg} ${action.shellHandoff ? "yes" : "no"}`,
     );
   } else {
     lines.push(
@@ -616,14 +615,8 @@ function renderOperations(
   action: DashboardAction | undefined,
 ): string {
   const actionLabel = action?.label ?? "None";
-  const handoff =
-    action?.kind === "command" && action.shellHandoff
-      ? "Shell handoff action"
-      : "No shell handoff pending";
   return [
-    `${escapeBlessedTags(state.operationMessage)}  {gray-fg}${escapeBlessedTags(
-      handoff,
-    )}{/gray-fg}`,
+    escapeBlessedTags(state.operationMessage),
     `{gray-fg}Selected{/gray-fg} ${escapeBlessedTags(actionLabel)}`,
   ].join("\n");
 }
@@ -659,10 +652,7 @@ function actionDetails(action: DashboardAction) {
   if (action.kind === "navigate") {
     return [{ label: "Route", value: action.route }];
   }
-  return [
-    { label: "Command", value: formatDashboardCommand(action.command) },
-    { label: "Shell handoff", value: action.shellHandoff ? "yes" : "no" },
-  ];
+  return [{ label: "Command", value: formatDashboardCommand(action.command) }];
 }
 
 function dashboardCommandNeedsOperands(command: readonly string[]): boolean {

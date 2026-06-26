@@ -15,8 +15,6 @@ export type OutputMode =
   | "report"
   | "shell";
 
-export type ShellHandoff = "none" | "optional-cd";
-
 export type TtyRequirement =
   | Readonly<{ kind: "none" }>
   | Readonly<{
@@ -100,7 +98,6 @@ export type CommandLeaf = CommandMetadata &
     examples: readonly CommandExample[];
     outputModes: readonly OutputMode[];
     tty: TtyRequirement;
-    shellHandoff: ShellHandoff;
     handler: string;
   }>;
 

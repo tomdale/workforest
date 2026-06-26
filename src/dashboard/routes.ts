@@ -29,7 +29,6 @@ export type DashboardAction =
       description: string;
       kind: "command";
       command: readonly string[];
-      shellHandoff: boolean;
     }>;
 
 export const DASHBOARD_ROUTES: readonly DashboardRoute[] = [
@@ -137,7 +136,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Create one change worktree for a single repository.",
     kind: "command",
     command: ["start", "<change>", "<repo>"],
-    shellHandoff: true,
   },
   {
     id: "start.template",
@@ -145,7 +143,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Create a workspace from a saved template.",
     kind: "command",
     command: ["start", "<change>", "@<template>"],
-    shellHandoff: true,
   },
   {
     id: "start.adhoc",
@@ -153,7 +150,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Create a workspace from several repositories.",
     kind: "command",
     command: ["start", "<change>", "<repo...>"],
-    shellHandoff: true,
   },
   {
     id: "changes.list",
@@ -161,7 +157,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show all known Workforest changes.",
     kind: "command",
     command: ["list"],
-    shellHandoff: false,
   },
   {
     id: "tasks.list",
@@ -169,7 +164,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show nested task worktrees for this change.",
     kind: "command",
     command: ["task", "list"],
-    shellHandoff: false,
   },
   {
     id: "tasks.start",
@@ -177,7 +171,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Create one nested task worktree from the current change.",
     kind: "command",
     command: ["task", "start", "<task>"],
-    shellHandoff: true,
   },
   {
     id: "tasks.finish",
@@ -185,7 +178,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Remove a task after its branch is integrated.",
     kind: "command",
     command: ["task", "finish", "<task>"],
-    shellHandoff: true,
   },
   {
     id: "templates.screen",
@@ -193,7 +185,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Open the dashboard-native templates screen.",
     kind: "command",
     command: ["templates"],
-    shellHandoff: false,
   },
   {
     id: "templates.list",
@@ -201,7 +192,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show saved workspace templates.",
     kind: "command",
     command: ["template", "list"],
-    shellHandoff: false,
   },
   {
     id: "templates.new",
@@ -209,7 +199,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Create a workspace template from repositories.",
     kind: "command",
     command: ["template", "new"],
-    shellHandoff: false,
   },
   {
     id: "cache.list",
@@ -217,7 +206,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show cached mirror inventory.",
     kind: "command",
     command: ["cache", "list"],
-    shellHandoff: false,
   },
   {
     id: "cache.doctor",
@@ -225,7 +213,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Diagnose cached mirrors for integrity problems.",
     kind: "command",
     command: ["cache", "doctor"],
-    shellHandoff: false,
   },
   {
     id: "cache.sync",
@@ -233,7 +220,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Fetch updates for selected or all cached mirrors.",
     kind: "command",
     command: ["cache", "sync"],
-    shellHandoff: false,
   },
   {
     id: "reviews.open",
@@ -241,7 +227,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Open a repository review workspace.",
     kind: "command",
     command: ["review", "open", "<repo>"],
-    shellHandoff: true,
   },
   {
     id: "reviews.checkout",
@@ -249,7 +234,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Add a pull request worktree inside a review workspace.",
     kind: "command",
     command: ["review", "checkout", "<repo>#<number>"],
-    shellHandoff: true,
   },
   {
     id: "config.screen",
@@ -257,7 +241,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Print resolved configuration and paths.",
     kind: "command",
     command: ["config", "show"],
-    shellHandoff: false,
   },
   {
     id: "config.init",
@@ -265,7 +248,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Configure checkout directories and branch prefix.",
     kind: "command",
     command: ["config", "init"],
-    shellHandoff: false,
   },
   {
     id: "config.edit",
@@ -273,7 +255,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Open config.json in the configured editor.",
     kind: "command",
     command: ["config", "edit"],
-    shellHandoff: false,
   },
   {
     id: "help.overview",
@@ -281,7 +262,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show the Workforest command overview.",
     kind: "command",
     command: ["help"],
-    shellHandoff: false,
   },
   {
     id: "help.workflow",
@@ -289,7 +269,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Show recommended workflows for users and agents.",
     kind: "command",
     command: ["help", "workflow"],
-    shellHandoff: false,
   },
   {
     id: "help.skills",
@@ -297,7 +276,6 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     description: "Print the bundled core agent skill.",
     kind: "command",
     command: ["skills", "get", "core"],
-    shellHandoff: false,
   },
 ];
 

@@ -1179,7 +1179,6 @@ async function runReviewOpen(
       return jsonSuccess({
         target,
         path: workspace.path,
-        shellHandoffPath: workspace.path,
       });
     }
 
@@ -1221,7 +1220,6 @@ async function runReviewCheckout(
         target,
         metadata,
         path: metadata.path,
-        shellHandoffPath: metadata.path,
       });
     }
 
@@ -1813,7 +1811,6 @@ async function runTaskDelete({
       return jsonSuccess({
         dryRun,
         removed: result.removed,
-        shellHandoffPath: cdTarget ?? null,
       });
     }
 
@@ -1895,7 +1892,6 @@ async function runRepositoryTaskDelete({
         dryRun,
         changeName: context.changeName,
         removed: result.removed,
-        shellHandoffPath: cdTarget ?? null,
       });
     }
 
@@ -1988,7 +1984,6 @@ async function runTaskFinish({
       return jsonSuccess({
         dryRun,
         removed: result.removed,
-        shellHandoffPath: cdTarget ?? null,
       });
     }
 
@@ -2054,7 +2049,6 @@ async function runRepositoryTaskFinish({
         dryRun,
         changeName: context.changeName,
         removed: result.removed,
-        shellHandoffPath: cdTarget ?? null,
       });
     }
 
@@ -2254,7 +2248,6 @@ async function runTemplateOpen(
     return jsonSuccess({
       template: templateJson(template),
       path: templateDir,
-      shellHandoffPath: templateDir,
     });
   }
 

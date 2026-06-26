@@ -17,7 +17,6 @@ export type ShellCompletionCommand = Readonly<{
 
 export type ShellCommandModel = Readonly<{
   commands: readonly ShellCompletionCommand[];
-  handoffCommands: readonly string[];
 }>;
 
 export function createShellCommandModel(
@@ -39,12 +38,7 @@ export function createShellCommandModel(
     ...visibleInvocations(registry.root.children),
   ];
 
-  return {
-    commands,
-    handoffCommands: commands
-      .filter((command) => commandUsesShellHandoff(registry, command))
-      .map((command) => command.name),
-  };
+  return { commands };
 }
 
 function visibleInvocations(
@@ -86,20 +80,6 @@ function completionCommand(
     flags: node.default ? commandFlags(node.default) : [],
     children: visibleInvocations(node.children),
   };
-}
-
-function commandUsesShellHandoff(
-  registry: CommandRegistry,
-  command: ShellCompletionCommand,
-): boolean {
-  const directCommand = findLeaf(registry.root, command.canonicalPath);
-  if (directCommand && directCommand.shellHandoff !== "none") {
-    return true;
-  }
-
-  return command.children.some((child) =>
-    commandUsesShellHandoff(registry, child),
-  );
 }
 
 function findLeaf(

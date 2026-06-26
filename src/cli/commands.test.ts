@@ -82,7 +82,6 @@ describe("commandRegistry", () => {
       expect(leaf.operands.variants.length).toBeGreaterThan(0);
       expect(leaf.outputModes.length).toBeGreaterThan(0);
       expect(leaf.tty.kind).toBeTruthy();
-      expect(leaf.shellHandoff).toMatch(/^(none|optional-cd)$/);
     }
   });
 

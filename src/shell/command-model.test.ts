@@ -64,19 +64,4 @@ describe("shell command model", () => {
     ]);
     expect(worktree?.children.flatMap((command) => command.flags)).toEqual([]);
   });
-
-  it("derives the wrapper handoff roots from leaf metadata", () => {
-    const model = createShellCommandModel(commandRegistry);
-
-    expect(model.handoffCommands).toEqual([
-      "start",
-      "add",
-      "switch",
-      "finish",
-      "delete",
-      "task",
-      "review",
-      "template",
-    ]);
-  });
 });

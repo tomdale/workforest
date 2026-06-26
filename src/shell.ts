@@ -36,21 +36,15 @@ export function renderShellInit(
     shell === "zsh"
       ? renderZshCompletion(commandModel)
       : renderBashCompletion(commandModel);
-  const handoffCommands =
-    commandModel.handoffCommands.join("|") || "__workforest_no_handoff__";
 
+  // No per-command filter is needed: the CLI only writes a cd path when a
+  // command actually has somewhere to go, and the wrapper only cd's when the
+  // file comes back non-empty. So every invocation can safely run under the
+  // temp file, including bare \`wf\`, which has no subcommand to allowlist.
   return `# workforest shell integration for ${shell}
 __workforest_invoke() {
   local workforest_cmd="$1"
   shift
-
-  case "$1" in
-    ""|${handoffCommands}) ;;
-    *)
-      command "$workforest_cmd" "$@"
-      return $?
-      ;;
-  esac
 
   local workforest_cd_file
   workforest_cd_file="$(mktemp "\${TMPDIR:-/tmp}/workforest-cd.XXXXXX")" || return 1

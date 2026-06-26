@@ -10,7 +10,6 @@ import type {
   HelpReference,
   OperandSpec,
   OutputMode,
-  ShellHandoff,
   TtyRequirement,
   Visibility,
 } from "./types.ts";
@@ -112,7 +111,6 @@ function leaf(options: {
   examples?: readonly CommandExample[];
   outputModes?: readonly OutputMode[];
   tty?: TtyRequirement;
-  shellHandoff?: ShellHandoff;
   visibility?: Visibility;
   /** Opt out of the normal global JSON envelope for native command streams. */
   supportsJson?: boolean;
@@ -135,7 +133,6 @@ function leaf(options: {
       options.supportsJson ?? true,
     ),
     tty: options.tty ?? noTty,
-    shellHandoff: options.shellHandoff ?? "none",
     handler: options.handler,
   };
 }
@@ -283,7 +280,6 @@ const changeStart = leaf({
     },
   ],
   outputModes: ["human"],
-  shellHandoff: "optional-cd",
 });
 
 const cacheDefault = leaf({
@@ -429,7 +425,6 @@ const changeAdd = leaf({
     },
   ],
   tty: optionalStdin,
-  shellHandoff: "optional-cd",
 });
 
 const changeSwitch = leaf({
@@ -462,7 +457,6 @@ const changeSwitch = leaf({
     },
   ],
   tty: optionalStdin,
-  shellHandoff: "optional-cd",
 });
 
 const changeFinish = leaf({
@@ -503,7 +497,6 @@ const changeFinish = leaf({
         "Finish a change integrated in a way Workforest cannot prove.",
     },
   ],
-  shellHandoff: "optional-cd",
 });
 
 const changeDelete = leaf({
@@ -540,7 +533,6 @@ const changeDelete = leaf({
     },
   ],
   tty: optionalStdin,
-  shellHandoff: "optional-cd",
 });
 
 const migrateWorkspaces = leaf({
@@ -720,7 +712,6 @@ export const commandRegistry: CommandRegistry = {
             ],
             outputModes: ["human", "report"],
             tty: optionalStdin,
-            shellHandoff: "optional-cd",
           }),
           leaf({
             name: "list",
@@ -789,7 +780,6 @@ export const commandRegistry: CommandRegistry = {
               },
             ],
             outputModes: ["human", "report"],
-            shellHandoff: "optional-cd",
           }),
           leaf({
             name: "delete",
@@ -838,7 +828,6 @@ export const commandRegistry: CommandRegistry = {
             ],
             outputModes: ["human", "report"],
             tty: optionalStdin,
-            shellHandoff: "optional-cd",
           }),
         ],
       }),
@@ -1265,7 +1254,6 @@ export const commandRegistry: CommandRegistry = {
             ],
             outputModes: ["human", "report"],
             tty: optionalStdin,
-            shellHandoff: "optional-cd",
           }),
           leaf({
             name: "checkout",
@@ -1300,7 +1288,6 @@ export const commandRegistry: CommandRegistry = {
             ],
             outputModes: ["human", "report"],
             tty: optionalStdin,
-            shellHandoff: "optional-cd",
           }),
         ],
       }),
@@ -1352,7 +1339,6 @@ export const commandRegistry: CommandRegistry = {
               },
             ],
             outputModes: ["path"],
-            shellHandoff: "optional-cd",
           }),
           leaf({
             name: "show",

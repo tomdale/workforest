@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,11 +53,6 @@ describe("shell integration", () => {
     const script = renderShellInit("zsh");
 
     expect(script).toContain("__workforest_invoke()");
-    expect(script).toContain('case "$1" in');
-    expect(script).toContain('""|start|add|switch');
-    expect(script).toContain(
-      "start|add|switch|finish|delete|task|review|template",
-    );
     expect(script).toContain("WORKFOREST_CD_PATH_FILE");
     expect(script).toContain("wf() {");
     expect(script).toContain("workforest() {");
@@ -93,7 +96,7 @@ describe("shell integration", () => {
     expect(script).not.toContain("compdef _workforest_complete");
   });
 
-  it("derives completion and handoff commands from the registry", () => {
+  it("derives completion commands from the registry", () => {
     const registry = structuredClone(commandRegistry) as MutableCommandRegistry;
     registry.shortcuts.push({
       name: "inspect",
@@ -115,10 +118,6 @@ describe("shell integration", () => {
     expect(script).toContain(
       "_workforest_complete_words 'templates tasks reviews inspect visit dashboard start list status add switch finish delete ai migrate task",
     );
-    expect(script).toContain(
-      "visit|start|add|switch|finish|delete|task|review|template)",
-    );
-    expect(script).not.toContain("inspect|visit|start");
   });
 
   it.each(["bash", "zsh"] as const)("renders valid %s syntax", (shell) => {
@@ -150,6 +149,45 @@ printf '%s\\n' "\${COMPREPLY[@]}"
     );
     expect(result.stdout).toContain("status\n");
     expect(result.stdout).toContain("switch\n");
+  });
+
+  it("cd's the parent shell for bare wf when a target is reported", async () => {
+    const tempDir = await createTempDir();
+    const binDir = path.join(tempDir, "bin");
+    const target = path.join(tempDir, "target");
+    await mkdir(binDir, { recursive: true });
+    await mkdir(target, { recursive: true });
+
+    // Stand in for the real CLI: when the wrapper runs us under the cd-path
+    // env var, report the change directory so the wrapper can follow it. Bare
+    // `wf` must reach this path even though it has no subcommand to allowlist.
+    const stub = path.join(binDir, "wf");
+    await writeFile(
+      stub,
+      `#!/bin/sh
+if [ -n "$${WORKFOREST_CD_PATH_ENV}" ]; then
+  printf '%s\\n' "$WF_STUB_TARGET" > "$${WORKFOREST_CD_PATH_ENV}"
+fi
+`,
+      "utf8",
+    );
+    await chmod(stub, 0o755);
+
+    const result = spawnSync("bash", [], {
+      input: `${renderShellInit("bash")}
+wf
+pwd -P
+`,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+        WF_STUB_TARGET: target,
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(await realpath(target));
   });
 
   it("resolves cleanup cd target only when current dir is inside the workspace", () => {
