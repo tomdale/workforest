@@ -1,5 +1,5 @@
 import { Box, NodeRuntime, Screen, setRuntime } from "@unblessed/node";
-import { fullscreenColor } from "./theme.ts";
+import { activeTheme, toBlessed } from "./theme-system.ts";
 
 setRuntime(new NodeRuntime());
 
@@ -40,7 +40,7 @@ export function createFullscreenStatusLine(
     height: 1,
     tags: true,
     padding: { left: 1 },
-    style: { fg: fullscreenColor.muted },
+    style: { fg: toBlessed(activeTheme().palette.muted) },
   });
 }
 

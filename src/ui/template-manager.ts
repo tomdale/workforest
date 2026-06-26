@@ -9,11 +9,31 @@ import {
 } from "../environment.ts";
 import type { Template } from "../templates/index.ts";
 import { escapeBlessedTags } from "../terminal/command-stream-adapter.ts";
-import { fullscreenColor } from "../terminal/theme.ts";
+import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import type { Hook, WorkspaceConfig } from "../types.ts";
 import { pathExists } from "../utils/fs.ts";
 
 setRuntime(new NodeRuntime());
+
+/** Semantic color roles as @unblessed tokens for the current theme. */
+function colors(): {
+  focus: string;
+  success: string;
+  warning: string;
+  error: string;
+  muted: string;
+  primary: string;
+} {
+  const { palette } = activeTheme();
+  return {
+    focus: toBlessed(palette.focus),
+    success: toBlessed(palette.success),
+    warning: toBlessed(palette.warning),
+    error: toBlessed(palette.error),
+    muted: toBlessed(palette.muted),
+    primary: toBlessed(palette.primary),
+  };
+}
 
 export type TemplateManagerAction =
   | { type: "quit" }
@@ -98,7 +118,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: fullscreenColor.accent },
+        border: { fg: colors().focus },
       },
     });
 
@@ -113,7 +133,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: fullscreenColor.muted },
+        border: { fg: colors().muted },
       },
     });
 
@@ -128,7 +148,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: fullscreenColor.muted },
+        border: { fg: colors().muted },
       },
     });
 
@@ -143,7 +163,7 @@ export async function runTemplateManager({
       tags: true,
       padding: { left: 1, top: 1 },
       style: {
-        border: { fg: fullscreenColor.muted },
+        border: { fg: colors().muted },
       },
     });
 
@@ -155,7 +175,7 @@ export async function runTemplateManager({
       height: 1,
       tags: true,
       padding: { left: 1 },
-      style: { fg: fullscreenColor.muted },
+      style: { fg: colors().muted },
     });
 
     const state: TemplateManagerState = {
@@ -246,9 +266,9 @@ export async function runTemplateManager({
         lines.push(
           "{bold}No templates configured{/bold}",
           "",
-          "Press {white-fg}n{/white-fg} to create one.",
+          `Press {${colors().primary}-fg}n{/${colors().primary}-fg} to create one.`,
           "",
-          "{gray-fg}Templates directory{/gray-fg}",
+          `{${colors().muted}-fg}Templates directory{/${colors().muted}-fg}`,
           escapeBlessedTags(templatesDir),
         );
         listBox.setContent(padToBox(lines, listBox));
@@ -258,16 +278,16 @@ export async function runTemplateManager({
       if (state.searchActive || state.query) {
         const cursor = state.searchActive ? "{inverse} {/inverse}" : "";
         lines.push(
-          `{gray-fg}Search{/gray-fg} /${escapeBlessedTags(state.query)}${cursor}`,
+          `{${colors().muted}-fg}Search{/${colors().muted}-fg} /${escapeBlessedTags(state.query)}${cursor}`,
           "",
         );
       }
 
       if (filtered.length === 0) {
         lines.push(
-          "{yellow-fg}No matching templates{/yellow-fg}",
+          `{${colors().warning}-fg}No matching templates{/${colors().warning}-fg}`,
           "",
-          "{gray-fg}Backspace edits the search.{/gray-fg}",
+          `{${colors().muted}-fg}Backspace edits the search.{/${colors().muted}-fg}`,
         );
         listBox.setContent(padToBox(lines, listBox));
         return;
@@ -314,20 +334,30 @@ export async function runTemplateManager({
           : "";
 
         if (selected) {
-          lines.push(`{cyan-fg}>{/cyan-fg} {bold}${id}{/bold}`);
+          lines.push(
+            `{${colors().focus}-fg}>{/${colors().focus}-fg} {bold}${id}{/bold}`,
+          );
           if (desc) {
-            lines.push(`  {white-fg}${escapeBlessedTags(desc)}{/white-fg}`);
+            lines.push(
+              `  {${colors().primary}-fg}${escapeBlessedTags(desc)}{/${colors().primary}-fg}`,
+            );
           }
           if (meta) {
-            lines.push(`  {gray-fg}${escapeBlessedTags(meta)}{/gray-fg}`);
+            lines.push(
+              `  {${colors().muted}-fg}${escapeBlessedTags(meta)}{/${colors().muted}-fg}`,
+            );
           }
         } else {
           lines.push(`  ${id}`);
           if (desc) {
-            lines.push(`  {gray-fg}${escapeBlessedTags(desc)}{/gray-fg}`);
+            lines.push(
+              `  {${colors().muted}-fg}${escapeBlessedTags(desc)}{/${colors().muted}-fg}`,
+            );
           }
           if (meta) {
-            lines.push(`  {gray-fg}${escapeBlessedTags(meta)}{/gray-fg}`);
+            lines.push(
+              `  {${colors().muted}-fg}${escapeBlessedTags(meta)}{/${colors().muted}-fg}`,
+            );
           }
         }
       }
@@ -344,7 +374,7 @@ export async function runTemplateManager({
         lines.push(
           "{bold}No template selected{/bold}",
           "",
-          "{gray-fg}Create a template to start reusing workspace setup.{/gray-fg}",
+          `{${colors().muted}-fg}Create a template to start reusing workspace setup.{/${colors().muted}-fg}`,
         );
         detailBox.setContent(padToBox(lines, detailBox));
         return;
@@ -362,7 +392,7 @@ export async function runTemplateManager({
         `{bold}${escapeBlessedTags(template.id)}{/bold}`,
         template.config.description
           ? escapeBlessedTags(template.config.description)
-          : "{gray-fg}(no description){/gray-fg}",
+          : `{${colors().muted}-fg}(no description){/${colors().muted}-fg}`,
         "",
         labeledValue("Repos", String(template.config.repos.length)),
         labeledValue("Hooks", String(hookCount)),
@@ -373,7 +403,7 @@ export async function runTemplateManager({
         ),
         labeledValue("Initializers", disableInitializers),
         "",
-        "{gray-fg}Config{/gray-fg}",
+        `{${colors().muted}-fg}Config{/${colors().muted}-fg}`,
         escapeBlessedTags(shortenPath(template.path)),
       );
 
@@ -387,7 +417,7 @@ export async function runTemplateManager({
         return;
       }
 
-      lines.push("{gray-fg}Repositories{/gray-fg}");
+      lines.push(`{${colors().muted}-fg}Repositories{/${colors().muted}-fg}`);
       for (const [index, repo] of template.config.repos.entries()) {
         lines.push(
           `${String(index + 1).padStart(2)}. ${escapeBlessedTags(truncatePlain(repo, contentWidth(reposBox) - 5))}`,
@@ -395,9 +425,9 @@ export async function runTemplateManager({
       }
 
       const hooks = template.config.hooks ?? [];
-      lines.push("", "{gray-fg}Hooks{/gray-fg}");
+      lines.push("", `{${colors().muted}-fg}Hooks{/${colors().muted}-fg}`);
       if (hooks.length === 0) {
-        lines.push("  {gray-fg}(none){/gray-fg}");
+        lines.push(`  {${colors().muted}-fg}(none){/${colors().muted}-fg}`);
       } else {
         for (const [index, hook] of hooks.entries()) {
           lines.push(formatHook(index, hook, contentWidth(reposBox)));
@@ -444,12 +474,14 @@ export async function runTemplateManager({
         return;
       }
 
-      lines.push("{gray-fg}Template files{/gray-fg}");
+      lines.push(`{${colors().muted}-fg}Template files{/${colors().muted}-fg}`);
 
       if (!artifact?.exists) {
-        lines.push("  {gray-fg}(none){/gray-fg}");
+        lines.push(`  {${colors().muted}-fg}(none){/${colors().muted}-fg}`);
       } else if (artifact.previewLines.length === 0) {
-        lines.push("  {gray-fg}(empty files directory){/gray-fg}");
+        lines.push(
+          `  {${colors().muted}-fg}(empty files directory){/${colors().muted}-fg}`,
+        );
       } else {
         const budget = Math.max(1, contentHeight(filesBox) - 12);
         for (const line of artifact.previewLines.slice(0, budget)) {
@@ -458,16 +490,16 @@ export async function runTemplateManager({
           );
         }
         if (artifact.truncated || artifact.previewLines.length > budget) {
-          lines.push("  {gray-fg}...{/gray-fg}");
+          lines.push(`  {${colors().muted}-fg}...{/${colors().muted}-fg}`);
         }
       }
 
       lines.push(
         "",
-        "{gray-fg}Location{/gray-fg}",
+        `{${colors().muted}-fg}Location{/${colors().muted}-fg}`,
         escapeBlessedTags(shortenPath(path.dirname(template.path))),
         "",
-        "{gray-fg}Actions{/gray-fg}",
+        `{${colors().muted}-fg}Actions{/${colors().muted}-fg}`,
         shortcut("enter/e", "edit"),
         shortcut("n", "new"),
         shortcut("c", "copy"),
@@ -481,10 +513,10 @@ export async function runTemplateManager({
     function renderFooter(): void {
       const mode = state.searchActive ? "search" : "browse";
       const status = state.status
-        ? `  {gray-fg}|{/gray-fg}  ${escapeBlessedTags(state.status)}`
+        ? `  {${colors().muted}-fg}|{/${colors().muted}-fg}  ${escapeBlessedTags(state.status)}`
         : "";
       footerBox.setContent(
-        `{white-fg}${mode}{/white-fg}  j/k navigate  enter edit  n new  c copy  d delete  / search  ? help  q quit${status}`,
+        `{${colors().primary}-fg}${mode}{/${colors().primary}-fg}  j/k navigate  enter edit  n new  c copy  d delete  / search  ? help  q quit${status}`,
       );
     }
 
@@ -722,16 +754,16 @@ function formatHook(index: number, hook: Hook, width: number): string {
   const command = truncatePlain(hook.run, Math.max(10, width - 8));
   return [
     `${String(index + 1).padStart(2)}. ${escapeBlessedTags(hook.name)}${escapeBlessedTags(suffix)}`,
-    `    {gray-fg}${escapeBlessedTags(command)}{/gray-fg}`,
+    `    {${colors().muted}-fg}${escapeBlessedTags(command)}{/${colors().muted}-fg}`,
   ].join("\n");
 }
 
 function labeledValue(label: string, value: string): string {
-  return `{gray-fg}${label.padEnd(12)}{/gray-fg} ${escapeBlessedTags(value)}`;
+  return `{${colors().muted}-fg}${label.padEnd(12)}{/${colors().muted}-fg} ${escapeBlessedTags(value)}`;
 }
 
 function shortcut(key: string, value: string): string {
-  return `  {white-fg}${key.padEnd(12)}{/white-fg} ${value}`;
+  return `  {${colors().primary}-fg}${key.padEnd(12)}{/${colors().primary}-fg} ${value}`;
 }
 
 function contentWidth(box: Box): number {

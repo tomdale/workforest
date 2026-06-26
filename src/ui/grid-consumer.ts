@@ -22,8 +22,55 @@ import {
   type FullscreenScreen,
   type FullscreenStatusLine,
 } from "../terminal/fullscreen-surface.ts";
-import { fullscreenColor } from "../terminal/theme.ts";
+import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import { runParallel } from "../utils/task-generator.ts";
+
+/** Pane status glyphs, resolved from the active theme's semantic symbols. */
+function statusIcons(): {
+  running: string;
+  complete: string;
+  failed: string;
+  pending: string;
+} {
+  const { symbols } = activeTheme();
+  return {
+    running: symbols.statusRunning,
+    complete: symbols.statusComplete,
+    failed: symbols.statusFailed,
+    pending: symbols.statusPending,
+  };
+}
+
+/** Decorative confetti fill colors, projected to @unblessed tokens. */
+function confettiColorTokens(): readonly string[] {
+  return activeTheme().decoration.confettiColors.map(toBlessed);
+}
+
+/** Decorative confetti particle glyphs from the active theme. */
+function confettiGlyphs(): readonly string[] {
+  return activeTheme().decoration.confettiGlyphs;
+}
+
+/** Semantic color roles as @unblessed tokens for the current theme. */
+function colors(): {
+  focus: string;
+  success: string;
+  warning: string;
+  error: string;
+  muted: string;
+  primary: string;
+} {
+  const { palette } = activeTheme();
+  return {
+    focus: toBlessed(palette.focus),
+    success: toBlessed(palette.success),
+    warning: toBlessed(palette.warning),
+    error: toBlessed(palette.error),
+    muted: toBlessed(palette.muted),
+    primary: toBlessed(palette.primary),
+  };
+}
+
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
 
@@ -56,15 +103,6 @@ const COMPLETION_CONFETTI_HORIZONTAL_JITTER = 3;
 const COMPLETION_CONFETTI_HORIZONTAL_RANGE = 5;
 const COMPLETION_CONFETTI_CHARACTER_SAMPLING: "cycle" | "fixed" = "cycle";
 const COMPLETION_MODAL_TEXT_PADDING = 3;
-const COMPLETION_CONFETTI_PARTICLES = ["◜", "◝", "◞", "◟"] as const;
-const COMPLETION_CONFETTI_COLORS = [
-  "cyan",
-  "green",
-  "yellow",
-  "magenta",
-  "blue",
-  "white",
-] as const;
 const MAX_GRID_REPOS = 9;
 
 export interface GridPaneLike {
@@ -143,7 +181,7 @@ function createDefaultEnvironment(): GridRenderEnvironment {
         left: 0,
         width: "100%",
         height: "100%-1",
-        borderColor: fullscreenColor.accent,
+        borderColor: colors().focus,
       }),
     createStatusLine: ({ screen }) =>
       createFullscreenStatusLine(
@@ -178,16 +216,6 @@ export function shouldUseGrid(repoCount?: number): boolean {
   }
   return true;
 }
-
-/**
- * Status indicators for pane labels.
- */
-const STATUS_ICONS = {
-  running: "\u21bb", // ⟳
-  complete: "\u2713", // ✓
-  failed: "\u2717", // ✗
-  pending: "\u25cb", // ○
-};
 
 /**
  * Render parallel repo pipelines using a grid layout.
@@ -229,7 +257,7 @@ export async function renderPipelinesGrid({
     paneMap.set(name, i);
     const pane = grid.getPane(i);
     if (pane) {
-      pane.setLabel(`${escapeBlessedTags(name)} ${STATUS_ICONS.pending}`);
+      pane.setLabel(`${escapeBlessedTags(name)} ${statusIcons().pending}`);
     }
   });
 
@@ -322,7 +350,9 @@ export async function renderPipelinesGrid({
       }
 
       if (onBeforeCompletionPrompt) {
-        statusLine?.setContent("{gray-fg}Finalizing workspace...{/gray-fg}");
+        statusLine?.setContent(
+          `{${colors().muted}-fg}Finalizing workspace...{/${colors().muted}-fg}`,
+        );
         grid.render();
         await onBeforeCompletionPrompt(
           completeOnWorktreesReady ? worktreeResults : repoResults,
@@ -331,7 +361,7 @@ export async function renderPipelinesGrid({
 
       statusLine?.setContent(
         backgroundInitialization
-          ? "{gray-fg}Initialization continues in the background{/gray-fg}"
+          ? `{${colors().muted}-fg}Initialization continues in the background{/${colors().muted}-fg}`
           : "",
       );
       renderCompletion();
@@ -377,7 +407,7 @@ export async function renderPipelinesGrid({
       switch (state.phase) {
         case "git": {
           pane.setLabel(
-            `${escapeBlessedTags(id)}: ${state.step} ${STATUS_ICONS.running}`,
+            `${escapeBlessedTags(id)}: ${state.step} ${statusIcons().running}`,
           );
 
           if (state.output) {
@@ -385,7 +415,7 @@ export async function renderPipelinesGrid({
           } else if (state.message) {
             flushOutputBuffer(pane, id, outputAdapters);
             pane.appendLine(
-              `{gray-fg}${escapeBlessedTags(state.message)}{/gray-fg}`,
+              `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
             );
           }
           break;
@@ -393,7 +423,7 @@ export async function renderPipelinesGrid({
 
         case "initializer": {
           pane.setLabel(
-            `${escapeBlessedTags(id)}: ${escapeBlessedTags(state.name)} ${STATUS_ICONS.running}`,
+            `${escapeBlessedTags(id)}: ${escapeBlessedTags(state.name)} ${statusIcons().running}`,
           );
 
           if (state.output) {
@@ -401,7 +431,7 @@ export async function renderPipelinesGrid({
           } else if (state.message) {
             flushOutputBuffer(pane, id, outputAdapters);
             pane.appendLine(
-              `{gray-fg}${escapeBlessedTags(state.message)}{/gray-fg}`,
+              `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
             );
           }
           break;
@@ -410,10 +440,10 @@ export async function renderPipelinesGrid({
         case "worktree-ready": {
           flushOutputBuffer(pane, id, outputAdapters);
           pane.setLabel(
-            `${escapeBlessedTags(id)}: initializing ${STATUS_ICONS.running}`,
+            `${escapeBlessedTags(id)}: initializing ${statusIcons().running}`,
           );
           pane.appendLine(
-            "{gray-fg}Worktree ready; initialization moved to background{/gray-fg}",
+            `{${colors().muted}-fg}Worktree ready; initialization moved to background{/${colors().muted}-fg}`,
           );
           worktreeResults.set(id, { hasLockfile: state.hasLockfile });
           worktreeSettled.add(id);
@@ -423,7 +453,7 @@ export async function renderPipelinesGrid({
         case "complete": {
           flushOutputBuffer(pane, id, outputAdapters);
           pane.setLabel(
-            `{green-fg}${escapeBlessedTags(id)} ${STATUS_ICONS.complete}{/green-fg}`,
+            `{${colors().success}-fg}${escapeBlessedTags(id)} ${statusIcons().complete}{/${colors().success}-fg}`,
           );
           repoResults.set(id, { hasLockfile: state.hasLockfile });
           break;
@@ -432,10 +462,10 @@ export async function renderPipelinesGrid({
         case "cancelled": {
           flushOutputBuffer(pane, id, outputAdapters);
           pane.setLabel(
-            `{yellow-fg}${escapeBlessedTags(id)} cancelled{/yellow-fg}`,
+            `{${colors().warning}-fg}${escapeBlessedTags(id)} cancelled{/${colors().warning}-fg}`,
           );
           pane.appendLine(
-            `{yellow-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/yellow-fg}`,
+            `{${colors().warning}-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/${colors().warning}-fg}`,
           );
           setupWarnings.push({
             repoName: id,
@@ -449,20 +479,20 @@ export async function renderPipelinesGrid({
         case "failed": {
           flushOutputBuffer(pane, id, outputAdapters);
           pane.setLabel(
-            `{red-fg}${escapeBlessedTags(id)} ${STATUS_ICONS.failed}{/red-fg}`,
+            `{${colors().error}-fg}${escapeBlessedTags(id)} ${statusIcons().failed}{/${colors().error}-fg}`,
           );
           if (state.step) {
             pane.appendLine(
-              `{red-fg}Step: ${escapeBlessedTags(state.step)}{/red-fg}`,
+              `{${colors().error}-fg}Step: ${escapeBlessedTags(state.step)}{/${colors().error}-fg}`,
             );
           }
           pane.appendLine(
-            `{red-fg}Error: ${escapeBlessedTags(state.error.message)}{/red-fg}`,
+            `{${colors().error}-fg}Error: ${escapeBlessedTags(state.error.message)}{/${colors().error}-fg}`,
           );
           if (getLogPath) {
             const logPath = await getLogPath(id);
             pane.appendLine(
-              `{red-fg}Log: ${escapeBlessedTags(logPath)}{/red-fg}`,
+              `{${colors().error}-fg}Log: ${escapeBlessedTags(logPath)}{/${colors().error}-fg}`,
             );
           }
           recordCompletionFailure(id, state, {
@@ -600,20 +630,20 @@ export function createDefaultCompletionModal({
 
   const style: BoxOptions["style"] = hasRepoErrors
     ? {
-        fg: fullscreenColor.primary,
+        fg: colors().primary,
         bg: "black",
-        border: { fg: fullscreenColor.error },
+        border: { fg: colors().error },
       }
     : hasSetupWarnings
       ? {
-          fg: fullscreenColor.primary,
+          fg: colors().primary,
           bg: "black",
-          border: { fg: fullscreenColor.warning },
+          border: { fg: colors().warning },
         }
       : {
-          fg: fullscreenColor.primary,
+          fg: colors().primary,
           bg: "black",
-          border: { fg: fullscreenColor.accent },
+          border: { fg: colors().focus },
         };
 
   const box = new Box({
@@ -681,7 +711,7 @@ function createCompletionModalTitle({
     height: 1,
     content: title,
     tags: true,
-    style: { fg: fullscreenColor.muted },
+    style: { fg: colors().muted },
   }) as GridCompletionModalLike;
 }
 
@@ -701,14 +731,14 @@ function getCompletionModalContent({
 }): string[] {
   if (repoErrors.length > 0) {
     return [
-      "{red-fg}{bold}Repository setup needs attention{/bold}{/red-fg}",
+      `{${colors().error}-fg}{bold}Repository setup needs attention{/bold}{/${colors().error}-fg}`,
       "",
       `${completedCount}/${totalCount} repositories completed. ${repoErrors.length} failed during git/worktree setup.`,
       "",
       ...formatCompletionFailures(repoErrors, "Repo errors"),
       ...formatCompletionFailures(setupWarnings, "Setup warnings"),
       "",
-      "{gray-fg}Press any key for next steps{/gray-fg}",
+      `{${colors().muted}-fg}Press any key for next steps{/${colors().muted}-fg}`,
     ];
   }
 
@@ -723,8 +753,8 @@ function getCompletionModalContent({
     ...(backgroundInitialization
       ? [
           "",
-          "{gray-fg}Initialization continues in the background.{/gray-fg}",
-          "{gray-fg}Run wf status --watch from the change to check progress.{/gray-fg}",
+          `{${colors().muted}-fg}Initialization continues in the background.{/${colors().muted}-fg}`,
+          `{${colors().muted}-fg}Run wf status --watch from the change to check progress.{/${colors().muted}-fg}`,
         ]
       : []),
     ...(setupWarnings.length > 0
@@ -784,7 +814,7 @@ function createCompletionTextLines(infoLines: string[]): ModalTextLine[] {
 
   const callToActionRow = Math.max(contentHeight - 2, 0);
   lines[callToActionRow] = {
-    text: "{bold}{cyan-fg}press any key{/cyan-fg}{/bold}",
+    text: `{bold}{${colors().focus}-fg}press any key{/${colors().focus}-fg}{/bold}`,
     align: "center",
   };
 
@@ -981,7 +1011,7 @@ class FallingStarField {
         }
         if (COMPLETION_CONFETTI_CHARACTER_SAMPLING === "cycle") {
           piece.particleIndex =
-            (piece.particleIndex + 1) % COMPLETION_CONFETTI_PARTICLES.length;
+            (piece.particleIndex + 1) % confettiGlyphs().length;
         }
       }
 
@@ -1016,7 +1046,7 @@ type FallingStarPiece = {
   directionChangeMs: number;
   directionElapsedMs: number;
   particleIndex: number;
-  color: (typeof COMPLETION_CONFETTI_COLORS)[number];
+  color: string;
 };
 
 function createFallingStarPiece({
@@ -1093,20 +1123,17 @@ function getConfettiSlotColumn({
 }
 
 function renderStarCell(piece: FallingStarPiece): string {
-  const particle = COMPLETION_CONFETTI_PARTICLES[piece.particleIndex];
+  const particle = confettiGlyphs()[piece.particleIndex];
   return `{${piece.color}-fg}${particle}{/${piece.color}-fg}`;
 }
 
 function getRandomParticleIndex(): number {
-  return Math.floor(Math.random() * COMPLETION_CONFETTI_PARTICLES.length);
+  return Math.floor(Math.random() * confettiGlyphs().length);
 }
 
-function getRandomStarColor(): (typeof COMPLETION_CONFETTI_COLORS)[number] {
-  return (
-    COMPLETION_CONFETTI_COLORS[
-      Math.floor(Math.random() * COMPLETION_CONFETTI_COLORS.length)
-    ] ?? "cyan"
-  );
+function getRandomStarColor(): string {
+  const colors = confettiColorTokens();
+  return colors[Math.floor(Math.random() * colors.length)] ?? "cyan";
 }
 
 function getRandomHorizontalDirection(): -1 | 1 {
@@ -1177,21 +1204,23 @@ function formatWorkspaceSummary({
   const lines: string[] = [];
   if (workspacePath) {
     lines.push(
-      `{bold}{white-fg}${escapeBlessedTags(
+      `{bold}{${colors().primary}-fg}${escapeBlessedTags(
         truncatePlainText(workspacePath, Math.max(contentWidth, 8)),
-      )}{/white-fg}{/bold}`,
+      )}{/${colors().primary}-fg}{/bold}`,
     );
   }
 
   for (const worktreeName of worktreeNames.slice(0, 6)) {
     lines.push(
-      `{cyan-fg}•{/cyan-fg} {bold}${escapeBlessedTags(
+      `{${colors().focus}-fg}•{/${colors().focus}-fg} {bold}${escapeBlessedTags(
         truncatePlainText(worktreeName, Math.max(contentWidth - 2, 8)),
       )}{/bold}`,
     );
   }
   if (worktreeNames.length > 6) {
-    lines.push(`  {gray-fg}+${worktreeNames.length - 6} more{/gray-fg}`);
+    lines.push(
+      `  {${colors().muted}-fg}+${worktreeNames.length - 6} more{/${colors().muted}-fg}`,
+    );
   }
   return lines;
 }
@@ -1212,7 +1241,7 @@ function formatCompletionFailures(
   if (failures.length === 0) return [];
 
   const visibleFailures = failures.slice(0, 3);
-  const lines = [`{yellow-fg}${label}{/yellow-fg}`];
+  const lines = [`{${colors().warning}-fg}${label}{/${colors().warning}-fg}`];
   for (const failure of visibleFailures) {
     const step = failure.step ? ` (${failure.step})` : "";
     lines.push(

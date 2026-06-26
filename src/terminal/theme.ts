@@ -32,12 +32,3 @@ export const terminalSymbol = {
   warning: "▲",
   error: "✗",
 };
-
-export const fullscreenColor = {
-  accent: "cyan",
-  muted: "gray",
-  success: "green",
-  warning: "yellow",
-  error: "red",
-  primary: "white",
-} as const;

@@ -8,7 +8,7 @@ import {
   createFullscreenStatusLine,
   FULLSCREEN_QUIT_KEYS,
 } from "../terminal/fullscreen-surface.ts";
-import { fullscreenColor } from "../terminal/theme.ts";
+import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
   type InitializationTarget,
@@ -18,13 +18,43 @@ import {
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
 
-const STATUS_ICONS = {
-  running: "\u21bb",
-  complete: "\u2713",
-  failed: "\u2717",
-  pending: "\u25cb",
-  cancelled: "\u2298",
-};
+/** Pane status glyphs, resolved from the active theme's semantic symbols. */
+function statusIcons(): {
+  running: string;
+  complete: string;
+  failed: string;
+  pending: string;
+  cancelled: string;
+} {
+  const { symbols } = activeTheme();
+  return {
+    running: symbols.statusRunning,
+    complete: symbols.statusComplete,
+    failed: symbols.statusFailed,
+    pending: symbols.statusPending,
+    cancelled: symbols.statusCancelled,
+  };
+}
+
+/** Semantic color roles as @unblessed tokens for the current theme. */
+function colors(): {
+  focus: string;
+  success: string;
+  warning: string;
+  error: string;
+  muted: string;
+  primary: string;
+} {
+  const { palette } = activeTheme();
+  return {
+    focus: toBlessed(palette.focus),
+    success: toBlessed(palette.success),
+    warning: toBlessed(palette.warning),
+    error: toBlessed(palette.error),
+    muted: toBlessed(palette.muted),
+    primary: toBlessed(palette.primary),
+  };
+}
 
 export async function renderInitializationStatus(
   target: InitializationTarget,
@@ -41,7 +71,7 @@ export async function renderInitializationStatus(
     left: 0,
     width: "100%",
     height: "100%-1",
-    borderColor: fullscreenColor.accent,
+    borderColor: colors().focus,
   });
   const paneMap = new Map<string, number>();
   const adapters = new Map<string, CommandStreamAdapter>();
@@ -50,7 +80,7 @@ export async function renderInitializationStatus(
     paneMap.set(repoName, index);
     grid
       .getPane(index)
-      ?.setLabel(`${escapeBlessedTags(repoName)} ${STATUS_ICONS.pending}`);
+      ?.setLabel(`${escapeBlessedTags(repoName)} ${statusIcons().pending}`);
   });
   const quit = createFullscreenKeypress(screen, FULLSCREEN_QUIT_KEYS);
 
@@ -78,7 +108,7 @@ export async function renderInitializationStatus(
         ? `  |  ${warningCount} warning${warningCount === 1 ? "" : "s"}`
         : "";
     statusLine.setContent(
-      `{gray-fg}${escapeBlessedTags(message)}${warningSuffix}  |  q quit{/gray-fg}`,
+      `{${colors().muted}-fg}${escapeBlessedTags(message)}${warningSuffix}  |  q quit{/${colors().muted}-fg}`,
     );
   };
 
@@ -157,17 +187,17 @@ function renderRepoState({
   switch (state.phase) {
     case "git":
       pane.setLabel(
-        `${escapeBlessedTags(repoName)}: ${state.step} ${STATUS_ICONS.running}`,
+        `${escapeBlessedTags(repoName)}: ${state.step} ${statusIcons().running}`,
       );
       if (state.message) {
         pane.appendLine(
-          `{gray-fg}${escapeBlessedTags(state.message)}{/gray-fg}`,
+          `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
         );
       }
       break;
     case "initializer":
       pane.setLabel(
-        `${escapeBlessedTags(repoName)}: ${escapeBlessedTags(state.name)} ${STATUS_ICONS.running}`,
+        `${escapeBlessedTags(repoName)}: ${escapeBlessedTags(state.name)} ${statusIcons().running}`,
       );
       if (state.output) {
         const adapter = getAdapter(adapters, repoName);
@@ -176,42 +206,42 @@ function renderRepoState({
         }
       } else if (state.message) {
         pane.appendLine(
-          `{gray-fg}${escapeBlessedTags(state.message)}{/gray-fg}`,
+          `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
         );
       }
       break;
     case "worktree-ready":
       pane.setLabel(
-        `${escapeBlessedTags(repoName)}: initializing ${STATUS_ICONS.running}`,
+        `${escapeBlessedTags(repoName)}: initializing ${statusIcons().running}`,
       );
       break;
     case "complete":
       flushAdapter(pane, repoName, adapters);
       pane.setLabel(
-        `{green-fg}${escapeBlessedTags(repoName)} ${STATUS_ICONS.complete}{/green-fg}`,
+        `{${colors().success}-fg}${escapeBlessedTags(repoName)} ${statusIcons().complete}{/${colors().success}-fg}`,
       );
       break;
     case "cancelled":
       flushAdapter(pane, repoName, adapters);
       pane.setLabel(
-        `{yellow-fg}${escapeBlessedTags(repoName)} ${STATUS_ICONS.cancelled}{/yellow-fg}`,
+        `{${colors().warning}-fg}${escapeBlessedTags(repoName)} ${statusIcons().cancelled}{/${colors().warning}-fg}`,
       );
       pane.appendLine(
-        `{yellow-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/yellow-fg}`,
+        `{${colors().warning}-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/${colors().warning}-fg}`,
       );
       break;
     case "failed":
       flushAdapter(pane, repoName, adapters);
       pane.setLabel(
-        `{red-fg}${escapeBlessedTags(repoName)} ${STATUS_ICONS.failed}{/red-fg}`,
+        `{${colors().error}-fg}${escapeBlessedTags(repoName)} ${statusIcons().failed}{/${colors().error}-fg}`,
       );
       if (state.step) {
         pane.appendLine(
-          `{red-fg}Step: ${escapeBlessedTags(state.step)}{/red-fg}`,
+          `{${colors().error}-fg}Step: ${escapeBlessedTags(state.step)}{/${colors().error}-fg}`,
         );
       }
       pane.appendLine(
-        `{red-fg}Error: ${escapeBlessedTags(state.error.message)}{/red-fg}`,
+        `{${colors().error}-fg}Error: ${escapeBlessedTags(state.error.message)}{/${colors().error}-fg}`,
       );
       break;
   }
