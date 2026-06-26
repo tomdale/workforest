@@ -21,7 +21,7 @@ describe("parseInvocation", () => {
     [["task", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
     [["review", "open", "front", "--force"], 'Unknown flag "--force"'],
     [["switch", "--force"], 'Unknown flag "--force"'],
-    [["skills", "get", "--full"], 'Unknown flag "--full"'],
+    [["skills", "get", "--unsupported"], 'Unknown flag "--unsupported"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
   });
@@ -119,7 +119,7 @@ describe("parseInvocation", () => {
       "start-work",
     ]);
     expect(() => parse(["skills", "get"])).toThrow(UsageError);
-    expect(() => parse(["skills", "get", "--all"])).toThrow(UsageError);
+    expect(() => parse(["skills", "get", "--unsupported"])).toThrow(UsageError);
   });
 
   it("does not expose the repository initializer worker as a command", () => {

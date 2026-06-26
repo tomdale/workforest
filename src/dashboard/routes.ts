@@ -296,7 +296,7 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     label: "Agent skill",
     description: "Print the bundled core agent skill.",
     kind: "command",
-    command: ["skills", "get", "core", "--full"],
+    command: ["skills", "get", "core"],
     shellHandoff: false,
   },
 ];

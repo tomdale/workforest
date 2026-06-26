@@ -326,10 +326,6 @@ function renderSkillContents(contents: readonly SkillContent[]): string {
     }
 
     output += withTrailingNewline(skill.content);
-    for (const file of skill.files ?? []) {
-      output += `\n--- ${file.path} ---\n\n`;
-      output += withTrailingNewline(file.content);
-    }
   }
   return output;
 }

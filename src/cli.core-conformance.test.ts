@@ -191,14 +191,28 @@ describe("core command family conformance", () => {
   });
 
   it.each([
-    [["version", "--json"], 'Unknown flag "--json" for wf version'],
-    [["shell", "init", "--json"], 'Unknown flag "--json" for wf shell init'],
-    [["config", "show", "--json"], 'Unknown flag "--json" for wf config show'],
-    [["config", "init", "--json"], 'Unknown flag "--json" for wf config init'],
-    [["config", "edit", "--json"], 'Unknown flag "--json" for wf config edit'],
-    [["skills", "get", "--full"], 'Unknown flag "--full" for wf skills get'],
+    [["version", "--unsupported"], 'Unknown flag "--unsupported" for wf version'],
+    [
+      ["shell", "init", "--unsupported"],
+      'Unknown flag "--unsupported" for wf shell init',
+    ],
+    [
+      ["config", "show", "--unsupported"],
+      'Unknown flag "--unsupported" for wf config show',
+    ],
+    [
+      ["config", "init", "--unsupported"],
+      'Unknown flag "--unsupported" for wf config init',
+    ],
+    [
+      ["config", "edit", "--unsupported"],
+      'Unknown flag "--unsupported" for wf config edit',
+    ],
     [["skills", "get", "--bogus"], 'Unknown flag "--bogus" for wf skills get'],
-    [["skills", "get", "--all"], 'Unknown flag "--all" for wf skills get'],
+    [
+      ["skills", "get", "--unsupported"],
+      'Unknown flag "--unsupported" for wf skills get',
+    ],
   ])("rejects unknown or inapplicable flags for %j", async (argv, message) => {
     if (argv.includes("--json")) {
       await expectJsonUsageError(argv, message);

@@ -75,12 +75,7 @@ describe("dashboard rendering", () => {
     ["cache", 1, ["cache", "doctor"], "wf cache doctor"],
     ["config", 0, ["config", "show"], "wf config show"],
     ["help", 1, ["help", "workflow"], "wf help workflow"],
-    [
-      "help",
-      2,
-      ["skills", "get", "core", "--full"],
-      "wf skills get core --full",
-    ],
+    ["help", 2, ["skills", "get", "core"], "wf skills get core"],
   ] as const)("returns %s dashboard command actions for CLI execution", (routeId, actionOffset, command, displayCommand) => {
     let state = createDashboardState(getDashboardRoute(routeId));
     for (let count = 0; count < actionOffset; count += 1) {
