@@ -48,11 +48,6 @@ export type InferredChange = {
 export type InferChangeOptions = {
   changeName: string;
   sources: ChosenSource[];
-  /**
-   * Reserved for cwd-based inference (mirroring `wf start` with no operands).
-   * Not yet honored; callers should pass explicit sources.
-   */
-  cwdContext?: boolean;
 };
 
 /**
