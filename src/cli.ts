@@ -198,7 +198,7 @@ export async function executeCli(
     if (workerResult) return workerResult;
 
     if (argv.length === 0 && (await shouldUseDashboardTui())) {
-      return runDashboardCommand(getDashboardRoute("home"));
+      return runChangeEntryCommand("go");
     }
 
     const resolution = resolveCommand(commandRegistry, argv);
@@ -256,7 +256,7 @@ async function runInvocation(
         if (!(await shouldUseDashboardTui())) {
           throw new UsageError("wf start requires a change name.");
         }
-        return runDashboardCommand(getDashboardRoute("start"));
+        return runChangeEntryCommand("create");
       }
       return runTypedCommand(async () => {
         const { runStartCommand } = await import("./cli/start.ts");
@@ -455,6 +455,32 @@ async function shouldUseDashboardTui(): Promise<boolean> {
     "./dashboard/index.ts"
   );
   return dashboardShouldUseTui();
+}
+
+/**
+ * Open the universal "go to or create a change" surface. Lazy-imported so the
+ * @unblessed runtime never loads on scriptable/JSON paths. `go` (bare `wf`)
+ * searches existing changes and can create; `create` (`wf start`) skips the
+ * existing-change search and goes straight to naming a new change.
+ */
+async function runChangeEntryCommand(
+  mode: "go" | "create",
+): Promise<CommandResult> {
+  const { runChangeEntry } = await import("./change-entry/surface.ts");
+  const { buildCreateChangeInput, createChange } = await import(
+    "./workspace/create-change.ts"
+  );
+  await runChangeEntry(mode, {
+    commitChange: async ({ changeName, sources }) => {
+      const input = await buildCreateChangeInput({ changeName, sources });
+      await createChange(input, {
+        interactive: true,
+        onEvent: humanServiceEventSink,
+        writeShellCdPath,
+      });
+    },
+  });
+  return success();
 }
 
 function isDefaultInvocation(
