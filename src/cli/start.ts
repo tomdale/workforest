@@ -1,11 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
-import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
-import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
-import { isShellAutoCdEnabled } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
 import {
@@ -15,27 +12,17 @@ import {
 import { validateResourceName } from "../utils/path-safety.ts";
 import { resolveWorkforestContext } from "../workspace/context.ts";
 import {
-  printRepoSetupFailures,
-  stampWorkspace,
-  stampWorkspaceInteractive,
-} from "../workspace/index.ts";
-import {
-  initializeRepositoryChangeSetup,
-  repositoryChangeInitializationScope,
-  startRepoInitialization,
-} from "../workspace/initialization.ts";
-import {
-  readWorkspaceMetadata,
-  writeRepositoryChangeMetadata,
-} from "../workspace/metadata.ts";
+  type CreateChangeOptions,
+  createChange,
+  type ResolvedStartSource,
+} from "../workspace/create-change.ts";
+import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  getRepositoryChangePath,
   getWorkspaceChangePath,
   resolveWorkforestDirectories,
   type WorkforestDirectories,
 } from "../workspace/paths.ts";
-import { createSingleWorktree } from "../worktree.ts";
 import { OperationalError, UsageError } from "./errors.ts";
 import { success } from "./output.ts";
 import type { CommandResult, ParsedInvocation } from "./types.ts";
@@ -48,26 +35,9 @@ export type ParsedStartOperands = Readonly<{
     | Readonly<{ kind: "template"; templateName: string }>;
 }>;
 
-type StartSource =
-  | Readonly<{ kind: "repository"; repo: RepoConfig }>
-  | Readonly<{ kind: "adhoc"; repos: readonly RepoConfig[] }>
-  | Readonly<{
-      kind: "template";
-      templateId: string;
-      repos: readonly RepoConfig[];
-      branchPrefix?: string;
-    }>;
+type StartSource = ResolvedStartSource;
 
-export type RunStartCommandOptions = Readonly<{
-  interactive: boolean;
-  onEvent?: ServiceEventSink;
-  writeShellCdPath: (targetDir: string) => Promise<void>;
-  createSingleWorktree?: typeof createSingleWorktree;
-  initializeRepositoryChangeSetup?: typeof initializeRepositoryChangeSetup;
-  startRepoInitialization?: typeof startRepoInitialization;
-  stampWorkspace?: typeof stampWorkspace;
-  stampWorkspaceInteractive?: typeof stampWorkspaceInteractive;
-}>;
+export type RunStartCommandOptions = CreateChangeOptions;
 
 const START_CONTEXT_ERROR = [
   "Not in a Workforest-managed repo or workspace.",
@@ -99,78 +69,7 @@ export async function runStartCommand(
         : config.branchPrefix,
     );
 
-  if (source.kind === "repository") {
-    const targetDir = getRepositoryChangePath(
-      directories,
-      source.repo.name,
-      changeName,
-    );
-    const repoRootDir = path.dirname(targetDir);
-    await fs.mkdir(repoRootDir, { recursive: true });
-    await (options.createSingleWorktree ?? createSingleWorktree)({
-      repo: source.repo,
-      branchName,
-      targetDir,
-    });
-    await writeRepositoryChangeMetadata(repoRootDir, {
-      featureName: changeName,
-      branchName,
-      repos: [
-        {
-          ...source.repo,
-          hasLockfile: await hasLockfile(targetDir),
-        },
-      ],
-    });
-    await (
-      options.initializeRepositoryChangeSetup ?? initializeRepositoryChangeSetup
-    )({
-      repoRootDir,
-      changeName,
-      repo: source.repo,
-    });
-    await (options.startRepoInitialization ?? startRepoInitialization)({
-      scope: repositoryChangeInitializationScope({ repoRootDir, changeName }),
-      repo: source.repo,
-    });
-    await options.writeShellCdPath(targetDir);
-    log.success(`Change ready: ${targetDir}`);
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${targetDir}`);
-    }
-    return success();
-  }
-
-  const groupName =
-    source.kind === "template" ? source.templateId : ADHOC_WORKSPACE_GROUP;
-  const workspaceDir = getWorkspaceChangePath(
-    directories,
-    groupName,
-    changeName,
-  );
-  const stampOptions = {
-    featureName: changeName,
-    branchName,
-    workspaceDir,
-    repos: source.repos,
-    ...(source.kind === "template" ? { templateId: source.templateId } : {}),
-    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-  };
-
-  if (options.interactive) {
-    const result = await (
-      options.stampWorkspaceInteractive ?? stampWorkspaceInteractive
-    )(stampOptions);
-    printRepoSetupFailures(result.setupFailures);
-  } else {
-    await (options.stampWorkspace ?? stampWorkspace)(stampOptions);
-  }
-
-  await options.writeShellCdPath(workspaceDir);
-  log.success(`Change ready: ${workspaceDir}`);
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${workspaceDir}`);
-  }
+  await createChange({ changeName, source, branchName, directories }, options);
   return success();
 }
 
@@ -366,21 +265,5 @@ async function comparablePath(value: string): Promise<string> {
     return await fs.realpath(value);
   } catch {
     return path.resolve(value);
-  }
-}
-
-async function hasLockfile(repoDir: string): Promise<boolean> {
-  return (
-    (await fileExists(path.join(repoDir, "pnpm-lock.yaml"))) ||
-    (await fileExists(path.join(repoDir, "pnpm-lock.yml")))
-  );
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
   }
 }

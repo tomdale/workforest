@@ -34,14 +34,20 @@ import {
   recordRepoSetupFailure,
   startRepoInitialization,
   watchRepoInitialization,
+  workspaceInitializationScope,
 } from "./initialization.ts";
+import type { InitializationScope } from "./initialization-scope.ts";
 import {
   appendWorkspaceRepos,
   readWorkspaceMetadata,
   updateWorkspaceRepo,
   writeWorkspaceMetadata,
 } from "./metadata.ts";
-import { repoPipelineGenerator } from "./pipeline.ts";
+import {
+  type RepoPipelineOptions,
+  type RepoPipelineState,
+  repoPipelineGenerator,
+} from "./pipeline.ts";
 import {
   cleanupWorkspaceWorktreesGenerator,
   ensureMirrorRepoGenerator,
@@ -520,32 +526,82 @@ async function* createBackgroundRepoSetupPipeline({
   workspaceDir: string;
   branchName: string;
   isNewWorkspace: boolean;
-  beforeInitializers: NonNullable<
-    import("./pipeline.ts").RepoPipelineOptions["beforeInitializers"]
-  >;
+  beforeInitializers: NonNullable<RepoPipelineOptions["beforeInitializers"]>;
   monitorBackground: boolean;
   templateBarrier: TemplateCopyBarrier | null;
-}): AsyncGenerator<import("./pipeline.ts").RepoPipelineState> {
+}): AsyncGenerator<RepoPipelineState> {
+  yield* runScopedRepoSetupPipeline({
+    repo,
+    scope: workspaceInitializationScope(workspaceDir),
+    rootDir: workspaceDir,
+    repoDir: resolveContainedPath(workspaceDir, repo.name),
+    branchName,
+    isNewWorkspace,
+    beforeInitializers,
+    monitorBackground,
+    onFailed: () => templateBarrier?.markRepoFailed(),
+  });
+}
+
+export type ScopedRepoSetupPipelineOptions = {
+  repo: RepoConfig;
+  /** Initialization scope used to record state, launch, and locate logs. */
+  scope: InitializationScope;
+  /** Root the worktree lives under (cleanup + log root). */
+  rootDir: string;
+  /** Absolute path of the repository worktree being created. */
+  repoDir: string;
+  branchName: string;
+  isNewWorkspace: boolean;
+  beforeInitializers?: RepoPipelineOptions["beforeInitializers"];
+  /** When true, watch the detached initializer and keep yielding its state. */
+  monitorBackground: boolean;
+  /** Invoked the first time the foreground git pipeline reports a failure. */
+  onFailed?: () => void;
+};
+
+/**
+ * Drive the foreground portion of a single repository's setup (mirror →
+ * worktree), record its progress against an initialization scope, hand
+ * initialization off to a detached worker, and optionally watch that worker.
+ *
+ * This is the shared primitive behind both workspace stamping and single-repo
+ * change creation, so the two surfaces present identical pipeline state through
+ * the grid regardless of repo count.
+ */
+export async function* runScopedRepoSetupPipeline({
+  repo,
+  scope,
+  rootDir,
+  repoDir,
+  branchName,
+  isNewWorkspace,
+  beforeInitializers,
+  monitorBackground,
+  onFailed,
+}: ScopedRepoSetupPipelineOptions): AsyncGenerator<RepoPipelineState> {
   let markedFailed = false;
   const foreground = withRepoSetupLog(
     repoPipelineGenerator({
       repo,
-      workspaceDir,
+      workspaceDir: rootDir,
+      repoDir,
       branchName,
       isNewWorkspace,
-      beforeInitializers,
+      ...(beforeInitializers ? { beforeInitializers } : {}),
       skipInitializers: true,
     }),
     {
-      workspaceDir,
+      workspaceDir: rootDir,
       repoName: repo.name,
-      repoDir: resolveContainedPath(workspaceDir, repo.name),
+      repoDir,
+      initializationScope: scope,
     },
   );
 
   for await (const state of foreground) {
     if (state.phase === "git") {
-      await recordRepoGitState(workspaceDir, repo.name, state);
+      await recordRepoGitState(scope, repo.name, state);
       yield state;
       continue;
     }
@@ -553,15 +609,10 @@ async function* createBackgroundRepoSetupPipeline({
     if (state.phase === "failed") {
       if (!markedFailed) {
         markedFailed = true;
-        templateBarrier?.markRepoFailed();
+        onFailed?.();
       }
-      await recordRepoSetupFailure(
-        workspaceDir,
-        repo.name,
-        state.error,
-        state.step,
-      );
-      await finalizeWorkspaceInitialization(workspaceDir);
+      await recordRepoSetupFailure(scope, repo.name, state.error, state.step);
+      await finalizeWorkspaceInitialization(scope);
       yield state;
       return;
     }
@@ -574,22 +625,19 @@ async function* createBackgroundRepoSetupPipeline({
     yield { phase: "worktree-ready", hasLockfile: state.hasLockfile };
 
     try {
-      await startRepoInitialization({ workspaceDir, repo });
+      await startRepoInitialization({ scope, repo });
     } catch (error) {
       yield {
         phase: "failed",
         step: "initializer:launch",
         error: error instanceof Error ? error : new Error(String(error)),
       };
-      await finalizeWorkspaceInitialization(workspaceDir);
+      await finalizeWorkspaceInitialization(scope);
       return;
     }
 
     if (monitorBackground) {
-      yield* watchRepoInitialization({
-        workspaceDir,
-        repoName: repo.name,
-      });
+      yield* watchRepoInitialization({ scope, repoName: repo.name });
     }
     return;
   }
@@ -847,22 +895,32 @@ function createTemplateCopyBarrier({
   };
 }
 
-async function createRepoSetupFailureSummary({
+export async function createRepoSetupFailureSummary({
   workspaceDir,
   repoName,
   error,
   step,
+  initializationScope,
 }: {
   workspaceDir: string;
   repoName: string;
   error: Error;
   step?: string;
+  initializationScope?: InitializationScope;
 }): Promise<RepoSetupFailureSummary> {
-  const logPath = await getRepoSetupLogPath({ workspaceDir, repoName });
+  const logPath = await getRepoSetupLogPath({
+    workspaceDir,
+    repoName,
+    ...(initializationScope ? { initializationScope } : {}),
+  });
   let logExcerpt: string | null = null;
 
   try {
-    logExcerpt = await readRepoSetupLogExcerpt({ workspaceDir, repoName });
+    logExcerpt = await readRepoSetupLogExcerpt({
+      workspaceDir,
+      repoName,
+      ...(initializationScope ? { initializationScope } : {}),
+    });
   } catch (logError) {
     const message =
       logError instanceof Error ? logError.message : String(logError);

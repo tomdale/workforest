@@ -13,6 +13,7 @@ import {
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { createTemplate } from "./templates/index.ts";
+import { buildCreateChangeInput } from "./workspace/create-change.ts";
 import {
   type RepoInitializationState,
   readRepoInitializationState,
@@ -35,6 +36,9 @@ type StartRepoInitialization = NonNullable<
   RunStartCommandOptions["startRepoInitialization"]
 >;
 type StampWorkspace = NonNullable<RunStartCommandOptions["stampWorkspace"]>;
+type RenderPipelinesGrid = NonNullable<
+  RunStartCommandOptions["renderPipelinesGrid"]
+>;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -167,6 +171,42 @@ describe("wf start", () => {
         },
       ],
     });
+  });
+
+  it("drives a single-repo interactive start through the grid pipeline", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const created = fakeCreateSingleWorktree();
+    const renderPipelinesGrid = vi.fn<RenderPipelinesGrid>(
+      async () => new Map([["front", { hasLockfile: false }]]),
+    );
+
+    await runStartCommand(invocation(["redesign-cli", "front"]), {
+      interactive: true,
+      writeShellCdPath: fixture.writeShellCdPath,
+      createSingleWorktree: created,
+      initializeRepositoryChangeSetup: vi.fn(async () => undefined),
+      shouldUseGrid: () => true,
+      renderPipelinesGrid,
+    });
+
+    // The grid renders the worktree pipeline itself, so the console-fallback
+    // single-worktree helper must not run.
+    expect(created).not.toHaveBeenCalled();
+    expect(renderPipelinesGrid).toHaveBeenCalledTimes(1);
+    const gridOptions = renderPipelinesGrid.mock.calls[0]?.[0];
+    expect(gridOptions?.repoNames).toEqual(["front"]);
+    expect(gridOptions?.pipelines.size).toBe(1);
+    expect(gridOptions?.pipelines.has("front")).toBe(true);
+    expect(gridOptions?.completeOnWorktreesReady).toBe(true);
+    expect(gridOptions?.backgroundInitialization).toBe(true);
+    expect(fixture.cdTargets).toEqual([
+      path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
+    ]);
   });
 
   it("uses an explicit branch for a single repository without renaming the change", async () => {
@@ -503,6 +543,123 @@ describe("wf start", () => {
 
     await expect(result).rejects.toBeInstanceOf(UsageError);
     await expect(result).rejects.toThrow(message);
+  });
+});
+
+describe("buildCreateChangeInput", () => {
+  it("resolves a single repo token to a repository change input", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+
+    const input = await buildCreateChangeInput({
+      changeName: "redesign-cli",
+      sources: [{ kind: "repo", token: "front" }],
+    });
+
+    expect(input).toEqual({
+      changeName: "redesign-cli",
+      branchName: "tomdale/redesign-cli",
+      source: {
+        kind: "repository",
+        repo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+        },
+      },
+      directories: expect.objectContaining({ base: fixture.baseDir }),
+    });
+  });
+
+  it("resolves multiple repo tokens to an adhoc workspace input", async () => {
+    const fixture = await createStartFixture();
+    for (const name of ["front", "api"]) {
+      await createCachedMirror(
+        fixture.cacheDir,
+        `${name}.git`,
+        `git@github.com:vercel/${name}.git`,
+      );
+    }
+
+    const input = await buildCreateChangeInput({
+      changeName: "billing",
+      sources: [
+        { kind: "repo", token: "front" },
+        { kind: "repo", token: "api" },
+      ],
+    });
+
+    expect(input.source.kind).toBe("adhoc");
+    expect(input.branchName).toBe("tomdale/billing");
+  });
+
+  it("resolves a template source and applies its branch prefix", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    await createTemplate("vercel-agent", {
+      repos: ["front"],
+      branchPrefix: "agent",
+    });
+
+    const input = await buildCreateChangeInput({
+      changeName: "auth-fix",
+      sources: [{ kind: "template", name: "vercel-agent" }],
+    });
+
+    expect(input.source).toMatchObject({
+      kind: "template",
+      templateId: "vercel-agent",
+    });
+    expect(input.branchName).toBe("agent/auth-fix");
+  });
+
+  it("honors a branch override verbatim", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+
+    const input = await buildCreateChangeInput({
+      changeName: "fix-auth",
+      sources: [{ kind: "repo", token: "front" }],
+      branchOverride: "tomdale/custom",
+    });
+
+    expect(input.branchName).toBe("tomdale/custom");
+  });
+
+  it("rejects combining a template with repository sources", async () => {
+    await createStartFixture();
+
+    await expect(
+      buildCreateChangeInput({
+        changeName: "auth-fix",
+        sources: [
+          { kind: "template", name: "vercel-agent" },
+          { kind: "repo", token: "api" },
+        ],
+      }),
+    ).rejects.toThrow(
+      "Template sources cannot be combined with repository sources.",
+    );
+  });
+
+  it("rejects an empty source list", async () => {
+    await createStartFixture();
+
+    await expect(
+      buildCreateChangeInput({ changeName: "auth-fix", sources: [] }),
+    ).rejects.toThrow("No repositories specified.");
   });
 });
 
