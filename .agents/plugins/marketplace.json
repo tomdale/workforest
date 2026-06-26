@@ -1,0 +1,20 @@
+{
+  "name": "workforest",
+  "interface": {
+    "displayName": "Workforest"
+  },
+  "plugins": [
+    {
+      "name": "wf",
+      "source": {
+        "source": "local",
+        "path": "./.agents/plugins/wf"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -14,6 +14,23 @@ long-lived branches accumulating changes.
 After any source changes are complete, always run `pnpm build` before wrapping
 up the work.
 
+## Commit Workflow
+
+Use the registered `commit` subagent for creating commits. The main agent
+should implement and verify the work, then delegate staging, commit granularity,
+and commit message selection to `commit` with a clear summary of the
+intended changes and verification already run.
+
+Commit messages should use concise Conventional Commit subjects such as
+`feat: add task cleanup`, `fix: read branch flag`, `docs: update workflow`, or
+`test: cover workspace status`. Use an optional scope only when it adds concrete
+signal. Keep subjects imperative, present tense, and no more than 72 characters.
+
+Keep commits small and coherent. Do not mix unrelated cleanup with feature work,
+do not stage unrelated user changes, and do not use broad staging commands unless
+the entire dirty tree is intentionally part of the commit. After committing,
+report the new SHA, subject, verification, and any remaining dirty files.
+
 ## Testing Style
 
 Tests must assert current contracts and invariants, not historical negative

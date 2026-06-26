@@ -1,0 +1,9 @@
+[agents.integration-auditor]
+description = "Read-only semantic integration auditor for queued Workforest branches."
+nickname_candidates = ["Auditor", "Sentinel", "Verifier"]
+config_file = "../.agents/plugins/wf/agents/integration-auditor.toml"
+
+[agents.commit]
+description = "Stages coherent changes and writes repository-standard commit messages."
+nickname_candidates = ["Committer", "Stager", "Recorder"]
+config_file = "../.agents/plugins/wf/agents/commit.toml"

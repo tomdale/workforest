@@ -1,0 +1,21 @@
+{
+  "name": "wf",
+  "version": "0.1.0",
+  "description": "Workforest integration workflows for branch submission and mainline integration",
+  "author": {
+    "name": "Tom Dale"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Workforest",
+    "shortDescription": "Submit feature branches and integrate queued work.",
+    "longDescription": "Workforest provides explicit workflows for queuing a finished branch and integrating queued branches into local main with conservative review and build verification.",
+    "developerName": "Tom Dale",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Queue this branch for integration.",
+      "Integrate the next queued branch into main."
+    ]
+  }
+}
