@@ -335,8 +335,7 @@ async function runInvocation(
       if (jsonRequested(invocation)) return unsupportedJson(invocation);
       return runConfigEdit();
     case "skills.list":
-    case "skills.get":
-    case "skills.path": {
+    case "skills.get": {
       const { runSkillsCommand } = await import("./skills.ts");
       switch (invocation.command.leaf.handler) {
         case "skills.list":
@@ -348,14 +347,6 @@ async function runInvocation(
           return runSkillsCommand({
             command: "get",
             names: invocation.beforeDoubleDash,
-            all: invocation.flags["all"] === true,
-            full: invocation.flags["full"] === true,
-            json: invocation.flags["json"] === true,
-          });
-        case "skills.path":
-          return runSkillsCommand({
-            command: "path",
-            name: invocation.beforeDoubleDash[0],
             json: invocation.flags["json"] === true,
           });
       }
