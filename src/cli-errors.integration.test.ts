@@ -80,7 +80,6 @@ async function runCli(argv: readonly string[]) {
     WORKFOREST_SKILLS_DIR: skillsDir,
     WORKFOREST_TEST_ARGV: JSON.stringify(argv),
   };
-  delete env["FORCE_COLOR"];
 
   return runSubprocess(
     process.execPath,

@@ -336,7 +336,6 @@ function runCli(
     WORKFOREST_NO_TUI: "1",
     WORKFOREST_TEST_ARGS: JSON.stringify(args),
   };
-  Reflect.deleteProperty(env, "FORCE_COLOR");
 
   return runSubprocess(
     process.execPath,

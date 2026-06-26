@@ -83,7 +83,6 @@ describe("final command contract", () => {
         WORKFOREST_CONFIG_DIR: configDir,
         XDG_CONFIG_HOME: configDir,
       };
-      Reflect.deleteProperty(env, "FORCE_COLOR");
 
       const result = await runSubprocess(
         process.execPath,
@@ -103,7 +102,6 @@ describe("final command contract", () => {
         WORKFOREST_CONFIG_DIR: configDir,
         XDG_CONFIG_HOME: configDir,
       };
-      Reflect.deleteProperty(env, "FORCE_COLOR");
 
       const result = await runSubprocess(
         process.execPath,

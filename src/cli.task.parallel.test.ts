@@ -142,7 +142,6 @@ function runWorktree(
       `${slug}-${invocation}.cd`,
     ),
   };
-  Reflect.deleteProperty(env, "FORCE_COLOR");
 
   return new Promise((resolve) => {
     execFile(

@@ -118,7 +118,6 @@ describe("bin/workforest.js", () => {
       ...process.env,
       NO_COLOR: "1",
     };
-    Reflect.deleteProperty(env, "FORCE_COLOR");
     Reflect.deleteProperty(env, "WORKFOREST_NO_TUI");
     Reflect.deleteProperty(env, "WORKFOREST_USE_SOURCE_CLI");
 

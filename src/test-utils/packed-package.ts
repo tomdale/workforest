@@ -154,7 +154,6 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
       WORKFOREST_CACHE_DIR: cacheDir,
       WORKFOREST_CONFIG_DIR: configDir,
     };
-    Reflect.deleteProperty(env, "FORCE_COLOR");
     Reflect.deleteProperty(env, "WORKFOREST_CD_PATH_FILE");
     Reflect.deleteProperty(env, "WORKFOREST_SKILLS_DIR");
 

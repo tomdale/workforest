@@ -529,7 +529,6 @@ async function runJson(
     WORKFOREST_SKILLS_DIR: options.skillsDir ?? skillsDir,
     WORKFOREST_TEST_ARGV: JSON.stringify(argv),
   };
-  delete env["FORCE_COLOR"];
 
   return runSubprocess(
     process.execPath,
