@@ -81,6 +81,19 @@ describe("Workforest path helpers", () => {
 });
 
 describe("resolveWorkforestContext", () => {
+  it("classifies repository roots", () => {
+    expect(
+      resolveWorkforestContext(
+        path.join("/workspace", "Repos", "workforest"),
+        roots,
+      ),
+    ).toEqual({
+      kind: "repository-root",
+      repoName: "workforest",
+      path: path.join("/workspace", "Repos", "workforest"),
+    });
+  });
+
   it("classifies repository changes", () => {
     expect(
       resolveWorkforestContext(

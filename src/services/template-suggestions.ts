@@ -993,6 +993,8 @@ function resolveTemplateSuggestionDebugRoot(
   const context = resolveWorkforestContext(cwd, directories);
 
   switch (context.kind) {
+    case "repository-root":
+      return path.join(context.path, ".workforest");
     case "repository-change":
       return path.join(
         path.dirname(context.path),

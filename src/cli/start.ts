@@ -174,7 +174,10 @@ async function resolveCurrentStartSource(
     await comparableDirectories(directories),
   );
 
-  if (context.kind === "repository-change") {
+  if (
+    context.kind === "repository-root" ||
+    context.kind === "repository-change"
+  ) {
     return resolveRepositoryStartSource(context.repoName);
   }
   if (

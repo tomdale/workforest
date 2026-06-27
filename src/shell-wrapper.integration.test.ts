@@ -33,6 +33,30 @@ describe("generated shell wrappers", () => {
     ["bash", "workforest"],
     ["zsh", "wf"],
     ["zsh", "workforest"],
+  ] as const)("hands off a successful bare %s %s invocation", async (shell, binName) => {
+    const fixture = await createShellFixture(shell, []);
+    const target = path.join(fixture.rootDir, "existing change");
+    await mkdir(target);
+
+    const result = await invokeWrapper(fixture, binName, {
+      WORKFOREST_FAKE_CD_TARGET: target,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(parseValue(result.stdout, "status")).toBe("0");
+    expect(await realpath(parseValue(result.stdout, "cwd") ?? "")).toBe(
+      await realpath(target),
+    );
+    expect(result.stderr).toBe("");
+    expect(await readFile(fixture.logPath, "utf8")).toBe("\n");
+    expect(await readdir(fixture.tmpDir)).toEqual([]);
+  });
+
+  it.each([
+    ["bash", "wf"],
+    ["bash", "workforest"],
+    ["zsh", "wf"],
+    ["zsh", "workforest"],
   ] as const)("hands off a successful %s %s invocation to a path containing spaces", async (shell, binName) => {
     const fixture = await createShellFixture(shell);
     const target = path.join(fixture.rootDir, "workspace with spaces");
@@ -102,6 +126,7 @@ type ShellFixture = {
 
 async function createShellFixture(
   shell: SupportedShell,
+  invocationArgs: string[] = ["switch"],
 ): Promise<ShellFixture> {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "workforest-wrapper-"));
   tempDirs.push(rootDir);
@@ -128,7 +153,10 @@ async function createShellFixture(
     [
       `. ${shellQuote(initPath)}`,
       `cd ${shellQuote(startDir)}`,
-      '"$WORKFOREST_TEST_BIN" switch',
+      [
+        '"$WORKFOREST_TEST_BIN"',
+        ...invocationArgs.map((arg) => shellQuote(arg)),
+      ].join(" "),
       "workforest_status=$?",
       'printf "status=%s\\ncwd=%s\\n" "$workforest_status" "$PWD"',
       "",

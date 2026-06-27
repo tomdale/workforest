@@ -45,7 +45,7 @@ __workforest_invoke() {
   shift
 
   case "$1" in
-    ${handoffCommands}) ;;
+    ""|${handoffCommands}) ;;
     *)
       command "$workforest_cmd" "$@"
       return $?
