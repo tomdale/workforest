@@ -216,9 +216,7 @@ async function detectDefaultBranch(
   return fallback;
 }
 
-/**
- * Generator version of ensureWorkingCopy that yields log messages.
- */
+/** Ensures a working copy exists and yields progress states. */
 export async function* ensureWorkingCopyGenerator(
   repo: RepoConfig,
   mirrorDir: string,
@@ -322,27 +320,6 @@ export async function* createWorkingCopyGenerator(
     ["worktree", "add", "-b", branchName, targetDir, `origin/${defaultBranch}`],
     { cwd: mirrorDir },
   );
-}
-
-/**
- * @deprecated Use ensureWorkingCopyGenerator for generator-based workflows.
- */
-export async function ensureWorkingCopy(
-  repo: RepoConfig,
-  mirrorDir: string,
-  targetDir: string,
-  branchName: string,
-): Promise<void> {
-  const gen = ensureWorkingCopyGenerator(
-    repo,
-    mirrorDir,
-    targetDir,
-    branchName,
-  );
-  let result = await gen.next();
-  while (!result.done) {
-    result = await gen.next();
-  }
 }
 
 /**
