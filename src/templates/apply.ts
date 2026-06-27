@@ -157,16 +157,3 @@ export async function* applyTemplateGenerator({
     yield { phase: "hook-complete", hookName: hook.name };
   }
 }
-
-/**
- * @deprecated Use applyTemplateGenerator for generator-based workflows.
- */
-export async function applyTemplate(
-  options: ApplyTemplateOptions,
-): Promise<void> {
-  const gen = applyTemplateGenerator(options);
-  let result = await gen.next();
-  while (!result.done) {
-    result = await gen.next();
-  }
-}
