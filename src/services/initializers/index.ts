@@ -14,7 +14,6 @@ import {
   getPluginPackageName,
   type NormalizedPluginCapabilityMetadata,
   normalizePluginCapabilityMetadata,
-  type PluginCapabilityEntry,
   type PluginCapabilityMetadata,
   type PluginPackage,
   type PluginPackageManifest,
@@ -141,7 +140,11 @@ function buildInitializerRegistry(
     }
 
     for (const entry of initializerMetadata) {
-      const metadata = normalizeInitializerMetadata(entry);
+      const metadata = normalizePluginCapabilityMetadata({
+        entry,
+        capabilityKind: "Initializer",
+        defaultModuleDirectory: "initializers",
+      });
 
       const existingPlugin = seenIds.get(metadata.id);
       if (existingPlugin) {
@@ -161,16 +164,6 @@ function buildInitializerRegistry(
   }
 
   return entries;
-}
-
-function normalizeInitializerMetadata(
-  entry: PluginCapabilityEntry,
-): RegisteredInitializer["metadata"] {
-  return normalizePluginCapabilityMetadata({
-    entry,
-    capabilityKind: "Initializer",
-    defaultModuleDirectory: "initializers",
-  });
 }
 
 function orderRegisteredInitializers(
