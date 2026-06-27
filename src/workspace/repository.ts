@@ -322,9 +322,7 @@ export async function* createWorkingCopyGenerator(
   );
 }
 
-/**
- * Generator version of cleanupWorkspaceWorktrees that yields log messages.
- */
+/** Removes a workspace's linked worktrees and yields progress states. */
 export async function* cleanupWorkspaceWorktreesGenerator(
   mirrorDir: string,
   workspaceDir: string,
@@ -375,20 +373,6 @@ export async function* cleanupWorkspaceWorktreesGenerator(
 
       throw error;
     }
-  }
-}
-
-/**
- * @deprecated Use cleanupWorkspaceWorktreesGenerator for generator-based workflows.
- */
-export async function cleanupWorkspaceWorktrees(
-  mirrorDir: string,
-  workspaceDir: string,
-): Promise<void> {
-  const gen = cleanupWorkspaceWorktreesGenerator(mirrorDir, workspaceDir);
-  let result = await gen.next();
-  while (!result.done) {
-    result = await gen.next();
   }
 }
 
