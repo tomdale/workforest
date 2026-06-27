@@ -24,12 +24,6 @@ export type LoadedAiProvider = {
   priority: number;
 };
 
-const activeAiProviderRegistry = buildAiProviderRegistry(builtInPluginPackages);
-
-export const builtInAiProviderIds = activeAiProviderRegistry.map(
-  (entry) => entry.metadata.id,
-);
-
 export function validateAndOrderPluginAiProviders(
   packages: PluginPackage[],
 ): NormalizedPluginCapabilityMetadata[] {
