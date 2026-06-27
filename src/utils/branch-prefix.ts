@@ -31,20 +31,3 @@ export function resolveBranchPrefix(
 
   return normalizeBranchPrefix(workspaceBranchPrefix);
 }
-
-export function inferBranchPrefix(
-  featureBranch: string | undefined,
-  featureName: string,
-): string {
-  if (!featureBranch) {
-    return "";
-  }
-
-  if (!featureBranch.endsWith(featureName)) {
-    return "";
-  }
-
-  return (
-    normalizeBranchPrefix(featureBranch.slice(0, -featureName.length)) ?? ""
-  );
-}

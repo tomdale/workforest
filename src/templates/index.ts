@@ -18,7 +18,6 @@ import { isSlug } from "../utils/slug.ts";
 
 const XDG_TEMPLATES_DIR = "workforest/templates";
 const TEMPLATE_FILENAME_JSONC = "template.jsonc";
-const TEMPLATE_FILENAME_JSON = "template.json";
 
 export type Template = {
   id: string;
@@ -74,16 +73,11 @@ export async function loadTemplate(
   const templatesDir = getTemplatesDir();
   const templateDir = resolveContainedPath(templatesDir, templateId);
 
-  // Try .jsonc first, then fall back to .json for backwards compatibility
-  const jsoncPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSONC);
-  const jsonPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSON);
-
-  let templatePath: string;
-  if (await pathExists(jsoncPath)) {
-    templatePath = jsoncPath;
-  } else if (await pathExists(jsonPath)) {
-    templatePath = jsonPath;
-  } else {
+  const templatePath = resolveContainedPath(
+    templateDir,
+    TEMPLATE_FILENAME_JSONC,
+  );
+  if (!(await pathExists(templatePath))) {
     return null;
   }
 
@@ -128,12 +122,6 @@ export async function createTemplate(
 
   const contents = generateTemplateJsonc(normalizeTemplateConfig(config));
   await fs.writeFile(templatePath, contents, "utf8");
-
-  // Remove old .json file if it exists (migration to .jsonc)
-  const oldJsonPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSON);
-  if (await pathExists(oldJsonPath)) {
-    await fs.unlink(oldJsonPath);
-  }
 }
 
 function generateTemplateJsonc(config: TemplateConfig): string {

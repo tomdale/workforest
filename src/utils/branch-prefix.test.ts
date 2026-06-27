@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBranchName,
-  inferBranchPrefix,
   normalizeBranchPrefix,
   resolveBranchPrefix,
 } from "./branch-prefix.ts";
@@ -49,19 +48,5 @@ describe("resolveBranchPrefix", () => {
 
   it("allows a template to explicitly disable the global prefix", () => {
     expect(resolveBranchPrefix("feature/", "")).toBeUndefined();
-  });
-});
-
-describe("inferBranchPrefix", () => {
-  it("normalizes prefixes inferred from older malformed branch names", () => {
-    expect(inferBranchPrefix("tomdalefeature-work", "feature-work")).toBe(
-      "tomdale/",
-    );
-  });
-
-  it("preserves already-normalized prefixes", () => {
-    expect(inferBranchPrefix("tomdale/feature-work", "feature-work")).toBe(
-      "tomdale/",
-    );
   });
 });

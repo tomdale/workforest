@@ -5,8 +5,6 @@ import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
-import { getGitHubSlug } from "../services/git.ts";
-import { fetchRepoDiskUsage } from "../services/github.ts";
 import {
   type InitializerState,
   runInitializersGenerator,
@@ -1099,53 +1097,4 @@ export async function writeVSCodeWorkspaceFile(
     level: "info",
     message: `VS Code workspace saved to ${workspaceFile}`,
   });
-}
-
-const LARGE_REPO_THRESHOLD_MB = 500;
-
-export type LargeRepositoryWarning = {
-  repo: string;
-  sizeMB: number;
-  message: string;
-};
-
-export async function warnAboutLargeRepositories(
-  repos: readonly RepoConfig[],
-  onEvent?: ServiceEventSink,
-): Promise<LargeRepositoryWarning[]> {
-  const warnings = await Promise.all(
-    repos.map(async (repo) => {
-      const slug = getGitHubSlug(repo.remote);
-      if (!slug) {
-        return undefined;
-      }
-
-      const { sizeBytes } = await fetchRepoDiskUsage(slug);
-      if (sizeBytes === null) {
-        return undefined;
-      }
-
-      const sizeMB = sizeBytes / (1024 * 1024);
-      if (sizeMB >= LARGE_REPO_THRESHOLD_MB) {
-        const sizeString = sizeMB.toFixed(1);
-        const warning = {
-          repo: repo.name,
-          sizeMB,
-          message: `Repository ${repo.name} is approximately ${sizeString} MB and may take a while to mirror.`,
-        } satisfies LargeRepositoryWarning;
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "warning",
-          message: warning.message,
-        });
-        return warning;
-      }
-
-      return undefined;
-    }),
-  );
-
-  return warnings.filter(
-    (warning): warning is LargeRepositoryWarning => warning !== undefined,
-  );
 }

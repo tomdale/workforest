@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { log } from "../logger.ts";
 import type { RunCommandOptions } from "../types.ts";
 import { createSpawnEnv } from "./spawn-env.ts";
 
@@ -118,22 +117,5 @@ export function runCommandWithStdin(
     // Write stdin and close
     child.stdin.write(stdin);
     child.stdin.end();
-  });
-}
-
-/**
- * Runs a command with real-time output to the console.
- * Logs the command being executed and streams stdout/stderr.
- */
-export function runCommandVerbose(
-  command: string,
-  args: string[],
-  options: { cwd?: string } = {},
-): Promise<{ stdout: string; stderr: string }> {
-  log.info(`$ ${command} ${args.join(" ")}`);
-  return runCommand(command, args, {
-    ...options,
-    onStdout: (chunk) => process.stdout.write(chunk),
-    onStderr: (chunk) => process.stderr.write(chunk),
   });
 }

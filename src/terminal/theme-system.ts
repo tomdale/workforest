@@ -1,4 +1,3 @@
-import chalk from "chalk";
 import { terminalSymbol } from "./theme.ts";
 
 /**
@@ -129,16 +128,6 @@ export function toHex(color: ThemeColor): string {
 export function fg(color: ThemeColor, text: string): string {
   const token = toBlessed(color);
   return `{${token}-fg}${text}{/${token}-fg}`;
-}
-
-/** Project a color onto a chalk styler for inline (non-fullscreen) output. */
-export function toChalk(color: ThemeColor): (value: string) => string {
-  if (color.kind === "rgb") {
-    const [r, g, b] = color.rgb;
-    return (value: string) => chalk.rgb(r, g, b)(value);
-  }
-  const styler = color.name === "gray" ? chalk.gray : chalk[color.name];
-  return (value: string) => styler(value);
 }
 
 const DEFAULT_SYMBOLS: ThemeSymbols = {
