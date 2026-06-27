@@ -382,7 +382,7 @@ async function activateInitializersForRepo({
   );
   const activeByKey = new Map<string, RegisteredInitializer>();
 
-  for (const pluginPackage of activePluginPackages) {
+  for (const pluginPackage of builtInPluginPackages) {
     const packageName = getPluginPackageName(pluginPackage);
     const pluginMetadata = getPluginMetadata(pluginPackage);
     if ((pluginMetadata.initializers ?? []).length === 0) {
@@ -602,5 +602,3 @@ export async function* runSingleRepoInitializersGenerator({
 
   yield { phase: "complete" };
 }
-
-const activePluginPackages = builtInPluginPackages;
