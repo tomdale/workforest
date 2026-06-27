@@ -36,9 +36,14 @@ Use this skill when processing queued branches into local `main`.
 9. Under the shared `workforest-main.lock`, fast-forward `main` to the integrated result.
 10. Push `origin main:main`.
 11. Dequeue the integrated queue entry.
+12. After all queued integrations are complete, offer to run `wf finish` for
+    every worktree integrated during this run. Run it only after the user
+    confirms, and only for worktrees whose integration is verified in Git
+    history.
 
 ## Notes
 
 - Skip or refresh stale entries before attempting to integrate them.
 - Keep the integration branch linear and explicit.
 - If build or merge verification fails, leave local `main` unchanged and fix the coordinator branch first.
+- Do not offer worktree cleanup while queued integrations remain.
