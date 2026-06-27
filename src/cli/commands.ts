@@ -16,7 +16,6 @@ import type {
 } from "./types.ts";
 
 const visible: Visibility = "visible";
-const hidden: Visibility = "hidden";
 const noTty: TtyRequirement = { kind: "none" };
 const optionalStdin: TtyRequirement = {
   kind: "optional",

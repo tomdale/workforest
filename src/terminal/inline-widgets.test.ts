@@ -79,9 +79,7 @@ describe("filterFuzzyChoices", () => {
   });
 
   it("matches hints case-insensitively", () => {
-    expect(filterFuzzyChoices(options, "documentation")).toEqual([
-      options[2],
-    ]);
+    expect(filterFuzzyChoices(options, "documentation")).toEqual([options[2]]);
   });
 
   it("returns no options when nothing matches", () => {

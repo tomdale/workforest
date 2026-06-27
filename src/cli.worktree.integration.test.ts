@@ -106,7 +106,9 @@ describe("wf worktree", () => {
       fixture.root,
     );
     expect(add.exitCode).toBe(0);
-    await expect(access(path.join(fixture.root, "relative"))).resolves.toBeUndefined();
+    await expect(
+      access(path.join(fixture.root, "relative")),
+    ).resolves.toBeUndefined();
 
     const move = await runWorktree(
       fixture.cacheDir,
@@ -114,7 +116,9 @@ describe("wf worktree", () => {
       fixture.root,
     );
     expect(move.exitCode).toBe(0);
-    await expect(access(path.join(fixture.root, "moved"))).resolves.toBeUndefined();
+    await expect(
+      access(path.join(fixture.root, "moved")),
+    ).resolves.toBeUndefined();
 
     const remove = await runWorktree(
       fixture.cacheDir,
@@ -122,7 +126,9 @@ describe("wf worktree", () => {
       fixture.root,
     );
     expect(remove.exitCode).toBe(0);
-    await expect(access(path.join(fixture.root, "moved"))).rejects.toMatchObject({
+    await expect(
+      access(path.join(fixture.root, "moved")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   }, 20_000);
@@ -184,11 +190,7 @@ async function tempDir(prefix: string): Promise<string> {
   return directory;
 }
 
-function runWorktree(
-  cacheDir: string,
-  args: readonly string[],
-  cwd?: string,
-) {
+function runWorktree(cacheDir: string, args: readonly string[], cwd?: string) {
   return runSubprocess(
     process.execPath,
     [path.resolve("bin/workforest.js"), "worktree", ...args],

@@ -104,12 +104,22 @@ export async function runWorktreeInvocation(
     }
     case "worktree.move": {
       const [worktreePath, newPath] = operands;
-      args = ["move", path.resolve(worktreePath!), path.resolve(newPath!)];
+      if (!worktreePath || !newPath) {
+        throw new Error(
+          "The CLI kernel accepted an invalid worktree move invocation.",
+        );
+      }
+      args = ["move", path.resolve(worktreePath), path.resolve(newPath)];
       break;
     }
     case "worktree.remove": {
       const [worktreePath] = operands;
-      args = ["remove", path.resolve(worktreePath!)];
+      if (!worktreePath) {
+        throw new Error(
+          "The CLI kernel accepted an invalid worktree remove invocation.",
+        );
+      }
+      args = ["remove", path.resolve(worktreePath)];
       break;
     }
     default:
