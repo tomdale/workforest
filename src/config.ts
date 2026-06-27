@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import {
   DEFAULT_WORKSPACE_CONFIG,
   normalizeWorkspaceConfig,
@@ -16,7 +17,7 @@ import type {
   ResolvedWorkspaceConfig,
   WorkspaceConfig,
 } from "./types.ts";
-import { ensureDir, pathExists } from "./utils/fs.ts";
+import { ensureDir } from "./utils/fs.ts";
 
 const DEFAULT_TRUNK_BRANCH = "main";
 const CONFIG_FILENAME = "config.json";

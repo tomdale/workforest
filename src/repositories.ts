@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { getCacheDir, reposFromSlugs } from "./config.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import { runGit } from "./services/git.ts";
 import type { RepoConfig } from "./types.ts";
-import { ensureDir, pathExists } from "./utils/fs.ts";
+import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
 import { ensureMirrorRepoGenerator } from "./workspace/repository.ts";
 

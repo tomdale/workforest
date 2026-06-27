@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { getCacheDir } from "./config.ts";
 import { resolveMirrorDir } from "./repositories.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
@@ -8,7 +9,7 @@ import { runGit } from "./services/git.ts";
 import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
 import type { RepoConfig } from "./types.ts";
 import { runCommand } from "./utils/exec.ts";
-import { ensureDir, pathExists } from "./utils/fs.ts";
+import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
 import {
   readWorkspaceMetadata,

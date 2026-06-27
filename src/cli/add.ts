@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
@@ -9,7 +10,6 @@ import { isShellAutoCdEnabled } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
 import { promptConfirm } from "../ui/prompts/index.ts";
-import { pathExists } from "../utils/fs.ts";
 import {
   resolveWorkforestContext,
   type WorkforestManagedContext,

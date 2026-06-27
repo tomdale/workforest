@@ -1,12 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import {
   cloneRepositoryGenerator,
   fixBareRepoRefsGenerator,
   runGit,
 } from "../services/git.ts";
 import type { RepoConfig } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
 import { asGenerator, withRetryGenerator } from "../utils/retry.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 

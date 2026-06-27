@@ -1,7 +1,7 @@
 import { promises as fs, constants as fsConstants } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { runHook } from "../services/hooks.ts";
-import { pathExists } from "../utils/fs.ts";
 import {
   assertContainedPathWithoutSymlinks,
   resolveContainedPath,

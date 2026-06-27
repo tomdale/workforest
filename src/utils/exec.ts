@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
+import { createSpawnEnv } from "@wf-plugin/core";
 import type { RunCommandOptions } from "../types.ts";
-import { createSpawnEnv } from "./spawn-env.ts";
 
 /**
  * Runs a command and captures its output.

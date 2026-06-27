@@ -28,9 +28,11 @@ vi.mock("node:fs", () => ({
   },
 }));
 
-vi.mock("../utils/fs.ts", () => ({
-  pathExists: pathExistsMock,
-}));
+vi.mock("@wf-plugin/core", async () => {
+  const actual =
+    await vi.importActual<typeof import("@wf-plugin/core")>("@wf-plugin/core");
+  return { ...actual, pathExists: pathExistsMock };
+});
 
 vi.mock("./index.ts", () => ({
   ensureCacheDir: ensureCacheDirMock,

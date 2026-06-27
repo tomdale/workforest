@@ -1,8 +1,8 @@
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { runGit } from "../services/git.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
 import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
   finalizeWorkspaceInitialization,

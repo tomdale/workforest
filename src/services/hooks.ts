@@ -1,6 +1,5 @@
+import { getNodeVersionPrefix, pathExists } from "@wf-plugin/core";
 import type { Hook } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
-import { getNodeVersionPrefix } from "../utils/node-version.ts";
 import {
   assertContainedPathWithoutSymlinks,
   resolveContainedPath,

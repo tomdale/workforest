@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
@@ -14,7 +15,6 @@ import type {
   WorkspaceRepoMetadata,
 } from "../types.ts";
 import { buildBranchName } from "../utils/branch-prefix.ts";
-import { pathExists } from "../utils/fs.ts";
 import {
   resolveContainedPath,
   validateResourceName,

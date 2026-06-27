@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs, lstatSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type {
   ReviewWorktreeMetadata,
@@ -9,7 +10,6 @@ import type {
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
 } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
 import {
   assertContainedPathWithoutSymlinks,
   resolveContainedPath,

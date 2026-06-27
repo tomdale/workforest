@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { runGit } from "../services/git.ts";
 import type { CleanupOptions, RepoConfig } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";

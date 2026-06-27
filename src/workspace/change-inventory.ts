@@ -1,9 +1,9 @@
 import { type Dirent, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
   listRepositoryChangeMetadata,

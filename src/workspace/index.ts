@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { hasAny } from "@wf-plugin/core";
+import { hasAny, pathExists } from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
@@ -17,7 +17,7 @@ import {
 } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
-import { ensureDir, pathExists } from "../utils/fs.ts";
+import { ensureDir } from "../utils/fs.ts";
 import {
   resolveContainedPath,
   validateResourceName,

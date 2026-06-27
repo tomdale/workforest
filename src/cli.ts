@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { pathExists } from "@wf-plugin/core";
 import { commandRegistry } from "./cli/commands.ts";
 import {
   isArgumentParserError,
@@ -88,7 +89,6 @@ import {
   promptText,
 } from "./ui/prompts/index.ts";
 import { resolveBranchPrefix } from "./utils/branch-prefix.ts";
-import { pathExists } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
 import type { CleanupState } from "./workspace/cleanup.ts";
 import { resolveWorkforestContext } from "./workspace/context.ts";

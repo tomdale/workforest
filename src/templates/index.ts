@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { parse as parseJsonc } from "jsonc-parser";
 import {
   readEnvironmentVariable,
@@ -9,7 +10,7 @@ import {
 } from "../environment.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { TemplateConfig } from "../types.ts";
-import { ensureDir, pathExists } from "../utils/fs.ts";
+import { ensureDir } from "../utils/fs.ts";
 import {
   resolveContainedPath,
   validateResourceName,

@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { createSpawnEnv } from "./spawn-env.ts";
-import { TailBuffer } from "./tail-buffer.ts";
+import { createSpawnEnv, TailBuffer } from "@wf-plugin/core";
 
 /**
  * State emitted by task generators to provide visibility into execution progress.

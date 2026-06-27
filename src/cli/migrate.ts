@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type Dirent, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
 import {
   type CachedRepository,
@@ -15,7 +16,6 @@ import type {
   WorkspaceConfig,
   WorkspaceMetadata,
 } from "../types.ts";
-import { pathExists } from "../utils/fs.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
   getRepositoryChangeMetadataPath,
