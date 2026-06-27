@@ -167,6 +167,9 @@ async function createFixture(): Promise<{
   await execFileAsync("git", ["config", "user.name", "Test User"], {
     cwd: sourceDir,
   });
+  await execFileAsync("git", ["config", "commit.gpgsign", "false"], {
+    cwd: sourceDir,
+  });
   await writeFile(path.join(sourceDir, "README.md"), "fixture\n");
   await execFileAsync("git", ["add", "README.md"], { cwd: sourceDir });
   await execFileAsync("git", ["commit", "--quiet", "-m", "initial"], {

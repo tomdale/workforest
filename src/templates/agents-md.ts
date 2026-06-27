@@ -504,7 +504,10 @@ async function stageTemplateRootFiles(
   const files = await collectTemplateRootFiles(template);
   if (files.length === 0) return [];
 
-  const stagingRoot = resolveContainedPath(sourcesRoot, STAGED_TEMPLATE_FILES_DIR);
+  const stagingRoot = resolveContainedPath(
+    sourcesRoot,
+    STAGED_TEMPLATE_FILES_DIR,
+  );
   const prepared: PreparedTemplateRootFile[] = [];
   for (const file of files) {
     const target = resolveContainedPath(stagingRoot, file.workspacePath);
@@ -531,7 +534,9 @@ async function collectTemplateRootFiles(
 
   const rootStat = await fs.lstat(filesRoot);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-    throw new Error(`Template files path must be a real directory: ${filesRoot}`);
+    throw new Error(
+      `Template files path must be a real directory: ${filesRoot}`,
+    );
   }
 
   const files: TemplateRootFile[] = [];
@@ -559,7 +564,9 @@ async function collectTemplateRootFilesFromDirectory(
     const stat = await fs.lstat(absolutePath);
 
     if (stat.isSymbolicLink()) {
-      throw new Error(`Template files must not contain symlinks: ${absolutePath}`);
+      throw new Error(
+        `Template files must not contain symlinks: ${absolutePath}`,
+      );
     }
     if (stat.isDirectory()) {
       await collectTemplateRootFilesFromDirectory(
@@ -687,9 +694,7 @@ function generationPrompt(
       return `- ${name}: checkout directory \`${repoPath}/\`; path hints: ${hintText}`;
     })
     .join("\n");
-  const templateRootFiles = formatTemplateRootFiles(
-    sources.templateRootFiles,
-  );
+  const templateRootFiles = formatTemplateRootFiles(sources.templateRootFiles);
 
   return [
     `You are drafting the compact instruction body for the root AGENTS.md for Workforest template \`${template.id}\`. It will later be copied to workspace roots and read by coding agents before edits.`,

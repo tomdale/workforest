@@ -115,6 +115,7 @@ describe("template AGENTS.md artifacts", () => {
       cwd: source,
     });
     await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
     await writeFile(
       path.join(source, "src", "settings.ts"),
       `export const settings = true;\n${"// implementation detail\n".repeat(5_000)}`,
@@ -241,6 +242,7 @@ describe("template AGENTS.md artifacts", () => {
       cwd: source,
     });
     await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
     await writeFile(
       path.join(source, "src", "settings.ts"),
       "export const settings = true;\n",
@@ -412,6 +414,7 @@ describe("template AGENTS.md artifacts", () => {
       cwd: source,
     });
     await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
     await writeFile(
       path.join(source, "src", "settings.ts"),
       "export const settings = true;\n",
@@ -490,6 +493,7 @@ describe("template AGENTS.md artifacts", () => {
       cwd: source,
     });
     await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
     await writeFile(
       path.join(source, "src", "settings.ts"),
       "export const settings = true;\n",

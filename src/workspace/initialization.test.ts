@@ -143,6 +143,7 @@ describe("background repository initialization", () => {
       cwd: source,
     });
     await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
     await writeFile(
       path.join(source, "src", "settings.ts"),
       "export const settings = true;\n",

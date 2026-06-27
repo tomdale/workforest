@@ -1,3 +1,4 @@
+import { loadTemplate } from "../templates/index.ts";
 import {
   CommandStreamAdapter,
   escapeBlessedTags,
@@ -9,7 +10,6 @@ import {
   FULLSCREEN_QUIT_KEYS,
 } from "../terminal/fullscreen-surface.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
-import { loadTemplate } from "../templates/index.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
   type InitializationTarget,

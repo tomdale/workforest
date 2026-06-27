@@ -32,6 +32,7 @@ async function createQueuedCherryPickFixture() {
   run("git", ["init", "-b", "main", repoDir], root);
   git(repoDir, ["config", "user.email", "test@example.com"]);
   git(repoDir, ["config", "user.name", "Test User"]);
+  git(repoDir, ["config", "commit.gpgsign", "false"]);
 
   await writeFile(path.join(repoDir, "README.md"), "base\n");
   git(repoDir, ["add", "README.md"]);
