@@ -28,10 +28,11 @@ Use this skill when processing queued branches into local `main`.
     the corresponding commit on `main` with the queue helper. This preserves
     the ancestry proof used by `wf finish`. The helper must skip dirty or
     missing source worktrees.
-11. Do not run an extra queue-empty `pnpm check` after the final queued entry
-    has already passed the lock-held check and fast-forwarded `main`. If the
-    queue is empty at the start of the integration run, run `pnpm check` in the
-    `main` worktree once.
+11. Do not run an extra queue-empty `pnpm check`. If the queue is empty at the
+    start of the integration run, report that there is nothing to integrate and
+    stop without running validation. After the final queued entry integrates, the
+    lock-held check that immediately preceded the `main` fast-forward is the
+    final verification for that run.
 
 ## Workflow
 
@@ -61,8 +62,8 @@ Use this skill when processing queued branches into local `main`.
 15. Repeat steps 2-14 until no ready queue entries remain. The lock-held
     `pnpm check` from step 10 is the final verification for the last integrated
     branch; do not rerun it solely because the queue is now empty.
-16. If there were no ready queue entries when the run started, run `pnpm check`
-    once in the `main` worktree.
+16. If there were no ready queue entries when the run started, stop after
+    reporting the empty queue. Do not run `pnpm check` for an empty queue.
 17. After all queued integrations are complete, offer to run `wf finish` for
     every worktree integrated during this run. Run it only after the user
     confirms, and only for worktrees whose integration is verified in Git
