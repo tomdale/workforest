@@ -119,8 +119,17 @@ function toChangeCandidate(
   entry: ChangeInventoryEntry,
   now: number,
 ): ChangeCandidate {
+  // Mark template-backed changes with the `@` prefix users already type
+  // (`wf start <change> @template`) so a template name reads distinctly from the
+  // plain repo names shown for single-repo and adhoc changes, and list the
+  // template's repos in parens after the name. The full repo list is passed
+  // through uncapped; the renderer truncates it to the column with "+ N more".
   const repoInfo =
-    entry.type === "repository-change" ? entry.repository : entry.repoSummary;
+    entry.type === "repository-change"
+      ? entry.repository
+      : entry.type === "template-workspace"
+        ? formatTemplateInfo(entry.groupName, entry.repos)
+        : entry.repos.join(", ");
   return {
     selector: entry.selector,
     changeName: entry.changeName,
@@ -134,6 +143,16 @@ function toChangeCandidate(
     }),
     path: entry.path,
   };
+}
+
+/** `@template (repo, repo)`, dropping the parens when the repo list is empty. */
+function formatTemplateInfo(
+  groupName: string,
+  repos: readonly string[],
+): string {
+  return repos.length > 0
+    ? `@${groupName} (${repos.join(", ")})`
+    : `@${groupName}`;
 }
 
 /**

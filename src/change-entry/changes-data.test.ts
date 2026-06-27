@@ -71,7 +71,8 @@ describe("listChangeCandidates", () => {
     expect(bySelector.get("vercel-agent/auth-fix")).toMatchObject({
       kind: "workspace",
       changeName: "auth-fix",
-      statusHint: "3d ago · agents, api",
+      // Template-backed workspace: shows the @template with its repos in parens.
+      statusHint: "3d ago · @vercel-agent (agents, api)",
       path: path.join(baseDir, "Workspaces", "vercel-agent", "auth-fix"),
     });
     expect(bySelector.get("_adhoc/billing")).toMatchObject({

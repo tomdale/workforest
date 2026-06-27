@@ -92,8 +92,8 @@ export type FuzzyListOptions<T> = {
   screen: Screen;
   /** Optional container; defaults to the screen itself. */
   parent?: Box;
-  /** A short label describing the choice, e.g. "go to a change". */
-  prompt: string;
+  /** Optional heading rendered above the input box. */
+  prompt?: string;
   items: FuzzyItem<T>[];
   /** Persistent literal row enabling free entry of the typed query. */
   actionRow?: FuzzyActionRow;
@@ -135,14 +135,16 @@ export type FuzzyList<T> = {
   destroy(): void;
 };
 
-const CARET = "▌";
 const PLACEHOLDER = "Type to filter…";
+// Upper bound on the name column so one long change name can't push the
+// timestamp/metadata columns off-screen.
+const NAME_COLUMN_CAP = 32;
 const NO_MATCHES = "No matches";
 const FOOTER_HINTS: ReadonlyArray<readonly [string, string]> = [
-  ["↑/↓", "move"],
-  ["enter", "select"],
-  ["esc", "cancel"],
-  ["bksp", "delete"],
+  ["↑↓", "MOVE"],
+  ["⏎", "SELECT"],
+  ["esc", "CANCEL"],
+  ["⌫", "DELETE"],
 ];
 
 /**
@@ -230,35 +232,31 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     const lines = new Array<string>(Math.max(height, 1)).fill("");
     const palette = theme.palette;
 
-    // The header stacks top-down: prompt, an optional prominent scope toggle,
-    // then the live query. `cursor` tracks the next free row so the list starts
-    // directly beneath whatever the header occupied.
+    // Optional heading and scope controls stack above the boxed query input.
     const showScopeBar = scopeToggle !== undefined;
     const scopeSuffix =
       scopeLabel && !showScopeBar
         ? `  ${fg(palette.muted, `· ${escapeBlessedTags(scopeLabel)}`)}`
         : "";
     let cursor = 0;
-    lines[cursor++] = `${fg(palette.focus, theme.symbols.active)} ${fg(
-      palette.primary,
-      escapeBlessedTags(prompt),
-    )}${scopeSuffix}`;
+    if (prompt) {
+      lines[cursor++] = `${fg(palette.focus, theme.symbols.active)} ${fg(
+        palette.primary,
+        escapeBlessedTags(prompt),
+      )}${scopeSuffix}`;
+    }
 
     if (scopeToggle !== undefined) {
       lines[cursor++] = renderScopeBar(theme, scopeToggle);
     }
 
-    const caret = fg(palette.focus, CARET);
-    if (query.length > 0) {
-      lines[cursor] =
-        `${fg(palette.primary, escapeBlessedTags(query))}${caret}`;
-    } else {
-      lines[cursor] = `${caret} ${fg(palette.muted, placeholder)}`;
-    }
-    cursor += 1;
+    const box = renderInputBox(theme, inner, query, placeholder);
+    lines[cursor] = box.top;
+    lines[cursor + 1] = box.mid;
+    lines[cursor + 2] = box.bottom;
 
-    const footerRow = Math.max(cursor, height - 1);
-    const listTop = cursor;
+    const listTop = cursor + 3;
+    const footerRow = Math.max(listTop, height - 1);
     const viewport = Math.max(0, footerRow - listTop);
 
     if (candidates.length === 0) {
@@ -279,6 +277,10 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       // Candidates and the action row form one scrollable list. The action row
       // is the final entry (index === candidates.length) and scrolls with the
       // rest, so it sits directly beneath the last match when everything fits.
+      // Column widths are measured across every candidate (not just the
+      // visible window) so the timestamp/metadata columns stay put while
+      // scrolling.
+      const columns = computeColumns(candidates);
       scrollTop = windowStart(total(), index, viewport, scrollTop);
       const end = Math.min(scrollTop + viewport, total());
       for (let i = scrollTop; i < end; i += 1) {
@@ -286,7 +288,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
         if (i < candidates.length) {
           const item = candidates[i];
           if (!item) continue;
-          lines[row] = renderItem(item, i === index, inner, theme);
+          lines[row] = renderItem(item, i === index, inner, theme, columns);
         } else if (actionRow) {
           lines[row] = renderAction(
             actionRow.label(query),
@@ -458,29 +460,189 @@ function screenProgram(screen: Screen): ScreenProgram | undefined {
   return (screen as unknown as { program?: ScreenProgram }).program;
 }
 
+const RULE = "━";
+// Rule glyphs to the left of the content; the label then aligns with the
+// unselected three-column indent.
+const RULE_LEAD = 2;
+
+/**
+ * The query input, wrapped in a rounded box. The placeholder doubles as the
+ * surface label (the caller renders no header), and a static caret marks the
+ * input position. The box is drawn one column short of the full width — blessed
+ * wraps a line whose width equals the content area, which would push the right
+ * border (and the corners) onto their own rows.
+ */
+function renderInputBox(
+  theme: Theme,
+  inner: number,
+  query: string,
+  placeholder: string,
+): { top: string; mid: string; bottom: string } {
+  const { palette } = theme;
+  const frame = palette.accent;
+  const span = Math.max(4, inner - 1);
+  const horizontal = "─".repeat(Math.max(0, span - 2));
+  // Content sits between "│ " and " │", so one space of padding each side.
+  const slot = Math.max(1, span - 4);
+
+  const shown = truncate(
+    escapeBlessedTags(query.length > 0 ? query : placeholder),
+    slot,
+  );
+  const inside =
+    query.length > 0 ? fg(palette.primary, shown) : fg(palette.muted, shown);
+  const pad = " ".repeat(Math.max(0, slot - visibleWidth(shown)));
+  return {
+    top: fg(frame, `╭${horizontal}╮`),
+    mid: `${fg(frame, "│")} ${inside}${pad} ${fg(frame, "│")}`,
+    bottom: fg(frame, `╰${horizontal}╯`),
+  };
+}
+
+/**
+ * Lay the focused row over a red rule that runs edge to edge: a short lead at
+ * the left margin, the styled content, then rule glyphs filling out to `inner`.
+ * The content knocks the middle out of the line, so it reads as a red wire
+ * passing behind the selection. `plainWidth` is the visible width of `content`.
+ */
+function ruledSelection(
+  theme: Theme,
+  content: string,
+  plainWidth: number,
+  inner: number,
+): string {
+  const red = theme.palette.primary;
+  const lead = fg(red, RULE.repeat(RULE_LEAD));
+  // [lead][space][content][space][fill] — one space of breathing room on each
+  // side of the text. The total stops one column short of `inner`: a line whose
+  // width equals the content area wraps in blessed, dropping the last glyph.
+  const fill = Math.max(0, inner - RULE_LEAD - plainWidth - 3);
+  return `${lead} ${content} ${fg(red, RULE.repeat(fill))}`;
+}
+
+type Columns = { name: number; time: number };
+
+/**
+ * Split a hint into its leading timestamp and the trailing metadata, on the
+ * same " · " join {@link buildStatusHint} uses. A hint with no separator is
+ * treated as all timestamp (the metadata column is then empty).
+ */
+function splitHint(hint: string | undefined): { time: string; meta: string } {
+  if (!hint) return { time: "", meta: "" };
+  const [time, ...rest] = hint.split(" · ");
+  return { time: time ?? "", meta: rest.join(" · ") };
+}
+
+/**
+ * Measure the name and timestamp column widths across every candidate so the
+ * three columns (name · timestamp · metadata) line up. The name column is
+ * capped so a single long change name can't push the metadata off-screen.
+ */
+function computeColumns<T>(candidates: FuzzyItem<T>[]): Columns {
+  let name = 0;
+  let time = 0;
+  for (const candidate of candidates) {
+    name = Math.max(name, visibleWidth(escapeBlessedTags(candidate.label)));
+    const { time: stamp } = splitHint(candidate.hint);
+    time = Math.max(time, visibleWidth(escapeBlessedTags(stamp)));
+  }
+  return { name: Math.min(name, NAME_COLUMN_CAP), time };
+}
+
+/** Escape, truncate to `width`, then right-pad with spaces to exactly `width`. */
+function padColumn(text: string, width: number): string {
+  const shown = truncate(escapeBlessedTags(text), width);
+  return shown + " ".repeat(Math.max(0, width - visibleWidth(shown)));
+}
+
+/**
+ * Fit a metadata string to `budget` columns. A comma-separated repo list —
+ * optionally wrapped as a template `@name (a, b, c)` — keeps as many whole
+ * entries as fit and summarizes the rest as ", + N more"; only truncating when
+ * the full list would overflow. A trailing " · "-joined flag (e.g. `stale`) is
+ * preserved, and non-list text that overflows is hard-truncated.
+ */
+export function fitMetaList(meta: string, budget: number): string {
+  if (budget <= 0) return "";
+  if (visibleWidth(meta) <= budget) return meta;
+
+  const [repoInfo = "", ...flags] = meta.split(" · ");
+  const flagSuffix = flags.length > 0 ? ` · ${flags.join(" · ")}` : "";
+
+  const wrapped = /^(.+) \((.+)\)$/.exec(repoInfo);
+  const lead = wrapped ? `${wrapped[1]} (` : "";
+  const close = wrapped ? ")" : "";
+  const items = (wrapped ? wrapped[2] : repoInfo).split(", ").filter(Boolean);
+
+  // Most entries first: the first count that fits wins.
+  for (let keep = items.length - 1; keep >= 1; keep -= 1) {
+    const shown = items.slice(0, keep).join(", ");
+    const candidate = `${lead}${shown}, + ${items.length - keep} more${close}${flagSuffix}`;
+    if (visibleWidth(candidate) <= budget) return candidate;
+  }
+  return truncate(meta, budget);
+}
+
+/**
+ * Color an unselected row's metadata cell: repo/template names take the dimmed
+ * red, but a template's parenthesized repo list stays grey, so `@name (repos)`
+ * reads as a dim-red parent with greyed children. `metaCell` is already escaped.
+ */
+function colorizeMeta(metaCell: string, theme: Theme): string {
+  const { palette } = theme;
+  if (metaCell.startsWith("@")) {
+    const parenAt = metaCell.indexOf(" (");
+    if (parenAt !== -1) {
+      const name = metaCell.slice(0, parenAt);
+      const repos = metaCell.slice(parenAt);
+      return `${fg(palette.dim, name)}${fg(palette.muted, repos)}`;
+    }
+  }
+  return fg(palette.dim, metaCell);
+}
+
 function renderItem<T>(
   item: FuzzyItem<T>,
   selected: boolean,
   inner: number,
   theme: Theme,
+  columns: Columns,
 ): string {
   const { palette } = theme;
-  const bullet = selected
-    ? fg(palette.focus, theme.symbols.radioOn)
-    : fg(palette.muted, theme.symbols.radioOff);
-  const budget = Math.max(1, inner - 4);
-  const labelText = truncate(escapeBlessedTags(item.label), budget);
-  let body = fg(selected ? palette.focus : palette.primary, labelText);
+  const { time, meta } = splitHint(item.hint);
 
-  if (item.hint) {
-    const remaining = budget - visibleWidth(labelText) - 2;
-    if (remaining > 1) {
-      const hint = truncate(escapeBlessedTags(item.hint), remaining);
-      body += `  ${fg(palette.muted, hint)}`;
-    }
+  const nameCell = padColumn(item.label, columns.name);
+  const timeCell = padColumn(time, columns.time);
+  // Three columns for the indent/rule lead, two-space gutters, and one trailing
+  // column left free so a full-width line never wraps in blessed.
+  const used = 3 + visibleWidth(nameCell) + 2 + visibleWidth(timeCell) + 2;
+  const metaCell = escapeBlessedTags(
+    fitMetaList(meta, Math.max(0, inner - used - 1)),
+  );
+  const plain =
+    visibleWidth(nameCell) +
+    2 +
+    visibleWidth(timeCell) +
+    2 +
+    visibleWidth(metaCell);
+
+  if (selected) {
+    // Selected: name bold white, timestamp and metadata both cyan.
+    const content = `{bold}${fg(palette.focus, nameCell)}{/bold}  ${fg(
+      palette.accent,
+      timeCell,
+    )}  ${fg(palette.accent, metaCell)}`;
+    return ruledSelection(theme, content, plain, inner);
   }
 
-  return ` ${bullet} ${body}`;
+  // Unselected: bright-red name, dimmed-red timestamp and repo/template name.
+  // For templates the parenthesized repo list stays grey. No bullet — a leading
+  // marker would imply radio-button semantics that don't exist.
+  const body = `${fg(palette.primary, nameCell)}  ${fg(
+    palette.dim,
+    timeCell,
+  )}  ${colorizeMeta(metaCell, theme)}`;
+  return `   ${body}`;
 }
 
 function renderAction(
@@ -490,10 +652,13 @@ function renderAction(
   theme: Theme,
 ): string {
   const { palette } = theme;
-  const pointer = selected ? fg(palette.focus, "›") : " ";
   const budget = Math.max(1, inner - 3);
   const text = truncate(escapeBlessedTags(label), budget);
-  return ` ${pointer} ${fg(selected ? palette.focus : palette.muted, text)}`;
+  if (selected) {
+    const content = `{bold}${fg(palette.focus, text)}{/bold}`;
+    return ruledSelection(theme, content, visibleWidth(text), inner);
+  }
+  return `   ${fg(palette.muted, text)}`;
 }
 
 /**
@@ -552,16 +717,15 @@ function renderScopeOption(
 
 function renderFooter(theme: Theme, tabHint?: string): string {
   const { palette } = theme;
-  const separator = fg(palette.muted, "  ·  ");
   const hints: ReadonlyArray<readonly [string, string]> = tabHint
-    ? [...FOOTER_HINTS, ["tab", tabHint]]
+    ? [...FOOTER_HINTS, ["tab", tabHint.toUpperCase()]]
     : FOOTER_HINTS;
   return hints
     .map(
       ([key, action]) =>
-        `{bold}${fg(palette.muted, key)}{/bold} ${fg(palette.muted, action)}`,
+        `${fg(palette.accent, `[${key}]`)} ${fg(palette.muted, action)}`,
     )
-    .join(separator);
+    .join("   ");
 }
 
 /**

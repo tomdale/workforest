@@ -133,8 +133,6 @@ async function runPhase1(
   const itemsNow = (): FuzzyItem<ChangeCandidate>[] =>
     toChangeItems(showingScoped ? scoped : candidates);
 
-  const prompt =
-    mode === "go" ? "go to or create a change" : "name a new change";
   const placeholder =
     mode === "go"
       ? "Type to find a change, or a new name to create one…"
@@ -143,7 +141,6 @@ async function runPhase1(
   while (true) {
     const list = createFuzzyList<ChangeCandidate>({
       screen,
-      prompt,
       items: itemsNow(),
       placeholder,
       ...(canScope
@@ -309,10 +306,10 @@ async function runPhase2(
       const list = createFuzzyList<SourceCandidate>({
         screen,
         parent: host,
-        prompt: `sources for "${changeName}"`,
         scopeLabel: `${modeLabel(mode)} mode`,
         tabHint: `${modeLabel(nextMode(mode))} mode`,
         items: itemsForMode(mode),
+        placeholder: "Add a repo or @template…",
         ...(preselect
           ? { initialSelected: (item) => preselect(item.value) }
           : {}),

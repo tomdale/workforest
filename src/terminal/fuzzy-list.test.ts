@@ -28,6 +28,7 @@ import { Screen } from "@unblessed/node";
 import {
   createFuzzyList,
   type FuzzyItem,
+  fitMetaList,
   fuzzyFilter,
   windowStart,
 } from "./fuzzy-list.ts";
@@ -107,6 +108,37 @@ describe("fuzzyFilter", () => {
   });
 });
 
+describe("fitMetaList", () => {
+  it("returns the list unchanged when it fits the budget", () => {
+    expect(fitMetaList("api, front, vercel", 40)).toBe("api, front, vercel");
+    expect(fitMetaList("@web (api, front)", 40)).toBe("@web (api, front)");
+  });
+
+  it("summarizes a bare list overflow as '+ N more'", () => {
+    // "api, front, vercel, web, docs" is 29 cols; a 20-col budget fits the first
+    // two entries plus the ", + 3 more" tail (also 20 cols).
+    expect(fitMetaList("api, front, vercel, web, docs", 20)).toBe(
+      "api, front, + 3 more",
+    );
+  });
+
+  it("summarizes a template list overflow inside the parens", () => {
+    expect(fitMetaList("@vercel-agent (api, front, vercel, web)", 30)).toBe(
+      "@vercel-agent (api, + 3 more)",
+    );
+  });
+
+  it("preserves a trailing flag like stale", () => {
+    const fitted = fitMetaList("api, front, vercel, web · stale", 24);
+    expect(fitted.endsWith(" · stale")).toBe(true);
+    expect(fitted).toContain("more");
+  });
+
+  it("returns empty string for a non-positive budget", () => {
+    expect(fitMetaList("api, front", 0)).toBe("");
+  });
+});
+
 describe("windowStart", () => {
   it("stays at zero when everything fits in the viewport", () => {
     expect(windowStart(3, 2, 5, 0)).toBe(0);
@@ -138,7 +170,6 @@ describe("createFuzzyList layout", () => {
     const screen = new Screen();
     const list = createFuzzyList<string>({
       screen,
-      prompt: "go to a change",
       items: items("alpha", "beta", "gamma"),
       actionRow: { label: (query) => `CREATE_${query}` },
     });
@@ -158,7 +189,6 @@ describe("createFuzzyList layout", () => {
     const screen = new Screen();
     const list = createFuzzyList<string>({
       screen,
-      prompt: "go to a change",
       items: items("alpha", "beta"),
       actionRow: { label: (query) => `CREATE_${query}` },
       initialQuery: "zzz",
@@ -183,10 +213,10 @@ describe("createFuzzyList layout", () => {
     });
     void list.run();
 
-    // The highlighted row carries the filled radio glyph; it must sit on gamma.
+    // The highlighted row carries the bold ruled selection treatment.
     const selectedRow = captured.content
       .split("\n")
-      .find((line) => line.includes(activeRadio()));
+      .find((line) => line.includes("gamma") && line.includes("{bold}"));
     expect(selectedRow).toContain("gamma");
 
     list.destroy();
@@ -223,7 +253,7 @@ describe("createFuzzyList scope switching", () => {
 
     expect(captured.content).toContain("scoped-one");
     expect(captured.content).toContain("repo: front");
-    expect(captured.content).toContain("all changes");
+    expect(captured.content).toContain("ALL CHANGES");
 
     keypressHandler(screen as unknown as MockScreen)(undefined, {
       name: "tab",
@@ -232,7 +262,7 @@ describe("createFuzzyList scope switching", () => {
     expect(captured.content).toContain("global-one");
     expect(captured.content).not.toContain("scoped-one");
     expect(captured.content).toContain("· all");
-    expect(captured.content).toContain("this repo");
+    expect(captured.content).toContain("THIS REPO");
 
     list.destroy();
   });
