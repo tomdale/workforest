@@ -100,7 +100,7 @@ export type FuzzyListOptions<T> = {
   /** Defaults to {@link fuzzyFilter} (case-insensitive subsequence, stable). */
   filter?: FuzzyFilter<T>;
   initialQuery?: string;
-  /** Empty-input hint. Defaults to "Type to filter…". */
+  /** Empty-input hint. Defaults to "type to filter". */
   placeholder?: string;
   /** Short label for the active scope/mode, shown muted beside the prompt. */
   scopeLabel?: string;
@@ -135,7 +135,7 @@ export type FuzzyList<T> = {
   destroy(): void;
 };
 
-const PLACEHOLDER = "Type to filter…";
+const PLACEHOLDER = "type to filter";
 // Upper bound on the name column so one long change name can't push the
 // timestamp/metadata columns off-screen.
 const NAME_COLUMN_CAP = 32;
@@ -221,9 +221,13 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
   let destroyed = false;
   let resolveRun: ((result: FuzzyResult<T>) => void) | null = null;
 
+  // The action row is an affordance for "use what I typed", so it stays hidden
+  // until the query has a non-whitespace character — an empty picker shows only
+  // its input, never a row to select.
+  const showAction = (): boolean => hasAction && query.trim().length > 0;
   const actionIndex = (): number => candidates.length;
-  const total = (): number => candidates.length + (hasAction ? 1 : 0);
-  const onActionRow = (): boolean => hasAction && index === actionIndex();
+  const total = (): number => candidates.length + (showAction() ? 1 : 0);
+  const onActionRow = (): boolean => showAction() && index === actionIndex();
 
   const render = (): void => {
     const height = readDimension(container.height, 24);
@@ -232,7 +236,8 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     const lines = new Array<string>(Math.max(height, 1)).fill("");
     const palette = theme.palette;
 
-    // Optional heading and scope controls stack above the boxed query input.
+    // An optional heading sits above the boxed query input; the scope controls
+    // sit between the input and the matching list.
     const showScopeBar = scopeToggle !== undefined;
     const scopeSuffix =
       scopeLabel && !showScopeBar
@@ -246,27 +251,32 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       )}${scopeSuffix}`;
     }
 
-    if (scopeToggle !== undefined) {
-      lines[cursor++] = renderScopeBar(theme, scopeToggle);
-    }
-
     const box = renderInputBox(theme, inner, query, placeholder);
     lines[cursor] = box.top;
     lines[cursor + 1] = box.mid;
     lines[cursor + 2] = box.bottom;
+    cursor += 3;
 
-    const listTop = cursor + 3;
+    if (scopeToggle !== undefined) {
+      lines[cursor++] = renderScopeBar(theme, scopeToggle);
+    }
+
+    const listTop = cursor;
     const footerRow = Math.max(listTop, height - 1);
     const viewport = Math.max(0, footerRow - listTop);
 
     if (candidates.length === 0) {
-      // Empty state: the "No matches" hint occupies the first list row, and the
-      // action row (always the sole selectable entry here) sits inline below it.
-      if (listTop < footerRow) {
-        lines[listTop] = `  ${fg(palette.muted, NO_MATCHES)}`;
+      // Empty state. "No matches" only makes sense when there were items to
+      // filter against; a create-only list (no items at all, e.g. `wf start`)
+      // is just a name prompt, so it shows the action row alone with no
+      // misleading hint. The action row (the sole selectable entry here) takes
+      // the first list row when the hint is suppressed, else sits below it.
+      let row = listTop;
+      if (items.length > 0 && row < footerRow) {
+        lines[row++] = `  ${fg(palette.muted, NO_MATCHES)}`;
       }
-      if (hasAction && actionRow && listTop + 1 < footerRow) {
-        lines[listTop + 1] = renderAction(
+      if (showAction() && actionRow && row < footerRow) {
+        lines[row] = renderAction(
           actionRow.label(query),
           onActionRow(),
           inner,

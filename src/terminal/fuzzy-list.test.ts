@@ -161,6 +161,9 @@ describe("createFuzzyList layout", () => {
       screen,
       items: items("alpha", "beta", "gamma"),
       actionRow: { label: (query) => `CREATE_${query}` },
+      // The action row only appears once the query has a character; "a" keeps
+      // all three candidates (subsequence match) and reveals the row below them.
+      initialQuery: "a",
     });
     // run() renders synchronously before its promise settles; never resolves
     // here since we send no keys, so we inspect the captured content directly.
@@ -172,6 +175,30 @@ describe("createFuzzyList layout", () => {
     expect(action).toBe(lastCandidate + 1);
 
     list.destroy();
+  });
+
+  it("hides the action row until the query has a non-whitespace character", () => {
+    // Empty query: candidates show, but there is no action row to select yet.
+    const empty = createFuzzyList<string>({
+      screen: new Screen(),
+      items: items("alpha", "beta"),
+      actionRow: { label: (query) => `CREATE_${query}` },
+    });
+    void empty.run();
+    expect(captured.content).toContain("alpha");
+    expect(captured.content).not.toContain("CREATE_");
+    empty.destroy();
+
+    // A typed character reveals it.
+    const typed = createFuzzyList<string>({
+      screen: new Screen(),
+      items: items("alpha", "beta"),
+      actionRow: { label: (query) => `CREATE_${query}` },
+      initialQuery: "a",
+    });
+    void typed.run();
+    expect(captured.content).toContain("CREATE_a");
+    typed.destroy();
   });
 
   it("renders the action row directly below the No matches hint when empty", () => {
@@ -188,6 +215,26 @@ describe("createFuzzyList layout", () => {
     const action = lineContaining(captured.content, "CREATE_");
     expect(hint).toBeGreaterThanOrEqual(0);
     expect(action).toBe(hint + 1);
+
+    list.destroy();
+  });
+
+  it("omits the No matches hint when there are no items to match (create-only)", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      items: items(),
+      actionRow: { label: (query) => `CREATE_${query}` },
+      initialQuery: "x",
+    });
+    void list.run();
+
+    // A create-only list is a name prompt, not a search — "No matches" would be
+    // misleading, and the action row is the sole entry once a name is typed.
+    expect(captured.content).not.toContain("No matches");
+    expect(lineContaining(captured.content, "CREATE_")).toBeGreaterThanOrEqual(
+      0,
+    );
 
     list.destroy();
   });
@@ -277,11 +324,12 @@ describe("createFuzzyList scope switching", () => {
     });
     void list.run();
 
-    // The scope toggle sits directly under the prompt, listing both options in a
-    // fixed order while the active badge moves between them.
-    const promptRow = lineContaining(captured.content, "go to a change");
+    // The scope toggle sits below the boxed input and above the list, listing
+    // both options in a fixed order while the active badge moves between them.
     const scopeRow = (): string =>
-      captured.content.split("\n")[promptRow + 1] ?? "";
+      captured.content.split("\n")[
+        lineContaining(captured.content, "all changes")
+      ] ?? "";
 
     const before = scopeRow();
     expect(before.indexOf("front")).toBeLessThan(before.indexOf("all changes"));

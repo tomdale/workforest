@@ -4,7 +4,11 @@ import {
   createFullscreenScreen,
   type FullscreenScreen,
 } from "../terminal/fullscreen-surface.ts";
-import { createFuzzyList, type FuzzyItem } from "../terminal/fuzzy-list.ts";
+import {
+  createFuzzyList,
+  type FuzzyItem,
+  type FuzzyScopeToggle,
+} from "../terminal/fuzzy-list.ts";
 import {
   activeTheme,
   fg,
@@ -69,7 +73,7 @@ type Phase1Result =
   | { kind: "create"; changeName: string }
   | { kind: "cancel" };
 
-const PREVIEW_HEIGHT = 8;
+const PREVIEW_HEIGHT = 7;
 
 export async function runChangeEntry(
   mode: ChangeEntryMode,
@@ -145,8 +149,8 @@ async function runPhase1(
 
   const placeholder =
     mode === "go"
-      ? "Type to find a change, or a new name to create one…"
-      : "Type a name for the new change…";
+      ? "type to find a change, or a new name to create one"
+      : "type a name for the new change";
 
   while (true) {
     const list = createFuzzyList<ChangeCandidate>({
@@ -213,6 +217,14 @@ function modeLabel(mode: SourceMode): string {
 function nextMode(mode: SourceMode): SourceMode {
   const index = MODE_ORDER.indexOf(mode);
   return MODE_ORDER[(index + 1) % MODE_ORDER.length] ?? "repo";
+}
+
+/** The mode switcher as a fuzzy-list scope bar (rendered between input and list). */
+function modeScopeToggle(mode: SourceMode): FuzzyScopeToggle {
+  return {
+    options: MODE_ORDER.map((candidate) => ({ label: modeLabel(candidate) })),
+    active: MODE_ORDER.indexOf(mode),
+  };
 }
 
 /** The mode to open Phase 2 in, defaulted from the launch scope. */
@@ -316,25 +328,23 @@ async function runPhase2(
       const list = createFuzzyList<SourceCandidate>({
         screen,
         parent: host,
-        scopeLabel: `${modeLabel(mode)} mode`,
-        tabHint: `${modeLabel(nextMode(mode))} mode`,
+        scopeToggle: modeScopeToggle(mode),
         items: itemsForMode(mode),
-        placeholder: "Add a repo or @template…",
+        placeholder: "add a repo or @template",
         ...(preselect
           ? { initialSelected: (item) => preselect(item.value) }
           : {}),
         actionRow: { label: (query) => actionLabel(query, mode, chosen) },
         onTab: () => {
           mode = nextMode(mode);
-          // Re-render the preview synchronously so the mode tabs and guidance
-          // track the switch (inference is deferred to the next render cycle).
+          // Re-render the preview synchronously so the guidance tracks the
+          // switch (inference is deferred to the next render cycle).
           preview.setContent(
             renderPreviewSync(theme, changeName, mode, chosen, null),
           );
           return {
             items: itemsForMode(mode),
-            scopeLabel: `${modeLabel(mode)} mode`,
-            tabHint: `${modeLabel(nextMode(mode))} mode`,
+            scopeActive: MODE_ORDER.indexOf(mode),
           };
         },
       });
@@ -494,7 +504,6 @@ function previewBaseLines(
       palette.focus,
       escapeBlessedTags(changeName),
     )}`,
-    renderModeTabs(theme, mode),
   ];
 
   if (mode === "multi" && chosen.length > 0) {
@@ -515,17 +524,6 @@ function previewBaseLines(
   }
 
   return lines;
-}
-
-/** The mode switcher row: each mode, the active one accented, plus a tab hint. */
-function renderModeTabs(theme: Theme, mode: SourceMode): string {
-  const { palette } = theme;
-  const tabs = MODE_ORDER.map((candidate) =>
-    candidate === mode
-      ? fg(palette.focus, `▌${modeLabel(candidate)}`)
-      : fg(palette.muted, modeLabel(candidate)),
-  ).join("   ");
-  return `${tabs}   ${fg(palette.muted, "· tab switches mode")}`;
 }
 
 function modeGuidance(mode: SourceMode): string {
