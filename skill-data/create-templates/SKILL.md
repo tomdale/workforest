@@ -8,7 +8,7 @@ description: Workforest guidance for creating, editing, and using templates.
 Use this skill when you need a reusable workspace recipe for repeatable work.
 
 ```sh
-wf template manage
+wf templates
 wf template new full-stack vercel/front vercel/api
 wf template edit full-stack
 wf template show full-stack

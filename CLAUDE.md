@@ -16,7 +16,7 @@ pnpm biome check --write .  # Auto-fix lint/format issues
 
 # Run CLI during development
 node bin/workforest.js start <change> <org/repo...|@template>
-node bin/workforest.js template manage
+node bin/workforest.js templates
 ```
 
 ## Architecture

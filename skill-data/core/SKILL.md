@@ -45,7 +45,7 @@ selector rules.
 ```sh
 wf task start <task>
 wf task list
-wf template manage
+wf templates
 wf review open <repo>
 wf review checkout <repo>#<pr>
 ```
