@@ -111,9 +111,7 @@ async function* pruneWorktreeMetadataGenerator(
   await runGit(["worktree", "prune"], { cwd: mirrorDir });
 }
 
-/**
- * Generator version of ensureMirrorRepo that yields log messages.
- */
+/** Ensures a mirror repository exists and yields progress states. */
 export async function* ensureMirrorRepoGenerator(
   repo: RepoConfig,
   mirrorDir: string,
@@ -184,21 +182,6 @@ async function* pruneStaleWorktreesIfNeededGenerator(
     message: "Pruning stale worktrees",
   };
   await runGit(["worktree", "prune"], { cwd: mirrorDir });
-}
-
-/**
- * @deprecated Use ensureMirrorRepoGenerator for generator-based workflows.
- */
-export async function ensureMirrorRepo(
-  repo: RepoConfig,
-  mirrorDir: string,
-): Promise<void> {
-  const gen = ensureMirrorRepoGenerator(repo, mirrorDir);
-  // Consume the generator, discarding states
-  let result = await gen.next();
-  while (!result.done) {
-    result = await gen.next();
-  }
 }
 
 /**
