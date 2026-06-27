@@ -1,4 +1,4 @@
-import { loadTemplate } from "../templates/index.ts";
+import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import {
   CommandStreamAdapter,
   escapeBlessedTags,
@@ -192,7 +192,12 @@ async function shouldShowAgentsMdPane(
   const metadata = await readWorkspaceMetadata(workspaceDir).catch(() => null);
   const templateId = metadata?.workspace.template_id;
   if (!templateId) return false;
-  const template = await loadTemplate(templateId).catch(() => null);
+  const template = await loadTemplate(
+    formatTemplateIdentifier({
+      parent: templateId,
+      variant: metadata.workspace.template_variant,
+    }),
+  ).catch(() => null);
   return Boolean(template?.config["AGENTS.md"]);
 }
 

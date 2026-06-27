@@ -12,8 +12,11 @@ const testState = vi.hoisted(() => ({
     message?: string;
     warnings?: string[];
   }>,
-  metadata: null as null | { workspace: { template_id?: string } },
+  metadata: null as null | {
+    workspace: { template_id?: string; template_variant?: string };
+  },
   template: null as null | { config: Record<string, unknown> },
+  loadedTemplates: [] as string[],
 }));
 
 vi.mock("../terminal/fullscreen-surface.ts", async (importOriginal) => {
@@ -60,7 +63,17 @@ vi.mock("../workspace/metadata.ts", () => ({
 }));
 
 vi.mock("../templates/index.ts", () => ({
-  loadTemplate: vi.fn(async () => testState.template),
+  formatTemplateIdentifier: ({
+    parent,
+    variant,
+  }: {
+    parent: string;
+    variant?: string;
+  }) => (variant ? `${parent}+${variant}` : parent),
+  loadTemplate: vi.fn(async (templateId: string) => {
+    testState.loadedTemplates.push(templateId);
+    return testState.template;
+  }),
 }));
 
 vi.mock("../workspace/initialization.ts", () => ({
@@ -96,6 +109,7 @@ describe("renderInitializationStatus", () => {
   beforeEach(() => {
     testState.keyHandler = undefined;
     testState.labels = [];
+    testState.loadedTemplates = [];
     testState.metadata = null;
     testState.template = null;
     testState.appendLine.mockReset();
@@ -122,6 +136,26 @@ describe("renderInitializationStatus", () => {
 
     await renderInitializationStatus("/tmp/workspace", ["front"]);
 
+    expect(testState.labels.some((label) => label.includes("AGENTS.md"))).toBe(
+      true,
+    );
+  });
+
+  it("uses the template variant when deciding whether to show AGENTS.md", async () => {
+    testState.metadata = {
+      workspace: {
+        template_id: "agents-template",
+        template_variant: "focused",
+      },
+    };
+    testState.template = { config: { "AGENTS.md": { focus: "settings" } } };
+    testState.appendLine.mockImplementationOnce(() => {
+      queueMicrotask(() => testState.keyHandler?.());
+    });
+
+    await renderInitializationStatus("/tmp/workspace", ["front"]);
+
+    expect(testState.loadedTemplates).toContain("agents-template+focused");
     expect(testState.labels.some((label) => label.includes("AGENTS.md"))).toBe(
       true,
     );

@@ -28,7 +28,10 @@ Use this skill when processing queued branches into local `main`.
     the corresponding commit on `main` with the queue helper. This preserves
     the ancestry proof used by `wf finish`. The helper must skip dirty or
     missing source worktrees.
-11. After the integration queue is fully processed, always run `pnpm check` in the `main` worktree.
+11. Do not run an extra queue-empty `pnpm check` after the final queued entry
+    has already passed the lock-held check and fast-forwarded `main`. If the
+    queue is empty at the start of the integration run, run `pnpm check` in the
+    `main` worktree once.
 
 ## Workflow
 
@@ -55,8 +58,11 @@ Use this skill when processing queued branches into local `main`.
     the reason before offering `wf finish`.
 13. Dequeue the integrated queue entry.
 14. Remove the temporary integration worktree and delete its merged helper branch.
-15. Repeat steps 2-14 until no ready queue entries remain.
-16. From the `main` worktree, run `pnpm check` once more after the queue is complete. Run this final check even when the queue was already empty and no entries were integrated.
+15. Repeat steps 2-14 until no ready queue entries remain. The lock-held
+    `pnpm check` from step 10 is the final verification for the last integrated
+    branch; do not rerun it solely because the queue is now empty.
+16. If there were no ready queue entries when the run started, run `pnpm check`
+    once in the `main` worktree.
 17. After all queued integrations are complete, offer to run `wf finish` for
     every worktree integrated during this run. Run it only after the user
     confirms, and only for worktrees whose integration is verified in Git
@@ -112,4 +118,5 @@ worktrees, and only run it after user confirmation.
 - Keep a failed integration worktree intact for diagnosis; clean it up only after
   the entry integrates successfully or is deliberately abandoned.
 - Do not offer worktree cleanup while queued integrations remain.
-- Do not treat per-entry checks as a substitute for the final check of the completed queue on `main`.
+- Do not treat pre-lock integration-worktree checks as a substitute for the
+  lock-held `pnpm check` that immediately precedes each fast-forward of `main`.
