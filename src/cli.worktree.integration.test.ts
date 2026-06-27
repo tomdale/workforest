@@ -97,6 +97,36 @@ describe("wf worktree", () => {
     }
   });
 
+  it("resolves relative worktree paths from the caller's directory", async () => {
+    const fixture = await createFixture();
+
+    const add = await runWorktree(
+      fixture.cacheDir,
+      ["add", "front.git", "relative", "relative-branch"],
+      fixture.root,
+    );
+    expect(add.exitCode).toBe(0);
+    await expect(access(path.join(fixture.root, "relative"))).resolves.toBeUndefined();
+
+    const move = await runWorktree(
+      fixture.cacheDir,
+      ["move", "front.git", "relative", "moved"],
+      fixture.root,
+    );
+    expect(move.exitCode).toBe(0);
+    await expect(access(path.join(fixture.root, "moved"))).resolves.toBeUndefined();
+
+    const remove = await runWorktree(
+      fixture.cacheDir,
+      ["remove", "front.git", "moved"],
+      fixture.root,
+    );
+    expect(remove.exitCode).toBe(0);
+    await expect(access(path.join(fixture.root, "moved"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  }, 20_000);
+
   it("does not create or sync a missing cached mirror", async () => {
     const cacheDir = await tempDir("workforest-worktree-cache-");
     const result = await runWorktree(cacheDir, ["list", "missing"]);
@@ -154,11 +184,16 @@ async function tempDir(prefix: string): Promise<string> {
   return directory;
 }
 
-function runWorktree(cacheDir: string, args: readonly string[]) {
+function runWorktree(
+  cacheDir: string,
+  args: readonly string[],
+  cwd?: string,
+) {
   return runSubprocess(
     process.execPath,
     [path.resolve("bin/workforest.js"), "worktree", ...args],
     {
+      cwd,
       env: {
         ...process.env,
         NO_COLOR: "1",

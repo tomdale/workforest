@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { OperationalError, UsageError } from "./cli/errors.ts";
 import {
   failure,
@@ -97,16 +98,20 @@ export async function runWorktreeInvocation(
         );
       }
       args = branch
-        ? ["add", "-b", branch, worktreePath]
-        : ["add", worktreePath];
+        ? ["add", "-b", branch, path.resolve(worktreePath)]
+        : ["add", path.resolve(worktreePath)];
       break;
     }
-    case "worktree.move":
-      args = ["move", ...operands];
+    case "worktree.move": {
+      const [worktreePath, newPath] = operands;
+      args = ["move", path.resolve(worktreePath!), path.resolve(newPath!)];
       break;
-    case "worktree.remove":
-      args = ["remove", ...operands];
+    }
+    case "worktree.remove": {
+      const [worktreePath] = operands;
+      args = ["remove", path.resolve(worktreePath!)];
       break;
+    }
     default:
       throw new Error(
         `Unsupported worktree handler: ${invocation.command.leaf.handler}`,
