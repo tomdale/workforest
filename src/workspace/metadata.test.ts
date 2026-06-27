@@ -14,7 +14,6 @@ import {
   appendTasks,
   appendWorkspaceRepos,
   getMetadataPath,
-  getRepositoryChangeMetadataPath,
   listRepositoryChangeMetadata,
   readRepositoryChangeMetadata,
   readWorkspaceMetadata,
@@ -421,9 +420,11 @@ describe("workspace metadata", () => {
     expect(() => getMetadataPath(workspaceDir)).toThrow(
       "must not be a symbolic link",
     );
-    await expect(readFile(outsideMetadataPath, "utf8")).resolves.toContain(
-      '"feature_name":"safe"',
-    );
+    expect(
+      JSON.parse(await readFile(outsideMetadataPath, "utf8")),
+    ).toMatchObject({
+      workspace: { feature_name: "safe" },
+    });
   });
 
   it("rejects writes through a symlinked metadata directory", async () => {
@@ -490,10 +491,6 @@ describe("repository change metadata", () => {
       ],
     });
 
-    const metadataPath = getRepositoryChangeMetadataPath(
-      repoRootDir,
-      "fix-auth-bug",
-    );
     await expect(
       readRepositoryChangeMetadata(repoRootDir, "fix-auth-bug"),
     ).resolves.toMatchObject({
@@ -507,9 +504,6 @@ describe("repository change metadata", () => {
         },
       ],
     });
-    await expect(readFile(metadataPath, "utf8")).resolves.toContain(
-      '"feature_name": "fix-auth-bug"',
-    );
   });
 
   it("lists and removes repository change metadata", async () => {

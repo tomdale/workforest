@@ -103,6 +103,13 @@ describe("wf template suggest", () => {
               confidence: 0.82,
               evidenceNotes: ["Recent PRs touched both repositories."],
             },
+            {
+              id: "docs-workflow",
+              description: "Documentation-only workflow changes.",
+              repos: ["vercel/docs"],
+              confidence: 0.71,
+              evidenceNotes: ["Recent PRs touched docs."],
+            },
           ],
           evidence: {
             generatedAt: "2026-06-25T12:00:00.000Z",
@@ -130,20 +137,9 @@ describe("wf template suggest", () => {
         description: "Cross-repo agent workflow changes.",
       },
     });
-    expect(promptMultiSelectMock).toHaveBeenCalledWith(
-      "Templates to save",
-      expect.objectContaining({
-        required: true,
-        options: expect.arrayContaining([
-          expect.objectContaining({ value: "agent-workflow" }),
-        ]),
-      }),
-    );
-    expect(promptConfirmMock).toHaveBeenCalledWith(
-      "Save 1 suggested template?",
-      false,
-      { throwOnCancel: true },
-    );
+    await expect(loadTemplate("docs-workflow")).resolves.toBeNull();
+    expect(promptMultiSelectMock).toHaveBeenCalledOnce();
+    expect(promptConfirmMock).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,7 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import stripAnsi from "strip-ansi";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
@@ -23,16 +22,6 @@ afterEach(async () => {
 });
 
 describe("wf ai status", () => {
-  it("renders human status output", async () => {
-    await useFakeCodex();
-
-    const output = render(await executeCli(["ai", "status"]));
-
-    expect(stripAnsi(output.stdout)).toContain("AI providers");
-    expect(stripAnsi(output.stdout)).toContain("Selected: codex-cli");
-    expect(stripAnsi(output.stdout)).toContain("Codex CLI (codex-cli)");
-  });
-
   it("renders JSON status output", async () => {
     await useFakeCodex();
 

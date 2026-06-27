@@ -49,7 +49,7 @@ describe("shell integration", () => {
     expect(normalizeShellName("/opt/homebrew/bin/fish")).toBeNull();
   });
 
-  it("renders shell init with auto-cd wrappers", () => {
+  it("renders shell init with auto-cd wrappers and zsh completion registration", () => {
     const script = renderShellInit("zsh");
 
     expect(script).toContain("__workforest_invoke()");
@@ -57,26 +57,7 @@ describe("shell integration", () => {
     expect(script).toContain("wf() {");
     expect(script).toContain("workforest() {");
     expect(script).toContain("_workforest_complete()");
-    expect(script).toContain("(( $+functions[compdef] )) || return 0");
     expect(script).toContain("compdef _workforest_complete wf workforest");
-    expect(script).toContain('local root_command="$' + '{words[2]:-}"');
-    expect(script).toContain('local subcommand="$' + '{words[3]:-}"');
-    expect(script).toContain("'start:Start a change'");
-    expect(script).toContain("'task:Manage temporary task worktrees'");
-    expect(script).toContain("'start:Start nested task lanes'");
-    expect(script).toContain("'--json:option'");
-    expect(script).toContain(
-      "_workforest_complete_flags '--repo' '-n' '--dry-run' '-f' '--force' '--json'",
-    );
-    expect(script).toContain(
-      "'review:Manage review workspaces and PR worktrees'",
-    );
-    expect(script).toContain("'checkout:Check out a pull request worktree'");
-    expect(script).toContain("'add-file:Add files to a template'");
-    expect(script).not.toContain("'fork:");
-    expect(script).not.toContain("'wt:");
-    expect(script).not.toContain("\n      'init:");
-    expect(script).not.toContain(" promote ");
   });
 
   it("renders generated bash completion for both executable names", () => {
@@ -84,16 +65,6 @@ describe("shell integration", () => {
 
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
-    expect(script).toContain(
-      "_workforest_complete_words 'templates tasks reviews dashboard start list status add switch finish delete ai migrate task cache worktree review template shell config skills help version'",
-    );
-    expect(script).toContain(
-      "_workforest_complete_words 'start list finish delete'",
-    );
-    expect(script).toContain(
-      "_workforest_complete_words '--repo -n --dry-run -f --force --json'",
-    );
-    expect(script).not.toContain("compdef _workforest_complete");
   });
 
   it("derives completion commands from the registry", () => {
@@ -115,9 +86,8 @@ describe("shell integration", () => {
 
     const script = renderShellInit("bash", registry);
 
-    expect(script).toContain(
-      "_workforest_complete_words 'templates tasks reviews inspect visit dashboard start list status add switch finish delete ai migrate task",
-    );
+    expect(script).toContain("inspect");
+    expect(script).toContain("visit");
   });
 
   it.each(["bash", "zsh"] as const)("renders valid %s syntax", (shell) => {

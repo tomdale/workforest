@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { parse as parseJsonc } from "jsonc-parser";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTemplate, deleteTemplate, loadTemplate } from "./index.ts";
 
@@ -68,9 +69,9 @@ describe("templates", () => {
       "demo",
       "template.jsonc",
     );
-    const contents = await readFile(templatePath, "utf8");
+    const templateConfig = parseJsonc(await readFile(templatePath, "utf8"));
 
-    expect(contents).toContain('"branchPrefix": "tomdale"');
+    expect(templateConfig).toMatchObject({ branchPrefix: "tomdale" });
   });
 
   it("preserves an explicit empty override when creating templates", async () => {
@@ -88,10 +89,10 @@ describe("templates", () => {
       "demo",
       "template.jsonc",
     );
-    const contents = await readFile(templatePath, "utf8");
+    const templateConfig = parseJsonc(await readFile(templatePath, "utf8"));
     const template = await loadTemplate("demo");
 
-    expect(contents).toContain('"branchPrefix": ""');
+    expect(templateConfig).toMatchObject({ branchPrefix: "" });
     expect(template?.config.branchPrefix).toBe("");
   });
 

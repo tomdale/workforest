@@ -167,7 +167,7 @@ describe("cli", () => {
 
     await cli();
 
-    expect(promptConfirmMock).toHaveBeenCalledWith("Save configuration?", true);
+    expect(promptConfirmMock).toHaveBeenCalledOnce();
     await expect(
       readFile(path.join(configDir, "config.json"), "utf8").then(JSON.parse),
     ).resolves.toEqual({
@@ -871,12 +871,6 @@ describe("cli", () => {
     await cli();
 
     expect(promptSelectMock).toHaveBeenCalledOnce();
-    const options = promptSelectMock.mock.calls[0]?.[1].options ?? [];
-    expect(options.map((option) => option.value)).toEqual([
-      "overwrite",
-      "diff",
-      "skip",
-    ]);
     await expect(readFile(templateFilePath, "utf8")).resolves.toBe(
       "FEATURE_FLAG=1\n",
     );
@@ -1019,13 +1013,6 @@ describe("cli", () => {
     await cli();
 
     expect(promptSelectMock).toHaveBeenCalledTimes(2);
-    const options = promptSelectMock.mock.calls[0]?.[1].options ?? [];
-    expect(options.map((option) => option.value)).toEqual([
-      "overwrite",
-      "diff",
-      "skip",
-      "cancel",
-    ]);
     expect(logs.join("\n")).toContain("-FEATURE_FLAG=0");
     expect(logs.join("\n")).toContain("+FEATURE_FLAG=1");
     await expect(

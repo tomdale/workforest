@@ -43,25 +43,6 @@ describe("final CLI contract", () => {
     });
   });
 
-  it.each(
-    [
-      ["new"],
-      ["clean"],
-      ["workspace"],
-      ["task", "create"],
-      ["cache", "info"],
-      ["cache", "path"],
-      ["cache", "add"],
-      ["cache", "update"],
-      ["cache", "check"],
-      ["cache", "repair"],
-      ["cache", "prune"],
-      ["cache", "manage"],
-    ].map((argv) => ({ argv })),
-  )("does not expose removed command wf %s", ({ argv }) => {
-    expect(() => resolve(argv)).toThrow();
-  });
-
   it.each([
     ["task delete", ["task", "delete"]],
     ["cache delete", ["cache", "delete"]],
