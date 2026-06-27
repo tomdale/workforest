@@ -1,16 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
-import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
-import {
-  getTemplateAgentsMdStatus,
-  refreshTemplateAgentsMd,
-} from "../templates/agents-md.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
-import { promptConfirm } from "../ui/prompts/index.ts";
 import {
   buildBranchName,
   resolveBranchPrefix,
@@ -75,42 +69,8 @@ export async function runStartCommand(
         : config.branchPrefix,
     );
 
-  if (source.kind === "template") {
-    await offerGuidanceRefresh(source, options.interactive);
-  }
-
   await createChange({ changeName, source, branchName, directories }, options);
   return success();
-}
-
-async function offerGuidanceRefresh(
-  source: Extract<StartSource, { kind: "template" }>,
-  interactive: boolean,
-): Promise<void> {
-  const template = await loadTemplate(source.templateId);
-  if (!template?.config["AGENTS.md"]) return;
-  const guidance = await getTemplateAgentsMdStatus(template);
-  if (guidance.state !== "missing" && guidance.state !== "expired") return;
-  const command = `wf template agents-md refresh ${template.id}`;
-  if (!interactive) {
-    log.warn(`AGENTS.md guidance is ${guidance.state}. Run: ${command}`);
-    return;
-  }
-  if (
-    !(await promptConfirm(
-      `AGENTS.md guidance is ${guidance.state}. Refresh it now?`,
-      true,
-    ))
-  )
-    return;
-  try {
-    await refreshTemplateAgentsMd(template, source.repos);
-  } catch (error) {
-    log.warn(
-      `Could not refresh AGENTS.md guidance: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    log.info(`Run: ${command}`);
-  }
 }
 
 export function parseStartOperands(

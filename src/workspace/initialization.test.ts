@@ -1,7 +1,16 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runGit } from "../services/git.ts";
+import { createTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import {
   buildRepoInitializerWorkerEnvironment,
@@ -20,6 +29,13 @@ import {
 import { writeWorkspaceMetadata } from "./metadata.ts";
 
 const tempDirs: string[] = [];
+const originalXdgConfigHome = process.env["XDG_CONFIG_HOME"];
+const originalCacheDir = process.env["WORKFOREST_CACHE_DIR"];
+const originalAiProvider = process.env["WORKFOREST_AI_PROVIDER"];
+const originalAiDisabled = process.env["WORKFOREST_AI_DISABLED"];
+const originalPath = process.env["PATH"];
+const originalPromptLog = process.env["WORKFOREST_PROMPT_LOG"];
+const originalShell = process.env["SHELL"];
 const repo: RepoConfig = {
   name: "front",
   remote: "git@github.com:vercel/front.git",
@@ -28,6 +44,13 @@ const repo: RepoConfig = {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  restoreEnvironment("XDG_CONFIG_HOME", originalXdgConfigHome);
+  restoreEnvironment("WORKFOREST_CACHE_DIR", originalCacheDir);
+  restoreEnvironment("WORKFOREST_AI_PROVIDER", originalAiProvider);
+  restoreEnvironment("WORKFOREST_AI_DISABLED", originalAiDisabled);
+  restoreEnvironment("PATH", originalPath);
+  restoreEnvironment("WORKFOREST_PROMPT_LOG", originalPromptLog);
+  restoreEnvironment("SHELL", originalShell);
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
@@ -99,6 +122,96 @@ describe("background repository initialization", () => {
     ).resolves.toMatchObject({
       status: "ready",
     });
+  });
+
+  it("refreshes template AGENTS.md guidance from the background initializer finalizer", async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-background-guidance-"),
+    );
+    tempDirs.push(root);
+    const source = path.join(root, "source");
+    const configHome = path.join(root, "config");
+    const cache = path.join(root, "cache");
+    const bin = path.join(root, "bin");
+    const workspaceDir = path.join(root, "workspace");
+    const promptLog = path.join(root, "prompts.log");
+    await mkdir(path.join(source, "src"), { recursive: true });
+    await mkdir(path.join(workspaceDir, "source"), { recursive: true });
+    await mkdir(bin);
+    await runGit(["init", "-b", "main"], { cwd: source });
+    await runGit(["config", "user.email", "test@example.com"], {
+      cwd: source,
+    });
+    await runGit(["config", "user.name", "Test"], { cwd: source });
+    await writeFile(
+      path.join(source, "src", "settings.ts"),
+      "export const settings = true;\n",
+      "utf8",
+    );
+    await runGit(["add", "src/settings.ts"], { cwd: source });
+    await runGit(["commit", "-m", "add settings"], { cwd: source });
+    await writeFile(
+      path.join(bin, "codex"),
+      fakeCodexScript(
+        [
+          "<agents_md>",
+          "Template: background-guidance.",
+          "Scope: Start in source/src/settings.ts.",
+          "</agents_md>",
+        ].join("\n"),
+      ),
+      "utf8",
+    );
+    await chmod(path.join(bin, "codex"), 0o755);
+
+    process.env["XDG_CONFIG_HOME"] = configHome;
+    process.env["WORKFOREST_CACHE_DIR"] = cache;
+    process.env["WORKFOREST_AI_PROVIDER"] = "codex-cli";
+    delete process.env["WORKFOREST_AI_DISABLED"];
+    process.env["WORKFOREST_PROMPT_LOG"] = promptLog;
+    process.env["PATH"] = `${bin}${path.delimiter}${originalPath ?? ""}`;
+    delete process.env["SHELL"];
+    await createTemplate("background-guidance", {
+      repos: [`file://${source}`],
+      "AGENTS.md": {
+        focus: "How settings are loaded.",
+        paths: { source: ["src"] },
+      },
+    });
+    const sourceRepo: RepoConfig = {
+      name: "source",
+      remote: `file://${source}`,
+      defaultBranch: "main",
+    };
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "background-guidance",
+      branchName: "tomdale/background-guidance",
+      templateId: "background-guidance",
+      repos: [{ ...sourceRepo, hasLockfile: false }],
+    });
+    await initializeWorkspaceInitialization({
+      workspaceDir,
+      repos: [sourceRepo],
+    });
+    const queued = await startRepoInitialization(
+      { workspaceDir, repo: sourceRepo },
+      async () => process.pid,
+    );
+
+    await runRepoInitializationWorker({
+      workspaceDir,
+      repoName: sourceRepo.name,
+      runId: queued.run_id ?? "",
+    });
+
+    await expect(
+      readWorkspaceInitializationState(workspaceDir),
+    ).resolves.toMatchObject({
+      status: "ready",
+    });
+    await expect(
+      readFile(path.join(workspaceDir, "AGENTS.md"), "utf8"),
+    ).resolves.toContain("Scope: Start in source/src/settings.ts.");
   });
 
   it("cancels a running worker process group and retries with a new attempt", async () => {
@@ -191,3 +304,27 @@ describe("background repository initialization", () => {
     });
   });
 });
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+function fakeCodexScript(response: string): string {
+  return `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'codex 1.0.0\\n'
+  exit 0
+fi
+output_file=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--output-last-message" ]; then output_file="$arg"; fi
+  if [ "$arg" = "--output-schema" ]; then exit 3; fi
+  previous="$arg"
+done
+input="$(cat)"
+printf '%s\\n---PROMPT---\\n' "$input" >> "$WORKFOREST_PROMPT_LOG"
+printf '%s' ${JSON.stringify(response)} > "$output_file"
+`;
+}

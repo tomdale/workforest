@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type KeyHandler = () => void;
 
@@ -6,6 +6,14 @@ const testState = vi.hoisted(() => ({
   keyHandler: undefined as KeyHandler | undefined,
   appendLine: vi.fn(),
   destroyScreen: vi.fn(),
+  labels: [] as string[],
+  workspaceStates: [] as Array<{
+    status: string;
+    message?: string;
+    warnings?: string[];
+  }>,
+  metadata: null as null | { workspace: { template_id?: string } },
+  template: null as null | { config: Record<string, unknown> },
 }));
 
 vi.mock("../terminal/fullscreen-surface.ts", async (importOriginal) => {
@@ -28,21 +36,31 @@ vi.mock("../terminal/fullscreen-surface.ts", async (importOriginal) => {
 });
 
 vi.mock("./grid-layout.ts", () => ({
-  calculateGridDimensions: () => ({ rows: 1, cols: 1 }),
+  calculateGridDimensions: (count: number) => ({ rows: 1, cols: count }),
   GridLayout: class {
-    private pane = {
-      setLabel: vi.fn(),
+    private panes = Array.from({ length: 8 }, () => ({
+      setLabel: (label: string) => {
+        testState.labels.push(label);
+      },
       appendLine: testState.appendLine,
-    };
+    }));
 
-    getPane(): typeof this.pane {
-      return this.pane;
+    getPane(index = 0): (typeof this.panes)[number] | undefined {
+      return this.panes[index];
     }
 
     render(): void {}
 
     destroy(): void {}
   },
+}));
+
+vi.mock("../workspace/metadata.ts", () => ({
+  readWorkspaceMetadata: vi.fn(async () => testState.metadata),
+}));
+
+vi.mock("../templates/index.ts", () => ({
+  loadTemplate: vi.fn(async () => testState.template),
 }));
 
 vi.mock("../workspace/initialization.ts", () => ({
@@ -67,9 +85,23 @@ vi.mock("../workspace/initialization.ts", () => ({
     })(),
 }));
 
+vi.mock("../workspace/initialization-scope.ts", () => ({
+  getInitializationRootDir: (target: { workspaceDir: string }) =>
+    target.workspaceDir,
+}));
+
 import { renderInitializationStatus } from "./initialization-status.ts";
 
 describe("renderInitializationStatus", () => {
+  beforeEach(() => {
+    testState.keyHandler = undefined;
+    testState.labels = [];
+    testState.metadata = null;
+    testState.template = null;
+    testState.appendLine.mockReset();
+    testState.destroyScreen.mockClear();
+  });
+
   it("stops rendering queued output after q is pressed", async () => {
     testState.appendLine.mockImplementationOnce(() => {
       queueMicrotask(() => testState.keyHandler?.());
@@ -79,5 +111,19 @@ describe("renderInitializationStatus", () => {
 
     expect(testState.appendLine).toHaveBeenCalledTimes(1);
     expect(testState.destroyScreen).toHaveBeenCalledOnce();
+  });
+
+  it("adds a virtual AGENTS.md pane for template guidance refresh", async () => {
+    testState.metadata = { workspace: { template_id: "agents-template" } };
+    testState.template = { config: { "AGENTS.md": { focus: "settings" } } };
+    testState.appendLine.mockImplementationOnce(() => {
+      queueMicrotask(() => testState.keyHandler?.());
+    });
+
+    await renderInitializationStatus("/tmp/workspace", ["front"]);
+
+    expect(testState.labels.some((label) => label.includes("AGENTS.md"))).toBe(
+      true,
+    );
   });
 });

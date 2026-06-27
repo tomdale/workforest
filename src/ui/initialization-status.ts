@@ -9,14 +9,19 @@ import {
   FULLSCREEN_QUIT_KEYS,
 } from "../terminal/fullscreen-surface.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
+import { loadTemplate } from "../templates/index.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
   type InitializationTarget,
   readWorkspaceInitializationState,
   watchRepoInitialization,
 } from "../workspace/initialization.ts";
+import { getInitializationRootDir } from "../workspace/initialization-scope.ts";
+import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import { calculateGridDimensions, GridLayout } from "./grid-layout.ts";
+
+const AGENTS_MD_PANE_NAME = "AGENTS.md";
 
 /** Pane status glyphs, resolved from the active theme's semantic symbols. */
 function statusIcons(): {
@@ -62,7 +67,11 @@ export async function renderInitializationStatus(
 ): Promise<void> {
   const screen = createFullscreenScreen();
   const statusLine = createFullscreenStatusLine(screen);
-  const { rows, cols } = calculateGridDimensions(repoNames.length);
+  const includeAgentsMdPane = await shouldShowAgentsMdPane(target);
+  const paneNames = includeAgentsMdPane
+    ? [...repoNames, AGENTS_MD_PANE_NAME]
+    : [...repoNames];
+  const { rows, cols } = calculateGridDimensions(paneNames.length);
   const grid = new GridLayout({
     screen,
     rows,
@@ -76,15 +85,15 @@ export async function renderInitializationStatus(
   const paneMap = new Map<string, number>();
   const adapters = new Map<string, CommandStreamAdapter>();
 
-  repoNames.forEach((repoName, index) => {
-    paneMap.set(repoName, index);
+  paneNames.forEach((paneName, index) => {
+    paneMap.set(paneName, index);
     grid
       .getPane(index)
-      ?.setLabel(`${escapeBlessedTags(repoName)} ${statusIcons().pending}`);
+      ?.setLabel(`${escapeBlessedTags(paneName)} ${statusIcons().pending}`);
   });
   const quit = createFullscreenKeypress(screen, FULLSCREEN_QUIT_KEYS);
 
-  const pipelines = new Map(
+  const pipelines = new Map<string, AsyncGenerator<RepoPipelineState>>(
     repoNames.map((repoName) => [
       repoName,
       watchRepoInitialization({
@@ -96,6 +105,9 @@ export async function renderInitializationStatus(
       }),
     ]),
   );
+  if (includeAgentsMdPane) {
+    pipelines.set(AGENTS_MD_PANE_NAME, watchAgentsMdInitialization(target));
+  }
   const updates = runParallel(pipelines)[Symbol.asyncIterator]();
   let nextUpdate = updates.next();
 
@@ -168,6 +180,64 @@ export async function renderInitializationStatus(
     statusLine.destroy();
     grid.destroy();
     screen.destroy();
+  }
+}
+
+async function shouldShowAgentsMdPane(
+  target: InitializationTarget,
+): Promise<boolean> {
+  if (typeof target !== "string" && target.kind !== "workspace") return false;
+  const workspaceDir =
+    typeof target === "string" ? target : getInitializationRootDir(target);
+  const metadata = await readWorkspaceMetadata(workspaceDir).catch(() => null);
+  const templateId = metadata?.workspace.template_id;
+  if (!templateId) return false;
+  const template = await loadTemplate(templateId).catch(() => null);
+  return Boolean(template?.config["AGENTS.md"]);
+}
+
+async function* watchAgentsMdInitialization(
+  target: InitializationTarget,
+): AsyncGenerator<RepoPipelineState> {
+  let lastRendered = "";
+  while (true) {
+    const workspaceState = await readWorkspaceInitializationState(target);
+    const message = workspaceState?.message ?? "Waiting for workspace setup";
+    const guidanceWarning = workspaceState?.warnings?.find((warning) =>
+      /AGENTS\.md/i.test(warning),
+    );
+
+    if (
+      workspaceState?.status === "ready" ||
+      workspaceState?.status === "failed" ||
+      workspaceState?.status === "cancelled"
+    ) {
+      if (guidanceWarning) {
+        yield {
+          phase: "cancelled",
+          message: guidanceWarning,
+        };
+      } else {
+        yield { phase: "complete", hasLockfile: false };
+      }
+      return;
+    }
+
+    const isRefreshing = /AGENTS\.md|guidance/i.test(message);
+    const nextRendered = `${isRefreshing ? "refresh" : "waiting"}:${message}`;
+    if (nextRendered !== lastRendered) {
+      lastRendered = nextRendered;
+      yield {
+        phase: "initializer",
+        name: isRefreshing ? "refresh" : "waiting",
+        status: "running",
+        message: isRefreshing
+          ? message
+          : "Waiting for repository initialization to finish",
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 

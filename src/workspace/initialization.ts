@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { validateRepositoryComponent } from "../repository-components.ts";
+import { refreshAndMaterializeTemplateAgentsMd } from "../templates/agents-md.ts";
 import { applyTemplateGenerator } from "../templates/apply.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
@@ -677,6 +678,35 @@ export async function finalizeWorkspaceInitialization(
       ? await loadTemplate(metadata.workspace.template_id)
       : null;
 
+    if (template?.config["AGENTS.md"]) {
+      await updateWorkspaceInitializationState(scope, (current) => ({
+        ...current,
+        message: "Refreshing AGENTS.md guidance",
+        updated_at: new Date().toISOString(),
+      }));
+
+      try {
+        await refreshAndMaterializeTemplateAgentsMd(
+          template,
+          getInitializationRootDir(scope),
+          metadata.repos.map((repo) => ({
+            name: repo.name,
+            remote: repo.remote,
+            defaultBranch: repo.default_branch,
+          })),
+          {
+            onWarning: (message) => {
+              warnings.push(message);
+            },
+          },
+        );
+      } catch (error) {
+        warnings.push(
+          `Could not materialize AGENTS.md guidance: ${formatError(error)}`,
+        );
+      }
+    }
+
     if (template?.config.hooks && template.config.hooks.length > 0) {
       await updateWorkspaceInitializationState(scope, (current) => ({
         ...current,
@@ -916,6 +946,10 @@ async function recordWorkerPipelineState(
       };
     });
   }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function markRepoCancelled(

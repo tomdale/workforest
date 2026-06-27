@@ -14,8 +14,10 @@ import { runGit } from "../services/git.ts";
 import {
   agentsMdDirectory,
   agentsMdScopeFingerprint,
+  agentsMdTemplateFilesFingerprint,
   getTemplateAgentsMdStatus,
   materializeTemplateAgentsMd,
+  refreshAndMaterializeTemplateAgentsMd,
   refreshTemplateAgentsMd,
 } from "./agents-md.ts";
 import { createTemplate, loadTemplate, type Template } from "./index.ts";
@@ -85,6 +87,8 @@ async function publish(
         generatedAt: generatedAt.toISOString(),
         expiresAt: expiresAt.toISOString(),
         sourceRevisions: { front: "abc" },
+        templateFilesFingerprint:
+          await agentsMdTemplateFilesFingerprint(template),
         provider: "fake",
         model: null,
       },
@@ -149,6 +153,18 @@ describe("template AGENTS.md artifacts", () => {
     });
     const template = await loadTemplate("explore");
     if (!template) throw new Error("Expected template");
+    const filesDir = path.join(path.dirname(template.path), "files");
+    await mkdir(path.join(filesDir, "source"), { recursive: true });
+    await writeFile(
+      path.join(filesDir, "README.md"),
+      "Workspace root notes for settings work.\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(filesDir, "source", "AGENTS.md"),
+      "Nested template overlay instructions.\n",
+      "utf8",
+    );
 
     const result = await refreshTemplateAgentsMd(template, [
       {
@@ -167,6 +183,19 @@ describe("template AGENTS.md artifacts", () => {
     expect(prompt).toEqual(expect.stringContaining("explore"));
     expect(prompt).toEqual(expect.stringContaining("How settings are loaded."));
     expect(prompt).toEqual(expect.stringContaining("source/src"));
+    expect(prompt).toEqual(
+      expect.stringContaining("Template-provided workspace root files:"),
+    );
+    expect(prompt).toEqual(
+      expect.stringContaining(
+        "workspace `README.md`: staged at `.workforest/template-files/README.md`",
+      ),
+    );
+    expect(prompt).toEqual(
+      expect.stringContaining(
+        "workspace `source/AGENTS.md`: staged at `.workforest/template-files/source/AGENTS.md`",
+      ),
+    );
     expect(prompt).toMatch(/<agents_md>[\s\S]*<\/agents_md>/);
     expect(prompt).not.toContain("implementation detail");
     expect(result.manifest).not.toBeNull();
@@ -179,6 +208,7 @@ describe("template AGENTS.md artifacts", () => {
       "generatedAt",
       "expiresAt",
       "sourceRevisions",
+      "templateFilesFingerprint",
       "provider",
       "model",
     ]);
@@ -315,6 +345,41 @@ describe("template AGENTS.md artifacts", () => {
     ).toBe("scope-changed");
   });
 
+  it("detects template root file changes as scope changes", async () => {
+    const { template } = await fixture();
+    await publish(
+      template,
+      new Date("2026-06-26T10:00:00Z"),
+      new Date("2026-06-27T10:00:00Z"),
+    );
+
+    expect(
+      (
+        await getTemplateAgentsMdStatus(
+          template,
+          new Date("2026-06-26T11:00:00Z"),
+        )
+      ).state,
+    ).toBe("fresh");
+
+    const filesDir = path.join(path.dirname(template.path), "files");
+    await mkdir(filesDir, { recursive: true });
+    await writeFile(
+      path.join(filesDir, "README.md"),
+      "Workspace-level setup notes changed.\n",
+      "utf8",
+    );
+
+    expect(
+      (
+        await getTemplateAgentsMdStatus(
+          template,
+          new Date("2026-06-26T11:00:00Z"),
+        )
+      ).state,
+    ).toBe("scope-changed");
+  });
+
   it("materializes only at the workspace root and fails closed after expiry", async () => {
     const { template, workspace } = await fixture();
     const generated = new Date("2026-06-26T10:00:00Z");
@@ -325,6 +390,143 @@ describe("template AGENTS.md artifacts", () => {
       "# Focus",
     );
     await materializeTemplateAgentsMd(template, workspace, { now: expires });
+    expect(await readFile(path.join(workspace, "AGENTS.md"), "utf8")).toContain(
+      "guidance unavailable",
+    );
+  });
+
+  it("refreshes missing guidance automatically before materializing a workspace", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wf-agents-auto-"));
+    roots.push(root);
+    const source = path.join(root, "source");
+    const configHome = path.join(root, "config");
+    const cache = path.join(root, "cache");
+    const bin = path.join(root, "bin");
+    const workspace = path.join(root, "workspace");
+    const promptLog = path.join(root, "prompts.log");
+    await mkdir(path.join(source, "src"), { recursive: true });
+    await mkdir(bin);
+    await mkdir(workspace);
+    await runGit(["init", "-b", "main"], { cwd: source });
+    await runGit(["config", "user.email", "test@example.com"], {
+      cwd: source,
+    });
+    await runGit(["config", "user.name", "Test"], { cwd: source });
+    await writeFile(
+      path.join(source, "src", "settings.ts"),
+      "export const settings = true;\n",
+      "utf8",
+    );
+    await runGit(["add", "src/settings.ts"], { cwd: source });
+    await runGit(["commit", "-m", "add settings"], { cwd: source });
+    await writeFile(
+      path.join(bin, "codex"),
+      fakeCodexScript(
+        [
+          "<agents_md>",
+          "Template: auto.",
+          "Scope: Start in source/src/settings.ts.",
+          "</agents_md>",
+        ].join("\n"),
+      ),
+      "utf8",
+    );
+    await chmod(path.join(bin, "codex"), 0o755);
+
+    process.env["XDG_CONFIG_HOME"] = configHome;
+    process.env["WORKFOREST_CACHE_DIR"] = cache;
+    process.env["WORKFOREST_AI_PROVIDER"] = "codex-cli";
+    delete process.env["WORKFOREST_AI_DISABLED"];
+    process.env["WORKFOREST_PROMPT_LOG"] = promptLog;
+    process.env["PATH"] = `${bin}${path.delimiter}${originalPath ?? ""}`;
+    delete process.env["SHELL"];
+    await createTemplate("auto", {
+      repos: [`file://${source}`],
+      "AGENTS.md": {
+        focus: "How settings are loaded.",
+        paths: { source: ["src"] },
+      },
+    });
+    const template = await loadTemplate("auto");
+    if (!template) throw new Error("Expected template");
+    const progress: string[] = [];
+
+    const result = await refreshAndMaterializeTemplateAgentsMd(
+      template,
+      workspace,
+      [
+        {
+          name: "source",
+          remote: `file://${source}`,
+          defaultBranch: "main",
+        },
+      ],
+      { onProgress: (message) => progress.push(message) },
+    );
+
+    expect(result.state).toBe("fresh");
+    expect(progress).toEqual(
+      expect.arrayContaining([
+        "AGENTS.md guidance is missing; refreshing automatically…",
+        "Materializing AGENTS.md guidance…",
+      ]),
+    );
+    expect(await readFile(path.join(workspace, "AGENTS.md"), "utf8")).toContain(
+      "Scope: Start in source/src/settings.ts.",
+    );
+  });
+
+  it("falls closed to an unavailable workspace document when automatic refresh fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wf-agents-fail-"));
+    roots.push(root);
+    const source = path.join(root, "source");
+    const configHome = path.join(root, "config");
+    const cache = path.join(root, "cache");
+    const workspace = path.join(root, "workspace");
+    await mkdir(path.join(source, "src"), { recursive: true });
+    await mkdir(workspace);
+    await runGit(["init", "-b", "main"], { cwd: source });
+    await runGit(["config", "user.email", "test@example.com"], {
+      cwd: source,
+    });
+    await runGit(["config", "user.name", "Test"], { cwd: source });
+    await writeFile(
+      path.join(source, "src", "settings.ts"),
+      "export const settings = true;\n",
+      "utf8",
+    );
+    await runGit(["add", "src/settings.ts"], { cwd: source });
+    await runGit(["commit", "-m", "add settings"], { cwd: source });
+
+    process.env["XDG_CONFIG_HOME"] = configHome;
+    process.env["WORKFOREST_CACHE_DIR"] = cache;
+    process.env["WORKFOREST_AI_DISABLED"] = "1";
+    await createTemplate("auto-fail", {
+      repos: [`file://${source}`],
+      "AGENTS.md": {
+        focus: "How settings are loaded.",
+        paths: { source: ["src"] },
+      },
+    });
+    const template = await loadTemplate("auto-fail");
+    if (!template) throw new Error("Expected template");
+    const warnings: string[] = [];
+
+    const result = await refreshAndMaterializeTemplateAgentsMd(
+      template,
+      workspace,
+      [
+        {
+          name: "source",
+          remote: `file://${source}`,
+          defaultBranch: "main",
+        },
+      ],
+      { onWarning: (message) => warnings.push(message) },
+    );
+
+    expect(result.state).toBe("missing");
+    expect(warnings[0]).toContain("Could not refresh AGENTS.md guidance:");
     expect(await readFile(path.join(workspace, "AGENTS.md"), "utf8")).toContain(
       "guidance unavailable",
     );
