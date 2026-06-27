@@ -96,9 +96,7 @@ Use these symbols consistently:
 Run:
 
 ```sh
-pnpm test
-pnpm typecheck
-pnpm lint
+pnpm check
 ```
 
 For prompt or fullscreen changes, also exercise the real interface in a PTY at

@@ -14,6 +14,7 @@ import {
   getPluginPackageName,
   type NormalizedPluginCapabilityMetadata,
   normalizePluginCapabilityMetadata,
+  type PluginCapabilityEntry,
   type PluginCapabilityMetadata,
   type PluginPackage,
   type PluginPackageManifest,

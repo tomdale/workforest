@@ -139,17 +139,14 @@ describe("cache commands", () => {
       "Cached repository not found: missing",
     ],
     [["cache", "clean"], 0, "No unused cached repositories.", ""],
-  ] as const)(
-    "implements canonical cache behavior for %j",
-    async (argv, exitCode, stdout, stderr) => {
-      await createCache();
-      const result = await runCommand(argv);
+  ] as const)("implements canonical cache behavior for %j", async (argv, exitCode, stdout, stderr) => {
+    await createCache();
+    const result = await runCommand(argv);
 
-      expect(result.exitCode).toBe(exitCode);
-      expect(result.stdout).toContain(stdout);
-      expect(result.stderr).toContain(stderr);
-    },
-  );
+    expect(result.exitCode).toBe(exitCode);
+    expect(result.stdout).toContain(stdout);
+    expect(result.stderr).toContain(stderr);
+  });
 
   it("rejects invalid cache operands", async () => {
     const result = await runCommand(["cache", "list", "extra"]);

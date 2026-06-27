@@ -90,9 +90,7 @@ respect `PAGER`, bypass paging outside a TTY, and retain a direct-output mode.
 Use project commands in review instructions:
 
 ```sh
-pnpm test
-pnpm typecheck
-pnpm lint
+pnpm check
 ```
 
 Exercise fallbacks and raw contracts:

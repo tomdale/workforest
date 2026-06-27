@@ -342,7 +342,9 @@ describe("suggestTemplates", () => {
     );
     expect(inputLog.evidence).toEqual(result.evidence);
     expect(
-      JSON.parse(await readFile(path.join(result.logDir, "output.txt"), "utf8")),
+      JSON.parse(
+        await readFile(path.join(result.logDir, "output.txt"), "utf8"),
+      ),
     ).toEqual(validResponse());
   });
 });

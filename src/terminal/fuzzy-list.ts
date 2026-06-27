@@ -570,9 +570,10 @@ export function fitMetaList(meta: string, budget: number): string {
   const flagSuffix = flags.length > 0 ? ` · ${flags.join(" · ")}` : "";
 
   const wrapped = /^(.+) \((.+)\)$/.exec(repoInfo);
-  const lead = wrapped ? `${wrapped[1]} (` : "";
+  const [, wrappedLead = "", wrappedItems = ""] = wrapped ?? [];
+  const lead = wrapped ? `${wrappedLead} (` : "";
   const close = wrapped ? ")" : "";
-  const items = (wrapped ? wrapped[2] : repoInfo).split(", ").filter(Boolean);
+  const items = (wrapped ? wrappedItems : repoInfo).split(", ").filter(Boolean);
 
   // Most entries first: the first count that fits wins.
   for (let keep = items.length - 1; keep >= 1; keep -= 1) {

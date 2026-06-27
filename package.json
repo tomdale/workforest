@@ -31,7 +31,7 @@
     "build:plugins": "pnpm --filter '@wf-plugin/*' build",
     "bench:ghostty": "tsx benchmarks/ghostty-real.ts",
     "bench:tui": "tsx benchmarks/tui-grid.ts",
-    "check": "pnpm lint && pnpm test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
     "format": "biome format --write .",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

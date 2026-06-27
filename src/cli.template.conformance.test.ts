@@ -58,16 +58,16 @@ describe("template command conformance", () => {
     { argv: ["template", "delete"], usage: "Usage: wf template delete" },
   ] as const;
 
-  it.each(helpCases)(
-    "renders help for $usage on stdout",
-    async ({ argv, usage }) => {
-      const output = await invoke([...argv, "--help"]);
+  it.each(helpCases)("renders help for $usage on stdout", async ({
+    argv,
+    usage,
+  }) => {
+    const output = await invoke([...argv, "--help"]);
 
-      expect(output.exitCode).toBe(0);
-      expect(output.stdout).toContain(usage);
-      expect(output.stderr).toBe("");
-    },
-  );
+    expect(output.exitCode).toBe(0);
+    expect(output.stdout).toContain(usage);
+    expect(output.stderr).toBe("");
+  });
 
   it("renders template usage errors on stderr without parser stacks", async () => {
     const output = await invoke(["template", "copy", "one"]);

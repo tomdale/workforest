@@ -195,21 +195,18 @@ describe("core command family conformance", () => {
   it.each([
     ["config", "init"],
     ["config", "edit"],
-  ])(
-    "returns JSON usage errors for interactive-only wf %s %s",
-    async (...argv) => {
-      const result = await runCommand([...argv, "--json"]);
+  ])("returns JSON usage errors for interactive-only wf %s %s", async (...argv) => {
+    const result = await runCommand([...argv, "--json"]);
 
-      expect(result).toMatchObject({ exitCode: 2, stderr: "" });
-      expect(JSON.parse(result.stdout)).toEqual({
-        ok: false,
-        error: {
-          kind: "usage",
-          message: `JSON output is not available for wf ${argv.join(" ")}.`,
-        },
-      });
-    },
-  );
+    expect(result).toMatchObject({ exitCode: 2, stderr: "" });
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      error: {
+        kind: "usage",
+        message: `JSON output is not available for wf ${argv.join(" ")}.`,
+      },
+    });
+  });
 
   it("reports valid non-interactive config init as an operational failure", async () => {
     const result = await runCommand(["config", "init"]);

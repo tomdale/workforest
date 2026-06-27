@@ -251,8 +251,8 @@ Templates live at
   "branchPrefix": "feature/",
   "hooks": [
     {
-      "name": "Build project",
-      "run": "pnpm build",
+      "name": "Validate project",
+      "run": "pnpm check",
       "in": ["frontend"]
     }
   ]
@@ -408,6 +408,7 @@ Requires Node.js 25+ and pnpm:
 git clone https://github.com/your-org/workforest
 cd workforest
 pnpm install
+pnpm check
 pnpm build
 ```
 
