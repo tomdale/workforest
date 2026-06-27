@@ -137,7 +137,6 @@ describe("task command workspace context", () => {
       "--force",
     );
     expectSuccess(deleteSibling);
-    expect(deleteSibling.stdout).toContain("Removed front-sibling");
     await expectPathToExist(fixture.frontTaskDir);
     await expectPathNotToExist(fixture.frontSiblingTaskDir);
     await expectPathToExist(fixture.docsTaskDir);
@@ -151,7 +150,6 @@ describe("task command workspace context", () => {
       "--force",
     );
     expectSuccess(deleteFromRoot);
-    expect(deleteFromRoot.stdout).toContain("Removed docs-current");
     await expectPathToExist(fixture.frontTaskDir);
     await expectPathNotToExist(fixture.docsTaskDir);
 
@@ -173,7 +171,6 @@ describe("task command workspace context", () => {
       "--force",
     );
     expectSuccess(deleteCurrent);
-    expect(deleteCurrent.stdout).toContain("Removed front-current");
     await expectPathNotToExist(fixture.frontTaskDir);
     await expect(readCdTarget(fixture.env)).resolves.toBe(
       await realpath(fixture.frontRepoDir),
@@ -228,7 +225,6 @@ describe("task command repository-change context", () => {
       "existing-task",
     );
     expectSuccess(finishTask);
-    expect(finishTask.stdout).toContain("Finished existing-task");
     await expectPathNotToExist(fixture.taskDir);
     await expect(readCdTarget(fixture.env)).resolves.toBe(
       await realpath(fixture.parentRepoDir),

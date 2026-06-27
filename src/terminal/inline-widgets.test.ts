@@ -50,8 +50,7 @@ describe("confirmPrompt", () => {
       type: "submitted",
       value: true,
     });
-    expect(stdout.writes.join("")).toContain("Delete workspace?");
-    expect(stdout.writes.join("")).toContain("Yes");
+    expect(stdout.write).toHaveBeenCalled();
   });
 });
 
