@@ -8,6 +8,7 @@ import {
   cleanCachedRepositories,
   deleteCachedRepository,
   listCachedRepositories,
+  listCachedRepositorySummaries,
   RegisteredRepositoryNameCollisionError,
   resolveCachedRepository,
   resolveMirrorDir,
@@ -126,6 +127,36 @@ describe("cached repository inventory", () => {
     });
     expect(repositories[0]?.sizeBytes).toBeGreaterThanOrEqual(0);
     expect(repositories[0]?.lastFetchedAt).toBeInstanceOf(Date);
+  });
+
+  it("summarizes identity and validity without spawning git", async () => {
+    const cacheDir = await createCacheDir();
+    await createMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:mycompany/myapp.git",
+    );
+    const brokenDir = path.join(cacheDir, "broken.git");
+    await mkdir(brokenDir);
+    await writeFile(path.join(brokenDir, "README"), "not git\n", "utf8");
+
+    const summaries = await listCachedRepositorySummaries();
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        name: "broken",
+        slug: null,
+        directoryName: "broken.git",
+        valid: false,
+      }),
+      expect.objectContaining({
+        name: "myapp",
+        slug: "mycompany/myapp",
+        remote: "git@github.com:mycompany/myapp.git",
+        directoryName: "myapp.git",
+        valid: true,
+      }),
+    ]);
   });
 
   it("keeps invalid cache directories visible for cleanup", async () => {

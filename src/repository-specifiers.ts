@@ -1,7 +1,7 @@
 import { isRepoSlug, reposFromSlugs } from "./config.ts";
 import {
-  type CachedRepository,
-  listCachedRepositories,
+  type CachedRepositorySummary,
+  listCachedRepositorySummaries,
   resolveRegisteredRepository,
 } from "./repositories.ts";
 import { listTemplates, loadTemplate } from "./templates/index.ts";
@@ -16,7 +16,7 @@ export type ResolvedRepositorySelections = {
 export async function qualifyRepositorySpecifiers(
   specifiers: readonly string[],
 ): Promise<string[]> {
-  let repositories: CachedRepository[] | undefined;
+  let repositories: CachedRepositorySummary[] | undefined;
   const qualified: string[] = [];
 
   for (const specifier of specifiers) {
@@ -26,7 +26,7 @@ export async function qualifyRepositorySpecifiers(
       continue;
     }
 
-    repositories ??= await listCachedRepositories();
+    repositories ??= await listCachedRepositorySummaries();
     const registered = await resolveRegisteredRepository(
       normalized,
       repositories,
@@ -66,7 +66,7 @@ export async function resolveRepositoryOrTemplateSpecifiers(
   selections: readonly string[],
 ): Promise<ResolvedRepositorySelections> {
   const repoSpecifiers: string[] = [];
-  let repositories: CachedRepository[] | undefined;
+  let repositories: CachedRepositorySummary[] | undefined;
   let templateId: string | undefined;
   let templateBranchPrefix: string | undefined;
 
@@ -84,7 +84,7 @@ export async function resolveRepositoryOrTemplateSpecifiers(
       continue;
     }
 
-    repositories ??= await listCachedRepositories();
+    repositories ??= await listCachedRepositorySummaries();
     const registeredRepo = await resolveRegisteredRepository(
       selection,
       repositories,

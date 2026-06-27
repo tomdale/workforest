@@ -72,16 +72,27 @@ export class CachedRepositorySelectorError extends Error {
   }
 }
 
+/**
+ * The minimal identity a repo needs to be resolved from a shorthand name: just
+ * its slug and name. Both {@link CachedRepository} and
+ * {@link CachedRepositorySummary} satisfy this, so resolution can run off the
+ * fast summary listing without forcing the expensive full inspection.
+ */
+export type RegisteredRepositoryIdentity = Readonly<{
+  slug: string | null;
+  name: string;
+}>;
+
 export async function resolveRegisteredRepository(
   repositoryName: string,
-  repositories?: CachedRepository[],
+  repositories?: readonly RegisteredRepositoryIdentity[],
 ): Promise<string | null> {
   const normalizedName = repositoryName.trim().toLowerCase();
   if (!normalizedName) {
     return null;
   }
 
-  const candidates = repositories ?? (await listCachedRepositories());
+  const candidates = repositories ?? (await listCachedRepositorySummaries());
   const matches = candidates.filter(
     (repository) =>
       repository.slug && repository.name.toLowerCase() === normalizedName,
@@ -126,6 +137,100 @@ export async function listCachedRepositories(): Promise<CachedRepository[]> {
   return repositories.sort((left, right) =>
     repositoryDisplayName(left).localeCompare(repositoryDisplayName(right)),
   );
+}
+
+/**
+ * A fast, identity-only view of a cached repository: just what a source picker
+ * needs to list and resolve a repo, with none of the git-derived detail
+ * ({@link CachedRepository}'s size, default branch, or worktrees).
+ */
+export type CachedRepositorySummary = {
+  name: string;
+  slug: string | null;
+  remote: string | null;
+  directoryName: string;
+  valid: boolean;
+};
+
+/**
+ * List cached repositories for pickers that only need identity and validity.
+ *
+ * Unlike {@link listCachedRepositories}, this spawns no git subprocesses: each
+ * repo's validity is inferred from its bare-repo marker files and its remote is
+ * read straight from the on-disk `config`. {@link listCachedRepositories} runs
+ * ~5 git commands per repo (including `count-objects -v`, which scans the whole
+ * object store), so it can take seconds across many mirrors — far too slow for
+ * an interactive picker that never displays size or worktree state.
+ */
+export async function listCachedRepositorySummaries(): Promise<
+  CachedRepositorySummary[]
+> {
+  const cacheDir = getCacheDir();
+  if (!(await pathExists(cacheDir))) {
+    return [];
+  }
+
+  const entries = await fs.readdir(cacheDir, { withFileTypes: true });
+  const summaries = await Promise.all(
+    entries
+      .filter((entry) => entry.name.endsWith(".git"))
+      .map((entry) =>
+        summarizeCachedRepository(resolveContainedPath(cacheDir, entry.name)),
+      ),
+  );
+
+  return summaries.sort((left, right) =>
+    summaryDisplayName(left).localeCompare(summaryDisplayName(right)),
+  );
+}
+
+function summaryDisplayName(summary: CachedRepositorySummary): string {
+  return (
+    summary.slug ??
+    summary.remote ??
+    summary.directoryName.replace(/\.git$/i, "")
+  );
+}
+
+async function summarizeCachedRepository(
+  mirrorPath: string,
+): Promise<CachedRepositorySummary> {
+  const directoryName = path.basename(mirrorPath);
+  const fallbackName = directoryName.replace(/\.git$/i, "");
+
+  const valid = await isBareRepositoryQuick(mirrorPath);
+  const remote = valid ? await readRemoteFromConfigFile(mirrorPath) : null;
+  const identity = remote ? getRemoteIdentity(remote) : null;
+
+  return {
+    name: identity?.name ?? fallbackName,
+    slug: identity?.slug ?? null,
+    remote,
+    directoryName,
+    valid,
+  };
+}
+
+/**
+ * A cheap bare-repository check that reads only filesystem markers (no git
+ * subprocess): the entry must be a real directory holding both a HEAD ref and a
+ * config file, which every bare mirror Workforest creates has.
+ */
+async function isBareRepositoryQuick(mirrorPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.lstat(mirrorPath);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  const [hasHead, hasConfig] = await Promise.all([
+    pathExists(path.join(mirrorPath, "HEAD")),
+    pathExists(path.join(mirrorPath, "config")),
+  ]);
+  return hasHead && hasConfig;
 }
 
 export async function resolveCachedRepository(

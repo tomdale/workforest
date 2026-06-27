@@ -1,6 +1,6 @@
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
-import { listCachedRepositories } from "../repositories.ts";
+import { listCachedRepositorySummaries } from "../repositories.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { listTemplates, loadTemplate } from "../templates/index.ts";
 import {
@@ -56,12 +56,12 @@ export type InferChangeOptions = {
  */
 export async function listSourceCandidates(): Promise<SourceCandidate[]> {
   const [repositories, templates] = await Promise.all([
-    listCachedRepositories(),
+    listCachedRepositorySummaries(),
     listTemplates(),
   ]);
 
   const repoCandidates: SourceCandidate[] = repositories
-    .filter((repository) => repository.health !== "invalid")
+    .filter((repository) => repository.valid)
     .map((repository) => {
       const id = repository.slug ?? repository.name;
       return {
