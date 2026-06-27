@@ -173,11 +173,22 @@ async function addToWorkspaceChange(
     );
     const templateId = target.metadata.workspace.template_id;
     const template = templateId ? await loadTemplate(templateId) : null;
-    if (template)
-      await invalidateWorkspaceAgentsMd(template, target.workspaceDir);
+    if (template) {
+      await invalidateWorkspaceAgentsMd(template, target.workspaceDir).catch(
+        (error: unknown) => {
+          log.warn(
+            `Could not invalidate AGENTS.md guidance: ${formatErrorMessage(error)}`,
+          );
+        },
+      );
+    }
   }
   await options.writeShellCdPath(target.workspaceDir);
   return success();
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function promoteRepositoryChange(

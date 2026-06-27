@@ -2,8 +2,6 @@ import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
-import { maintainWorkspaceAgentsMd } from "../templates/agents-md.ts";
-import { loadTemplate } from "../templates/index.ts";
 import {
   CancelError,
   cancel,
@@ -14,7 +12,6 @@ import {
   type ChangeInventoryEntry,
   collectChangeInventory,
 } from "../workspace/change-inventory.ts";
-import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import { resolveChangeSelector } from "../workspace/selectors.ts";
 import { OperationalError, UsageError } from "./errors.ts";
 import { success } from "./output.ts";
@@ -51,12 +48,6 @@ export async function runSwitchCommand(
     if (!entry) return success();
   }
 
-  if (entry.type !== "repository-change") {
-    const metadata = await readWorkspaceMetadata(entry.path).catch(() => null);
-    const templateId = metadata?.workspace.template_id;
-    const template = templateId ? await loadTemplate(templateId) : null;
-    if (template) await maintainWorkspaceAgentsMd(template, entry.path);
-  }
   await options.writeShellCdPath(entry.path);
   if (!isShellAutoCdEnabled()) {
     log.info(`Run: cd ${entry.path}`);

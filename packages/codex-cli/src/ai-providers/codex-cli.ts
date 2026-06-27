@@ -107,7 +107,7 @@ const codexCliProvider: AiProviderDefinition = {
   label: "Codex CLI",
   priority: 100,
   capabilities: ["text"],
-  modelCategories: { mini: "gpt-5.4-mini" },
+  modelCategories: { "generate-context": "gpt-5.4" },
   async detect(context) {
     if (await commandAvailable("codex", ["--version"], context)) {
       return { available: true };

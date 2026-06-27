@@ -2,7 +2,7 @@ import process from "node:process";
 import { runCli } from "@wf-plugin/core";
 import { describe, expect, it } from "vitest";
 
-describe("Codex CLI subprocess runner", () => {
+describe("Claude CLI subprocess runner", () => {
   it("force-kills a timed-out process that ignores SIGTERM", async () => {
     const debug: string[] = [];
 

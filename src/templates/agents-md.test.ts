@@ -118,7 +118,19 @@ describe("template AGENTS.md artifacts", () => {
     );
     await runGit(["add", "src/settings.ts"], { cwd: source });
     await runGit(["commit", "-m", "add settings"], { cwd: source });
-    await writeFile(path.join(bin, "codex"), fakeCodexScript(), "utf8");
+    await writeFile(
+      path.join(bin, "codex"),
+      fakeCodexScript(
+        [
+          "<agents_md>",
+          "Template: explore.",
+          "Scope: Settings are loaded through `source/src/settings.ts`.",
+          "</agents_md>",
+          "",
+        ].join("\n"),
+      ),
+      "utf8",
+    );
     await chmod(path.join(bin, "codex"), 0o755);
 
     process.env["XDG_CONFIG_HOME"] = configHome;
@@ -152,54 +164,11 @@ describe("template AGENTS.md artifacts", () => {
     expect(prompts).toHaveLength(1);
     const prompt = prompts[0];
     if (!prompt) throw new Error("Expected prompt");
-    expect(prompt).toContain(
-      "You are drafting the Markdown body for the root AGENTS.md for Workforest template `explore`.",
-    );
-    expect(prompt).toContain("Operating context:");
-    expect(prompt).toContain(
-      "A Workforest workspace is a local working directory created from a template,",
-    );
-    expect(prompt).toContain(
-      "Assume it starts at the workspace root, then enters repository directories",
-    );
-    expect(prompt).toContain("Why this file exists:");
-    expect(prompt).toContain(
-      "Without a root guide, coding agents waste context rediscovering repository boundaries",
-    );
-    expect(prompt).toContain("Success criteria:");
-    expect(prompt).toContain("Exploration budget and stop rules:");
-    expect(prompt).toContain(
-      "The useful outcome is a compact router that helps the next agent choose the right repository",
-    );
-    expect(prompt).toContain("Configured focus:\nHow settings are loaded.");
-    expect(prompt).toContain(
-      "- source: checkout directory `source/`; path hints: `source/src`",
-    );
-    expect(prompt).toContain("Output only Markdown for the file body.");
-    expect(prompt).toContain(
-      "Do not create, edit, or request permission to write files.",
-    );
-    expect(prompt).toContain(
-      "Workforest will write the artifact after your final answer.",
-    );
-    expect(prompt).toContain(
-      "Do not duplicate instructions already covered by repository or nested AGENTS.md files",
-    );
-    expect(prompt).toContain(
-      "Do not inline exhaustive research notes, architecture walkthroughs, API inventories, or incident histories.",
-    );
-    expect(prompt).toContain(
-      "representative owner files and seams, not every helper in the call graph.",
-    );
-    expect(prompt).toContain(
-      "roughly 6-12 shell commands across all repositories for normal templates.",
-    );
-    expect(prompt).toContain(
-      "Do not inspect another file just to make the guide more complete.",
-    );
-    expect(prompt).toContain(
-      "Memoize repeated exploration patterns as short recipes",
-    );
+    expect(prompt).toEqual(expect.stringContaining("explore"));
+    expect(prompt).toEqual(expect.stringContaining("How settings are loaded."));
+    expect(prompt).toEqual(expect.stringContaining("source/src"));
+    expect(prompt).toMatch(/<agents_md>[\s\S]*<\/agents_md>/);
+    expect(prompt).not.toContain("implementation detail");
     expect(result.manifest).not.toBeNull();
     expect(Object.keys(result.manifest ?? {})).toEqual([
       "version",
@@ -216,12 +185,74 @@ describe("template AGENTS.md artifacts", () => {
     expect(result.manifest?.sourceRevisions).toEqual({
       source: expect.stringMatching(/^[0-9a-f]{40}$/),
     });
-    expect(result.manifest?.model).toBe("gpt-5.4-mini");
+    expect(result.manifest?.model).toBe("gpt-5.4");
 
     if (!result.artifactPath) throw new Error("Expected artifact path");
     const artifact = await readFile(result.artifactPath, "utf8");
     expect(artifact).toContain("<!-- Managed by Workforest.");
-    expect(artifact).toContain("# Workspace guidance for explore");
+    expect(artifact).not.toContain("<agents_md>");
+    expect(artifact).not.toMatch(/^# /m);
+    expect(artifact).toContain("Template: explore.");
+    expect(artifact).toContain("Scope: Settings");
+  });
+
+  it("requires generated guidance to use the agents_md envelope", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wf-agents-envelope-"));
+    roots.push(root);
+    const source = path.join(root, "source");
+    const configHome = path.join(root, "config");
+    const cache = path.join(root, "cache");
+    const bin = path.join(root, "bin");
+    const promptLog = path.join(root, "prompts.log");
+    await mkdir(path.join(source, "src"), { recursive: true });
+    await mkdir(bin);
+    await runGit(["init", "-b", "main"], { cwd: source });
+    await runGit(["config", "user.email", "test@example.com"], {
+      cwd: source,
+    });
+    await runGit(["config", "user.name", "Test"], { cwd: source });
+    await writeFile(
+      path.join(source, "src", "settings.ts"),
+      "export const settings = true;\n",
+      "utf8",
+    );
+    await runGit(["add", "src/settings.ts"], { cwd: source });
+    await runGit(["commit", "-m", "add settings"], { cwd: source });
+    await writeFile(
+      path.join(bin, "codex"),
+      fakeCodexScript(
+        "Template: missing-envelope. Scope: usable but not wrapped.",
+      ),
+      "utf8",
+    );
+    await chmod(path.join(bin, "codex"), 0o755);
+
+    process.env["XDG_CONFIG_HOME"] = configHome;
+    process.env["WORKFOREST_CACHE_DIR"] = cache;
+    process.env["WORKFOREST_AI_PROVIDER"] = "codex-cli";
+    delete process.env["WORKFOREST_AI_DISABLED"];
+    process.env["WORKFOREST_PROMPT_LOG"] = promptLog;
+    process.env["PATH"] = `${bin}${path.delimiter}${originalPath ?? ""}`;
+    delete process.env["SHELL"];
+    await createTemplate("missing-envelope", {
+      repos: [`file://${source}`],
+      "AGENTS.md": {
+        focus: "How settings are loaded.",
+        paths: { source: ["src"] },
+      },
+    });
+    const template = await loadTemplate("missing-envelope");
+    if (!template) throw new Error("Expected template");
+
+    await expect(
+      refreshTemplateAgentsMd(template, [
+        {
+          name: "source",
+          remote: `file://${source}`,
+          defaultBranch: "main",
+        },
+      ]),
+    ).rejects.toThrow(/<agents_md>/);
   });
 
   it("reports fresh and expired at the exact TTL boundary", async () => {
@@ -305,7 +336,7 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
-function fakeCodexScript(): string {
+function fakeCodexScript(response: string): string {
   return `#!/bin/sh
 if [ "$1" = "--version" ]; then
   printf 'codex 1.0.0\\n'
@@ -320,15 +351,9 @@ for arg in "$@"; do
   if [ "$arg" = "--output-schema" ]; then exit 3; fi
   previous="$arg"
 done
-[ "$model" = "gpt-5.4-mini" ] || exit 2
+[ "$model" = "gpt-5.4" ] || exit 2
 input="$(cat)"
 printf '%s\\n---PROMPT---\\n' "$input" >> "$WORKFOREST_PROMPT_LOG"
-response='# Workspace guidance for explore
-
-## Scope
-
-Settings are loaded through \`source/src/settings.ts\`.
-'
-printf '%s' "$response" > "$output_file"
+printf '%s' ${JSON.stringify(response)} > "$output_file"
 `;
 }

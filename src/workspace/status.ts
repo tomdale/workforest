@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { runGit } from "../services/git.ts";
 import {
-  maintainWorkspaceAgentsMd,
+  getWorkspaceAgentsMdStatus,
   type TemplateAgentsMdState,
 } from "../templates/agents-md.ts";
 import { loadTemplate } from "../templates/index.ts";
@@ -228,7 +228,7 @@ async function workspaceGuidanceState(
   if (!templateId) return undefined;
   const template = await loadTemplate(templateId);
   if (!template) return "missing";
-  return (await maintainWorkspaceAgentsMd(template, entry.path)).state;
+  return (await getWorkspaceAgentsMdStatus(template, entry.path)).state;
 }
 
 async function buildRepositoryStatuses(

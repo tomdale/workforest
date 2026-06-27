@@ -23,7 +23,7 @@ export type GenerateTextOptions = {
   cwd?: string;
   provider?: string;
   model?: string;
-  modelCategory?: AiModelCategory;
+  category?: AiModelCategory;
   outputSchema?: Record<string, unknown>;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
@@ -60,7 +60,7 @@ type AiRuntimeOptions = {
   cwd?: string;
   provider?: string;
   model?: string;
-  modelCategory?: AiModelCategory;
+  category?: AiModelCategory;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   config?: WorkspaceConfig;
@@ -73,7 +73,7 @@ type ResolvedAiOptions = {
   disabled: boolean;
   provider?: string;
   model?: string;
-  modelCategory?: AiModelCategory;
+  category?: AiModelCategory;
   timeoutMs: number;
 };
 
@@ -317,7 +317,7 @@ async function resolveAiOptions(
     disabled,
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
-    ...(options.modelCategory ? { modelCategory: options.modelCategory } : {}),
+    ...(options.category ? { category: options.category } : {}),
     timeoutMs,
   };
 }
@@ -414,7 +414,7 @@ function toAiStatus(inspection: AiInspection): AiStatus {
 
 function selectedModel(inspection: AiInspection): string | undefined {
   if (inspection.options.model) return inspection.options.model;
-  const category = inspection.options.modelCategory;
+  const category = inspection.options.category;
   if (category && inspection.selected) {
     return inspection.selected.loaded.provider.modelCategories[category];
   }

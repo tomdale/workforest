@@ -78,6 +78,33 @@ describe("AI provider resolver", () => {
     });
   });
 
+  it("streams concise Claude events while retaining the final response", async () => {
+    const fixture = await createFixture(["claude"]);
+    const events: unknown[] = [];
+
+    const text = await generateText({
+      prompt: "name this",
+      cwd: fixture.cwd,
+      env: fixture.env,
+      config: {},
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(text).toBe("claude:name this");
+    expect(events).toContainEqual({
+      type: "activity",
+      source: "Claude",
+      activity: "command",
+      description: "rg -n account src",
+    });
+    expect(events).toContainEqual({
+      type: "usage",
+      source: "Claude",
+      inputTokens: 120,
+      outputTokens: 8,
+    });
+  });
+
   it("uses env provider override before config provider override", async () => {
     const fixture = await createFixture(["codex", "claude"], {
       WORKFOREST_AI_PROVIDER: "claude-cli",
@@ -104,7 +131,7 @@ describe("AI provider resolver", () => {
     expect(status.selectedProvider).toBe("claude-cli");
   });
 
-  it("resolves the mini model category through each provider", async () => {
+  it("resolves the AGENTS.md task model category through each provider", async () => {
     const codex = await createFixture(["codex"]);
     const claude = await createFixture(["claude"]);
 
@@ -114,18 +141,18 @@ describe("AI provider resolver", () => {
         cwd: codex.cwd,
         env: codex.env,
         config: {},
-        modelCategory: "mini",
+        category: "generate-context",
       }),
-    ).resolves.toBe("codex-model:gpt-5.4-mini");
+    ).resolves.toBe("codex-model:gpt-5.4");
     await expect(
       generateText({
         prompt: "report model",
         cwd: claude.cwd,
         env: claude.env,
         config: {},
-        modelCategory: "mini",
+        category: "generate-context",
       }),
-    ).resolves.toBe("claude-model:haiku");
+    ).resolves.toBe("claude-model:claude-opus-4-5");
   });
 
   it("lets an explicit model override a normalized model category", async () => {
@@ -137,7 +164,7 @@ describe("AI provider resolver", () => {
         cwd: codex.cwd,
         env: codex.env,
         config: { ai: { model: "configured-model" } },
-        modelCategory: "mini",
+        category: "generate-context",
       }),
     ).resolves.toBe("codex-model:configured-model");
   });
@@ -292,10 +319,12 @@ if [ "$1" = "--version" ]; then
 fi
 model=""
 schema=""
+output_format="text"
 previous=""
 for arg in "$@"; do
   if [ "$previous" = "--model" ]; then model="$arg"; fi
   if [ "$previous" = "--json-schema" ]; then schema="$arg"; fi
+  if [ "$previous" = "--output-format" ]; then output_format="$arg"; fi
   previous="$arg"
 done
 input="$(cat)"
@@ -303,6 +332,10 @@ if [ "$input" = "report model" ]; then
   printf 'claude-model:%s' "$model"
 elif [ "$input" = "report schema" ]; then
   printf 'claude-schema:%s' "$schema"
+elif [ "$output_format" = "stream-json" ]; then
+  printf '%s\\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"rg -n account src"}}]}}'
+  printf '%s\\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"result\\":\\"hidden final JSON\\"}"}]}}'
+  printf '%s\\n' '{"type":"result","subtype":"success","result":"claude:name this","usage":{"input_tokens":120,"output_tokens":8}}'
 else
   printf 'claude:%s' "$input"
 fi

@@ -52,6 +52,11 @@ names such as `unknown`, `invalid`, or `unsupported`. A real retired name may
 appear in a test only when the product intentionally supports a migration,
 compatibility warning, or tailored error for that exact legacy input.
 
+Tests for AI prompts must assert durable contracts and invariants, not prompt
+prose. Verify structured inputs, schemas, configured values, delimiters,
+validation behavior, and generated outputs. Do not assert exact instructional
+phrases, section titles, or explanatory wording inside prompts.
+
 ## Parallel Multi-Agent Workflow
 
 When a task can be split safely across multiple agents, use Workforest tasks

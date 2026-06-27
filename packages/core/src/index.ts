@@ -104,7 +104,7 @@ export type AiProgressEvent =
   | { type: "diagnostic"; source: string; message: string }
   | { type: "error"; source: string; message: string };
 
-export type AiModelCategory = "mini";
+export type AiModelCategory = "generate-context";
 
 export type AiTextGenerationRequest = {
   prompt: string;
@@ -409,6 +409,9 @@ export type CliRunOptions = {
   env: SpawnEnvironment;
   input?: string;
   timeoutMs: number;
+  timeoutKillGraceMs?: number;
+  onOutput?: (stream: "stdout" | "stderr", data: string) => void;
+  onDebug?: (message: string) => void;
 };
 
 export type CliRunResult = {
@@ -418,6 +421,7 @@ export type CliRunResult = {
 };
 
 const CLI_STDERR_TAIL_CHARS = 4096;
+const CLI_TIMEOUT_KILL_GRACE_MS = 5000;
 
 export async function commandAvailable(
   command: string,
@@ -449,32 +453,53 @@ export function runCli(
     const stdout: string[] = [];
     const stderr = new TailBuffer(CLI_STDERR_TAIL_CHARS);
     let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const startedAt = Date.now();
 
     const timer = setTimeout(() => {
       timedOut = true;
+      options.onDebug?.(
+        `${command} timed out after ${options.timeoutMs}ms; sending SIGTERM to pid ${child.pid ?? "(unknown)"}.`,
+      );
       child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        options.onDebug?.(
+          `${command} did not exit after SIGTERM; sending SIGKILL to pid ${child.pid ?? "(unknown)"}.`,
+        );
+        child.kill("SIGKILL");
+      }, options.timeoutKillGraceMs ?? CLI_TIMEOUT_KILL_GRACE_MS);
     }, options.timeoutMs);
+    options.onDebug?.(
+      `${command} spawned pid ${child.pid ?? "(unknown)"} in ${options.cwd} with timeout ${options.timeoutMs}ms.`,
+    );
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
 
     child.stdout.on("data", (chunk: string) => {
       stdout.push(chunk);
+      options.onOutput?.("stdout", chunk);
     });
     child.stderr.on("data", (chunk: string) => {
       stderr.append(chunk);
+      options.onOutput?.("stderr", chunk);
     });
 
     child.on("error", (error) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       reject(error);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      options.onDebug?.(
+        `${command} exited with code ${code ?? "(signal)"} after ${Date.now() - startedAt}ms.`,
+      );
       if (timedOut) {
         reject(
           new Error(
-            `${command} timed out after ${options.timeoutMs}ms. Increase WORKFOREST_AI_TIMEOUT_MS if this is expected.`,
+            `${command} timed out after ${options.timeoutMs}ms and exited after forced termination. Increase WORKFOREST_AI_TIMEOUT_MS if this is expected.`,
           ),
         );
         return;

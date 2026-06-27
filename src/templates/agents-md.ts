@@ -2,13 +2,17 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs, constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AiModelCategory, AiProgressEvent } from "@wf-plugin/core";
+import {
+  type AiModelCategory,
+  type AiProgressEvent,
+  pathExists,
+} from "@wf-plugin/core";
 import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { generateText, getAiStatus } from "../services/ai/index.ts";
 import { runGit } from "../services/git.ts";
 import type { RepoConfig, TemplateAgentsMdConfig } from "../types.ts";
-import { ensureDir, pathExists } from "../utils/fs.ts";
+import { ensureDir } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import { ensureMirrorRepoGenerator } from "../workspace/repository.ts";
 import type { Template } from "./index.ts";
@@ -18,7 +22,7 @@ export const AGENTS_MD_MANIFEST_VERSION = 1;
 const MANIFEST_FILE = "manifest.json";
 const ARTIFACT_DIR = "agents-md";
 const MAX_GUIDANCE_LENGTH = 16_000;
-const AGENTS_MD_MODEL_CATEGORY: AiModelCategory = "mini";
+const AGENTS_MD_MODEL_CATEGORY: AiModelCategory = "generate-context";
 const AGENTS_MD_MIN_AI_TIMEOUT_MS = 10 * 60_000;
 
 export type TemplateAgentsMdState =
@@ -149,7 +153,7 @@ export async function refreshTemplateAgentsMd(
   try {
     const ai = await getAiStatus({
       cwd: sources.root,
-      modelCategory: AGENTS_MD_MODEL_CATEGORY,
+      category: AGENTS_MD_MODEL_CATEGORY,
     });
     const provider = ai.selectedProvider ?? "configured AI provider";
     const timeoutMs = Math.max(ai.timeoutMs, AGENTS_MD_MIN_AI_TIMEOUT_MS);
@@ -159,7 +163,7 @@ export async function refreshTemplateAgentsMd(
     const markdown = validateGeneratedMarkdown(
       await generateText({
         cwd: sources.root,
-        modelCategory: AGENTS_MD_MODEL_CATEGORY,
+        category: AGENTS_MD_MODEL_CATEGORY,
         timeoutMs,
         prompt: generationPrompt(template, config, sources),
         ...(options.onEvent ? { onEvent: options.onEvent } : {}),
@@ -437,18 +441,28 @@ async function resolveDefaultRef(
 
 function validateGeneratedMarkdown(markdown: string): string {
   const trimmed = markdown.trim();
-  if (!trimmed || trimmed.length > MAX_GUIDANCE_LENGTH)
-    throw new Error("Generated markdown is missing or excessive.");
-  if (!trimmed.startsWith("# "))
-    throw new Error("Generated guidance must start with a Markdown heading.");
-  if (
-    trimmed.startsWith("{") ||
-    trimmed.startsWith("[") ||
-    /^```(?:markdown|md)?\s*\n[\s\S]*\n```$/i.test(trimmed)
-  )
-    throw new Error("Generated guidance must be raw AGENTS.md markdown.");
-  rejectUnsafeContent(trimmed);
-  return trimmed;
+  if (!trimmed) throw new Error("Generated guidance is missing.");
+  const normalized = extractTaggedMarkdown(trimmed);
+  if (!normalized || normalized.length > MAX_GUIDANCE_LENGTH)
+    throw new Error("Generated guidance is missing or excessive.");
+  if (normalized.startsWith("{") || normalized.startsWith("["))
+    throw new Error("Generated guidance must be raw AGENTS.md content.");
+  // Fail closed only for output that is unsafe or structurally unusable.
+  // Formatting preferences are prompt-steered because the file is read by
+  // coding agents, not rendered as human documentation.
+  rejectUnsafeContent(normalized);
+  return normalized;
+}
+
+function extractTaggedMarkdown(value: string): string {
+  const matches = [
+    ...value.matchAll(/<agents_md>\s*([\s\S]*?)\s*<\/agents_md>/gi),
+  ];
+  if (matches.length !== 1)
+    throw new Error(
+      "Generated guidance must include exactly one <agents_md> block.",
+    );
+  return matches[0]?.[1]?.trim() ?? "";
 }
 
 function rejectUnsafeContent(value: string): void {
@@ -482,7 +496,7 @@ function generationPrompt(
     .join("\n");
 
   return [
-    `You are drafting the Markdown body for the root AGENTS.md for Workforest template \`${template.id}\`. It will later be copied to workspace roots and read by coding agents before edits.`,
+    `You are drafting the compact instruction body for the root AGENTS.md for Workforest template \`${template.id}\`. It will later be copied to workspace roots and read by coding agents before edits.`,
     [
       "Operating context:",
       "A Workforest workspace is a local working directory created from a template, with related repository checkouts side-by-side and a root AGENTS.md above them.",
@@ -513,16 +527,34 @@ function generationPrompt(
       "- Stop exploring and draft once you can name the owning repo, first files, governing AGENTS.md files, cross-repository handoff, and verification lane for the focused workflow. Do not inspect another file just to make the guide more complete.",
     ].join("\n"),
     [
-      "Write the final AGENTS.md directly. Output only Markdown for the file body.",
+      "Final response contract:",
+      "The final answer must contain exactly one `<agents_md>` block. Workforest always extracts and publishes only the text inside that block. If the block is missing or repeated, refresh fails.",
+      'When ready to answer, return the block directly without preamble. Do not start the final response with phrases like "Here is", "Based on", "I have enough", or "Now I".',
+      "The content inside the block is for another LLM, not for rendered documentation. Write compact plain agent guidance.",
       "Do not create, edit, or request permission to write files. The checked-out repositories are read-only evidence for this drafting run. Workforest will write the artifact after your final answer.",
-      "Do not return JSON, YAML frontmatter, whole-response code fences, citations metadata, analysis notes, or generation/expiry metadata.",
+      "Do not return JSON, YAML frontmatter, code fences, citations metadata, analysis notes, or generation/expiry metadata.",
     ].join("\n"),
     [
-      "Required shape:",
-      `- Start with \`# Workspace guidance for ${template.id}\`.`,
+      "Required content:",
+      `- Identify this as guidance for template \`${template.id}\` without using a Markdown heading.`,
       "- Keep it compact enough to be useful at the start of an agent session; optimize for fast routing, not broad education.",
-      "- Include sections for scope, in-scope paths, cross-repository flow, task routing hints, reusable exploration recipes, verified commands, and existing AGENTS.md instructions.",
+      "- Cover scope, in-scope paths, cross-repository flow, task routing hints, reusable exploration recipes, verified commands, and existing AGENTS.md instructions.",
       "- Use repo-prefixed paths like `front/path/to/file.ts` so agents can jump directly to the right files.",
+    ].join("\n"),
+    [
+      "Output style for an LLM reader:",
+      "- Markdown is visual chrome. Do not use Markdown headings, tables, fenced code blocks, decorative file trees, bold, italics, horizontal rules, or blank lines used only for visual spacing.",
+      "- Prefer dense labeled lines, short paragraphs, comma-separated inline lists, and colon-delimited key-value lines. Factor repeated path prefixes once, then list relative files.",
+      "- Write commands as single lines like `front/: pnpm type-check -F vercel-site`, not fenced shell blocks.",
+      "- Every token must route future agents faster; omit visual formatting that only helps human scanning.",
+    ].join("\n"),
+    [
+      "Final response example:",
+      "<agents_md>",
+      `Template: ${template.id}. Purpose: route agents through the configured workflow without duplicating repository AGENTS.md files.`,
+      "Scope: Start in `repo/path` for the primary owner; follow `other-repo/path` for the cross-repository handoff.",
+      "Commands: `repo/: pnpm test`; `other-repo/: pnpm typecheck`.",
+      "</agents_md>",
     ].join("\n"),
     [
       "Quality bar:",
