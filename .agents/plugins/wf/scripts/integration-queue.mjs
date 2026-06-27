@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import process from "node:process";
 
 const QUEUE_PREFIX = "refs/workforest/integration-ready";
@@ -26,6 +26,15 @@ function runGitAllowEmpty(args, options = {}) {
   }
 }
 
+function runCommand(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    stdio: "inherit",
+    ...options,
+  });
+  if (result.error) throw result.error;
+  return result.status ?? 1;
+}
+
 function gitSucceeds(args, options = {}) {
   try {
     runGit(args, options);
@@ -40,6 +49,18 @@ function gitSucceeds(args, options = {}) {
 
 function currentBranch() {
   return runGit(["branch", "--show-current"]);
+}
+
+function assertCleanWorktree() {
+  const status = runGitAllowEmpty(["status", "--short"]);
+  if (!status) return;
+  throw new Error(
+    [
+      "Cannot enqueue with a dirty working tree.",
+      "Commit, stash, or discard the following changes, then rerun enqueue:",
+      status,
+    ].join("\n"),
+  );
 }
 
 function shortRefName(ref) {
@@ -138,6 +159,34 @@ function assertQueueableBranch(branch) {
   }
 }
 
+function validateBranchForEnqueue(branch, branchArg) {
+  const checkedOutBranch = currentBranch();
+  if (!checkedOutBranch) {
+    throw new Error("Cannot enqueue a detached HEAD without checking out a branch.");
+  }
+  if (branchArg && branch !== checkedOutBranch) {
+    throw new Error(
+      [
+        `Cannot validate ${branch} from checked-out branch ${checkedOutBranch}.`,
+        `Switch to ${branch} or run enqueue from that branch's worktree.`,
+      ].join("\n"),
+    );
+  }
+
+  assertCleanWorktree();
+  console.error("Running validation: pnpm check");
+  const status = runCommand("pnpm", ["check"]);
+  if (status !== 0) {
+    throw new Error(
+      [
+        `Validation failed for ${branch}: pnpm check exited with code ${status}.`,
+        "Fix the reported errors, commit the fixes, and rerun enqueue.",
+      ].join("\n"),
+    );
+  }
+  assertCleanWorktree();
+}
+
 function findEntry(identifier) {
   const entries = queueEntries();
   const exactEntry =
@@ -169,6 +218,7 @@ function enqueue(branchArg) {
     throw new Error("Cannot enqueue a detached HEAD without an explicit branch name.");
   }
   assertQueueableBranch(branch);
+  validateBranchForEnqueue(branch, branchArg);
 
   const sha = branchArg
     ? runGit(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])
