@@ -82,7 +82,7 @@ describe("shell integration", () => {
     expect(script).toContain("_workforest_complete()");
     expect(script).toContain("complete -F _workforest_complete wf workforest");
     expect(script).toContain(
-      "_workforest_complete_words 'templates tasks reviews dashboard start list status add switch finish delete ai migrate task cache review template shell config skills help version'",
+      "_workforest_complete_words 'templates tasks reviews dashboard start list status add switch finish delete ai migrate task cache worktree review template shell config skills help version'",
     );
     expect(script).toContain(
       "_workforest_complete_words 'start list finish delete'",

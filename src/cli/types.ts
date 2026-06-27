@@ -1,4 +1,5 @@
-export type ExitCode = 0 | 1 | 2;
+/** Exit status returned by a Workforest command or delegated subprocess. */
+export type ExitCode = number;
 
 export type CliErrorKind = "operational" | "usage";
 

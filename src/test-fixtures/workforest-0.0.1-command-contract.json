@@ -47,6 +47,10 @@
       "summary": "Manage cached repositories"
     },
     {
+      "name": "worktree",
+      "summary": "Manage worktrees in cached repositories"
+    },
+    {
       "name": "review",
       "summary": "Manage review workspaces and PR worktrees"
     },
@@ -75,7 +79,8 @@
       "summary": "Print the workforest version"
     }
   ],
-  "removedRootCommands": ["new", "clean", "workspace", "worktree"],
+  "removedRootCommands": ["new", "clean", "workspace"],
+  "worktreeSubcommands": ["list", "add", "move", "remove"],
   "templateSubcommands": {
     "list": [],
     "show": [],

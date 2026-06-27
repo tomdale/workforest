@@ -22,6 +22,7 @@ describe("shell command model", () => {
       "migrate",
       "task",
       "cache",
+      "worktree",
       "review",
       "template",
       "shell",
@@ -39,6 +40,9 @@ describe("shell command model", () => {
     const model = createShellCommandModel(commandRegistry);
     const task = model.commands.find((command) => command.name === "task");
     const start = task?.children.find((command) => command.name === "start");
+    const worktree = model.commands.find(
+      (command) => command.name === "worktree",
+    );
 
     expect(task?.children.map((command) => command.name)).toEqual([
       "start",
@@ -52,6 +56,13 @@ describe("shell command model", () => {
       "--force",
       "--json",
     ]);
+    expect(worktree?.children.map((command) => command.name)).toEqual([
+      "list",
+      "add",
+      "move",
+      "remove",
+    ]);
+    expect(worktree?.children.flatMap((command) => command.flags)).toEqual([]);
   });
 
   it("derives the wrapper handoff roots from leaf metadata", () => {

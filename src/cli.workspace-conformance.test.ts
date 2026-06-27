@@ -11,6 +11,7 @@ describe("change CLI conformance", () => {
     [["status", "--help"], "Usage: wf status"],
     [["finish", "--help"], "Usage: wf finish"],
     [["delete", "--help"], "Usage: wf delete"],
+    [["worktree", "--help"], "Usage: wf worktree"],
   ])("renders scoped help for %j", async (argv, usage) => {
     const result = await executeCli(argv);
 
@@ -28,9 +29,8 @@ describe("change CLI conformance", () => {
     [["clean"], "Unknown command: clean"],
     [["workspace"], "Unknown command: workspace"],
     [["workspace", "create"], "Unknown command: workspace"],
-    [["worktree"], "Unknown command: worktree"],
-    [["worktree", "create"], "Unknown command: worktree"],
     [["task", "create"], "Unknown wf task subcommand: create"],
+    [["worktree", "create"], "Unknown wf worktree subcommand: create"],
   ])("returns exit 2 for removed invocation %j", async (argv, message) => {
     const result = await executeCli(argv);
     const output = renderResult(result);

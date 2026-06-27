@@ -394,6 +394,11 @@ async function runInvocation(
     return runCacheInvocation(invocation);
   }
 
+  if (invocation.command.leaf.handler.startsWith("worktree.")) {
+    const { runWorktreeInvocation } = await import("./repository-cli.ts");
+    return runWorktreeInvocation(invocation);
+  }
+
   if (invocation.command.leaf.handler.startsWith("task.")) {
     return runTaskInvocation(invocation);
   }
@@ -523,6 +528,7 @@ async function runTypedCommand(
 }
 
 function requestsJsonOutput(argv: readonly string[]): boolean {
+  if (argv[0] === "worktree") return false;
   const delimiter = argv.indexOf("--");
   const flags = delimiter === -1 ? argv : argv.slice(0, delimiter);
   return flags.some(

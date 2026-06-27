@@ -15,6 +15,7 @@ type PublishedContract = {
   rootCommands: CommandContractEntry[];
   removedRootCommands: string[];
   templateSubcommands: Record<string, string[]>;
+  worktreeSubcommands: string[];
 };
 
 const tempDirs: string[] = [];
@@ -41,6 +42,7 @@ describe("final command contract", () => {
       "migrate",
       "task",
       "cache",
+      "worktree",
       "review",
       "template",
       "shell",
@@ -49,11 +51,12 @@ describe("final command contract", () => {
       "help",
       "version",
     ]);
-    expect(contract.removedRootCommands).toEqual([
-      "new",
-      "clean",
-      "workspace",
-      "worktree",
+    expect(contract.removedRootCommands).toEqual(["new", "clean", "workspace"]);
+    expect(contract.worktreeSubcommands).toEqual([
+      "list",
+      "add",
+      "move",
+      "remove",
     ]);
   });
 

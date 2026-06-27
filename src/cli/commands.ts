@@ -115,6 +115,8 @@ function leaf(options: {
   tty?: TtyRequirement;
   shellHandoff?: ShellHandoff;
   visibility?: Visibility;
+  /** Opt out of the normal global JSON envelope for native command streams. */
+  supportsJson?: boolean;
 }): CommandLeaf {
   return {
     kind: "leaf",
@@ -131,6 +133,7 @@ function leaf(options: {
     outputModes: normalizeOutputModes(
       options.outputModes ?? ["human"],
       options.visibility ?? visible,
+      options.supportsJson ?? true,
     ),
     tty: options.tty ?? noTty,
     shellHandoff: options.shellHandoff ?? "none",
@@ -141,8 +144,10 @@ function leaf(options: {
 function normalizeOutputModes(
   modes: readonly OutputMode[],
   visibility: Visibility,
+  supportsJson: boolean,
 ): readonly OutputMode[] {
-  if (visibility !== "visible" || modes.includes("json")) return modes;
+  if (visibility !== "visible" || !supportsJson || modes.includes("json"))
+    return modes;
   return [...modes, "json"];
 }
 
@@ -1118,6 +1123,114 @@ export const commandRegistry: CommandRegistry = {
             ],
             outputModes: ["report", "json"],
             tty: optionalStdin,
+          }),
+        ],
+      }),
+      group({
+        name: "worktree",
+        path: ["worktree"],
+        summary: "Manage worktrees in cached repositories",
+        description:
+          "Runs a small fixed set of Git worktree operations against existing cached bare mirrors. These commands do not create or sync mirrors, write Workforest metadata, run setup or hooks, or filter Workforest-managed worktrees.",
+        help: { kind: "command", command: "worktree" },
+        children: [
+          leaf({
+            name: "list",
+            path: ["worktree", "list"],
+            summary: "List registered worktrees",
+            description:
+              "Lists every Git-registered worktree for an existing cached mirror, including Workforest-managed worktrees.",
+            handler: "worktree.list",
+            help: nestedHelp("worktree", "list"),
+            operands: operands(
+              1,
+              1,
+              "cached repository",
+              undefined,
+              "A cached repo name, `org/repo` shorthand, full Git URL, or cache directory name.",
+            ),
+            examples: [{ command: "wf worktree list vercel/front" }],
+            outputModes: ["human"],
+            supportsJson: false,
+          }),
+          leaf({
+            name: "add",
+            path: ["worktree", "add"],
+            summary: "Add a worktree on a new branch",
+            description:
+              "Creates a worktree at the requested path on a new branch from the cached mirror's current HEAD. When branch is omitted, Git derives it from the destination directory name.",
+            handler: "worktree.add",
+            help: nestedHelp("worktree", "add"),
+            operands: operands(
+              2,
+              3,
+              "arguments",
+              "<cached repository> <path> [branch]",
+              "An existing cached repository, destination path, and optional new branch name.",
+            ),
+            examples: [
+              {
+                command: "wf worktree add vercel/front ~/Code/front-fix-auth",
+                description:
+                  "Let Git derive the new branch name from front-fix-auth.",
+              },
+              {
+                command:
+                  "wf worktree add vercel/front ~/Code/front-fix-auth tomdale/fix-auth",
+                description:
+                  "Create the worktree on an explicitly named branch.",
+              },
+            ],
+            outputModes: ["human"],
+            supportsJson: false,
+          }),
+          leaf({
+            name: "move",
+            path: ["worktree", "move"],
+            summary: "Move a registered worktree",
+            description:
+              "Moves a registered worktree to a new path using Git's standard safety checks.",
+            handler: "worktree.move",
+            help: nestedHelp("worktree", "move"),
+            operands: operands(
+              3,
+              3,
+              "arguments",
+              "<cached repository> <path> <new path>",
+              "An existing cached repository, registered worktree path, and destination path.",
+            ),
+            examples: [
+              {
+                command:
+                  "wf worktree move vercel/front ~/Code/front-fix-auth ~/Code/front-auth-fix",
+              },
+            ],
+            outputModes: ["human"],
+            supportsJson: false,
+          }),
+          leaf({
+            name: "remove",
+            path: ["worktree", "remove"],
+            summary: "Remove a registered worktree",
+            description:
+              "Removes a clean registered worktree using Git's standard safety checks. The branch is left intact.",
+            handler: "worktree.remove",
+            help: nestedHelp("worktree", "remove"),
+            operands: operands(
+              2,
+              2,
+              "arguments",
+              "<cached repository> <path>",
+              "An existing cached repository and registered worktree path.",
+            ),
+            examples: [
+              {
+                command:
+                  "wf worktree remove vercel/front ~/Code/front-fix-auth",
+              },
+            ],
+            outputModes: ["human"],
+            supportsJson: false,
           }),
         ],
       }),

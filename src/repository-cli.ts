@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { OperationalError, UsageError } from "./cli/errors.ts";
 import {
   failure,
@@ -68,6 +69,73 @@ export async function runCacheInvocation(
         `Unsupported cache handler: ${invocation.command.leaf.handler}`,
       );
   }
+}
+
+/** Run fixed Git worktree primitives without applying Workforest lifecycle rules. */
+export async function runWorktreeInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  if (flag(invocation, "json")) {
+    throw new UsageError('Flag "--json" is not supported by wf worktree.');
+  }
+
+  const [selector, ...operands] = invocation.beforeDoubleDash;
+  if (!selector) {
+    throw new Error("The CLI kernel accepted an invalid worktree invocation.");
+  }
+
+  let args: readonly string[];
+  switch (invocation.command.leaf.handler) {
+    case "worktree.list":
+      args = ["list"];
+      break;
+    case "worktree.add": {
+      const [worktreePath, branch] = operands;
+      if (!worktreePath) {
+        throw new Error(
+          "The CLI kernel accepted an invalid worktree add invocation.",
+        );
+      }
+      args = branch
+        ? ["add", "-b", branch, worktreePath]
+        : ["add", worktreePath];
+      break;
+    }
+    case "worktree.move":
+      args = ["move", ...operands];
+      break;
+    case "worktree.remove":
+      args = ["remove", ...operands];
+      break;
+    default:
+      throw new Error(
+        `Unsupported worktree handler: ${invocation.command.leaf.handler}`,
+      );
+  }
+
+  const repository = await requireRepository(selector);
+  const exitCode = await runGitWorktree(repository.mirrorPath, args);
+  return exitCode === 0 ? success() : failure(exitCode, { kind: "none" });
+}
+
+async function runGitWorktree(
+  mirrorPath: string,
+  args: readonly string[],
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["worktree", ...args], {
+      cwd: mirrorPath,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code !== null) {
+        resolve(code);
+      } else {
+        resolve(signal ? 1 : 0);
+      }
+    });
+  });
 }
 
 async function runCacheList(json: boolean): Promise<CommandResult> {

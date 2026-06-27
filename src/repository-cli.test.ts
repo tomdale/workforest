@@ -13,7 +13,7 @@ const originalCacheDir = process.env["WORKFOREST_CACHE_DIR"];
 const tempDirs: string[] = [];
 
 type CliResult = {
-  exitCode: 0 | 1 | 2;
+  exitCode: number;
   stdout: string;
   stderr: string;
 };

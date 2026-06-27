@@ -85,9 +85,6 @@ describe("resolveCommand", () => {
     expect(() => resolveCommand(commandRegistry, ["workspace"])).toThrow(
       "Unknown command: workspace",
     );
-    expect(() => resolveCommand(commandRegistry, ["worktree"])).toThrow(
-      "Unknown command: worktree",
-    );
     expect(() => resolveCommand(commandRegistry, ["task", "create"])).toThrow(
       "Unknown wf task subcommand: create",
     );
