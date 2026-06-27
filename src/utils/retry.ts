@@ -75,33 +75,6 @@ export async function* withRetryGenerator<T>(
   throw lastError ?? new Error(`${label} failed after ${attempts} attempts.`);
 }
 
-/**
- * @deprecated Use withRetryGenerator for generator-based tasks.
- * Promise-based retry for backwards compatibility.
- */
-export async function withRetry<T>(
-  task: () => Promise<T>,
-  { attempts, label }: RetryOptions,
-): Promise<T> {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      return await task();
-    } catch (error_) {
-      lastError = error_;
-      const delay = attempt * 1000;
-      if (attempt < attempts) {
-        // In non-generator context, warnings are silently dropped
-        // Callers should migrate to withRetryGenerator
-        await wait(delay);
-      }
-    }
-  }
-
-  throw lastError ?? new Error(`${label} failed after ${attempts} attempts.`);
-}
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
