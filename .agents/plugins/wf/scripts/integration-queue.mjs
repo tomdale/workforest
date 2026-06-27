@@ -187,6 +187,16 @@ function validateBranchForEnqueue(branch, branchArg) {
   assertCleanWorktree();
 }
 
+function pruneQueuedBranchEntries(branch, keepRefName) {
+  const removedRefs = [];
+  for (const entry of queueEntries()) {
+    if (entry.branch !== branch || entry.id === keepRefName) continue;
+    runGit(["update-ref", "-d", entry.id]);
+    removedRefs.push(entry.id);
+  }
+  return removedRefs;
+}
+
 function findEntry(identifier) {
   const entries = queueEntries();
   const exactEntry =
@@ -229,7 +239,8 @@ function enqueue(branchArg) {
   const timestamp = ensureUniqueTimestamp(branch);
   const refName = refNameFor(branch, timestamp);
   runGit(["update-ref", refName, sha]);
-  return { branch, sha, refName, timestamp };
+  const removedRefs = pruneQueuedBranchEntries(branch, refName);
+  return { branch, sha, refName, timestamp, removedRefs };
 }
 
 function refresh(identifier) {
