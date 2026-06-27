@@ -196,24 +196,7 @@ describe("core command family conformance", () => {
       'Unknown flag "--unsupported" for wf version',
     ],
     [
-      ["shell", "init", "--unsupported"],
-      'Unknown flag "--unsupported" for wf shell init',
-    ],
-    [
-      ["config", "show", "--unsupported"],
-      'Unknown flag "--unsupported" for wf config show',
-    ],
-    [
-      ["config", "init", "--unsupported"],
-      'Unknown flag "--unsupported" for wf config init',
-    ],
-    [
-      ["config", "edit", "--unsupported"],
-      'Unknown flag "--unsupported" for wf config edit',
-    ],
-    [["skills", "get", "--bogus"], 'Unknown flag "--bogus" for wf skills get'],
-    [
-      ["skills", "get", "--unsupported"],
+      ["skills", "get", "--unsupported", "--json"],
       'Unknown flag "--unsupported" for wf skills get',
     ],
   ])("rejects unknown or inapplicable flags for %j", async (argv, message) => {

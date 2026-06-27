@@ -110,12 +110,14 @@ describe("dashboard rendering", () => {
     expect(selected.operationMessage).toBe("Opened Cache");
   });
 
-  it("renders a plain dashboard fallback report", () => {
+  it("renders the selected route and its actions in the fallback report", () => {
     const report = renderDashboardReport(getDashboardRoute("templates"));
+    const lines = report.split("\n");
 
-    expect(report).toContain("Workforest Templates");
-    expect(report).toContain("Templates dashboard");
-    expect(report).toContain("Operations");
-    expect(report).toContain("Interactive dashboard opens in a capable TTY");
+    expect(lines[0]).toBe("Workforest Templates");
+    expect(report).toContain("Route");
+    expect(report).toContain("Actions");
+    expect(report).toContain("wf templates");
+    expect(report).toContain("wf template new");
   });
 });

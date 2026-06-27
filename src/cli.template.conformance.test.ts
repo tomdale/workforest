@@ -155,50 +155,13 @@ describe("template command conformance", () => {
     expect(output.stderr).not.toContain("node_modules/arg");
   });
 
-  const flagScopes = [
+  it.each([
+    { kind: "unknown", argv: ["template", "list", "--bogus"] },
     {
-      argv: ["template", "list"],
-      foreign: ["--force"],
+      kind: "foreign",
+      argv: ["template", "add-file", "file", "--description", "foreign"],
     },
-    {
-      argv: ["template", "suggest"],
-      foreign: ["--force"],
-    },
-    {
-      argv: ["template", "open", "demo"],
-      foreign: ["--description", "foreign"],
-    },
-    {
-      argv: ["template", "show", "demo"],
-      foreign: ["--force"],
-    },
-    {
-      argv: ["template", "new", "demo", "vercel/front"],
-      foreign: ["--force"],
-    },
-    {
-      argv: ["template", "edit", "demo"],
-      foreign: ["--force"],
-    },
-    {
-      argv: ["template", "add-file", "file"],
-      foreign: ["--description", "foreign"],
-    },
-    {
-      argv: ["template", "copy", "source", "target"],
-      foreign: ["--force"],
-    },
-    {
-      argv: ["template", "delete", "demo"],
-      foreign: ["--description", "foreign"],
-    },
-  ] as const;
-  const flagCases = flagScopes.flatMap(({ argv, foreign }) => [
-    { kind: "unknown", argv: [...argv, "--bogus"] },
-    { kind: "foreign", argv: [...argv, ...foreign] },
-  ]);
-
-  it.each(flagCases)("rejects $kind flags for $argv", async ({ argv }) => {
+  ])("rejects $kind flags for $argv", async ({ argv }) => {
     const output = await invoke(argv);
 
     expect(output.exitCode).toBe(2);

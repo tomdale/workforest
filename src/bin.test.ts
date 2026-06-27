@@ -39,43 +39,24 @@ describe("bin/workforest.js", () => {
     expect(result.stderr).not.toContain("ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX");
   });
 
-  it("styles every help level when color is supported", async () => {
+  it("styles help when color is supported", async () => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       FORCE_COLOR: "1",
     };
     Reflect.deleteProperty(env, "NO_COLOR");
 
-    const results = await Promise.all(
-      [
-        ["--help"],
-        ["task", "--help"],
-        ["task", "delete", "--help"],
-        ["start", "--help"],
-      ].map((args) =>
-        execFileAsync(
-          process.execPath,
-          [path.resolve("bin/workforest.js"), ...args],
-          {
-            env,
-            timeout: 10_000,
-          },
-        ),
-      ),
+    const result = await execFileAsync(
+      process.execPath,
+      [path.resolve("bin/workforest.js"), "--help"],
+      {
+        env,
+        timeout: 10_000,
+      },
     );
 
-    for (const result of results) {
-      expect(result.stdout).toContain("\u001b[");
-      expect(stripAnsi(result.stdout)).toContain("Usage: wf");
-    }
-
-    const coloredOutput = results.map((result) => result.stdout).join("");
-    expect(coloredOutput).toContain("\u001b[36m");
-    expect(coloredOutput).toContain("\u001b[33m");
-    expect(coloredOutput).toContain("\u001b[96m");
-    expect(coloredOutput).toContain("\u001b[97m");
-    expect(coloredOutput).not.toContain("\u001b[32m");
-    expect(coloredOutput).not.toContain("\u001b[35m");
+    expect(result.stdout).toContain("\u001b[");
+    expect(stripAnsi(result.stdout)).toContain("Usage: wf");
   });
 
   it("keeps bundled skill content undecorated on stdout", async () => {

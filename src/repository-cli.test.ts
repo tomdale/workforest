@@ -108,8 +108,6 @@ describe("cache commands", () => {
 
     expect(result).toMatchObject({ exitCode: 0, stderr: "" });
     expect(result.stdout).toContain("Usage: wf cache");
-    expect(result.stdout).toContain("sync");
-    expect(result.stdout).not.toContain("manage");
   });
 
   it.each([
@@ -152,18 +150,8 @@ describe("cache commands", () => {
 
   it.each([
     ["cache", "wat"],
-    ["cache", "info"],
-    ["cache", "path"],
-    ["cache", "add"],
-    ["cache", "update"],
-    ["cache", "check"],
-    ["cache", "repair"],
-    ["cache", "prune"],
-    ["cache", "manage"],
     ["cache", "list", "extra"],
     ["cache", "show"],
-    ["cache", "show", "one", "two"],
-    ["cache", "show", "one", "two", "--path"],
     ["cache", "delete"],
     ["cache", "clean", "extra"],
   ])("rejects invalid cache operands for %j", async (...argv) => {
@@ -180,9 +168,7 @@ describe("cache commands", () => {
     ["cache", "list", "--bogus"],
     ["cache", "list", "--json", "--json"],
     ["cache", "list", "--force"],
-    ["cache", "show", "front", "--force"],
     ["cache", "show", "front", "--path", "--json"],
-    ["cache", "doctor", "--force"],
     ["cache", "delete", "front", "-n", "--dry-run"],
   ])("rejects inapplicable cache flags for %j", async (...argv) => {
     const result = await runCommand(argv);

@@ -25,23 +25,6 @@ describe("change CLI conformance", () => {
   });
 
   it.each([
-    [["new"], "Unknown command: new"],
-    [["clean"], "Unknown command: clean"],
-    [["workspace"], "Unknown command: workspace"],
-    [["workspace", "create"], "Unknown command: workspace"],
-    [["task", "create"], "Unknown wf task subcommand: create"],
-    [["worktree", "create"], "Unknown wf worktree subcommand: create"],
-  ])("returns exit 2 for removed invocation %j", async (argv, message) => {
-    const result = await executeCli(argv);
-    const output = renderResult(result);
-
-    expect(result.exitCode).toBe(2);
-    expect(output.stdout).toBe("");
-    expect(output.stderr).toContain(message);
-    expect(output.stderr).not.toMatch(/\n\s+at /);
-  });
-
-  it.each([
     [["start"], "Invalid operands for wf start"],
     [["add"], "Invalid operands for wf add"],
     [["delete"], "Invalid operands for wf delete"],

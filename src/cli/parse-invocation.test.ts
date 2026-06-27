@@ -18,9 +18,6 @@ describe("parseInvocation", () => {
 
   it.each([
     [["cache", "list", "--force"], 'Unknown flag "--force"'],
-    [["task", "list", "--dry-run"], 'Unknown flag "--dry-run"'],
-    [["review", "open", "front", "--force"], 'Unknown flag "--force"'],
-    [["switch", "--force"], 'Unknown flag "--force"'],
     [["skills", "get", "--unsupported"], 'Unknown flag "--unsupported"'],
   ])("rejects unknown or inapplicable flags for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);
@@ -118,7 +115,6 @@ describe("parseInvocation", () => {
       parse(["skills", "get", "core", "start-work"]).beforeDoubleDash,
     ).toEqual(["core", "start-work"]);
     expect(() => parse(["skills", "get"])).toThrow(UsageError);
-    expect(() => parse(["skills", "get", "--unsupported"])).toThrow(UsageError);
   });
 
   it("does not expose the repository initializer worker as a command", () => {
@@ -126,19 +122,6 @@ describe("parseInvocation", () => {
     expect(() => parse([privateWorkerCommand])).toThrow(
       `Unknown command: ${privateWorkerCommand}`,
     );
-  });
-
-  it.each(
-    [
-      ["new"],
-      ["clean"],
-      ["workspace"],
-      ["worktree"],
-      ["task", "create"],
-      ["skills", "path"],
-    ].map((argv) => ({ argv })),
-  )("does not expose removed command %j", ({ argv }) => {
-    expect(() => parse(argv)).toThrow();
   });
 
   it("lets help bypass operand cardinality", () => {

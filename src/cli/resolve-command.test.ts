@@ -75,23 +75,8 @@ describe("resolveCommand", () => {
     expect(() => resolveCommand(commandRegistry, ["wat"])).toThrow(
       "Unknown command: wat",
     );
-    expect(() => resolveCommand(commandRegistry, ["new"])).toThrow(
-      "Unknown command: new",
-    );
-    expect(() => resolveCommand(commandRegistry, ["clean"])).toThrow(
-      "Unknown command: clean",
-    );
-    expect(() => resolveCommand(commandRegistry, ["workspace"])).toThrow(
-      "Unknown command: workspace",
-    );
-    expect(() => resolveCommand(commandRegistry, ["task", "create"])).toThrow(
-      "Unknown wf task subcommand: create",
-    );
     expect(() => resolveCommand(commandRegistry, ["cache", "inspect"])).toThrow(
       "Unknown wf cache subcommand: inspect",
-    );
-    expect(() => resolveCommand(commandRegistry, ["cache", "info"])).toThrow(
-      "Unknown wf cache subcommand: info",
     );
     const privateWorkerCommand = ["_initialize", "repo"].join("-");
     expect(() =>

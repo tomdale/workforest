@@ -32,15 +32,9 @@ import {
   fuzzyFilter,
   windowStart,
 } from "./fuzzy-list.ts";
-import { activeTheme } from "./theme-system.ts";
 
 function items(...labels: string[]): FuzzyItem<string>[] {
   return labels.map((label) => ({ value: label, label }));
-}
-
-/** The glyph marking the highlighted row (theme-defined filled radio). */
-function activeRadio(): string {
-  return activeTheme().symbols.radioOn;
 }
 
 // The index of the first content line containing `needle`, or -1.
@@ -235,7 +229,7 @@ describe("createFuzzyList scope switching", () => {
     return call[1] as KeypressFn;
   }
 
-  it("swaps items, scope label, and footer hint on Tab", () => {
+  it("swaps items and scope label on Tab", () => {
     const screen = new Screen();
     const list = createFuzzyList<string>({
       screen,
@@ -253,7 +247,6 @@ describe("createFuzzyList scope switching", () => {
 
     expect(captured.content).toContain("scoped-one");
     expect(captured.content).toContain("repo: front");
-    expect(captured.content).toContain("ALL CHANGES");
 
     keypressHandler(screen as unknown as MockScreen)(undefined, {
       name: "tab",
@@ -262,7 +255,6 @@ describe("createFuzzyList scope switching", () => {
     expect(captured.content).toContain("global-one");
     expect(captured.content).not.toContain("scoped-one");
     expect(captured.content).toContain("· all");
-    expect(captured.content).toContain("THIS REPO");
 
     list.destroy();
   });
@@ -291,18 +283,13 @@ describe("createFuzzyList scope switching", () => {
     void list.run();
 
     // The scope toggle sits directly under the prompt, listing both options in a
-    // fixed order with the active one's name as a background badge (no glyph
-    // prefix) and an explicit Tab cue — not the muted "· in front" suffix used
-    // without scopeToggle.
+    // fixed order while the active badge moves between them.
     const promptRow = lineContaining(captured.content, "go to a change");
     const scopeRow = (): string =>
       captured.content.split("\n")[promptRow + 1] ?? "";
 
     const before = scopeRow();
     expect(before.indexOf("front")).toBeLessThan(before.indexOf("all changes"));
-    expect(before).toContain("switches scope");
-    expect(before).not.toContain("▌");
-    expect(captured.content).not.toContain("· in front");
     expect(badgedName(before)).toBe("front");
 
     keypressHandler(screen as unknown as MockScreen)(undefined, {

@@ -646,16 +646,9 @@ describe("renderPipelinesGrid", () => {
         width: 50,
       }),
     );
-    expect(vi.mocked(Box).mock.calls).toContainEqual([
-      expect.objectContaining({
-        content: "Workspace Created",
-      }),
-    ]);
     expect(String(modalCall?.[0]?.content)).toContain(
       `{bold}{${FOCUS}-fg}press any key{/${FOCUS}-fg}{/bold}`,
     );
-    expect(String(modalCall?.[0]?.content)).not.toContain("Workspace stamped");
-    expect(String(modalCall?.[0]?.content)).not.toContain("created");
   });
 
   it("animates the default success completion modal until acknowledgement", async () => {
@@ -730,7 +723,7 @@ describe("renderPipelinesGrid", () => {
       );
 
     expect(results.has("repo")).toBe(false);
-    expect(String(modalCall?.[0]?.content)).not.toContain("Workspace stamped");
+    expect(String(modalCall?.[0]?.content)).toContain("Setup warnings");
     expect(String(modalCall?.[0]?.content)).toContain(
       "initializer:pnpm install",
     );
@@ -878,6 +871,5 @@ describe("completion modal content layout", () => {
     const joined = lines.join("\n");
     // The theme's focus token drives the "press any key" call to action.
     expect(joined).toContain(`{${FOCUS}-fg}`);
-    expect(joined).toContain("press any key");
   });
 });

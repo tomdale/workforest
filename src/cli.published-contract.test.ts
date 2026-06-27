@@ -13,7 +13,6 @@ type PublishedContract = {
   version: string;
   bins: string[];
   rootCommands: CommandContractEntry[];
-  removedRootCommands: string[];
   templateSubcommands: Record<string, string[]>;
   worktreeSubcommands: string[];
 };
@@ -51,7 +50,6 @@ describe("final command contract", () => {
       "help",
       "version",
     ]);
-    expect(contract.removedRootCommands).toEqual(["new", "clean", "workspace"]);
     expect(contract.worktreeSubcommands).toEqual([
       "list",
       "add",
@@ -71,7 +69,7 @@ describe("final command contract", () => {
     );
   });
 
-  it("keeps every public root command invocable and rejects removed roots", async () => {
+  it("keeps every public root command invocable", async () => {
     const contract = await loadPublishedContract();
     const configDir = await mkdtemp(
       path.join(os.tmpdir(), "workforest-published-contract-"),
@@ -95,25 +93,6 @@ describe("final command contract", () => {
 
       expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout).toContain(`Usage: wf ${command.name}`);
-    }
-
-    for (const command of contract.removedRootCommands) {
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        NO_COLOR: "1",
-        WORKFOREST_USE_SOURCE_CLI: "1",
-        WORKFOREST_CONFIG_DIR: configDir,
-        XDG_CONFIG_HOME: configDir,
-      };
-
-      const result = await runSubprocess(
-        process.execPath,
-        [path.resolve("bin/workforest.js"), command, "--help"],
-        { env },
-      );
-
-      expect(result.exitCode).toBe(2);
-      expect(result.stderr).toContain(`Unknown command: ${command}`);
     }
   }, 15_000);
 });

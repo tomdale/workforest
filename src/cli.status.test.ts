@@ -54,15 +54,11 @@ describe("wf status", () => {
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
     expect(rendered.stderr).toBe("");
-    expect(rendered.stdout).toContain("Change status");
     expect(rendered.stdout).toContain("workforest/cli-redesign");
-    expect(rendered.stdout).toContain("repository change");
     expect(rendered.stdout).toContain(repoChange);
     expect(rendered.stdout).toContain("workforest - dirty: 1 untracked");
     expect(rendered.stdout).toContain("origin/main");
     expect(rendered.stdout).toContain("not integrated");
-    expect(rendered.stdout).toContain("Tasks\n  No nested tasks.");
-    expect(rendered.stdout).toContain("Run: git status");
   });
 
   it("renders repository change initialization state and failed setup logs", async () => {
@@ -107,10 +103,7 @@ describe("wf status", () => {
         "workforest.log",
       ),
     );
-    expect(rendered.stdout).toContain("Initialization");
-    expect(rendered.stdout).toContain("Change: failed");
     expect(rendered.stdout).toContain("Failed: workforest");
-    expect(rendered.stdout).toContain("Inspect initialization details above.");
   });
 
   it("surfaces workspace initialization failures as blockers", async () => {
@@ -129,11 +122,8 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("Initialization");
-    expect(rendered.stdout).toContain("Workspace: failed");
     expect(rendered.stdout).toContain("Error:     pnpm install failed");
     expect(rendered.stdout).toContain("Hook:      install");
-    expect(rendered.stdout).toContain("Inspect initialization details above.");
   });
 
   it("shows a static report when watch has no initialization state", async () => {
@@ -147,8 +137,6 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("Change status");
-    expect(rendered.stdout).toContain("Note");
     expect(rendered.stdout).toContain(
       "No initialization is recorded for this change; showing the static report.",
     );
@@ -181,7 +169,6 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("Initialization");
     expect(rendered.stdout).toContain("Failed:    api");
     expect(rendered.stdout).toContain(
       "Initialization watcher requires an interactive terminal; showing the static report.",

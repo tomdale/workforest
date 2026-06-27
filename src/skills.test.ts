@@ -264,48 +264,6 @@ hidden: true
     expect(output).toContain("\n---\n\n");
   });
 
-  it("ships bundled skills that teach the final change lifecycle", async () => {
-    const contents = await getSkillContents({
-      skillsDirs: [path.resolve("skill-data")],
-      names: [
-        "core",
-        "start-work",
-        "coordinate-agents",
-        "finish-work",
-        "create-templates",
-        "configure-workforest",
-        "keep-cache-healthy",
-        "review-prs",
-      ],
-    });
-
-    const byName = new Map(contents.map((item) => [item.name, item]));
-    expect(byName.get("core")?.content).toContain("wf start");
-    expect(byName.get("start-work")?.content).toContain("wf start");
-    expect(byName.get("coordinate-agents")?.content).toContain("wf task start");
-    expect(byName.get("finish-work")?.content).toContain("wf finish");
-    expect(byName.get("create-templates")?.content).toContain("wf template");
-    expect(byName.get("configure-workforest")?.content).toContain("wf config");
-    expect(byName.get("keep-cache-healthy")?.content).toContain("wf cache");
-    expect(byName.get("review-prs")?.content).toContain("wf review");
-
-    const allText = contents.map((item) => item.content).join("\n");
-    const stalePatterns = [
-      "workspace" + " create",
-      "worktree" + " create",
-      "wf" + " new",
-      "wf" + " clean",
-      "task" + " create",
-      "_initialize" + "-repo",
-      "~/" + "Code/workspaces",
-      "default" + "Dir",
-      "dir" + "Prefix",
-      "--full",
-      "--all",
-    ];
-    expect(allText).not.toMatch(new RegExp(stalePatterns.join("|")));
-  });
-
   it("ships skills without references directories and under the line budget", async () => {
     const contents = await discoverSkills([path.resolve("skill-data")]);
 

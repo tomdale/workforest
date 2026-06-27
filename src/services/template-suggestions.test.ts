@@ -248,9 +248,11 @@ describe("template suggestion debug logs", () => {
     await writeTemplateSuggestionInputLog(debugLog, input);
     await writeTemplateSuggestionOutputLog(debugLog, '{"suggestions":[]}');
 
-    await expect(readFile(debugLog.inputPath, "utf8")).resolves.toContain(
-      '"evidence"',
-    );
+    const inputLog = JSON.parse(await readFile(debugLog.inputPath, "utf8"));
+    expect(inputLog).toMatchObject({
+      schema: input.schema,
+      evidence: input.evidence,
+    });
     await expect(readFile(debugLog.outputPath, "utf8")).resolves.toBe(
       '{"suggestions":[]}',
     );
@@ -335,12 +337,13 @@ describe("suggestTemplates", () => {
         }),
       ]),
     );
-    await expect(
-      readFile(path.join(result.logDir, "input.json"), "utf8"),
-    ).resolves.toContain("Evidence packet");
-    await expect(
-      readFile(path.join(result.logDir, "output.txt"), "utf8"),
-    ).resolves.toContain("agent-workflow");
+    const inputLog = JSON.parse(
+      await readFile(path.join(result.logDir, "input.json"), "utf8"),
+    );
+    expect(inputLog.evidence).toEqual(result.evidence);
+    expect(
+      JSON.parse(await readFile(path.join(result.logDir, "output.txt"), "utf8")),
+    ).toEqual(validResponse());
   });
 });
 

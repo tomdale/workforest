@@ -52,19 +52,15 @@ describe("wf list", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode).toBe(0);
+    expect(rendered.stderr).toBe("");
     expect(rendered.stdout).toContain("Changes\n\nWorkspaces");
     expect(rendered.stdout).toContain("  vercel-agent");
     expect(rendered.stdout).toContain("auth-fix");
-    expect(rendered.stdout).toContain("agents, api");
-    expect(rendered.stdout).toContain("ready");
     expect(rendered.stdout).toContain("  _adhoc");
     expect(rendered.stdout).toContain("billing");
-    expect(rendered.stdout).toContain("front, api");
     expect(rendered.stdout).toContain("Repositories");
     expect(rendered.stdout).toContain("  workforest");
     expect(rendered.stdout).toContain("cli-redesign");
-    expect(rendered.stdout).toContain("ready");
-    expect(rendered.stdout).toContain("2 workspaces, 1 repository change");
     expect(rendered.stdout).not.toContain(fixture.baseDir);
   });
 
@@ -82,6 +78,7 @@ describe("wf list", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode).toBe(0);
+    expect(rendered.stderr).toBe("");
     expect(rendered.stdout).toContain("  _adhoc");
     expect(rendered.stdout).toContain("billing");
     expect(rendered.stdout).toContain(

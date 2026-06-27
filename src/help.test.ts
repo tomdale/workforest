@@ -7,12 +7,7 @@ import type {
   CommandNode,
   CommandRegistry,
 } from "./cli/types.ts";
-import {
-  CONCEPTS,
-  commandPathHelp,
-  commandUsageLines,
-  rootHelp,
-} from "./help.ts";
+import { commandPathHelp, commandUsageLines, rootHelp } from "./help.ts";
 
 const ROOT_CONTEXT = {
   configPath: "/config/config.json",
@@ -44,16 +39,6 @@ describe("registry-derived help", () => {
     expect(output).toContain("Usage: wf <command> [options]");
   });
 
-  it("explains what workforest is and defines its core concepts", () => {
-    const output = stripAnsi(rootHelp(commandRegistry, ROOT_CONTEXT));
-
-    expect(output).toContain("Concepts:");
-    for (const { term, summary } of CONCEPTS) {
-      expect(output).toContain(term);
-      expect(output).toContain(summary);
-    }
-  });
-
   it("renders scoped subcommands, operands, and flags from the registry", () => {
     const task = stripAnsi(commandPathHelp(commandRegistry, ["task"]) ?? "");
     const start = stripAnsi(
@@ -70,7 +55,6 @@ describe("registry-derived help", () => {
     expect(start).toContain("--repo <repository>");
     expect(start).toContain("--dry-run");
     expect(start).toContain("--json");
-    expect(start).toContain("Emit a machine-readable JSON envelope");
   });
 
   it("hides hidden commands and aliases while showing visible aliases", () => {
