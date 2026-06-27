@@ -47,13 +47,19 @@ import {
   ScrollableBox,
   setRuntime,
 } from "@unblessed/node";
+import stringWidth from "string-width";
 import {
   createFullscreenKeypress,
   type FullscreenKeypress,
   type FullscreenScreen,
 } from "../terminal/fullscreen-surface.ts";
+import { setActiveTheme } from "../terminal/theme-system.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
-import { renderPipelinesGrid, shouldUseGrid } from "./grid-consumer.ts";
+import {
+  getCompletionModalContent,
+  renderPipelinesGrid,
+  shouldUseGrid,
+} from "./grid-consumer.ts";
 
 function createManualKeypress(
   setReceive: (receive: () => void) => void,
@@ -821,5 +827,58 @@ describe("renderPipelinesGrid", () => {
         },
       }),
     ).rejects.toThrow("Grid can render 9 repositories");
+  });
+});
+
+describe("completion modal content layout", () => {
+  const stripTags = (line: string): string => line.replace(/\{[^}]*\}/g, "");
+  const visibleWidth = (line: string): number => stringWidth(stripTags(line));
+
+  const baseOptions = {
+    completedCount: 3,
+    totalCount: 3,
+    workspacePath: "/Users/me/Code/Workspaces/vercel-agent/auth-redesign",
+    worktreeNames: ["front", "api", "edge-config-store"],
+    setupWarnings: [],
+    repoErrors: [],
+    backgroundInitialization: true,
+  };
+
+  // The confetti layer animates by re-rendering with fresh random star rows.
+  // If any composed line is wider than the content width the modal box wraps it
+  // onto a second visual row, which shoves the text up and down between frames.
+  // Across many random frames every line must stay within the content width and
+  // the line count must never change.
+  it("keeps every line within the content width across animation frames", () => {
+    setActiveTheme("cyberpunk-red");
+    const contentWidth = 58;
+
+    const firstFrame = getCompletionModalContent({
+      ...baseOptions,
+      contentWidth,
+    });
+    const lineCount = firstFrame.length;
+    expect(lineCount).toBeGreaterThan(0);
+
+    for (let frame = 0; frame < 250; frame += 1) {
+      const lines = getCompletionModalContent({ ...baseOptions, contentWidth });
+      expect(lines).toHaveLength(lineCount);
+      for (const line of lines) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(contentWidth);
+      }
+    }
+  });
+
+  it("renders modal text with the active theme's palette tokens", () => {
+    setActiveTheme("cyberpunk-red");
+    const lines = getCompletionModalContent({
+      ...baseOptions,
+      contentWidth: 58,
+    });
+    const joined = lines.join("\n");
+    // Cyberpunk focus (cyan) drives the "press any key" call to action; its hex
+    // token must reach the content rather than a hardcoded color name.
+    expect(joined).toContain("{#00f5ff-fg}");
+    expect(joined).toContain("press any key");
   });
 });

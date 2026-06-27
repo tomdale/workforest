@@ -628,23 +628,20 @@ export function createDefaultCompletionModal({
   const left = Math.max(0, Math.floor((screenWidth - width) / 2));
   const top = Math.max(1, Math.floor((screenHeight - height) / 2));
 
-  const style: BoxOptions["style"] = hasRepoErrors
-    ? {
-        fg: colors().primary,
-        bg: "black",
-        border: { fg: colors().error },
-      }
+  // The modal's surface reads from the theme's chrome background like every
+  // other themed surface — never a hardcoded black, which would leave the
+  // popover visibly off-theme against the rest of the cyberpunk UI.
+  const surfaceBackground = toBlessed(activeTheme().chrome.background);
+  const borderColor = hasRepoErrors
+    ? colors().error
     : hasSetupWarnings
-      ? {
-          fg: colors().primary,
-          bg: "black",
-          border: { fg: colors().warning },
-        }
-      : {
-          fg: colors().primary,
-          bg: "black",
-          border: { fg: colors().focus },
-        };
+      ? colors().warning
+      : colors().focus;
+  const style: BoxOptions["style"] = {
+    fg: colors().primary,
+    bg: surfaceBackground,
+    border: { fg: borderColor },
+  };
 
   const box = new Box({
     parent: screen as UnblessedScreen,
@@ -653,6 +650,10 @@ export function createDefaultCompletionModal({
     width,
     height,
     tags: true,
+    // The confetti layer paints each row to its exact inner width; disabling
+    // wrap guarantees a stray wide row can never spill onto a second line and
+    // shove the text up and down between animation frames.
+    wrap: false,
     border: { type: "line" },
     padding: { top: 0, bottom: 0, left: 1, right: 2 },
     content: contentLines.join("\n"),
@@ -715,7 +716,7 @@ function createCompletionModalTitle({
   }) as GridCompletionModalLike;
 }
 
-function getCompletionModalContent({
+export function getCompletionModalContent({
   completedCount,
   totalCount,
   workspacePath,
@@ -910,36 +911,32 @@ function renderCompletionModalLayers({
     starRows?.slice(0, height) ?? new FallingStarField(width, height).rows;
 
   return textLines.map(({ text, align = "left" }, row) => {
+    const cells = (background[row] ?? []).slice(0, width);
     if (stripBlessedTags(text).length === 0) {
-      return renderCells(background[row] ?? [], width);
+      return trimTrailingSpaces(cells.join(""));
     }
 
+    // Overlay the (tag-bearing) text onto the confetti row by removing exactly
+    // the columns the text covers — `visibleLength` cells, each one column wide
+    // — and splicing the text into the gap. Removing precisely as many cells as
+    // the text is wide keeps every composed row at most `width` columns, so it
+    // never wraps. (Earlier code capped the removal at an inner padded width
+    // while still inserting the full text, so any line wider than that padding
+    // overflowed and wrapped, jumping the text between frames.)
     const visibleLength = stringWidth(stripBlessedTags(text));
-    const paddedWidth = Math.max(width - textPadding * 2, 1);
     const left =
       align === "center"
         ? Math.max(Math.floor((width - visibleLength) / 2), 0)
         : Math.min(textPadding, Math.max(width - visibleLength, 0));
-    const replacementWidth =
-      align === "center" ? visibleLength : Math.min(visibleLength, paddedWidth);
-    const rowCells = background[row] ?? [];
-    return renderCells(
-      [
-        ...rowCells.slice(0, left),
-        text,
-        ...rowCells.slice(Math.min(left + replacementWidth, width)),
-      ],
-      width,
+    const right = Math.min(left + visibleLength, width);
+    return trimTrailingSpaces(
+      [...cells.slice(0, left), text, ...cells.slice(right)].join(""),
     );
   });
 }
 
-function renderCells(cells: string[], width: number): string {
-  const line = cells.join("");
-  const trimmed = line.replace(/\s+$/u, "");
-  const visibleWidth = stringWidth(stripBlessedTags(trimmed));
-  if (visibleWidth <= width) return trimmed;
-  return cells.slice(0, width).join("").replace(/\s+$/u, "");
+function trimTrailingSpaces(line: string): string {
+  return line.replace(/\s+$/u, "");
 }
 
 class FallingStarField {
@@ -1132,8 +1129,14 @@ function getRandomParticleIndex(): number {
 }
 
 function getRandomStarColor(): string {
-  const colors = confettiColorTokens();
-  return colors[Math.floor(Math.random() * colors.length)] ?? "cyan";
+  const palette = confettiColorTokens();
+  // Fall back to a theme token (never a hardcoded color) if a theme somehow
+  // ships an empty confetti palette.
+  return (
+    palette[Math.floor(Math.random() * palette.length)] ??
+    palette[0] ??
+    colors().focus
+  );
 }
 
 function getRandomHorizontalDirection(): -1 | 1 {
