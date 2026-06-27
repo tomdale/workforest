@@ -17,9 +17,37 @@ export type ChangeCandidate = {
   selector: string;
   changeName: string;
   kind: "workspace" | "repository";
+  /**
+   * The parent the change lives under: a repository name for repository
+   * changes, or a workspace group (template id or the adhoc group) for
+   * workspace changes. Used to scope the picker to the current directory.
+   */
+  groupName: string;
   statusHint: string;
   path: string;
 };
+
+/**
+ * The Workforest container the user is currently inside, used to default the
+ * change picker and the new-change source mode to the relevant subset:
+ * - `repo`     — a repository change (matches repository changes / Repo mode)
+ * - `template` — a template workspace (matches that group / Template mode)
+ * - `adhoc`    — an ad-hoc multi-repo workspace (matches that group / Multi mode)
+ */
+export type ChangeScope =
+  | { kind: "repo"; name: string }
+  | { kind: "template"; name: string }
+  | { kind: "adhoc"; name: string };
+
+/** Whether a candidate belongs to the given scope. */
+export function candidateInScope(
+  candidate: ChangeCandidate,
+  scope: ChangeScope,
+): boolean {
+  return scope.kind === "repo"
+    ? candidate.kind === "repository" && candidate.groupName === scope.name
+    : candidate.kind === "workspace" && candidate.groupName === scope.name;
+}
 
 /**
  * Load every existing change and flatten it into render-ready candidates,
@@ -97,6 +125,7 @@ function toChangeCandidate(
     selector: entry.selector,
     changeName: entry.changeName,
     kind: entry.type === "repository-change" ? "repository" : "workspace",
+    groupName: entry.groupName,
     statusHint: buildStatusHint({
       modifiedAtMs: entry.modifiedAtMs,
       now,

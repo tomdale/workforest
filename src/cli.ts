@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathExists } from "@wf-plugin/core";
+import type { ChangeScope } from "./change-entry/changes-data.ts";
 import { commandRegistry } from "./cli/commands.ts";
 import {
   isArgumentParserError,
@@ -97,6 +98,7 @@ import {
   readWorkspaceMetadata,
 } from "./workspace/metadata.ts";
 import {
+  ADHOC_WORKSPACE_GROUP,
   getRepositoryChangePath,
   resolveWorkforestDirectories,
 } from "./workspace/paths.ts";
@@ -464,7 +466,9 @@ async function runChangeEntryCommand(
   const { buildCreateChangeInput, createChange } = await import(
     "./workspace/create-change.ts"
   );
+  const scope = await resolveCurrentChangeScope();
   await runChangeEntry(mode, {
+    ...(scope ? { scope } : {}),
     commitChange: async ({ changeName, sources }) => {
       const input = await buildCreateChangeInput({ changeName, sources });
       await createChange(input, {
@@ -475,6 +479,45 @@ async function runChangeEntryCommand(
     },
   });
   return success();
+}
+
+/**
+ * Map the current working directory onto a change-entry scope so the surface can
+ * default to the container the user launched from. Returns undefined outside a
+ * Workforest change (e.g. a review checkout or an unrelated directory).
+ */
+async function resolveCurrentChangeScope(): Promise<ChangeScope | undefined> {
+  try {
+    const { config } = await loadWorkspaceConfig();
+    const directories = resolveWorkforestDirectories(config);
+    const context = resolveWorkforestContext(process.cwd(), directories);
+    switch (context.kind) {
+      case "repository-change":
+        return { kind: "repo", name: context.repoName };
+      case "template-workspace-change":
+        return { kind: "template", name: context.groupName };
+      case "adhoc-workspace-change":
+        return { kind: "adhoc", name: context.groupName };
+      case "workspace-repo":
+        return context.groupName === ADHOC_WORKSPACE_GROUP
+          ? { kind: "adhoc", name: context.groupName }
+          : { kind: "template", name: context.groupName };
+      case "nested-task":
+        if (context.parentKind === "repository-change") {
+          return { kind: "repo", name: context.repoName };
+        }
+        return context.groupName === undefined
+          ? undefined
+          : context.groupName === ADHOC_WORKSPACE_GROUP
+            ? { kind: "adhoc", name: context.groupName }
+            : { kind: "template", name: context.groupName };
+      default:
+        return undefined;
+    }
+  } catch {
+    // Scope is a best-effort convenience; never block the surface on it.
+    return undefined;
+  }
 }
 
 function isDefaultInvocation(

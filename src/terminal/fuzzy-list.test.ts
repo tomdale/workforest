@@ -31,9 +31,15 @@ import {
   fuzzyFilter,
   windowStart,
 } from "./fuzzy-list.ts";
+import { activeTheme } from "./theme-system.ts";
 
 function items(...labels: string[]): FuzzyItem<string>[] {
   return labels.map((label) => ({ value: label, label }));
+}
+
+/** The glyph marking the highlighted row (theme-defined filled radio). */
+function activeRadio(): string {
+  return activeTheme().symbols.radioOn;
 }
 
 // The index of the first content line containing `needle`, or -1.
@@ -163,6 +169,140 @@ describe("createFuzzyList layout", () => {
     const action = lineContaining(captured.content, "CREATE_");
     expect(hint).toBeGreaterThanOrEqual(0);
     expect(action).toBe(hint + 1);
+
+    list.destroy();
+  });
+
+  it("highlights the candidate chosen by initialSelected", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      prompt: "pick",
+      items: items("alpha", "beta", "gamma"),
+      initialSelected: (item) => item.value === "gamma",
+    });
+    void list.run();
+
+    // The highlighted row carries the filled radio glyph; it must sit on gamma.
+    const selectedRow = captured.content
+      .split("\n")
+      .find((line) => line.includes(activeRadio()));
+    expect(selectedRow).toContain("gamma");
+
+    list.destroy();
+  });
+});
+
+describe("createFuzzyList scope switching", () => {
+  type KeypressFn = (ch: string | undefined, key: { name?: string }) => void;
+  type MockScreen = { on: ReturnType<typeof vi.fn> };
+
+  function keypressHandler(screen: MockScreen): KeypressFn {
+    const call = screen.on.mock.calls.find(
+      (args: unknown[]) => args[0] === "keypress",
+    );
+    if (!call) throw new Error("no keypress handler registered");
+    return call[1] as KeypressFn;
+  }
+
+  it("swaps items, scope label, and footer hint on Tab", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      prompt: "go to a change",
+      items: items("scoped-one", "scoped-two"),
+      scopeLabel: "repo: front",
+      tabHint: "all changes",
+      onTab: () => ({
+        items: items("global-one", "global-two", "global-three"),
+        scopeLabel: "all",
+        tabHint: "this repo",
+      }),
+    });
+    void list.run();
+
+    expect(captured.content).toContain("scoped-one");
+    expect(captured.content).toContain("repo: front");
+    expect(captured.content).toContain("all changes");
+
+    keypressHandler(screen as unknown as MockScreen)(undefined, {
+      name: "tab",
+    });
+
+    expect(captured.content).toContain("global-one");
+    expect(captured.content).not.toContain("scoped-one");
+    expect(captured.content).toContain("· all");
+    expect(captured.content).toContain("this repo");
+
+    list.destroy();
+  });
+
+  // The name painted inside the focus-background badge, e.g. "{cyan-bg}{black-fg}
+  // front {/black-fg}{/cyan-bg}" → "front". Returns null when no badge is shown.
+  function badgedName(row: string): string | null {
+    return row.match(/-bg\}\{[^}]+-fg\} (.+?) \{/)?.[1] ?? null;
+  }
+
+  it("renders a fixed scope toggle, moving only the highlight badge on Tab", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      prompt: "go to a change",
+      items: items("scoped-one"),
+      scopeToggle: {
+        options: [
+          { label: "in front", name: "front" },
+          { label: "all changes" },
+        ],
+        active: 0,
+      },
+      onTab: () => ({ items: items("global-one"), scopeActive: 1 }),
+    });
+    void list.run();
+
+    // The scope toggle sits directly under the prompt, listing both options in a
+    // fixed order with the active one's name as a background badge (no glyph
+    // prefix) and an explicit Tab cue — not the muted "· in front" suffix used
+    // without scopeToggle.
+    const promptRow = lineContaining(captured.content, "go to a change");
+    const scopeRow = (): string =>
+      captured.content.split("\n")[promptRow + 1] ?? "";
+
+    const before = scopeRow();
+    expect(before.indexOf("front")).toBeLessThan(before.indexOf("all changes"));
+    expect(before).toContain("switches scope");
+    expect(before).not.toContain("▌");
+    expect(captured.content).not.toContain("· in front");
+    expect(badgedName(before)).toBe("front");
+
+    keypressHandler(screen as unknown as MockScreen)(undefined, {
+      name: "tab",
+    });
+
+    // Positions are unchanged — "front" still precedes "all changes" — but the
+    // highlight badge has moved to the second option.
+    const after = scopeRow();
+    expect(after.indexOf("front")).toBeLessThan(after.indexOf("all changes"));
+    expect(badgedName(after)).toBe("all changes");
+    expect(captured.content).toContain("global-one");
+
+    list.destroy();
+  });
+
+  it("ignores Tab when no onTab handler is provided", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      prompt: "pick",
+      items: items("alpha", "beta"),
+    });
+    void list.run();
+    const before = captured.content;
+
+    keypressHandler(screen as unknown as MockScreen)(undefined, {
+      name: "tab",
+    });
+    expect(captured.content).toBe(before);
 
     list.destroy();
   });

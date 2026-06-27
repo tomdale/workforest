@@ -17,6 +17,8 @@ import {
 } from "../workspace/metadata.ts";
 import {
   type ChangeCandidate,
+  type ChangeScope,
+  candidateInScope,
   cdToChange,
   dirtyHintFor,
   filterChangeCandidates,
@@ -117,6 +119,34 @@ describe("filterChangeCandidates", () => {
   });
 });
 
+describe("candidateInScope", () => {
+  const repoChange = candidate("front/login", "login", "repository");
+  const otherRepoChange = candidate("api/limit", "limit", "repository");
+  const templateChange = candidate("agent/auth", "auth", "workspace");
+  const adhocChange = candidate("_adhoc/billing", "billing", "workspace");
+
+  it("matches repository changes under a repo scope", () => {
+    const scope: ChangeScope = { kind: "repo", name: "front" };
+    expect(candidateInScope(repoChange, scope)).toBe(true);
+    expect(candidateInScope(otherRepoChange, scope)).toBe(false);
+    // A workspace change never belongs to a repo scope, even by name.
+    expect(candidateInScope(templateChange, scope)).toBe(false);
+  });
+
+  it("matches workspace changes under a template scope", () => {
+    const scope: ChangeScope = { kind: "template", name: "agent" };
+    expect(candidateInScope(templateChange, scope)).toBe(true);
+    expect(candidateInScope(adhocChange, scope)).toBe(false);
+    expect(candidateInScope(repoChange, scope)).toBe(false);
+  });
+
+  it("matches the adhoc group under an adhoc scope", () => {
+    const scope: ChangeScope = { kind: "adhoc", name: "_adhoc" };
+    expect(candidateInScope(adhocChange, scope)).toBe(true);
+    expect(candidateInScope(templateChange, scope)).toBe(false);
+  });
+});
+
 describe("cdToChange", () => {
   it("writes the change directory to the shell handoff file", async () => {
     const dir = await createTempDir("workforest-cd-");
@@ -158,6 +188,7 @@ function candidate(
     selector,
     changeName,
     kind,
+    groupName: selector.split("/")[0] ?? selector,
     statusHint: "ready",
     path: candidatePath,
   };

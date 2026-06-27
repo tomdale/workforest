@@ -1,7 +1,7 @@
 import { Box, type Screen } from "@unblessed/node";
 import { escapeBlessedTags } from "./command-stream-adapter.ts";
 import { truncate, visibleWidth } from "./text.ts";
-import { activeTheme, fg, type Theme, toBlessed } from "./theme-system.ts";
+import { activeTheme, bg, fg, type Theme, toBlessed } from "./theme-system.ts";
 
 /**
  * A reusable fullscreen fuzzy picker that renders inside a caller-provided
@@ -37,10 +37,55 @@ export type FuzzyResult<T> =
   | { kind: "action"; query: string }
   | { kind: "cancel" };
 
+/** One option of a {@link FuzzyScopeToggle}. */
+export type FuzzyScopeOption = {
+  /** Full display text, e.g. "in workforest" or "all changes". */
+  label: string;
+  /**
+   * The substring of {@link label} to paint as the highlighted badge when this
+   * option is active (e.g. "workforest" within "in workforest"). Defaults to the
+   * whole label.
+   */
+  name?: string;
+};
+
+/**
+ * A prominent two-way scope toggle rendered above the list. Both options hold
+ * fixed positions; pressing Tab moves only the highlighted badge between them
+ * (it never reorders the row). Drive the position from {@link FuzzyTabUpdate}'s
+ * `scopeActive`.
+ */
+export type FuzzyScopeToggle = {
+  /** The options in fixed left-to-right display order. */
+  options: readonly FuzzyScopeOption[];
+  /** Index into {@link options} of the currently selected scope. */
+  active: number;
+};
+
 export type FuzzyFilter<T> = (
   items: FuzzyItem<T>[],
   query: string,
 ) => FuzzyItem<T>[];
+
+/**
+ * The new state to apply when the user presses Tab, returned by
+ * {@link FuzzyListOptions.onTab}. Returning `null` leaves the list unchanged.
+ * The callback runs in the caller's closure, so it can also update sibling UI
+ * (e.g. a preview pane) before returning; the list re-renders the whole screen
+ * afterward.
+ */
+export type FuzzyTabUpdate<T> = {
+  /** The candidate set to show after the switch. */
+  items: FuzzyItem<T>[];
+  /** Short label for the now-active scope/mode, shown beside the prompt. */
+  scopeLabel?: string;
+  /** New active index for a {@link FuzzyListOptions.scopeToggle}. */
+  scopeActive?: number;
+  /** Footer hint describing what the next Tab does. */
+  tabHint?: string;
+  /** Clear the typed query on switch. Defaults to false (query is preserved). */
+  resetQuery?: boolean;
+};
 
 export type FuzzyListOptions<T> = {
   /** The @unblessed screen this widget binds its key handling to. */
@@ -57,6 +102,32 @@ export type FuzzyListOptions<T> = {
   initialQuery?: string;
   /** Empty-input hint. Defaults to "Type to filter…". */
   placeholder?: string;
+  /** Short label for the active scope/mode, shown muted beside the prompt. */
+  scopeLabel?: string;
+  /**
+   * Footer hint describing what Tab does (e.g. "all changes"). Tab is handled
+   * only when {@link onTab} is also provided.
+   */
+  tabHint?: string;
+  /**
+   * Called when Tab is pressed. Return the new state to apply in place, or
+   * `null` to ignore the keystroke. Enables the Tab footer hint.
+   */
+  onTab?: () => FuzzyTabUpdate<T> | null;
+  /**
+   * Selects the initially-highlighted candidate. The first item satisfying the
+   * predicate starts highlighted; defaults to the first row.
+   */
+  initialSelected?: (item: FuzzyItem<T>) => boolean;
+  /**
+   * Render a prominent two-way scope toggle above the list — both options held
+   * in fixed positions, the selected one painted as a highlighted badge, plus an
+   * explicit Tab cue — instead of the muted inline {@link scopeLabel} suffix.
+   * Requires {@link onTab} (which returns the new `scopeActive`). Use for binary
+   * scope switches; leave off for callers that render their own switcher (e.g. a
+   * multi-mode preview pane).
+   */
+  scopeToggle?: FuzzyScopeToggle;
 };
 
 export type FuzzyList<T> = {
@@ -115,11 +186,12 @@ export function windowStart(
 }
 
 export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
-  const { screen, prompt, items, actionRow } = options;
+  const { screen, prompt, actionRow } = options;
   const parent = options.parent ?? screen;
   const filter = options.filter ?? fuzzyFilter;
   const placeholder = options.placeholder ?? PLACEHOLDER;
   const hasAction = actionRow !== undefined;
+  const onTab = options.onTab;
 
   const theme = activeTheme();
   const container = new Box({
@@ -136,9 +208,13 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     },
   });
 
+  let items = options.items;
+  let scopeLabel = options.scopeLabel;
+  let scopeToggle = options.scopeToggle;
+  let tabHint = options.tabHint;
   let query = options.initialQuery ?? "";
   let candidates = filter(items, query);
-  let index = 0;
+  let index = initialIndex(candidates, options.initialSelected);
   let scrollTop = 0;
   let destroyed = false;
   let resolveRun: ((result: FuzzyResult<T>) => void) | null = null;
@@ -154,20 +230,35 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     const lines = new Array<string>(Math.max(height, 1)).fill("");
     const palette = theme.palette;
 
-    lines[0] = `${fg(palette.focus, theme.symbols.active)} ${fg(
+    // The header stacks top-down: prompt, an optional prominent scope toggle,
+    // then the live query. `cursor` tracks the next free row so the list starts
+    // directly beneath whatever the header occupied.
+    const showScopeBar = scopeToggle !== undefined;
+    const scopeSuffix =
+      scopeLabel && !showScopeBar
+        ? `  ${fg(palette.muted, `· ${escapeBlessedTags(scopeLabel)}`)}`
+        : "";
+    let cursor = 0;
+    lines[cursor++] = `${fg(palette.focus, theme.symbols.active)} ${fg(
       palette.primary,
       escapeBlessedTags(prompt),
-    )}`;
+    )}${scopeSuffix}`;
+
+    if (scopeToggle !== undefined) {
+      lines[cursor++] = renderScopeBar(theme, scopeToggle);
+    }
 
     const caret = fg(palette.focus, CARET);
     if (query.length > 0) {
-      lines[1] = `${fg(palette.primary, escapeBlessedTags(query))}${caret}`;
+      lines[cursor] =
+        `${fg(palette.primary, escapeBlessedTags(query))}${caret}`;
     } else {
-      lines[1] = `${caret} ${fg(palette.muted, placeholder)}`;
+      lines[cursor] = `${caret} ${fg(palette.muted, placeholder)}`;
     }
+    cursor += 1;
 
-    const footerRow = Math.max(2, height - 1);
-    const listTop = 2;
+    const footerRow = Math.max(cursor, height - 1);
+    const listTop = cursor;
     const viewport = Math.max(0, footerRow - listTop);
 
     if (candidates.length === 0) {
@@ -207,7 +298,10 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       }
     }
 
-    lines[footerRow] = renderFooter(theme);
+    lines[footerRow] = renderFooter(
+      theme,
+      onTab && !showScopeBar ? tabHint : undefined,
+    );
     container.setContent(lines.join("\n"));
     screen.render();
   };
@@ -244,6 +338,23 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     render();
   };
 
+  const switchScope = (): void => {
+    if (!onTab) return;
+    const update = onTab();
+    if (!update) return;
+    items = update.items;
+    if (update.resetQuery) query = "";
+    if (update.scopeLabel !== undefined) scopeLabel = update.scopeLabel;
+    if (update.scopeActive !== undefined && scopeToggle !== undefined) {
+      scopeToggle = { ...scopeToggle, active: update.scopeActive };
+    }
+    if (update.tabHint !== undefined) tabHint = update.tabHint;
+    candidates = filter(items, query);
+    index = 0;
+    scrollTop = 0;
+    render();
+  };
+
   const onKeypress = (
     ch: string | undefined,
     key: { name?: string; ctrl?: boolean; meta?: boolean },
@@ -255,6 +366,9 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     switch (key.name) {
       case "escape":
         finish({ kind: "cancel" });
+        return;
+      case "tab":
+        switchScope();
         return;
       case "enter":
       case "return":
@@ -292,10 +406,24 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     }
   };
 
+  // The screen swallows Tab for focus traversal, so it never reaches the
+  // screen-level "keypress" listener; the program-level stream still carries it.
+  // We bind there (forward Tab only) so scope switching works in a real
+  // terminal, while the screen "keypress" handler above keeps Tab working under
+  // test harnesses that deliver it directly.
+  const program = onTab ? screenProgram(screen) : undefined;
+  const onProgramKeypress = (
+    _ch: string | undefined,
+    key: { name?: string; shift?: boolean },
+  ): void => {
+    if (key?.name === "tab" && !key.shift) switchScope();
+  };
+
   const cleanup = (): void => {
     if (destroyed) return;
     destroyed = true;
     screen.removeListener("keypress", onKeypress);
+    program?.removeListener?.("keypress", onProgramKeypress);
     container.detach();
     container.destroy();
   };
@@ -305,6 +433,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       return new Promise<FuzzyResult<T>>((resolve) => {
         resolveRun = resolve;
         screen.on("keypress", onKeypress);
+        program?.on?.("keypress", onProgramKeypress);
         render();
       });
     },
@@ -313,6 +442,20 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       else cleanup();
     },
   };
+}
+
+/** Minimal view of the @unblessed program's key event stream. */
+type ScreenProgram = {
+  on?(event: "keypress", listener: ProgramKeyListener): void;
+  removeListener?(event: "keypress", listener: ProgramKeyListener): void;
+};
+type ProgramKeyListener = (
+  ch: string | undefined,
+  key: { name?: string; shift?: boolean },
+) => void;
+
+function screenProgram(screen: Screen): ScreenProgram | undefined {
+  return (screen as unknown as { program?: ScreenProgram }).program;
 }
 
 function renderItem<T>(
@@ -353,13 +496,85 @@ function renderAction(
   return ` ${pointer} ${fg(selected ? palette.focus : palette.muted, text)}`;
 }
 
-function renderFooter(theme: Theme): string {
+/**
+ * A prominent two-way scope toggle. Both options keep fixed positions; only the
+ * highlight moves between them, so Tab never reorders the row. The selected
+ * option's name is painted as a badge — a contrasting foreground on a
+ * {@link ThemePalette.focus} background — with its connector (e.g. the "in " of
+ * "in workforest") muted; unselected options render plain muted. An explicit,
+ * accented Tab cue trails the options.
+ */
+function renderScopeBar(theme: Theme, toggle: FuzzyScopeToggle): string {
+  const { palette } = theme;
+  const segments = toggle.options.map((option, i) =>
+    renderScopeOption(theme, option, i === toggle.active),
+  );
+  const cue = `${fg(palette.muted, "·")} {bold}${fg(
+    palette.focus,
+    "tab",
+  )}{/bold} ${fg(palette.muted, "switches scope")}`;
+  return `  ${segments.join("   ")}   ${cue}`;
+}
+
+/**
+ * One scope option. Its name carries a space of padding on each side that is
+ * always present — selecting paints that padded name as a focus-background badge
+ * (with a contrasting foreground), deselecting renders the same padded name
+ * muted. Because both states occupy identical cells, the row never shifts as the
+ * highlight moves; only color changes. The connector around the name (e.g. the
+ * "in" of "in workforest") stays muted in both.
+ */
+function renderScopeOption(
+  theme: Theme,
+  option: FuzzyScopeOption,
+  active: boolean,
+): string {
+  const { palette, chrome } = theme;
+  const { label } = option;
+  const name = option.name ?? label;
+  const at = name === label ? -1 : label.lastIndexOf(name);
+  const before = at >= 0 ? label.slice(0, at).replace(/\s+$/, "") : "";
+  const after =
+    at >= 0 ? label.slice(at + name.length).replace(/^\s+/, "") : "";
+  const padded = ` ${escapeBlessedTags(at >= 0 ? name : label)} `;
+
+  const nameCell = active
+    ? bg(palette.focus, fg(chrome.background, padded))
+    : fg(palette.muted, padded);
+  // A plain (un-highlighted) space separates the connector from the badge, so
+  // the name reads as detached from "in" rather than fused to the highlight.
+  return [
+    before ? `${fg(palette.muted, escapeBlessedTags(before))} ` : "",
+    nameCell,
+    after ? ` ${fg(palette.muted, escapeBlessedTags(after))}` : "",
+  ].join("");
+}
+
+function renderFooter(theme: Theme, tabHint?: string): string {
   const { palette } = theme;
   const separator = fg(palette.muted, "  ·  ");
-  return FOOTER_HINTS.map(
-    ([key, action]) =>
-      `{bold}${fg(palette.muted, key)}{/bold} ${fg(palette.muted, action)}`,
-  ).join(separator);
+  const hints: ReadonlyArray<readonly [string, string]> = tabHint
+    ? [...FOOTER_HINTS, ["tab", tabHint]]
+    : FOOTER_HINTS;
+  return hints
+    .map(
+      ([key, action]) =>
+        `{bold}${fg(palette.muted, key)}{/bold} ${fg(palette.muted, action)}`,
+    )
+    .join(separator);
+}
+
+/**
+ * The starting highlight: the first candidate matching `selected`, or row 0
+ * when there is no predicate or no match.
+ */
+function initialIndex<T>(
+  candidates: FuzzyItem<T>[],
+  selected?: (item: FuzzyItem<T>) => boolean,
+): number {
+  if (!selected) return 0;
+  const found = candidates.findIndex((item) => selected(item));
+  return found === -1 ? 0 : found;
 }
 
 function readDimension(value: number, fallback: number): number {

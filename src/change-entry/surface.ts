@@ -14,6 +14,8 @@ import {
 } from "../terminal/theme-system.ts";
 import {
   type ChangeCandidate,
+  type ChangeScope,
+  candidateInScope,
   cdToChange,
   listChangeCandidates,
 } from "./changes-data.ts";
@@ -48,6 +50,12 @@ export type ChangeEntryDeps = Readonly<{
     changeName: string;
     sources: ChosenSource[];
   }) => Promise<void>;
+  /**
+   * The Workforest container the command was launched from, when inside one.
+   * Phase 1 defaults its change list to this scope (Tab toggles to all changes)
+   * and Phase 2 defaults its source mode and highlight to it.
+   */
+  scope?: ChangeScope;
 }>;
 
 type Phase1Result =
@@ -75,14 +83,14 @@ export async function runChangeEntry(
   };
 
   try {
-    const phase1 = await runPhase1(screen, mode);
+    const phase1 = await runPhase1(screen, mode, deps.scope);
     if (phase1.kind === "cancel") return;
     if (phase1.kind === "cd") {
       await cdToChange(phase1.candidate);
       return;
     }
 
-    const sources = await runPhase2(screen, phase1.changeName);
+    const sources = await runPhase2(screen, phase1.changeName, deps.scope);
     if (!sources) return;
 
     // Hand off to the setup grid + confetti, which owns its own screen.
@@ -93,16 +101,44 @@ export async function runChangeEntry(
   }
 }
 
-async function runPhase1(
-  screen: FullscreenScreen,
-  mode: ChangeEntryMode,
-): Promise<Phase1Result> {
-  const candidates = mode === "go" ? await listChangeCandidates() : [];
-  const items: FuzzyItem<ChangeCandidate>[] = candidates.map((candidate) => ({
+function toChangeItems(
+  candidates: ChangeCandidate[],
+): FuzzyItem<ChangeCandidate>[] {
+  return candidates.map((candidate) => ({
     value: candidate,
     label: candidate.changeName,
     hint: candidate.statusHint,
   }));
+}
+
+async function runPhase1(
+  screen: FullscreenScreen,
+  mode: ChangeEntryMode,
+  scope: ChangeScope | undefined,
+): Promise<Phase1Result> {
+  const candidates = mode === "go" ? await listChangeCandidates() : [];
+
+  // When launched inside a Workforest container, default the list to that
+  // scope's changes; fall back to the full list when the scope has none.
+  // Tab toggles between the scoped and global views.
+  const scoped = scope
+    ? candidates.filter((candidate) => candidateInScope(candidate, scope))
+    : [];
+  const canScope = scope !== undefined && scoped.length > 0;
+  let showingScoped = canScope;
+
+  // The two scopes hold fixed positions in the toggle: the launch scope first
+  // ("in front", badging "front"), all changes second. Tab moves only the
+  // highlight between them — index 0 when scoped, 1 when showing everything.
+  const scopeName = scope ? describeScope(scope) : "";
+  const scopeOptions = [
+    { label: `in ${scopeName}`, name: scopeName },
+    { label: "all changes" },
+  ];
+  const activeScopeIndex = (): number => (showingScoped ? 0 : 1);
+  const itemsNow = (): FuzzyItem<ChangeCandidate>[] =>
+    toChangeItems(showingScoped ? scoped : candidates);
+
   const prompt =
     mode === "go" ? "go to or create a change" : "name a new change";
   const placeholder =
@@ -114,8 +150,20 @@ async function runPhase1(
     const list = createFuzzyList<ChangeCandidate>({
       screen,
       prompt,
-      items,
+      items: itemsNow(),
       placeholder,
+      ...(canScope
+        ? {
+            scopeToggle: { options: scopeOptions, active: activeScopeIndex() },
+            onTab: () => {
+              showingScoped = !showingScoped;
+              return {
+                items: itemsNow(),
+                scopeActive: activeScopeIndex(),
+              };
+            },
+          }
+        : {}),
       actionRow: {
         label: (query) => {
           const name = query.trim();
@@ -137,12 +185,101 @@ async function runPhase1(
   }
 }
 
+/** A short human label for a scope, e.g. "front" or "vercel-agent". */
+function describeScope(scope: ChangeScope): string {
+  return scope.name;
+}
+
+/**
+ * The kind of change being assembled. Each mode maps to one of `wf start`'s
+ * outcomes and filters the source list accordingly:
+ * - `repo`     — one repository (a single-repo change)
+ * - `template` — one saved `@template` (a template workspace)
+ * - `multi`    — several repositories (an ad-hoc multi-repo workspace)
+ */
+type SourceMode = "repo" | "template" | "multi";
+
+const MODE_ORDER: readonly SourceMode[] = ["repo", "template", "multi"];
+
+function modeLabel(mode: SourceMode): string {
+  return mode === "repo"
+    ? "Repo"
+    : mode === "template"
+      ? "Template"
+      : "Multi-repo";
+}
+
+function nextMode(mode: SourceMode): SourceMode {
+  const index = MODE_ORDER.indexOf(mode);
+  return MODE_ORDER[(index + 1) % MODE_ORDER.length] ?? "repo";
+}
+
+/** The mode to open Phase 2 in, defaulted from the launch scope. */
+function initialMode(scope: ChangeScope | undefined): SourceMode {
+  switch (scope?.kind) {
+    case "template":
+      return "template";
+    case "adhoc":
+      return "multi";
+    default:
+      return "repo";
+  }
+}
+
+/**
+ * A predicate selecting the candidate to highlight on entry, so a change
+ * started from inside a repo/template opens with that source under the cursor
+ * (without auto-adding it). Only meaningful for the single-source modes.
+ */
+function preselectFor(
+  scope: ChangeScope | undefined,
+  mode: SourceMode,
+): ((candidate: SourceCandidate) => boolean) | undefined {
+  if (!scope) return undefined;
+  if (mode === "repo" && scope.kind === "repo") {
+    const name = scope.name;
+    return (candidate) =>
+      candidate.id === name || candidate.id.endsWith(`/${name}`);
+  }
+  if (mode === "template" && scope.kind === "template") {
+    const id = scope.name;
+    return (candidate) => candidate.id === id;
+  }
+  return undefined;
+}
+
 async function runPhase2(
   screen: FullscreenScreen,
   changeName: string,
+  scope: ChangeScope | undefined,
 ): Promise<ChosenSource[] | null> {
   const candidates = await listSourceCandidates();
+  const repoCandidates = candidates.filter(
+    (candidate) => candidate.kind === "repo",
+  );
+  const templateCandidates = candidates.filter(
+    (candidate) => candidate.kind === "template",
+  );
+  const candidatesForMode = (mode: SourceMode): SourceCandidate[] =>
+    mode === "template" ? templateCandidates : repoCandidates;
+
+  // `chosen` only accumulates in multi mode; the single modes commit on the
+  // first selection. `mode` and `chosen` are read live by the closures below.
+  let mode = initialMode(scope);
   const chosen: ChosenSource[] = [];
+
+  const remainingForMode = (m: SourceMode): SourceCandidate[] => {
+    const base = candidatesForMode(m);
+    return m === "multi"
+      ? base.filter((candidate) => !isChosen(candidate, chosen))
+      : base;
+  };
+  const itemsForMode = (m: SourceMode): FuzzyItem<SourceCandidate>[] =>
+    remainingForMode(m).map((candidate) => ({
+      value: candidate,
+      label: candidate.label,
+      hint: candidate.hint,
+    }));
 
   const theme = activeTheme();
   const preview = new Box({
@@ -169,44 +306,60 @@ async function runPhase2(
   try {
     while (true) {
       preview.setContent(
-        await renderPreview(theme, changeName, chosen, notice),
+        await renderPreview(theme, changeName, mode, chosen, notice),
       );
       screen.render();
       notice = null;
 
-      const remaining = candidates.filter(
-        (candidate) => !isChosen(candidate, chosen),
-      );
-      const items: FuzzyItem<SourceCandidate>[] = remaining.map(
-        (candidate) => ({
-          value: candidate,
-          label: candidate.label,
-          hint: candidate.hint,
-        }),
-      );
-
+      const preselect = preselectFor(scope, mode);
       const list = createFuzzyList<SourceCandidate>({
         screen,
         parent: host,
         prompt: `sources for "${changeName}"`,
-        items,
-        actionRow: { label: (query) => actionLabel(query, chosen, changeName) },
+        scopeLabel: `${modeLabel(mode)} mode`,
+        tabHint: `${modeLabel(nextMode(mode))} mode`,
+        items: itemsForMode(mode),
+        ...(preselect
+          ? { initialSelected: (item) => preselect(item.value) }
+          : {}),
+        actionRow: { label: (query) => actionLabel(query, mode, chosen) },
+        onTab: () => {
+          mode = nextMode(mode);
+          // Re-render the preview synchronously so the mode tabs and guidance
+          // track the switch (inference is deferred to the next render cycle).
+          preview.setContent(
+            renderPreviewSync(theme, changeName, mode, chosen, null),
+          );
+          return {
+            items: itemsForMode(mode),
+            scopeLabel: `${modeLabel(mode)} mode`,
+            tabHint: `${modeLabel(nextMode(mode))} mode`,
+          };
+        },
       });
 
       const result = await list.run();
       if (result.kind === "cancel") return null;
 
       if (result.kind === "item") {
-        notice = addSource(chosen, sourceFromCandidate(result.value));
-        continue;
+        const source = sourceFromCandidate(result.value);
+        if (mode === "multi") {
+          notice = addSource(chosen, source);
+          continue;
+        }
+        return [source];
       }
 
       const query = result.query.trim();
       if (query.length > 0) {
-        notice = addSource(chosen, sourceFromFreeEntry(query));
-        continue;
+        const source = sourceFromFreeEntry(query, mode);
+        if (mode === "multi") {
+          notice = addSource(chosen, source);
+          continue;
+        }
+        return [source];
       }
-      if (chosen.length > 0) return chosen;
+      if (mode === "multi" && chosen.length > 0) return chosen;
     }
   } finally {
     preview.destroy();
@@ -216,13 +369,23 @@ async function runPhase2(
 
 function actionLabel(
   query: string,
+  mode: SourceMode,
   chosen: ChosenSource[],
-  changeName: string,
 ): string {
   const typed = query.trim();
-  if (typed.length > 0) return `✛ add "${typed}"`;
-  if (chosen.length > 0) return `✓ create "${changeName}"`;
-  return "· type to add a repo or @template";
+  if (typed.length > 0) {
+    return mode === "template"
+      ? `✛ use @${escapeBlessedTags(typed.replace(/^@/, ""))}`
+      : `✛ add "${escapeBlessedTags(typed)}"`;
+  }
+  if (mode === "multi") {
+    return chosen.length > 0
+      ? "✓ create (or add more)"
+      : "· add one or more repositories";
+  }
+  return mode === "template"
+    ? "· select a template to create the change"
+    : "· select a repository to create the change";
 }
 
 function sourceFromCandidate(candidate: SourceCandidate): ChosenSource {
@@ -231,28 +394,26 @@ function sourceFromCandidate(candidate: SourceCandidate): ChosenSource {
     : { kind: "repo", token: candidate.id };
 }
 
-function sourceFromFreeEntry(query: string): ChosenSource {
+/** Interpret a free-entry query as the kind of source the mode expects. */
+function sourceFromFreeEntry(query: string, mode: SourceMode): ChosenSource {
+  if (mode === "template") {
+    return { kind: "template", name: query.replace(/^@/, "") };
+  }
   return query.startsWith("@")
     ? { kind: "template", name: query.slice(1) }
     : { kind: "repo", token: query };
 }
 
 /**
- * Add a source, enforcing the templates-cannot-combine-with-repos rule. Returns
- * a human notice when the add is rejected or redundant, else null.
+ * Add a repository to the multi-repo accumulation, rejecting templates (which
+ * belong to single Template mode) and duplicates. Returns a human notice when
+ * the add is rejected, else null.
  */
 function addSource(chosen: ChosenSource[], next: ChosenSource): string | null {
-  const hasTemplate = chosen.some((source) => source.kind === "template");
-  const hasRepo = chosen.some((source) => source.kind === "repo");
-
-  if (next.kind === "template" && (hasTemplate || hasRepo)) {
-    return "A template can't be combined with other sources";
-  }
-  if (next.kind === "repo" && hasTemplate) {
-    return "A template can't be combined with repositories";
+  if (next.kind === "template") {
+    return "Use Template mode (tab) for a template workspace";
   }
   if (isChosen2(chosen, next)) return "Already added";
-
   chosen.push(next);
   return null;
 }
@@ -271,25 +432,48 @@ function isChosen2(chosen: ChosenSource[], next: ChosenSource): boolean {
   );
 }
 
+/** Phase 2 preview without the (async) inferred-change line. */
+function renderPreviewSync(
+  theme: Theme,
+  changeName: string,
+  mode: SourceMode,
+  chosen: ChosenSource[],
+  notice: string | null,
+): string {
+  return previewBaseLines(theme, changeName, mode, chosen, notice).join("\n");
+}
+
 async function renderPreview(
   theme: Theme,
   changeName: string,
+  mode: SourceMode,
   chosen: ChosenSource[],
   notice: string | null,
 ): Promise<string> {
+  const lines = previewBaseLines(theme, changeName, mode, chosen, notice);
+  if (mode === "multi" && chosen.length > 0) {
+    lines.push("", await describeInferred(theme, changeName, chosen));
+  }
+  return lines.join("\n");
+}
+
+function previewBaseLines(
+  theme: Theme,
+  changeName: string,
+  mode: SourceMode,
+  chosen: ChosenSource[],
+  notice: string | null,
+): string[] {
   const { palette } = theme;
-  const lines: string[] = [];
-  lines.push(
+  const lines: string[] = [
     `${fg(palette.muted, "new change")}  ${fg(
       palette.focus,
       escapeBlessedTags(changeName),
     )}`,
-  );
+    renderModeTabs(theme, mode),
+  ];
 
-  if (chosen.length === 0) {
-    lines.push("");
-    lines.push(fg(palette.muted, "add one or more repos, or one @template"));
-  } else {
+  if (mode === "multi" && chosen.length > 0) {
     const chips = chosen
       .map((source) =>
         source.kind === "template"
@@ -298,18 +482,37 @@ async function renderPreview(
       )
       .join(fg(palette.muted, " · "));
     lines.push(`${fg(palette.muted, "sources")}  ${chips}`);
-
-    const inferred = await describeInferred(theme, changeName, chosen);
-    lines.push("");
-    lines.push(inferred);
+  } else {
+    lines.push(fg(palette.muted, modeGuidance(mode)));
   }
 
   if (notice) {
-    lines.push("");
     lines.push(fg(palette.warning, escapeBlessedTags(notice)));
   }
 
-  return lines.join("\n");
+  return lines;
+}
+
+/** The mode switcher row: each mode, the active one accented, plus a tab hint. */
+function renderModeTabs(theme: Theme, mode: SourceMode): string {
+  const { palette } = theme;
+  const tabs = MODE_ORDER.map((candidate) =>
+    candidate === mode
+      ? fg(palette.focus, `▌${modeLabel(candidate)}`)
+      : fg(palette.muted, modeLabel(candidate)),
+  ).join("   ");
+  return `${tabs}   ${fg(palette.muted, "· tab switches mode")}`;
+}
+
+function modeGuidance(mode: SourceMode): string {
+  switch (mode) {
+    case "repo":
+      return "select a repository for a single-repo change";
+    case "template":
+      return "select a @template for a template workspace";
+    case "multi":
+      return "add repositories for an ad-hoc multi-repo workspace";
+  }
 }
 
 async function describeInferred(
