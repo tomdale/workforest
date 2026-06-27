@@ -4,7 +4,7 @@ import type {
   AiTextGenerationRequest,
   AiTextGenerationResult,
 } from "@wf-plugin/core";
-import { commandAvailable, formatCliFailure, runCli } from "./cli.ts";
+import { commandAvailable, formatCliFailure, runCli } from "@wf-plugin/core";
 
 const SETUP_HINT = "Install Claude Code and run `claude auth login`.";
 
