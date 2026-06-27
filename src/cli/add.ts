@@ -7,6 +7,7 @@ import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
+import { invalidateWorkspaceAgentsMd } from "../templates/agents-md.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
 import { promptConfirm } from "../ui/prompts/index.ts";
@@ -170,6 +171,10 @@ async function addToWorkspaceChange(
     log.success(
       `Added ${result.addedRepos.length} repo${result.addedRepos.length === 1 ? "" : "s"} to ${target.metadata.workspace.feature_name}.`,
     );
+    const templateId = target.metadata.workspace.template_id;
+    const template = templateId ? await loadTemplate(templateId) : null;
+    if (template)
+      await invalidateWorkspaceAgentsMd(template, target.workspaceDir);
   }
   await options.writeShellCdPath(target.workspaceDir);
   return success();

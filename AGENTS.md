@@ -16,6 +16,12 @@ up the work. `pnpm check` is the standard validation gate and includes linting
 and tests; use narrower focused commands only as additional local iteration, not
 as a substitute for the final check.
 
+These instructions are the user's standing, explicit authorization to use
+subagents when this file says they are appropriate. In particular, a request to
+commit work authorizes delegating commit creation to the registered `commit`
+subagent, and a task that can be split safely authorizes the multi-agent
+workflow below.
+
 ## Commit Workflow
 
 Use the registered `commit` subagent for creating commits. The main agent

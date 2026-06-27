@@ -42,12 +42,22 @@ export type ResolvedWorkspaceConfig = {
 
 export type TemplateConfig = {
   repos: string[];
+  "AGENTS.md"?: TemplateAgentsMdConfig;
   description?: string;
   hooks?: Hook[];
   /** Undefined inherits the global setting. Empty string disables it for this template. */
   branchPrefix?: string;
   /** Disable automatic initializers. Set to true to disable all, or an array of initializer IDs to disable specific ones. */
   disableInitializers?: boolean | string[];
+};
+
+export type TemplateAgentsMdConfig = {
+  /** The cross-repository workflow and components the generated guidance covers. */
+  focus: string;
+  /** Repository-relative component hints, keyed by repository name. */
+  paths?: Record<string, string[]>;
+  /** Guidance lifetime. Defaults to 24 hours. */
+  maxAgeHours?: number;
 };
 
 export type Hook = {

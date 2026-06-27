@@ -32,6 +32,7 @@ describe("commandRegistry", () => {
         "new",
         "edit",
         "add-file",
+        "agents-md",
         "copy",
         "delete",
       ],

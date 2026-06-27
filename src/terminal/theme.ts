@@ -2,6 +2,7 @@ import chalk from "chalk";
 
 export const terminalColor = {
   accent: chalk.cyan,
+  agent: chalk.blueBright,
   muted: chalk.dim,
   success: chalk.green,
   warning: chalk.yellow,

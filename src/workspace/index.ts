@@ -10,6 +10,7 @@ import {
   runInitializersGenerator,
 } from "../services/initializers/index.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
+import { materializeTemplateAgentsMd } from "../templates/agents-md.ts";
 import {
   applyTemplateGenerator,
   copyTemplateFiles,
@@ -294,6 +295,7 @@ export async function* stampWorkspaceGenerator({
 
   if (template && templateId) {
     await copyTemplateFiles(template, workspaceDir);
+    await materializeTemplateAgentsMd(template, workspaceDir);
   }
 
   // Phase B: Run initializers (package managers, vercel link, turbo link, etc.)
@@ -407,7 +409,10 @@ export async function stampWorkspace(
     template !== null
       ? createTemplateCopyBarrier({
           repoCount: repos.length,
-          copyTemplateFiles: () => copyTemplateFiles(template, workspaceDir),
+          copyTemplateFiles: async () => {
+            await copyTemplateFiles(template, workspaceDir);
+            await materializeTemplateAgentsMd(template, workspaceDir);
+          },
         })
       : null;
   const beforeInitializers = async ({

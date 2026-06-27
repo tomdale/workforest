@@ -158,6 +158,21 @@ function generateTemplateJsonc(config: TemplateConfig): string {
 
   // hooks (optional)
   lines.push("");
+  lines.push("  // Focused, generated workspace guidance (optional)");
+  if (config["AGENTS.md"]) {
+    lines.push(
+      `  "AGENTS.md": ${JSON.stringify(config["AGENTS.md"], null, 2).replace(/\n/g, "\n  ")},`,
+    );
+  } else {
+    lines.push('  // "AGENTS.md": {');
+    lines.push('  //   "focus": "How a workflow crosses these repositories.",');
+    lines.push('  //   "paths": { "repo": ["src/component"] },');
+    lines.push('  //   "maxAgeHours": 24');
+    lines.push("  // },");
+  }
+
+  // hooks (optional)
+  lines.push("");
   lines.push("  // Hooks run after workspace setup (optional)");
   lines.push(
     "  // Each hook has: name (required), run (required), in (optional repo filter)",
@@ -203,12 +218,35 @@ function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
   const { branchPrefix: _branchPrefix, ...rest } = config;
 
   if (!hasBranchPrefix) {
-    return rest;
+    return normalizeAgentsMdConfig(rest);
   }
 
-  return {
+  return normalizeAgentsMdConfig({
     ...rest,
     branchPrefix: config.branchPrefix?.trim() ?? "",
+  });
+}
+
+function normalizeAgentsMdConfig(config: TemplateConfig): TemplateConfig {
+  const agents = config["AGENTS.md"];
+  if (!agents) return config;
+  return {
+    ...config,
+    "AGENTS.md": {
+      ...agents,
+      focus: agents.focus.trim(),
+      ...(agents.paths
+        ? {
+            paths: Object.fromEntries(
+              Object.entries(agents.paths).map(([repo, paths]) => [
+                repo,
+                [...paths],
+              ]),
+            ),
+          }
+        : {}),
+      maxAgeHours: agents.maxAgeHours ?? 24,
+    },
   };
 }
 
@@ -236,6 +274,28 @@ export function validateTemplateName(templateId: string): string {
 }
 
 function validateTemplateConfigPaths(config: TemplateConfig): void {
+  const configuredRepoNames = new Set(
+    config.repos.map((repo) =>
+      repo
+        .replace(/\.git$/, "")
+        .split(/[/:]/)
+        .filter(Boolean)
+        .at(-1),
+    ),
+  );
+  for (const [repo, paths] of Object.entries(
+    config["AGENTS.md"]?.paths ?? {},
+  )) {
+    validateRepositoryComponent(repo, "AGENTS.md paths repository");
+    if (!configuredRepoNames.has(repo)) {
+      throw new Error(
+        `AGENTS.md paths references unknown repository "${repo}".`,
+      );
+    }
+    for (const componentPath of paths) {
+      resolveContainedPath("/workforest-agents-md-root", componentPath);
+    }
+  }
   for (const hook of config.hooks ?? []) {
     const hookDirs = hook.in
       ? Array.isArray(hook.in)
@@ -342,6 +402,37 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
         if (
           condition["fileExists"] !== undefined &&
           typeof condition["fileExists"] !== "string"
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+
+  const agents = config["AGENTS.md"];
+  if (agents !== undefined) {
+    if (agents === null || typeof agents !== "object") return false;
+    const value = agents as Record<string, unknown>;
+    if (typeof value["focus"] !== "string" || !value["focus"].trim()) {
+      return false;
+    }
+    if (
+      value["maxAgeHours"] !== undefined &&
+      (!Number.isInteger(value["maxAgeHours"]) ||
+        (value["maxAgeHours"] as number) <= 0)
+    ) {
+      return false;
+    }
+    if (value["paths"] !== undefined) {
+      if (value["paths"] === null || typeof value["paths"] !== "object") {
+        return false;
+      }
+      for (const paths of Object.values(
+        value["paths"] as Record<string, unknown>,
+      )) {
+        if (
+          !Array.isArray(paths) ||
+          paths.some((item) => typeof item !== "string" || !item)
         ) {
           return false;
         }

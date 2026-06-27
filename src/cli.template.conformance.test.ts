@@ -54,6 +54,18 @@ describe("template command conformance", () => {
       argv: ["template", "add-file"],
       usage: "Usage: wf template add-file",
     },
+    {
+      argv: ["template", "agents-md"],
+      usage: "Usage: wf template agents-md",
+    },
+    {
+      argv: ["template", "agents-md", "status"],
+      usage: "Usage: wf template agents-md",
+    },
+    {
+      argv: ["template", "agents-md", "refresh"],
+      usage: "Usage: wf template agents-md",
+    },
     { argv: ["template", "copy"], usage: "Usage: wf template copy" },
     { argv: ["template", "delete"], usage: "Usage: wf template delete" },
   ] as const;

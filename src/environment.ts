@@ -10,6 +10,7 @@ export type EnvironmentVariableDefinition = Readonly<{
 
 export const WORKFOREST_ENVIRONMENT_VARIABLES = {
   aiDisabled: "WORKFOREST_AI_DISABLED",
+  aiDebug: "WORKFOREST_AI_DEBUG",
   aiModel: "WORKFOREST_AI_MODEL",
   aiProvider: "WORKFOREST_AI_PROVIDER",
   aiTimeoutMs: "WORKFOREST_AI_TIMEOUT_MS",
@@ -108,6 +109,14 @@ export const ENVIRONMENT_VARIABLE_REGISTRY: readonly EnvironmentVariableDefiniti
       description:
         "Disables AI-backed Workforest features, overriding ai.disabled in config.",
       defaultBehavior: "Uses ai.disabled from config, or false.",
+    },
+    {
+      name: WORKFOREST_ENVIRONMENT_VARIABLES.aiDebug,
+      value: "1/true/yes",
+      audience: "user",
+      description:
+        "Enables verbose AI provider diagnostics such as subprocess pid, timeout lifecycle, temp output path, and normalized provider event types.",
+      defaultBehavior: "AI provider diagnostics are hidden.",
     },
     {
       name: WORKFOREST_ENVIRONMENT_VARIABLES.timingFile,

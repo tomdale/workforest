@@ -1498,6 +1498,46 @@ export const commandRegistry: CommandRegistry = {
             ],
             tty: optionalStdin,
           }),
+          group({
+            name: "agents-md",
+            path: ["template", "agents-md"],
+            summary: "Manage generated AGENTS.md guidance",
+            description:
+              "Inspect or refresh focused, template-owned cross-repository guidance. Generated artifacts stay under the template's `agents-md/` directory and are materialized only at workspace roots.",
+            help: nestedHelp("template", "agents-md"),
+            children: [
+              leaf({
+                name: "status",
+                path: ["template", "agents-md", "status"],
+                summary: "Show guidance state",
+                description:
+                  "Reports whether a template's generated guidance is disabled, missing, fresh, expired, scope-changed, modified, or conflicting.",
+                handler: "template.agents-md.status",
+                help: nestedHelp("template", "agents-md"),
+                operands: operands(1, 1, "template"),
+                outputModes: ["report", "json"],
+              }),
+              leaf({
+                name: "refresh",
+                path: ["template", "agents-md", "refresh"],
+                summary: "Generate and verify guidance",
+                description:
+                  "Analyzes clean default-branch repository state, streams progress and AI provider output, verifies the focused guidance independently, and atomically publishes it. JSON mode suppresses progress so stdout remains machine-readable.",
+                handler: "template.agents-md.refresh",
+                help: nestedHelp("template", "agents-md"),
+                operands: operands(1, 1, "template"),
+                flags: [
+                  booleanFlag(
+                    "force",
+                    "--force",
+                    "-f",
+                    "Replace conflicting authored or modified managed guidance, preserving a backup.",
+                  ),
+                ],
+                outputModes: ["report", "json"],
+              }),
+            ],
+          }),
           leaf({
             name: "copy",
             path: ["template", "copy"],

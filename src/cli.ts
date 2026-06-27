@@ -61,6 +61,11 @@ import {
   writeShellCdPath,
 } from "./shell.ts";
 import {
+  getTemplateAgentsMdStatus,
+  refreshTemplateAgentsMd,
+  type TemplateAgentsMdStatus,
+} from "./templates/agents-md.ts";
+import {
   createTemplate,
   deleteTemplate,
   getTemplatesDir,
@@ -68,6 +73,7 @@ import {
   loadTemplate,
   validateTemplateName,
 } from "./templates/index.ts";
+import { createAgentOutputStream } from "./terminal/agent-output.ts";
 import {
   printReport,
   type ReportField,
@@ -2189,6 +2195,17 @@ async function runTemplateInvocation(
       return runTemplateEdit(invocation.beforeDoubleDash[0] ?? "");
     case "template.add-file":
       return runTemplateAddFile(invocation, json);
+    case "template.agents-md.status":
+      return runTemplateAgentsMdStatus(
+        invocation.beforeDoubleDash[0] ?? "",
+        json,
+      );
+    case "template.agents-md.refresh":
+      return runTemplateAgentsMdRefresh(
+        invocation.beforeDoubleDash[0] ?? "",
+        invocation.flags["force"] === true,
+        json,
+      );
     case "template.copy":
       return runTemplateCopy(
         invocation.beforeDoubleDash[0] ?? "",
@@ -2206,6 +2223,82 @@ async function runTemplateInvocation(
         `No template handler registered for ${invocation.command.leaf.handler}.`,
       );
   }
+}
+
+async function requireTemplate(templateId: string) {
+  const template = await loadTemplate(templateId);
+  if (!template)
+    throw new OperationalError(`Template "${templateId}" not found.`);
+  return template;
+}
+
+async function runTemplateAgentsMdStatus(
+  templateId: string,
+  json: boolean,
+): Promise<CommandResult> {
+  const template = await requireTemplate(templateId);
+  const guidance = await getTemplateAgentsMdStatus(template);
+  if (json) return jsonSuccess({ guidance });
+  printReport({
+    title: `AGENTS.md guidance for ${template.id}`,
+    sections: [
+      {
+        fields: [
+          { label: "State", value: guidance.state },
+          ...(guidance.manifest
+            ? [
+                { label: "Generated", value: guidance.manifest.generatedAt },
+                { label: "Expires", value: guidance.manifest.expiresAt },
+                { label: "Artifact", value: guidance.manifest.artifact },
+              ]
+            : []),
+        ],
+      },
+    ],
+    ...(guidance.state === "fresh"
+      ? {}
+      : { footer: `Refresh: wf template agents-md refresh ${template.id}` }),
+  });
+  return templateSuccess();
+}
+
+async function runTemplateAgentsMdRefresh(
+  templateId: string,
+  force: boolean,
+  json: boolean,
+): Promise<CommandResult> {
+  const template = await requireTemplate(templateId);
+  const repos = await resolveRepositorySpecifiers(template.config.repos);
+  const stream = json ? null : createAgentOutputStream();
+  let guidance: TemplateAgentsMdStatus;
+  try {
+    guidance = await refreshTemplateAgentsMd(template, repos, {
+      force,
+      ...(stream
+        ? {
+            onProgress: (message: string) => {
+              stream.finishLine();
+              log.info(message);
+              if (message.startsWith("Generating focused guidance")) {
+                process.stdout.write("\n");
+              }
+            },
+            onEvent: stream.writeEvent,
+          }
+        : {}),
+    });
+  } catch (error) {
+    throw new OperationalError(
+      error instanceof Error ? error.message : String(error),
+      { cause: error },
+    );
+  } finally {
+    stream?.finishLine();
+  }
+  if (json) return jsonSuccess({ action: "refreshed", guidance });
+  log.success(`Refreshed AGENTS.md guidance for "${template.id}".`);
+  log.info(`Artifact: ${guidance.artifactPath}`);
+  return templateSuccess();
 }
 
 function templateSuccess(): CommandResult {
@@ -2229,10 +2322,24 @@ function templateJson(
 
 async function runTemplateList(json: boolean): Promise<CommandResult> {
   const templates = await listTemplates();
+  const guidanceStates = new Map(
+    await Promise.all(
+      templates.map(
+        async (template) =>
+          [
+            template.id,
+            (await getTemplateAgentsMdStatus(template)).state,
+          ] as const,
+      ),
+    ),
+  );
 
   if (json) {
     return jsonSuccess({
-      templates: templates.map(templateJson),
+      templates: templates.map((template) => ({
+        ...templateJson(template),
+        guidance: guidanceStates.get(template.id),
+      })),
       templatesDir: getTemplatesDir(),
     });
   }
@@ -2256,6 +2363,10 @@ async function runTemplateList(json: boolean): Promise<CommandResult> {
             {
               label: "Repositories",
               value: template.config.repos.join(", "),
+            },
+            {
+              label: "AGENTS.md",
+              value: guidanceStates.get(template.id) ?? "disabled",
             },
           ],
         })),
@@ -2337,12 +2448,14 @@ async function runTemplateShow(
         : template.config.branchPrefix;
   const filesDir = path.join(path.dirname(template.path), "files");
   const hasFiles = await pathExists(filesDir);
+  const guidance = await getTemplateAgentsMdStatus(template);
 
   if (json) {
     return jsonSuccess({
       template: templateJson(template),
       branchPrefixSummary,
       filesDir: hasFiles ? filesDir : null,
+      guidance,
     });
   }
 
@@ -2355,6 +2468,7 @@ async function runTemplateShow(
             ? [{ label: "Description", value: template.config.description }]
             : []),
           { label: "Branch prefix", value: branchPrefixSummary },
+          { label: "AGENTS.md", value: guidance.state },
           ...(hasFiles ? [{ label: "Files", value: filesDir }] : []),
         ],
       },

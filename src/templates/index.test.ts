@@ -96,6 +96,57 @@ describe("templates", () => {
     expect(template?.config.branchPrefix).toBe("");
   });
 
+  it("round-trips AGENTS.md generation configuration with a default TTL", async () => {
+    const configHome = await createTemplatesHome();
+    await createTemplate("demo", {
+      repos: ["vercel/front", "vercel/api"],
+      "AGENTS.md": {
+        focus: "  How settings flow through the API.  ",
+        paths: { front: ["app/settings"], api: ["services/settings"] },
+      },
+    });
+
+    const template = await loadTemplate("demo");
+    const templateDir = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "demo",
+    );
+    expect(template?.config["AGENTS.md"]).toEqual({
+      focus: "How settings flow through the API.",
+      paths: { front: ["app/settings"], api: ["services/settings"] },
+      maxAgeHours: 24,
+    });
+    await expect(
+      readFile(path.join(templateDir, "AGENTS.md"), "utf8"),
+    ).rejects.toThrow();
+  });
+
+  it.each([
+    { focus: "" },
+    { focus: "workflow", maxAgeHours: 0 },
+    { focus: "workflow", maxAgeHours: 1.5 },
+    { focus: "workflow", paths: { unknown: ["src"] } },
+    { focus: "workflow", paths: { front: ["../outside"] } },
+  ])("rejects invalid AGENTS.md configuration %j", async (agents) => {
+    const configHome = await createTemplatesHome();
+    const templatePath = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "demo",
+      "template.jsonc",
+    );
+    await mkdir(path.dirname(templatePath), { recursive: true });
+    await writeFile(
+      templatePath,
+      JSON.stringify({ repos: ["vercel/front"], "AGENTS.md": agents }),
+      "utf8",
+    );
+    await expect(loadTemplate("demo")).rejects.toThrow();
+  });
+
   it.each([
     ".",
     "..",

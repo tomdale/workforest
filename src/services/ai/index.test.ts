@@ -51,6 +51,33 @@ describe("AI provider resolver", () => {
     expect(text).toBe("claude:name this");
   });
 
+  it("streams concise Codex events while retaining the final response", async () => {
+    const fixture = await createFixture(["codex"]);
+    const events: unknown[] = [];
+
+    const text = await generateText({
+      prompt: "name this",
+      cwd: fixture.cwd,
+      env: fixture.env,
+      config: {},
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(text).toBe("codex:name this");
+    expect(events).toContainEqual({
+      type: "activity",
+      source: "Codex",
+      activity: "command",
+      description: "rg -n account src",
+    });
+    expect(events).toContainEqual({
+      type: "usage",
+      source: "Codex",
+      inputTokens: 120,
+      outputTokens: 8,
+    });
+  });
+
   it("uses env provider override before config provider override", async () => {
     const fixture = await createFixture(["codex", "claude"], {
       WORKFOREST_AI_PROVIDER: "claude-cli",
@@ -75,6 +102,69 @@ describe("AI provider resolver", () => {
     });
 
     expect(status.selectedProvider).toBe("claude-cli");
+  });
+
+  it("resolves the mini model category through each provider", async () => {
+    const codex = await createFixture(["codex"]);
+    const claude = await createFixture(["claude"]);
+
+    await expect(
+      generateText({
+        prompt: "report model",
+        cwd: codex.cwd,
+        env: codex.env,
+        config: {},
+        modelCategory: "mini",
+      }),
+    ).resolves.toBe("codex-model:gpt-5.4-mini");
+    await expect(
+      generateText({
+        prompt: "report model",
+        cwd: claude.cwd,
+        env: claude.env,
+        config: {},
+        modelCategory: "mini",
+      }),
+    ).resolves.toBe("claude-model:haiku");
+  });
+
+  it("lets an explicit model override a normalized model category", async () => {
+    const codex = await createFixture(["codex"]);
+
+    await expect(
+      generateText({
+        prompt: "report model",
+        cwd: codex.cwd,
+        env: codex.env,
+        config: { ai: { model: "configured-model" } },
+        modelCategory: "mini",
+      }),
+    ).resolves.toBe("codex-model:configured-model");
+  });
+
+  it("passes structured output schemas through each provider", async () => {
+    const schema = { type: "object" };
+    const codex = await createFixture(["codex"]);
+    const claude = await createFixture(["claude"]);
+
+    await expect(
+      generateText({
+        prompt: "report schema",
+        cwd: codex.cwd,
+        env: codex.env,
+        config: {},
+        outputSchema: schema,
+      }),
+    ).resolves.toBe('codex-schema:{"type":"object"}');
+    await expect(
+      generateText({
+        prompt: "report schema",
+        cwd: claude.cwd,
+        env: claude.env,
+        config: {},
+        outputSchema: schema,
+      }),
+    ).resolves.toBe('claude-schema:{"type":"object"}');
   });
 
   it("reports disabled mode and blocks generation", async () => {
@@ -163,15 +253,34 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 output_file=""
+model=""
+schema_file=""
 previous=""
 for arg in "$@"; do
   if [ "$previous" = "--output-last-message" ]; then
     output_file="$arg"
   fi
+  if [ "$previous" = "--model" ]; then
+    model="$arg"
+  fi
+  if [ "$previous" = "--output-schema" ]; then
+    schema_file="$arg"
+  fi
   previous="$arg"
 done
 input="$(cat)"
-printf 'codex:%s' "$input" >"$output_file"
+printf '%s\n' '{"type":"item.started","item":{"type":"command_execution","command":"rg -n account src","status":"in_progress"}}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"large command output","status":"completed"}}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"result\\":\\"hidden final JSON\\"}"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":120,"output_tokens":8}}'
+if [ "$input" = "report model" ]; then
+  printf 'codex-model:%s' "$model" >"$output_file"
+elif [ "$input" = "report schema" ]; then
+  printf 'codex-schema:' >"$output_file"
+  cat "$schema_file" >>"$output_file"
+else
+  printf 'codex:%s' "$input" >"$output_file"
+fi
 `;
 }
 
@@ -181,7 +290,21 @@ if [ "$1" = "--version" ]; then
   printf 'claude 1.0.0\\n'
   exit 0
 fi
+model=""
+schema=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--model" ]; then model="$arg"; fi
+  if [ "$previous" = "--json-schema" ]; then schema="$arg"; fi
+  previous="$arg"
+done
 input="$(cat)"
-printf 'claude:%s' "$input"
+if [ "$input" = "report model" ]; then
+  printf 'claude-model:%s' "$model"
+elif [ "$input" = "report schema" ]; then
+  printf 'claude-schema:%s' "$schema"
+else
+  printf 'claude:%s' "$input"
+fi
 `;
 }

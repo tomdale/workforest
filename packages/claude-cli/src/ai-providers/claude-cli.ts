@@ -30,6 +30,9 @@ class ClaudeCliClient {
     if (model) {
       args.push("--model", model);
     }
+    if (request.outputSchema) {
+      args.push("--json-schema", JSON.stringify(request.outputSchema));
+    }
 
     const result = await runCli("claude", args, {
       cwd: this.#context.cwd,
@@ -50,6 +53,7 @@ const claudeCliProvider: AiProviderDefinition = {
   label: "Claude CLI",
   priority: 50,
   capabilities: ["text"],
+  modelCategories: { mini: "haiku" },
   async detect(context) {
     if (await commandAvailable("claude", ["--version"], context)) {
       return { available: true };

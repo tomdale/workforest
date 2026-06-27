@@ -1,0 +1,655 @@
+import { createHash, randomUUID } from "node:crypto";
+import { promises as fs, constants as fsConstants } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { AiModelCategory, AiProgressEvent } from "@wf-plugin/core";
+import { getCacheDir } from "../config.ts";
+import { resolveMirrorDir } from "../repositories.ts";
+import { generateText, getAiStatus } from "../services/ai/index.ts";
+import { runGit } from "../services/git.ts";
+import type { RepoConfig, TemplateAgentsMdConfig } from "../types.ts";
+import { ensureDir, pathExists } from "../utils/fs.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
+import { ensureMirrorRepoGenerator } from "../workspace/repository.ts";
+import type { Template } from "./index.ts";
+
+export const AGENTS_MD_DEFAULT_MAX_AGE_HOURS = 24;
+export const AGENTS_MD_MANIFEST_VERSION = 1;
+const MANIFEST_FILE = "manifest.json";
+const ARTIFACT_DIR = "agents-md";
+const MAX_GUIDANCE_LENGTH = 16_000;
+const AGENTS_MD_MODEL_CATEGORY: AiModelCategory = "mini";
+const AGENTS_MD_MIN_AI_TIMEOUT_MS = 10 * 60_000;
+
+export type TemplateAgentsMdState =
+  | "disabled"
+  | "missing"
+  | "fresh"
+  | "expired"
+  | "scope-changed"
+  | "modified"
+  | "conflict";
+
+export type AgentsMdManifest = Readonly<{
+  version: 1;
+  templateId: string;
+  artifact: string;
+  sha256: string;
+  scopeFingerprint: string;
+  generatedAt: string;
+  expiresAt: string;
+  sourceRevisions: Record<string, string>;
+  provider: string;
+  model: string | null;
+}>;
+
+export type TemplateAgentsMdStatus = Readonly<{
+  state: TemplateAgentsMdState;
+  templateId: string;
+  manifest: AgentsMdManifest | null;
+  artifactPath: string | null;
+}>;
+
+type PreparedRepository = Readonly<{
+  name: string;
+  path: string;
+  mirror: string;
+  revision: string;
+  hints: readonly string[];
+}>;
+
+type PreparedSources = Readonly<{
+  root: string;
+  repositories: readonly PreparedRepository[];
+}>;
+
+export function agentsMdDirectory(template: Template): string {
+  return path.join(path.dirname(template.path), ARTIFACT_DIR);
+}
+
+export function agentsMdScopeFingerprint(template: Template): string {
+  return sha256(
+    JSON.stringify({
+      templateId: template.id,
+      repos: [...template.config.repos].sort(),
+      config: template.config["AGENTS.md"] ?? null,
+    }),
+  );
+}
+
+export async function getTemplateAgentsMdStatus(
+  template: Template,
+  now = new Date(),
+): Promise<TemplateAgentsMdStatus> {
+  if (!template.config["AGENTS.md"]) {
+    return status(template, "disabled", null, null);
+  }
+  if (
+    await pathExists(
+      path.join(path.dirname(template.path), "files", "AGENTS.md"),
+    )
+  ) {
+    return status(template, "conflict", await readManifest(template), null);
+  }
+  const manifest = await readManifest(template);
+  if (!manifest) return status(template, "missing", null, null);
+  if (
+    manifest.templateId !== template.id ||
+    manifest.scopeFingerprint !== agentsMdScopeFingerprint(template)
+  ) {
+    return status(
+      template,
+      "scope-changed",
+      manifest,
+      artifactPath(template, manifest),
+    );
+  }
+  const activePath = artifactPath(template, manifest);
+  if (!(await pathExists(activePath)))
+    return status(template, "missing", manifest, activePath);
+  if (sha256(await fs.readFile(activePath)) !== manifest.sha256) {
+    return status(template, "modified", manifest, activePath);
+  }
+  if (now.getTime() >= Date.parse(manifest.expiresAt)) {
+    return status(template, "expired", manifest, activePath);
+  }
+  return status(template, "fresh", manifest, activePath);
+}
+
+export async function refreshTemplateAgentsMd(
+  template: Template,
+  repos: readonly RepoConfig[],
+  options: {
+    force?: boolean;
+    now?: Date;
+    onProgress?: (message: string) => void;
+    onEvent?: (event: AiProgressEvent) => void;
+  } = {},
+): Promise<TemplateAgentsMdStatus> {
+  const config = template.config["AGENTS.md"];
+  if (!config)
+    throw new Error(
+      `Template "${template.id}" does not enable AGENTS.md generation.`,
+    );
+  validateConfiguredRepositories(config, repos);
+  const authoredPath = path.join(
+    path.dirname(template.path),
+    "files",
+    "AGENTS.md",
+  );
+  if ((await pathExists(authoredPath)) && !options.force) {
+    throw new Error(
+      `Template contains files/AGENTS.md. Remove it or refresh with --force.`,
+    );
+  }
+  options.onProgress?.("Synchronizing clean default-branch sources…");
+  const sources = await prepareSources(repos, config, (repo) =>
+    options.onProgress?.(`Preparing ${repo}…`),
+  );
+  try {
+    const ai = await getAiStatus({
+      cwd: sources.root,
+      modelCategory: AGENTS_MD_MODEL_CATEGORY,
+    });
+    const provider = ai.selectedProvider ?? "configured AI provider";
+    const timeoutMs = Math.max(ai.timeoutMs, AGENTS_MD_MIN_AI_TIMEOUT_MS);
+    options.onProgress?.(
+      `Generating focused guidance with ${provider} (${ai.model ?? AGENTS_MD_MODEL_CATEGORY})…`,
+    );
+    const markdown = validateGeneratedMarkdown(
+      await generateText({
+        cwd: sources.root,
+        modelCategory: AGENTS_MD_MODEL_CATEGORY,
+        timeoutMs,
+        prompt: generationPrompt(template, config, sources),
+        ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+      }),
+    );
+
+    if ((await pathExists(authoredPath)) && options.force) {
+      await backupFile(authoredPath);
+      await fs.rm(authoredPath);
+    }
+    options.onProgress?.("Publishing guidance…");
+
+    const now = options.now ?? new Date();
+    const generatedAt = now.toISOString();
+    const maxAgeHours = config.maxAgeHours ?? AGENTS_MD_DEFAULT_MAX_AGE_HOURS;
+    const expiresAt = new Date(
+      now.getTime() + maxAgeHours * 3_600_000,
+    ).toISOString();
+    const document = renderManagedDocument(markdown, generatedAt, expiresAt);
+    const directory = agentsMdDirectory(template);
+    await ensureDir(directory);
+    const artifact = await nextArtifactName(directory, now);
+    const target = resolveContainedPath(directory, artifact);
+    await fs.writeFile(target, document, { encoding: "utf8", flag: "wx" });
+
+    const manifest: AgentsMdManifest = {
+      version: AGENTS_MD_MANIFEST_VERSION,
+      templateId: template.id,
+      artifact,
+      sha256: sha256(document),
+      scopeFingerprint: agentsMdScopeFingerprint(template),
+      generatedAt,
+      expiresAt,
+      sourceRevisions: Object.fromEntries(
+        sources.repositories.map((repo) => [repo.name, repo.revision]),
+      ),
+      provider: ai.selectedProvider ?? "unknown",
+      model: ai.model ?? null,
+    };
+    try {
+      await atomicWriteJson(path.join(directory, MANIFEST_FILE), manifest);
+    } catch (error) {
+      await fs.rm(target, { force: true });
+      throw error;
+    }
+    await removeSupersededArtifacts(directory, artifact);
+    return status(template, "fresh", manifest, target);
+  } finally {
+    await cleanupSources(sources);
+  }
+}
+
+export async function materializeTemplateAgentsMd(
+  template: Template,
+  workspaceDir: string,
+  options: { force?: boolean; now?: Date } = {},
+): Promise<TemplateAgentsMdStatus> {
+  const current = await getTemplateAgentsMdStatus(template, options.now);
+  const target = path.join(workspaceDir, "AGENTS.md");
+  const provenancePath = path.join(
+    workspaceDir,
+    ".workforest",
+    "agents-md.json",
+  );
+  if (current.state === "disabled") return current;
+  if (current.state !== "fresh" || !current.artifactPath || !current.manifest) {
+    const contents = unavailableDocument(template.id, current.state);
+    await replaceManagedFile(
+      target,
+      contents,
+      provenancePath,
+      options.force ?? false,
+    );
+    await atomicWriteJson(provenancePath, {
+      version: 1,
+      templateId: template.id,
+      sha256: sha256(contents),
+      scopeFingerprint: agentsMdScopeFingerprint(template),
+      state: current.state,
+    });
+    return current;
+  }
+  const contents = await fs.readFile(current.artifactPath, "utf8");
+  await replaceManagedFile(
+    target,
+    contents,
+    provenancePath,
+    options.force ?? false,
+  );
+  await atomicWriteJson(provenancePath, {
+    version: 1,
+    templateId: template.id,
+    artifact: current.manifest.artifact,
+    sha256: sha256(contents),
+    generatedAt: current.manifest.generatedAt,
+    expiresAt: current.manifest.expiresAt,
+    scopeFingerprint: current.manifest.scopeFingerprint,
+  });
+  return current;
+}
+
+export async function getWorkspaceAgentsMdStatus(
+  template: Template,
+  workspaceDir: string,
+  now = new Date(),
+): Promise<TemplateAgentsMdStatus> {
+  const templateStatus = await getTemplateAgentsMdStatus(template, now);
+  if (templateStatus.state === "disabled") return templateStatus;
+  const target = path.join(workspaceDir, "AGENTS.md");
+  const provenancePath = path.join(
+    workspaceDir,
+    ".workforest",
+    "agents-md.json",
+  );
+  if (!(await pathExists(target)))
+    return status(template, "missing", templateStatus.manifest, null);
+  const provenance = (await readJson(provenancePath)) as {
+    sha256?: unknown;
+    scopeFingerprint?: unknown;
+  } | null;
+  if (!provenance || typeof provenance.sha256 !== "string")
+    return status(template, "conflict", templateStatus.manifest, target);
+  if (sha256(await fs.readFile(target)) !== provenance.sha256)
+    return status(template, "modified", templateStatus.manifest, target);
+  if (provenance.scopeFingerprint !== agentsMdScopeFingerprint(template))
+    return status(template, "scope-changed", templateStatus.manifest, target);
+  return { ...templateStatus, artifactPath: target };
+}
+
+export async function maintainWorkspaceAgentsMd(
+  template: Template,
+  workspaceDir: string,
+  now = new Date(),
+): Promise<TemplateAgentsMdStatus> {
+  const workspaceStatus = await getWorkspaceAgentsMdStatus(
+    template,
+    workspaceDir,
+    now,
+  );
+  if (["expired", "scope-changed", "missing"].includes(workspaceStatus.state)) {
+    await materializeTemplateAgentsMd(template, workspaceDir, { now });
+    return getWorkspaceAgentsMdStatus(template, workspaceDir, now);
+  }
+  return workspaceStatus;
+}
+
+export async function invalidateWorkspaceAgentsMd(
+  template: Template,
+  workspaceDir: string,
+): Promise<void> {
+  if (!template.config["AGENTS.md"]) return;
+  const target = path.join(workspaceDir, "AGENTS.md");
+  const provenancePath = path.join(
+    workspaceDir,
+    ".workforest",
+    "agents-md.json",
+  );
+  const contents = unavailableDocument(template.id, "scope-changed");
+  await replaceManagedFile(target, contents, provenancePath, false);
+  await atomicWriteJson(provenancePath, {
+    version: 1,
+    templateId: template.id,
+    sha256: sha256(contents),
+    scopeFingerprint: "workspace-repository-set-changed",
+  });
+}
+
+async function replaceManagedFile(
+  target: string,
+  contents: string,
+  provenancePath: string,
+  force: boolean,
+): Promise<void> {
+  if (await pathExists(target)) {
+    const provenance = (await readJson(provenancePath)) as {
+      sha256?: unknown;
+    } | null;
+    const existing = await fs.readFile(target);
+    const managedUnmodified =
+      typeof provenance?.sha256 === "string" &&
+      sha256(existing) === provenance.sha256;
+    if (!managedUnmodified && !force)
+      throw new Error(
+        `Refusing to replace existing or modified ${target}. Use --force.`,
+      );
+    if (!managedUnmodified && force) await backupFile(target);
+  }
+  await ensureDir(path.dirname(target));
+  await fs.writeFile(target, contents, "utf8");
+}
+
+async function prepareSources(
+  repos: readonly RepoConfig[],
+  config: TemplateAgentsMdConfig,
+  onRepository?: (repository: string) => void,
+): Promise<PreparedSources> {
+  const cacheDir = getCacheDir();
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "workforest-agents-md-"),
+  );
+  const prepared: PreparedRepository[] = [];
+  try {
+    for (const repo of repos) {
+      onRepository?.(repo.name);
+      const mirror = await resolveMirrorDir(repo, cacheDir);
+      for await (const state of ensureMirrorRepoGenerator(repo, mirror)) {
+        if (state.status === "failed") throw state.error;
+      }
+      const ref = await resolveDefaultRef(mirror, repo.defaultBranch);
+      const { stdout: revisionOut } = await runGit(["rev-parse", ref], {
+        cwd: mirror,
+      });
+      const target = resolveContainedPath(root, repo.name);
+      await runGit(["worktree", "add", "--detach", target, ref], {
+        cwd: mirror,
+      });
+      const hints = config.paths?.[repo.name] ?? [];
+      prepared.push({
+        name: repo.name,
+        path: repo.name,
+        mirror,
+        revision: revisionOut.trim(),
+        hints,
+      });
+      for (const hint of hints) {
+        const hintPath = resolveContainedPath(target, hint);
+        if (!(await pathExists(hintPath))) {
+          throw new Error(
+            `Configured AGENTS.md path does not exist at ${repo.name}/${hint}.`,
+          );
+        }
+      }
+    }
+    return { root, repositories: prepared };
+  } catch (error) {
+    await cleanupSources({ root, repositories: prepared });
+    throw error;
+  }
+}
+
+async function cleanupSources(sources: PreparedSources): Promise<void> {
+  await Promise.all(
+    sources.repositories.map(async (repo) => {
+      try {
+        await runGit(
+          ["worktree", "remove", "--force", path.join(sources.root, repo.path)],
+          { cwd: repo.mirror },
+        );
+      } catch {
+        // The temporary root is removed below even if Git already forgot it.
+      }
+    }),
+  );
+  await fs.rm(sources.root, { recursive: true, force: true });
+}
+
+async function resolveDefaultRef(
+  mirror: string,
+  branch: string,
+): Promise<string> {
+  for (const ref of [
+    `refs/remotes/origin/${branch}`,
+    `refs/heads/${branch}`,
+    branch,
+  ]) {
+    try {
+      await runGit(["rev-parse", "--verify", ref], { cwd: mirror });
+      return ref;
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error(`Default branch ${branch} was not found in ${mirror}.`);
+}
+
+function validateGeneratedMarkdown(markdown: string): string {
+  const trimmed = markdown.trim();
+  if (!trimmed || trimmed.length > MAX_GUIDANCE_LENGTH)
+    throw new Error("Generated markdown is missing or excessive.");
+  if (!trimmed.startsWith("# "))
+    throw new Error("Generated guidance must start with a Markdown heading.");
+  if (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    /^```(?:markdown|md)?\s*\n[\s\S]*\n```$/i.test(trimmed)
+  )
+    throw new Error("Generated guidance must be raw AGENTS.md markdown.");
+  rejectUnsafeContent(trimmed);
+  return trimmed;
+}
+
+function rejectUnsafeContent(value: string): void {
+  if (
+    /(?:AKIA[0-9A-Z]{16}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9_]{20,})/.test(
+      value,
+    )
+  )
+    throw new Error("Generated guidance appears to contain a secret.");
+  if (
+    /\b(?:rm\s+-rf|git\s+(?:reset\s+--hard|push\s+--force)|sudo\s+)\b/i.test(
+      value,
+    )
+  )
+    throw new Error("Generated guidance contains a destructive command.");
+}
+
+function generationPrompt(
+  template: Template,
+  config: TemplateAgentsMdConfig,
+  sources: PreparedSources,
+): string {
+  const repositories = sources.repositories
+    .map(({ name, path: repoPath, hints }) => {
+      const hintText =
+        hints.length > 0
+          ? hints.map((hint) => `\`${repoPath}/${hint}\``).join(", ")
+          : "no configured path hints";
+      return `- ${name}: checkout directory \`${repoPath}/\`; path hints: ${hintText}`;
+    })
+    .join("\n");
+
+  return [
+    `You are drafting the Markdown body for the root AGENTS.md for Workforest template \`${template.id}\`. It will later be copied to workspace roots and read by coding agents before edits.`,
+    [
+      "Operating context:",
+      "A Workforest workspace is a local working directory created from a template, with related repository checkouts side-by-side and a root AGENTS.md above them.",
+      "The coding agent reading the generated file may not know Workforest. Assume it starts at the workspace root, then enters repository directories. Orient it to the multi-repository layout and focused workflow before it follows each repository's own AGENTS.md and commands.",
+    ].join("\n"),
+    [
+      "Why this file exists:",
+      "Without a root guide, coding agents waste context rediscovering repository boundaries, cross-repository seams, commands, and nested instructions. The useful outcome is a compact router that helps the next agent choose the right repository, files, existing AGENTS.md instructions, and verification command for the configured workflow.",
+      "Repository and nested AGENTS.md files remain authoritative for local conventions. This template-owned file should add only the cross-repository and workflow-specific context those files do not already provide.",
+    ].join("\n"),
+    `Configured focus:\n${config.focus}`,
+    `Checked-out clean default-branch repositories are available from the current working directory:\n${repositories}`,
+    [
+      "Success criteria:",
+      "- A coding agent can tell which repository owns each common part of the focused workflow.",
+      "- The first files or directories to inspect are named with repo-prefixed paths.",
+      "- Cross-repository control flow, data flow, proxying, generated-client boundaries, or shared contracts are summarized only where they affect the configured focus.",
+      "- Applicable repo-level and nested AGENTS.md files are listed without duplicating their instructions.",
+      "- Verification commands are included only when found in package scripts or local docs, with the directory they run from.",
+    ].join("\n"),
+    [
+      "Exploration budget and stop rules:",
+      "- Treat the configured path hints as entry points, not as the complete source of truth.",
+      "- Search each repository for applicable AGENTS.md files, then read only the repo-level and nested instruction files that govern the hinted paths.",
+      "- Prefer a small number of high-signal reads, roughly 6-12 shell commands across all repositories for normal templates. If that is not enough, choose the missing evidence needed for the success criteria and omit lower-confidence detail.",
+      "- Inspect the smallest useful set of implementation paths, nearby tests, package scripts, and local docs that directly affect the configured focus. A useful root guide usually needs representative owner files and seams, not every helper in the call graph.",
+      "- Follow cross-repository calls, API routes, generated clients, shared packages, or data contracts only until the handoff is clear enough to route a future task.",
+      "- Stop exploring and draft once you can name the owning repo, first files, governing AGENTS.md files, cross-repository handoff, and verification lane for the focused workflow. Do not inspect another file just to make the guide more complete.",
+    ].join("\n"),
+    [
+      "Write the final AGENTS.md directly. Output only Markdown for the file body.",
+      "Do not create, edit, or request permission to write files. The checked-out repositories are read-only evidence for this drafting run. Workforest will write the artifact after your final answer.",
+      "Do not return JSON, YAML frontmatter, whole-response code fences, citations metadata, analysis notes, or generation/expiry metadata.",
+    ].join("\n"),
+    [
+      "Required shape:",
+      `- Start with \`# Workspace guidance for ${template.id}\`.`,
+      "- Keep it compact enough to be useful at the start of an agent session; optimize for fast routing, not broad education.",
+      "- Include sections for scope, in-scope paths, cross-repository flow, task routing hints, reusable exploration recipes, verified commands, and existing AGENTS.md instructions.",
+      "- Use repo-prefixed paths like `front/path/to/file.ts` so agents can jump directly to the right files.",
+    ].join("\n"),
+    [
+      "Quality bar:",
+      "- Answer the startup questions: which repository owns the work, which files should be inspected first, which existing instructions apply, and which command verifies the change.",
+      "- Be specific about how the focused workflow is wired together.",
+      "- Prefer concrete modules, route files, scripts, and tests over broad repository summaries.",
+      "- Do not duplicate instructions already covered by repository or nested AGENTS.md files; list the applicable AGENTS.md paths and add only the template-specific context agents need on top.",
+      "- Do not inline exhaustive research notes, architecture walkthroughs, API inventories, or incident histories. If deeper context is useful, point to existing source files, docs, or AGENTS.md files and summarize only the route to them.",
+      "- Memoize repeated exploration patterns as short recipes: the search terms, source paths, and package scripts an agent should try first.",
+      "- Include only statements supported by files you actually inspected.",
+      "- Include only commands you found in package scripts or local docs, and state the repository directory they should run from.",
+      "- Omit unrelated components, generic coding advice, and speculative behavior.",
+      "- If a detail cannot be verified from the checked-out files, leave it out.",
+    ].join("\n"),
+    [
+      "Safety:",
+      "- Do not include secrets or environment values.",
+      "- Do not recommend destructive commands such as force pushes, hard resets, recursive deletes, or sudo.",
+    ].join("\n"),
+  ].join("\n\n");
+}
+
+function renderManagedDocument(
+  markdown: string,
+  generatedAt: string,
+  expiresAt: string,
+): string {
+  return `<!-- Managed by Workforest. Generated ${generatedAt}; expires ${expiresAt}. Disregard this document after expiration. -->\n\n${markdown.trim()}\n`;
+}
+
+function unavailableDocument(
+  templateId: string,
+  state: TemplateAgentsMdState,
+): string {
+  return `# Workspace guidance unavailable\n\nFocused guidance for template \`${templateId}\` is ${state}. Do not infer repository behavior from stale guidance.\n\nRun \`wf template agents-md refresh ${templateId}\` to regenerate it.\n`;
+}
+
+async function readManifest(
+  template: Template,
+): Promise<AgentsMdManifest | null> {
+  const value = await readJson(
+    path.join(agentsMdDirectory(template), MANIFEST_FILE),
+  );
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value as { version?: unknown }).version !== AGENTS_MD_MANIFEST_VERSION
+  )
+    return null;
+  return value as AgentsMdManifest;
+}
+
+async function readJson(file: string): Promise<unknown | null> {
+  try {
+    return JSON.parse(await fs.readFile(file, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return null;
+  }
+}
+
+async function atomicWriteJson(file: string, value: unknown): Promise<void> {
+  await ensureDir(path.dirname(file));
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await fs.rename(temporary, file);
+}
+
+async function backupFile(file: string): Promise<void> {
+  const backup = `${file}.backup-${portableTimestamp(new Date())}`;
+  await fs.copyFile(file, backup, fsConstants.COPYFILE_EXCL);
+}
+
+async function removeSupersededArtifacts(
+  directory: string,
+  active: string,
+): Promise<void> {
+  const entries = await fs.readdir(directory);
+  await Promise.all(
+    entries
+      .filter(
+        (entry) => /^AGENTS-\d{8}T\d{6}Z\.md$/.test(entry) && entry !== active,
+      )
+      .map((entry) => fs.rm(path.join(directory, entry), { force: true })),
+  );
+}
+
+function artifactPath(template: Template, manifest: AgentsMdManifest): string {
+  return resolveContainedPath(agentsMdDirectory(template), manifest.artifact);
+}
+
+function status(
+  template: Template,
+  state: TemplateAgentsMdState,
+  manifest: AgentsMdManifest | null,
+  artifact: string | null,
+): TemplateAgentsMdStatus {
+  return { state, templateId: template.id, manifest, artifactPath: artifact };
+}
+
+function validateConfiguredRepositories(
+  config: TemplateAgentsMdConfig,
+  repos: readonly RepoConfig[],
+): void {
+  const names = new Set(repos.map((repo) => repo.name));
+  for (const repo of Object.keys(config.paths ?? {}))
+    if (!names.has(repo))
+      throw new Error(
+        `AGENTS.md paths references unknown repository "${repo}".`,
+      );
+}
+
+function portableTimestamp(date: Date): string {
+  return date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+}
+async function nextArtifactName(directory: string, now: Date): Promise<string> {
+  for (let offset = 0; offset < 60; offset += 1) {
+    const artifact = `AGENTS-${portableTimestamp(
+      new Date(now.getTime() + offset * 1000),
+    )}.md`;
+    if (!(await pathExists(path.join(directory, artifact)))) return artifact;
+  }
+  throw new Error("Could not allocate a unique AGENTS.md artifact timestamp.");
+}
+function sha256(value: string | Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}

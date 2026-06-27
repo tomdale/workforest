@@ -2,6 +2,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { runGit } from "../services/git.ts";
+import {
+  maintainWorkspaceAgentsMd,
+  type TemplateAgentsMdState,
+} from "../templates/agents-md.ts";
+import { loadTemplate } from "../templates/index.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
 import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
@@ -31,6 +36,7 @@ export type ChangeStatus = Readonly<{
   repositories: readonly ChangeRepositoryStatus[];
   tasks: readonly ChangeTaskStatus[];
   initialization: ChangeInitializationStatus | null;
+  guidance?: TemplateAgentsMdState;
   nextSteps: readonly string[];
 }>;
 
@@ -132,6 +138,7 @@ export async function buildChangeStatus(
   );
   const tasks = await buildTaskStatuses(entry);
   const summary = buildSummary(entry, repositories);
+  const guidance = await workspaceGuidanceState(entry);
 
   return {
     selector: entry.selector,
@@ -146,6 +153,7 @@ export async function buildChangeStatus(
     repositories,
     tasks,
     initialization,
+    ...(guidance ? { guidance } : {}),
     nextSteps: deriveNextSteps(
       entry.selector,
       repositories,
@@ -195,6 +203,10 @@ export function renderChangeStatus(
     );
   }
 
+  if (status.guidance) {
+    lines.push("", "Guidance", `  AGENTS.md: ${status.guidance}`);
+  }
+
   lines.push("", "Next steps");
   for (const step of status.nextSteps) {
     lines.push(`  ${step}`);
@@ -205,6 +217,18 @@ export function renderChangeStatus(
   }
 
   return lines.join("\n");
+}
+
+async function workspaceGuidanceState(
+  entry: ChangeInventoryEntry,
+): Promise<TemplateAgentsMdState | undefined> {
+  if (entry.type === "repository-change") return undefined;
+  const metadata = await readWorkspaceMetadata(entry.path).catch(() => null);
+  const templateId = metadata?.workspace.template_id;
+  if (!templateId) return undefined;
+  const template = await loadTemplate(templateId);
+  if (!template) return "missing";
+  return (await maintainWorkspaceAgentsMd(template, entry.path)).state;
 }
 
 async function buildRepositoryStatuses(

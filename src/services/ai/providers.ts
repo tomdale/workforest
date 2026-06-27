@@ -144,6 +144,9 @@ function isAiProviderDefinition(value: unknown): value is AiProviderDefinition {
     candidate.capabilities.every(
       (capability) => typeof capability === "string",
     ) &&
+    candidate.modelCategories !== null &&
+    typeof candidate.modelCategories === "object" &&
+    typeof candidate.modelCategories.mini === "string" &&
     typeof candidate.detect === "function" &&
     typeof candidate.create === "function"
   );

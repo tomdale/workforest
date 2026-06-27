@@ -1,5 +1,7 @@
 import {
   type AiAvailability,
+  type AiModelCategory,
+  type AiProgressEvent,
   type AiProviderContext,
   type AiProviderDefinition,
   createSpawnEnv,
@@ -21,9 +23,12 @@ export type GenerateTextOptions = {
   cwd?: string;
   provider?: string;
   model?: string;
+  modelCategory?: AiModelCategory;
+  outputSchema?: Record<string, unknown>;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   config?: WorkspaceConfig;
+  onEvent?: (event: AiProgressEvent) => void;
 };
 
 export type GenerateJsonOptions<T> = GenerateTextOptions & {
@@ -55,6 +60,7 @@ type AiRuntimeOptions = {
   cwd?: string;
   provider?: string;
   model?: string;
+  modelCategory?: AiModelCategory;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   config?: WorkspaceConfig;
@@ -67,6 +73,7 @@ type ResolvedAiOptions = {
   disabled: boolean;
   provider?: string;
   model?: string;
+  modelCategory?: AiModelCategory;
   timeoutMs: number;
 };
 
@@ -110,11 +117,14 @@ export async function generateText(
 
   const context = providerContext(inspection.options);
   const client = await selected.loaded.provider.create(context);
+  const model = selectedModel(inspection);
   try {
     const result = await client.generateText({
       prompt: options.prompt,
-      ...(inspection.options.model ? { model: inspection.options.model } : {}),
+      ...(model ? { model } : {}),
+      ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
       timeoutMs: inspection.options.timeoutMs,
+      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     });
     return result.text;
   } catch (error) {
@@ -307,6 +317,7 @@ async function resolveAiOptions(
     disabled,
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
+    ...(options.modelCategory ? { modelCategory: options.modelCategory } : {}),
     timeoutMs,
   };
 }
@@ -335,6 +346,7 @@ function aiSpawnEnv(cwd: string): NodeJS.ProcessEnv {
 
 function isAiEnvironmentVariable(key: string): boolean {
   return (
+    key.startsWith("WORKFOREST_AI_") ||
     key.startsWith("ANTHROPIC_") ||
     key.startsWith("CLAUDE_") ||
     key.startsWith("CODEX_") ||
@@ -389,14 +401,24 @@ function readBooleanEnv(
 }
 
 function toAiStatus(inspection: AiInspection): AiStatus {
+  const model = selectedModel(inspection);
   return {
     disabled: inspection.options.disabled,
     selectedProvider: inspection.selected?.loaded.provider.id ?? null,
-    ...(inspection.options.model ? { model: inspection.options.model } : {}),
+    ...(model ? { model } : {}),
     timeoutMs: inspection.options.timeoutMs,
     providers: inspection.providers.map((provider) => provider.status),
     ...(inspection.setupHint ? { setupHint: inspection.setupHint } : {}),
   };
+}
+
+function selectedModel(inspection: AiInspection): string | undefined {
+  if (inspection.options.model) return inspection.options.model;
+  const category = inspection.options.modelCategory;
+  if (category && inspection.selected) {
+    return inspection.selected.loaded.provider.modelCategories[category];
+  }
+  return undefined;
 }
 
 function formatProviderFailure(

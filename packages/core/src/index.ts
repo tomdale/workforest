@@ -87,10 +87,31 @@ export type AiProviderContext = {
   timeoutMs: number;
 };
 
+export type AiProgressEvent =
+  | { type: "message"; source: string; text: string }
+  | {
+      type: "activity";
+      source: string;
+      activity: "command" | "search" | "tool";
+      description: string;
+    }
+  | {
+      type: "usage";
+      source: string;
+      inputTokens: number;
+      outputTokens: number;
+    }
+  | { type: "diagnostic"; source: string; message: string }
+  | { type: "error"; source: string; message: string };
+
+export type AiModelCategory = "mini";
+
 export type AiTextGenerationRequest = {
   prompt: string;
   model?: string;
+  outputSchema?: Record<string, unknown>;
   timeoutMs?: number;
+  onEvent?: (event: AiProgressEvent) => void;
 };
 
 export type AiTextGenerationResult = {
@@ -108,6 +129,7 @@ export type AiProviderDefinition = {
   label: string;
   priority: number;
   capabilities: string[];
+  modelCategories: Record<AiModelCategory, string>;
   detect(context: AiProviderContext): Promise<AiAvailability>;
   create(
     context: AiProviderContext,

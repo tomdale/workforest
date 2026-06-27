@@ -52,13 +52,19 @@ export async function copyTemplateFiles(
     );
   }
 
-  await copyDirectoryContents(templateFilesDir, workspaceDir, workspaceDir);
+  await copyDirectoryContents(
+    templateFilesDir,
+    workspaceDir,
+    workspaceDir,
+    template.config["AGENTS.md"] !== undefined,
+  );
 }
 
 async function copyDirectoryContents(
   sourceDir: string,
   targetDir: string,
   workspaceDir: string,
+  skipRootAgentsMd = false,
 ): Promise<void> {
   await assertContainedPathWithoutSymlinks(workspaceDir, targetDir);
   await fs.mkdir(targetDir, { recursive: true });
@@ -66,6 +72,13 @@ async function copyDirectoryContents(
 
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
+    if (
+      skipRootAgentsMd &&
+      sourceDir.endsWith(`${path.sep}${TEMPLATE_FILES_DIR}`) &&
+      entry.name === "AGENTS.md"
+    ) {
+      continue;
+    }
     const sourcePath = resolveContainedPath(sourceDir, entry.name);
     const targetPath = resolveContainedPath(targetDir, entry.name);
 
@@ -75,7 +88,7 @@ async function copyDirectoryContents(
       );
     }
     if (entry.isDirectory()) {
-      await copyDirectoryContents(sourcePath, targetPath, workspaceDir);
+      await copyDirectoryContents(sourcePath, targetPath, workspaceDir, false);
       continue;
     }
     if (!entry.isFile()) {
