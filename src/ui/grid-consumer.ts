@@ -59,8 +59,10 @@ function colors(): {
   error: string;
   muted: string;
   primary: string;
+  border: string;
 } {
-  const { palette } = activeTheme();
+  const theme = activeTheme();
+  const { palette } = theme;
   return {
     focus: toBlessed(palette.focus),
     success: toBlessed(palette.success),
@@ -68,6 +70,7 @@ function colors(): {
     error: toBlessed(palette.error),
     muted: toBlessed(palette.muted),
     primary: toBlessed(palette.primary),
+    border: toBlessed(theme.chrome.border),
   };
 }
 
@@ -181,7 +184,7 @@ function createDefaultEnvironment(): GridRenderEnvironment {
         left: 0,
         width: "100%",
         height: "100%-1",
-        borderColor: colors().focus,
+        borderColor: colors().border,
       }),
     createStatusLine: ({ screen }) =>
       createFullscreenStatusLine(
@@ -636,7 +639,7 @@ export function createDefaultCompletionModal({
     ? colors().error
     : hasSetupWarnings
       ? colors().warning
-      : colors().focus;
+      : colors().border;
   const style: BoxOptions["style"] = {
     fg: colors().primary,
     bg: surfaceBackground,

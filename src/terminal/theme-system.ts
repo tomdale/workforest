@@ -2,15 +2,15 @@ import chalk from "chalk";
 import { terminalSymbol } from "./theme.ts";
 
 /**
- * The single source of truth for every color and symbol a themeable fullscreen
- * surface draws. Surfaces read tokens by *semantic role* — they never hardcode a
- * color or glyph. A theme supplies the concrete value for each role, so a
- * different theme can shift hues and glyphs while the role→meaning mapping stays
- * fixed (success is always "success", whatever color the theme paints it).
+ * The single source of truth for every color and symbol a fullscreen surface
+ * draws. There is exactly one theme; surfaces read tokens by *semantic role* —
+ * they never hardcode a color or glyph — so the role→meaning mapping stays fixed
+ * (success is always "success", whatever color the theme paints it) and every
+ * surface renders identically no matter how it was launched.
  *
  * State is carried by these semantic role tokens, not by the theme's chrome
- * accent. Decorative confetti may be as colorful as a theme likes, but those
- * colors must not encode state.
+ * accent. Decorative confetti may be as colorful as it likes, but those colors
+ * must not encode state.
  */
 
 export type Rgb = readonly [number, number, number];
@@ -58,6 +58,17 @@ export type ThemePalette = Readonly<{
   muted: ThemeColor;
   /** Primary content. */
   primary: ThemeColor;
+  /**
+   * A dimmed {@link primary}: same hue, lower intensity. For secondary content
+   * that should still read as "primary-colored" but recede — e.g. metadata on
+   * unselected rows.
+   */
+  dim: ThemeColor;
+  /**
+   * Secondary neon accent. Pairs against {@link primary} for duotone contrast —
+   * metadata, separators, active markers — and must not encode state.
+   */
+  accent: ThemeColor;
 }>;
 
 export type ThemeChrome = Readonly<{
@@ -94,8 +105,6 @@ export type ThemeSymbols = Readonly<{
 }>;
 
 export type Theme = Readonly<{
-  id: string;
-  name: string;
   palette: ThemePalette;
   chrome: ThemeChrome;
   decoration: ThemeDecoration;
@@ -166,60 +175,37 @@ const DEFAULT_SYMBOLS: ThemeSymbols = {
   statusCancelled: "⊘",
 };
 
-/**
- * Reproduces the pre-theme appearance exactly: the same named ANSI colors and
- * glyphs the fullscreen surfaces used before theming existed. Selecting this
- * theme must be a visual no-op.
- */
-export const DEFAULT_THEME: Theme = {
-  id: "default",
-  name: "Default",
-  palette: {
-    focus: named("cyan"),
-    success: named("green"),
-    warning: named("yellow"),
-    error: named("red"),
-    cancel: named("red"),
-    muted: named("gray"),
-    primary: named("white"),
-  },
-  chrome: {
-    background: named("black"),
-    border: named("cyan"),
-  },
-  decoration: {
-    confettiColors: [
-      named("cyan"),
-      named("green"),
-      named("yellow"),
-      named("magenta"),
-      named("blue"),
-      named("white"),
-    ],
-    confettiGlyphs: ["◜", "◝", "◞", "◟"], // ◜ ◝ ◞ ◟
-  },
-  symbols: DEFAULT_SYMBOLS,
-};
-
 const CYBERPUNK_BACKGROUND: Rgb = [18, 20, 22];
-const CYBERPUNK_RED: Rgb = [251, 10, 38];
-const CYBERPUNK_CYAN: Rgb = [0, 245, 255];
+// Electric neon red — high saturation, pushed bright so it reads as a glow.
+// Blue is kept low (near the green channel) so it stays a true red instead of
+// drifting pink/magenta.
+const CYBERPUNK_RED: Rgb = [255, 28, 28];
+// Electric cyan. Pulled down from near-white so it reads as a vivid, saturated
+// cyan rather than a pale wash — apparent vibrancy peaks below max lightness.
+const CYBERPUNK_CYAN: Rgb = [34, 211, 238];
+const CYBERPUNK_WHITE: Rgb = [245, 240, 242];
 
 /**
- * Cyberpunk red: red is ambient chrome (border/background); cyan and the other
- * semantic roles still carry state. Confetti goes deliberately colorful.
+ * The one theme the whole app wears. Red dominates: it is the primary text color
+ * and the ambient chrome (borders/background). The focused/selected element
+ * flips to white (surfaces render it bold) so selection reads against the red.
+ * Cyan and amber stay reserved for success/warning state, which red can't carry
+ * once it's the default text color. Confetti goes deliberately colorful.
  */
-export const CYBERPUNK_RED_THEME: Theme = {
-  id: "cyberpunk-red",
-  name: "Cyberpunk red",
+const THEME: Theme = {
   palette: {
-    focus: rgb(...CYBERPUNK_CYAN),
+    focus: rgb(...CYBERPUNK_WHITE),
     success: rgb(...CYBERPUNK_CYAN),
     warning: rgb(255, 196, 0),
     error: rgb(...CYBERPUNK_RED),
     cancel: rgb(...CYBERPUNK_RED),
-    muted: rgb(120, 110, 116),
-    primary: rgb(245, 240, 242),
+    muted: rgb(90, 70, 100),
+    primary: rgb(...CYBERPUNK_RED),
+    // A reddish grey: mostly neutral, warmed by a red tint (green == blue, so no
+    // pink/salmon lean). Recedes behind the vivid primary while staying clearly
+    // warmer than the neutral muted grey used for template repos.
+    dim: rgb(130, 90, 90),
+    accent: rgb(...CYBERPUNK_CYAN),
   },
   chrome: {
     background: rgb(...CYBERPUNK_BACKGROUND),
@@ -239,20 +225,6 @@ export const CYBERPUNK_RED_THEME: Theme = {
   symbols: DEFAULT_SYMBOLS,
 };
 
-export const THEMES: readonly Theme[] = [DEFAULT_THEME, CYBERPUNK_RED_THEME];
-
-let currentTheme: Theme = DEFAULT_THEME;
-
 export function activeTheme(): Theme {
-  return currentTheme;
-}
-
-export function setActiveTheme(theme: Theme | string): void {
-  if (typeof theme === "string") {
-    const match = THEMES.find((candidate) => candidate.id === theme);
-    if (!match) throw new Error(`Unknown theme: ${theme}`);
-    currentTheme = match;
-    return;
-  }
-  currentTheme = theme;
+  return THEME;
 }

@@ -8,7 +8,6 @@ import { createFuzzyList, type FuzzyItem } from "../terminal/fuzzy-list.ts";
 import {
   activeTheme,
   fg,
-  setActiveTheme,
   type Theme,
   toBlessed,
 } from "../terminal/theme-system.ts";
@@ -69,11 +68,6 @@ export async function runChangeEntry(
   mode: ChangeEntryMode,
   deps: ChangeEntryDeps,
 ): Promise<void> {
-  // The new front door wears the cyberpunk theme by default. Truecolor hex tags
-  // must render in the target terminal; override with a named-color theme via
-  // setActiveTheme("default") if a terminal cannot show them.
-  setActiveTheme("cyberpunk-red");
-
   const screen = createFullscreenScreen();
   let torn = false;
   const teardown = (): void => {

@@ -53,13 +53,15 @@ import {
   type FullscreenKeypress,
   type FullscreenScreen,
 } from "../terminal/fullscreen-surface.ts";
-import { setActiveTheme } from "../terminal/theme-system.ts";
+import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import {
   getCompletionModalContent,
   renderPipelinesGrid,
   shouldUseGrid,
 } from "./grid-consumer.ts";
+
+const FOCUS = toBlessed(activeTheme().palette.focus);
 
 function createManualKeypress(
   setReceive: (receive: () => void) => void,
@@ -639,7 +641,7 @@ describe("renderPipelinesGrid", () => {
     expect(modalCall?.[0]).toEqual(
       expect.objectContaining({
         content: expect.stringContaining(
-          "{cyan-fg}•{/cyan-fg} {bold}repo{/bold}",
+          `{${FOCUS}-fg}•{/${FOCUS}-fg} {bold}repo{/bold}`,
         ),
         width: 50,
       }),
@@ -650,7 +652,7 @@ describe("renderPipelinesGrid", () => {
       }),
     ]);
     expect(String(modalCall?.[0]?.content)).toContain(
-      "{bold}{cyan-fg}press any key{/cyan-fg}{/bold}",
+      `{bold}{${FOCUS}-fg}press any key{/${FOCUS}-fg}{/bold}`,
     );
     expect(String(modalCall?.[0]?.content)).not.toContain("Workspace stamped");
     expect(String(modalCall?.[0]?.content)).not.toContain("created");
@@ -850,7 +852,6 @@ describe("completion modal content layout", () => {
   // Across many random frames every line must stay within the content width and
   // the line count must never change.
   it("keeps every line within the content width across animation frames", () => {
-    setActiveTheme("cyberpunk-red");
     const contentWidth = 58;
 
     const firstFrame = getCompletionModalContent({
@@ -870,15 +871,13 @@ describe("completion modal content layout", () => {
   });
 
   it("renders modal text with the active theme's palette tokens", () => {
-    setActiveTheme("cyberpunk-red");
     const lines = getCompletionModalContent({
       ...baseOptions,
       contentWidth: 58,
     });
     const joined = lines.join("\n");
-    // Cyberpunk focus (cyan) drives the "press any key" call to action; its hex
-    // token must reach the content rather than a hardcoded color name.
-    expect(joined).toContain("{#00f5ff-fg}");
+    // The theme's focus token drives the "press any key" call to action.
+    expect(joined).toContain(`{${FOCUS}-fg}`);
     expect(joined).toContain("press any key");
   });
 });
