@@ -1,5 +1,7 @@
 import type {
   AiConfig,
+  CloudConfig,
+  VercelCloudConfig,
   VercelLinkConfig,
   VercelRepoOverride,
   WorkforestDirectoryConfig,
@@ -204,6 +206,83 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
       return ai === undefined ? {} : { ai };
     },
   },
+  {
+    key: "cloud",
+    type: "object",
+    description:
+      "Defaults for cloud workspaces provisioned on Vercel Sandbox (wf start --cloud).",
+    defaultBehavior:
+      "Unset. cloud.vercel.team and cloud.vercel.project (slugs) are required before any cloud command runs; the rest use provider defaults.",
+    example: {
+      vercel: {
+        team: "vercel",
+        project: "my-app",
+        vcpus: 4,
+        timeoutMs: 14400000,
+        snapshotTtlMs: 86400000,
+        ports: [3000],
+        runtime: "node24",
+      },
+    },
+    children: [
+      {
+        key: "vercel",
+        type: "object",
+        description: "Vercel Sandbox provider settings.",
+        defaultBehavior: "Required for cloud commands (team + project).",
+      },
+      {
+        key: "vercel.team",
+        type: "string (slug)",
+        description:
+          "Vercel team slug that owns the sandboxes. Required for cloud commands.",
+        defaultBehavior: "Unset; cloud commands error until configured.",
+      },
+      {
+        key: "vercel.project",
+        type: "string (slug)",
+        description:
+          "Vercel project slug to associate sandbox operations with. Required for cloud commands.",
+        defaultBehavior: "Unset; cloud commands error until configured.",
+      },
+      {
+        key: "vercel.vcpus",
+        type: "positive integer",
+        description: "vCPUs per sandbox (2048 MB memory per vCPU).",
+        defaultBehavior: "Provider default.",
+      },
+      {
+        key: "vercel.timeoutMs",
+        type: "positive integer",
+        description: "Sandbox runtime auto-terminate timeout, in milliseconds.",
+        defaultBehavior: "Provider default.",
+      },
+      {
+        key: "vercel.snapshotTtlMs",
+        type: "positive integer",
+        description:
+          "How long a per-template base snapshot stays fresh before it is rebuilt.",
+        defaultBehavior: "86400000 (24 hours).",
+      },
+      {
+        key: "vercel.ports",
+        type: "array of positive integers",
+        description:
+          "Ports exposed at creation so preview URLs can be resolved (max 4).",
+        defaultBehavior: "[3000].",
+      },
+      {
+        key: "vercel.runtime",
+        type: "string",
+        description: "Sandbox runtime image, for example node24.",
+        defaultBehavior: "Provider default (node24).",
+      },
+    ],
+    normalize: (value, pathLabel) => {
+      const cloud = normalizeCloudConfig(value, pathLabel);
+      return cloud === undefined ? {} : { cloud };
+    },
+  },
 ] as const;
 
 export const CONFIGURATION_EXAMPLE: WorkspaceConfig = Object.fromEntries(
@@ -326,6 +405,81 @@ function normalizeAiConfig(
   if (disabled !== undefined) result.disabled = disabled;
 
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeCloudConfig(
+  value: unknown,
+  pathLabel: string,
+): CloudConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  const vercel = normalizeVercelCloudConfig(
+    config["vercel"],
+    `${pathLabel}.vercel`,
+  );
+  return vercel === undefined ? undefined : { vercel };
+}
+
+function normalizeVercelCloudConfig(
+  value: unknown,
+  pathLabel: string,
+): VercelCloudConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  const result: VercelCloudConfig = {};
+  const team = normalizeString(config["team"]);
+  const project = normalizeString(config["project"]);
+  const vcpus = normalizePositiveInteger(config["vcpus"], `${pathLabel}.vcpus`);
+  const timeoutMs = normalizePositiveInteger(
+    config["timeoutMs"],
+    `${pathLabel}.timeoutMs`,
+  );
+  const snapshotTtlMs = normalizePositiveInteger(
+    config["snapshotTtlMs"],
+    `${pathLabel}.snapshotTtlMs`,
+  );
+  const ports = normalizeNumberArray(config["ports"], `${pathLabel}.ports`);
+  const runtime = normalizeString(config["runtime"]);
+
+  if (team !== undefined) result.team = team;
+  if (project !== undefined) result.project = project;
+  if (vcpus !== undefined) result.vcpus = vcpus;
+  if (timeoutMs !== undefined) result.timeoutMs = timeoutMs;
+  if (snapshotTtlMs !== undefined) result.snapshotTtlMs = snapshotTtlMs;
+  if (ports !== undefined) result.ports = ports;
+  if (runtime !== undefined) result.runtime = runtime;
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeNumberArray(
+  value: unknown,
+  pathLabel: string,
+): number[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an array of positive integers.`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "number" || !Number.isInteger(entry) || entry <= 0) {
+      throw new Error(`${pathLabel}[${index}] must be a positive integer.`);
+    }
+    return entry;
+  });
 }
 
 function normalizePositiveInteger(

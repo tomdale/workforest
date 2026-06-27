@@ -72,6 +72,19 @@ export async function runStartCommand(
         : config.branchPrefix,
     );
 
+  if (invocation.flags["cloud"] === true) {
+    const { createCloudChange } = await import("../cloud/provisioning.ts");
+    await createCloudChange(
+      { changeName, source, branchName, directories },
+      {
+        interactive: options.interactive,
+        config,
+        ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+      },
+    );
+    return success();
+  }
+
   await createChange({ changeName, source, branchName, directories }, options);
   return success();
 }

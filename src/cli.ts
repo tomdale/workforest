@@ -265,7 +265,10 @@ async function runInvocation(
         if (!(await shouldUseDashboardTui())) {
           throw new UsageError("wf start requires a change name.");
         }
-        return runChangeEntryCommand("create");
+        return runChangeEntryCommand(
+          "create",
+          invocation.flags["cloud"] === true ? "cloud" : undefined,
+        );
       }
       return runTypedCommand(async () => {
         const { runStartCommand } = await import("./cli/start.ts");
@@ -403,6 +406,13 @@ async function runInvocation(
     return runCacheInvocation(invocation);
   }
 
+  if (invocation.command.leaf.handler.startsWith("cloud.")) {
+    return runTypedCommand(async () => {
+      const { runCloudInvocation } = await import("./cloud/cli.ts");
+      return runCloudInvocation(invocation);
+    });
+  }
+
   if (invocation.command.leaf.handler.startsWith("worktree.")) {
     const { runWorktreeInvocation } = await import("./repository-cli.ts");
     return runWorktreeInvocation(invocation);
@@ -470,6 +480,7 @@ async function shouldUseDashboardTui(): Promise<boolean> {
  */
 async function runChangeEntryCommand(
   mode: "go" | "create",
+  target?: "local" | "cloud",
 ): Promise<CommandResult> {
   const { runChangeEntry } = await import("./change-entry/surface.ts");
   const { buildCreateChangeInput, createChange } = await import(
@@ -478,8 +489,19 @@ async function runChangeEntryCommand(
   const scope = await resolveCurrentChangeScope();
   await runChangeEntry(mode, {
     ...(scope ? { scope } : {}),
-    commitChange: async ({ changeName, sources }) => {
+    ...(target ? { initialTarget: target } : {}),
+    commitChange: async ({ changeName, sources, target }) => {
       const input = await buildCreateChangeInput({ changeName, sources });
+      if (target === "cloud") {
+        const { config } = await loadWorkspaceConfig();
+        const { createCloudChange } = await import("./cloud/provisioning.ts");
+        await createCloudChange(input, {
+          interactive: true,
+          onEvent: humanServiceEventSink,
+          config,
+        });
+        return;
+      }
       await createChange(input, {
         interactive: true,
         onEvent: humanServiceEventSink,

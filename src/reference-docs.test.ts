@@ -17,6 +17,7 @@ describe("configuration registry", () => {
       "branchPrefix",
       "vercelLink",
       "ai",
+      "cloud",
     ]);
   });
 

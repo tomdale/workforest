@@ -241,6 +241,12 @@ const changeStart = leaf({
       description:
         "Use this exact Git branch name instead of deriving one from `branchPrefix` and <change>.",
     }),
+    booleanFlag(
+      "cloud",
+      "--cloud",
+      undefined,
+      "Provision the change as a cloud workspace on Vercel Sandbox instead of locally.",
+    ),
   ],
   operands: {
     variants: [
@@ -827,6 +833,135 @@ export const commandRegistry: CommandRegistry = {
               },
             ],
             outputModes: ["human", "report"],
+            tty: optionalStdin,
+          }),
+        ],
+      }),
+      group({
+        name: "cloud",
+        path: ["cloud"],
+        summary: "Manage cloud workspaces",
+        description:
+          "Inspect and tear down cloud workspaces provisioned with `wf start --cloud` on Vercel Sandbox. State is read from the sandboxes' tags, so these commands work from any machine.",
+        help: { kind: "command", command: "cloud" },
+        children: [
+          leaf({
+            name: "list",
+            path: ["cloud", "list"],
+            summary: "List cloud workspaces",
+            description:
+              "Lists every workforest-managed cloud workspace with its status, branch, and repositories, reconstructed from the sandboxes' tags. With `--json` it emits a JSON envelope.",
+            handler: "cloud.list",
+            help: nestedHelp("cloud", "list"),
+            flags: [
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit the cloud workspace list as a JSON envelope instead of the report.",
+              ),
+            ],
+            outputModes: ["report", "json"],
+          }),
+          leaf({
+            name: "status",
+            path: ["cloud", "status"],
+            summary: "Show one cloud workspace",
+            description:
+              "Shows a single cloud workspace in detail: status, branch, repositories, and creation time. Errors if no workspace matches the change name.",
+            handler: "cloud.status",
+            help: nestedHelp("cloud", "status"),
+            operands: operands(
+              1,
+              1,
+              "change",
+              "<change>",
+              "The change name of the cloud workspace.",
+            ),
+            flags: [
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit the workspace record as a JSON envelope.",
+              ),
+            ],
+            outputModes: ["report", "json"],
+          }),
+          leaf({
+            name: "attach",
+            path: ["cloud", "attach"],
+            summary: "Open a shell in a cloud workspace",
+            description:
+              "Resumes the cloud workspace if stopped and opens an interactive shell in it. Shells out to the `sandbox` CLI (required on PATH), scoped to the configured cloud.team and cloud.project.",
+            handler: "cloud.attach",
+            help: nestedHelp("cloud", "attach"),
+            operands: operands(
+              1,
+              1,
+              "change",
+              "<change>",
+              "The change name of the cloud workspace to attach to.",
+            ),
+            outputModes: ["human"],
+            supportsJson: false,
+            tty: optionalTerminal,
+          }),
+          leaf({
+            name: "stop",
+            path: ["cloud", "stop"],
+            summary: "Stop a cloud workspace",
+            description:
+              "Stops a cloud workspace's sandbox, snapshotting its filesystem so it can be resumed later. Errors if no workspace matches the change name.",
+            handler: "cloud.stop",
+            help: nestedHelp("cloud", "stop"),
+            operands: operands(
+              1,
+              1,
+              "change",
+              "<change>",
+              "The change name of the cloud workspace to stop.",
+            ),
+            flags: [
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit the result as a JSON envelope.",
+              ),
+            ],
+            outputModes: ["report", "json"],
+          }),
+          leaf({
+            name: "delete",
+            path: ["cloud", "delete"],
+            summary: "Delete a cloud workspace",
+            description:
+              "Stops and removes a cloud workspace's sandbox. Errors if no workspace matches the change name.",
+            handler: "cloud.delete",
+            help: nestedHelp("cloud", "delete"),
+            operands: operands(
+              1,
+              1,
+              "change",
+              "<change>",
+              "The change name of the cloud workspace to delete.",
+            ),
+            flags: [
+              booleanFlag(
+                "force",
+                "--force",
+                "-f",
+                "Delete without confirmation.",
+              ),
+              booleanFlag(
+                "json",
+                "--json",
+                undefined,
+                "Emit the result as a JSON envelope.",
+              ),
+            ],
+            outputModes: ["report", "json"],
             tty: optionalStdin,
           }),
         ],

@@ -28,11 +28,46 @@ export type AiConfig = {
   disabled?: boolean;
 };
 
+/**
+ * Provider-specific defaults for Vercel Sandbox provisioning. Nested under
+ * `cloud.vercel` so the provider context is explicit and a future provider can
+ * add a sibling block (e.g. `cloud.<provider>`). Every field is optional; unset
+ * values fall back to the provider defaults resolved in `src/cloud/`.
+ */
+export type VercelCloudConfig = {
+  /**
+   * Vercel team slug that owns the sandboxes. Required for cloud commands and
+   * passed to the SDK as the team scope (a slug, not a team_… id).
+   */
+  team?: string;
+  /**
+   * Vercel project slug to associate sandbox operations with. Required for cloud
+   * commands and passed to the SDK as the project scope (a slug, not a prj_… id).
+   */
+  project?: string;
+  /** vCPUs per sandbox (2048 MB memory per vCPU). */
+  vcpus?: number;
+  /** Sandbox runtime auto-terminate timeout, in milliseconds. */
+  timeoutMs?: number;
+  /** How long a per-template base snapshot stays fresh before a rebuild. */
+  snapshotTtlMs?: number;
+  /** Ports exposed at creation so `domain(port)` can resolve preview URLs. */
+  ports?: number[];
+  /** Sandbox runtime image, e.g. "node24". */
+  runtime?: string;
+};
+
+/** Cloud provisioning settings, grouped by provider. */
+export type CloudConfig = {
+  vercel?: VercelCloudConfig;
+};
+
 export type WorkspaceConfig = {
   directory?: WorkforestDirectoryConfig;
   branchPrefix?: string;
   vercelLink?: VercelLinkConfig;
   ai?: AiConfig;
+  cloud?: CloudConfig;
 };
 
 export type ResolvedWorkspaceConfig = {
@@ -145,4 +180,20 @@ export type ReviewWorktreeMetadata = {
   path: string;
   branch?: string;
   created_at: string;
+};
+
+/**
+ * A cloud workspace's identity, reconstructed from a Vercel Sandbox's tags
+ * (the source of truth) rather than persisted locally. One sandbox per change.
+ */
+export type CloudSandboxMetadata = {
+  /** The Vercel Sandbox name, also the workforest change name. */
+  name: string;
+  changeName: string;
+  branchName: string;
+  templateId?: string;
+  /** Repo names checked out in the sandbox (from the `wf:repos` tag). */
+  repos: string[];
+  status: string;
+  createdAt: string;
 };

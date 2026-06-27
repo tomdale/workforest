@@ -200,6 +200,81 @@ wf status workforest/fix-auth
 wf finish workforest/fix-auth
 ```
 
+## Cloud Workspaces
+
+Provision a change as a remote, persistent [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)
+instead of local worktrees by adding `--cloud` to `wf start`. The cloud workspace
+behaves like a local one — one or more repositories, each checked out on a new
+branch, with dependencies installed and `vercel env pull` run — but the
+environment lives in the cloud, so it does not depend on your machine staying
+online and is not bounded by local resources.
+
+Cloud commands talk to Vercel through the `@vercel/sandbox` SDK (the only
+exception is `wf cloud attach`, which shells out to the `sandbox` CLI for an
+interactive PTY). Before using them, configure a **team and project** (Vercel
+slugs) and provide a token:
+
+```jsonc
+// ~/.workforest/config.json
+{ "cloud": { "vercel": { "team": "<team-slug>", "project": "<project-slug>" } } }
+```
+
+The token is inherited automatically from your `vercel login` (the access token
+the Vercel CLI stores on disk). To use a different credential, set `VERCEL_TOKEN`
+(or a team-scoped `VERCEL_OIDC_TOKEN`), which take precedence:
+
+```sh
+vercel login            # or: export VERCEL_TOKEN=…
+```
+
+Both `cloud.team` and `cloud.project` are required; every cloud command errors
+early until they are set. The team and project are passed to the SDK as the
+scope, so provisioning is deterministic regardless of any ambient Vercel state.
+
+```sh
+# Provision a template's repos as a cloud workspace.
+wf start auth-fix @vercel-agent --cloud
+
+# Single repo, in the cloud.
+wf start try-token-refresh vercel/front --cloud
+```
+
+The interactive front door (`wf` or `wf start` with no source) ends with a
+**Local / Cloud** prompt, so the same flow can target either.
+
+Spin-up is near-instant after the first run: workforest maintains a per-template
+**base snapshot** (repos cloned, dependencies installed) and forks it, then
+fetches and branches on top. The snapshot is rebuilt when it ages past its TTL
+(`cloud.snapshotTtlMs`, default 24h).
+
+Credentials are **brokered by the sandbox firewall**: a GitHub token (from
+`gh auth token`) and a Vercel token (`VERCEL_TOKEN`) are injected into outbound
+requests to `github.com` and `api.vercel.com` in transit, so they never live
+inside the sandbox and cannot be read or exfiltrated by code running there.
+
+Inspect and tear down cloud workspaces — state is read from the sandboxes' tags,
+so these work from any machine:
+
+```sh
+wf cloud list
+wf cloud status auth-fix
+wf cloud attach auth-fix    # resume if stopped + open an interactive shell
+wf cloud stop auth-fix      # snapshot + halt; resumes on next use
+wf cloud delete auth-fix
+```
+
+`wf cloud attach` resumes the workspace (via the SDK) and opens an interactive
+shell. This one command shells out to the [`sandbox` CLI](https://vercel.com/docs/vercel-sandbox)
+(required on `PATH`) for the PTY; it passes the configured `cloud.team` and
+`cloud.project` as explicit scope and your token via the environment, so it
+targets exactly where the workspace was provisioned regardless of the CLI's own
+default scope.
+
+A running workspace also exposes its dev-server ports as preview URLs (printed
+when provisioning finishes and shown by `wf cloud status`). Cloud defaults (team,
+project, vCPUs, timeout, exposed ports, runtime) live under the `cloud` key in
+`config.json`; the sandbox runtime timeout defaults to 45 minutes.
+
 ## Code Review
 
 Open a repository review workspace:
@@ -361,9 +436,24 @@ Global settings live in `~/.workforest/config.json` by default:
     "teamByGitHubOwner": {
       "vercel": "vercel"
     }
+  },
+  "cloud": {
+    "vercel": {
+      "team": "vercel",
+      "project": "my-app",
+      "vcpus": 4,
+      "ports": [3000],
+      "snapshotTtlMs": 86400000
+    }
   }
 }
 ```
+
+The `cloud.vercel` key configures `wf start --cloud` workspaces (it is nested
+under a provider name so other providers can be added later). `team` and
+`project` (Vercel slugs) are **required** for any cloud command; the rest (vCPUs,
+sandbox timeout, base-snapshot TTL, exposed ports, runtime) are optional and fall
+back to sensible defaults.
 
 Manage configuration with:
 
@@ -392,6 +482,11 @@ wf task finish         Clean up integrated task worktrees
 wf task delete         Delete explicit task worktrees
 
 wf cache list          Inspect cached mirrors
+wf cloud list          List cloud workspaces
+wf cloud status        Show one cloud workspace
+wf cloud attach        Resume and open a shell in a cloud workspace
+wf cloud stop          Stop a cloud workspace (snapshot + halt)
+wf cloud delete        Delete a cloud workspace
 wf review open         Open a review workspace
 wf review checkout     Check out a pull request
 wf templates           Open the templates dashboard

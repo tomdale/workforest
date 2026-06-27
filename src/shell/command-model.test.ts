@@ -21,6 +21,7 @@ describe("shell command model", () => {
       "ai",
       "migrate",
       "task",
+      "cloud",
       "cache",
       "worktree",
       "review",

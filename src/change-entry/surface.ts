@@ -39,16 +39,23 @@ import {
 
 export type ChangeEntryMode = "go" | "create";
 
+/** Where a new change is provisioned: this machine, or a cloud sandbox. */
+export type ChangeTarget = "local" | "cloud";
+
 export type ChangeEntryDeps = Readonly<{
   /**
    * Resolve the chosen name + sources into a real change: build worktrees, run
    * setup through the grid, show the confetti modal, and cd on acknowledgement.
-   * Injected so the surface stays decoupled from the creation core.
+   * Injected so the surface stays decoupled from the creation core. `target`
+   * selects local vs cloud provisioning.
    */
   commitChange: (intent: {
     changeName: string;
     sources: ChosenSource[];
+    target: ChangeTarget;
   }) => Promise<void>;
+  /** Target highlighted first when the command line supplies a preference. */
+  initialTarget?: ChangeTarget;
   /**
    * The Workforest container the command was launched from, when inside one.
    * Phase 1 defaults its change list to this scope (Tab toggles to all changes)
@@ -87,9 +94,12 @@ export async function runChangeEntry(
     const sources = await runPhase2(screen, phase1.changeName, deps.scope);
     if (!sources) return;
 
+    const target = await runTargetStep(screen, deps.initialTarget);
+    if (!target) return;
+
     // Hand off to the setup grid + confetti, which owns its own screen.
     teardown();
-    await deps.commitChange({ changeName: phase1.changeName, sources });
+    await deps.commitChange({ changeName: phase1.changeName, sources, target });
   } finally {
     teardown();
   }
@@ -356,6 +366,29 @@ async function runPhase2(
     preview.destroy();
     host.destroy();
   }
+}
+
+/**
+ * The final create step: choose where the change runs. Local is highlighted by
+ * default so the common case is a single Enter; cancel aborts the whole flow.
+ */
+async function runTargetStep(
+  screen: FullscreenScreen,
+  initialTarget: ChangeTarget = "local",
+): Promise<ChangeTarget | null> {
+  const list = createFuzzyList<ChangeTarget>({
+    screen,
+    prompt: "Where should this change run?",
+    items: [
+      { value: "local", label: "Local", hint: "worktrees on this machine" },
+      { value: "cloud", label: "Cloud", hint: "Vercel Sandbox" },
+    ],
+    initialSelected: (item) => item.value === initialTarget,
+  });
+  const result = await list.run();
+  list.destroy();
+  if (result.kind === "item") return result.value;
+  return null;
 }
 
 function actionLabel(

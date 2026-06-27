@@ -21,6 +21,7 @@ describe("commandRegistry", () => {
       ai: ["status"],
       migrate: ["workspaces"],
       task: ["start", "list", "finish", "delete"],
+      cloud: ["list", "status", "attach", "stop", "delete"],
       cache: ["list", "show", "sync", "doctor", "delete", "clean"],
       worktree: ["list", "add", "move", "remove"],
       review: ["open", "checkout"],
