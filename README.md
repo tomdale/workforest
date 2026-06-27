@@ -43,6 +43,14 @@ picking sources before handing off to the live setup grid. `wf start` with no
 arguments opens the same surface in create-only mode. Both fall back to plain
 output outside a TTY, and the explicit forms below stay fully scriptable.
 
+The surface is aware of where you launch it. Run inside a workspace or
+single-repo change and the change list defaults to that scope's changes; press
+**Tab** to toggle between the current scope and all changes. When naming a new
+change, the source picker is grouped into **Repo**, **Template**, and
+**Multi-repo** modes — **Tab** cycles between them — and it opens in the mode
+matching the container you started from (with that repo or template under the
+cursor).
+
 ```sh
 # Go to an existing change or create a new one (interactive front door).
 wf
