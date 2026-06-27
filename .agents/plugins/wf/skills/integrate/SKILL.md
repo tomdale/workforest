@@ -16,10 +16,12 @@ Use this skill when processing queued branches into local `main`.
    Tell the auditor to report progress after its initial diff scan and at least every
    60 seconds during long audits.
 5. Preserve linear history where possible and resolve conflicts conservatively.
-6. Run `pnpm build` before fast-forwarding `main`.
-7. Hold `workforest-main.lock` while fast-forwarding local `main`.
-8. Push `origin main:main` after a successful local integration.
-9. After the integration queue is fully processed, always run `pnpm build` in the `main` worktree.
+6. Integrate each queued entry in a dedicated worktree created and removed with
+   `wf worktree`. Do not use raw `git worktree` commands for integration worktrees.
+7. Run `pnpm build` before fast-forwarding `main`.
+8. Hold `workforest-main.lock` while fast-forwarding local `main`.
+9. Push `origin main:main` after a successful local integration.
+10. After the integration queue is fully processed, always run `pnpm build` in the `main` worktree.
 
 ## Workflow
 
@@ -31,23 +33,71 @@ Use this skill when processing queued branches into local `main`.
    Include an explicit progress contract in the auditor prompt: report files reviewed,
    remaining scope, and provisional blockers after the initial scan and every 60
    seconds while still running.
-6. Rebase or cherry-pick the queued work onto the current integration base.
-7. Resolve conflicts narrowly. Do not discard unrelated local `main` changes.
-8. Run `pnpm build`.
-9. Under the shared `workforest-main.lock`, fast-forward `main` to the integrated result.
-10. Push `origin main:main`.
-11. Dequeue the integrated queue entry.
-12. Repeat steps 2-11 until no ready queue entries remain.
-13. From the `main` worktree, run `pnpm build` once more after the queue is complete. Run this final build even when the queue was already empty and no entries were integrated.
-14. After all queued integrations are complete, offer to run `wf finish` for
+6. Create a dedicated integration worktree from current `main` using the
+   integration-worktree workflow below.
+7. Cherry-pick the queued commits into the integration worktree in order.
+8. Resolve conflicts narrowly. Do not discard unrelated local `main` changes.
+9. Run `pnpm build` in the integration worktree.
+10. Under the shared `workforest-main.lock`, rebase the integration branch onto
+    the latest local `main`, rerun `pnpm build`, and fast-forward `main`.
+11. Push `origin main:main` while holding the same shared lock.
+12. Dequeue the integrated queue entry.
+13. Remove the temporary integration worktree and delete its merged helper branch.
+14. Repeat steps 2-13 until no ready queue entries remain.
+15. From the `main` worktree, run `pnpm build` once more after the queue is complete. Run this final build even when the queue was already empty and no entries were integrated.
+16. After all queued integrations are complete, offer to run `wf finish` for
     every worktree integrated during this run. Run it only after the user
     confirms, and only for worktrees whose integration is verified in Git
     history.
+
+## Integration Worktrees
+
+Create one isolated integration worktree for every queue entry. Do not rebase a
+queued branch in its existing worktree and do not disturb uncommitted changes
+there. Use a unique timestamp or queue identifier in both the path and branch:
+
+```sh
+repository="$(git remote get-url origin)"
+integration_path="/tmp/workforest-integrate-<queue-id>-<branch-slug>"
+integration_branch="tomdale/integrate-<queue-id>-<branch-slug>"
+
+wf worktree add "$repository" "$integration_path" "$integration_branch"
+cd "$integration_path"
+git merge --ff-only main
+git cherry-pick <merge-base>..<queued-sha>
+pnpm build
+```
+
+Before creating it, verify that the path and helper branch do not already
+exist. `wf worktree add` creates a new branch from the cached repository's
+current `HEAD`; `git merge --ff-only main` verifies that the helper branch is
+based on the current integration base before queued commits are applied. If the
+queue entry contains commits already integrated under different SHAs,
+cherry-pick only the commits whose changes are not present on `main`.
+
+For the integration commit point, hold `workforest-main.lock` continuously
+while rebasing the helper branch onto the latest `main`, building it, and
+fast-forwarding the designated `main` worktree. Keep the same lock held while
+pushing `origin main:main`.
+
+After the push succeeds and the queue entry is dequeued, clean up the ephemeral
+worktree with Workforest, then delete the merged helper branch:
+
+```sh
+wf worktree remove "$repository" "$integration_path"
+git branch -d "$integration_branch"
+```
+
+Do not use `wf finish` for these ephemeral integration worktrees; they have no
+Workforest workspace metadata. Reserve `wf finish` for the original integrated
+worktrees, and only run it after user confirmation.
 
 ## Notes
 
 - Skip or refresh stale entries before attempting to integrate them.
 - Keep the integration branch linear and explicit.
 - If build or merge verification fails, leave local `main` unchanged and fix the coordinator branch first.
+- Keep a failed integration worktree intact for diagnosis; clean it up only after
+  the entry integrates successfully or is deliberately abandoned.
 - Do not offer worktree cleanup while queued integrations remain.
 - Do not treat per-entry builds as a substitute for the final build of the completed queue on `main`.
