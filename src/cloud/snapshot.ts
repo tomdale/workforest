@@ -95,8 +95,8 @@ export async function ensureBaseSnapshot(
     return name;
   }
 
-  // Rebuild: a stale base is replaced by stopping it (the fork reads the latest
-  // snapshot) after re-cloning. Recreating under the same name supersedes it.
+  // Rebuild: a stale or partial base must not be forked. Delete it first so a
+  // failed rebuild cannot be mistaken for a fresh snapshot on the next run.
   emitServiceEvent(params.onEvent, {
     type: "message",
     level: "info",
@@ -105,6 +105,19 @@ export async function ensureBaseSnapshot(
       : `Building cloud base environment (${params.group})…`,
   });
 
+  if (existing) {
+    try {
+      await existing.delete();
+    } catch (error) {
+      emitServiceEvent(params.onEvent, {
+        type: "message",
+        level: "warning",
+        message: `Could not replace stale base environment; provisioning cold. ${formatError(error)}`,
+      });
+      return null;
+    }
+  }
+
   let base: CloudSandbox;
   try {
     base = await createBaseSandbox({
@@ -112,7 +125,6 @@ export async function ensureBaseSnapshot(
       tags: {
         wf: "1",
         [BASE_GROUP_TAG]: params.group,
-        [BUILT_AT_TAG]: String(params.nowMs),
       },
       networkPolicy: params.networkPolicy,
       credentials: params.credentials,
@@ -153,14 +165,37 @@ export async function ensureBaseSnapshot(
       });
     }
     await base.stop();
+    await base.update({
+      tags: {
+        wf: "1",
+        [BASE_GROUP_TAG]: params.group,
+        [BUILT_AT_TAG]: String(params.nowMs),
+      },
+    });
     return name;
   } catch (error) {
+    await deletePartialBase(base, params.onEvent);
     emitServiceEvent(params.onEvent, {
       type: "message",
       level: "warning",
       message: `Base environment build failed; provisioning cold. ${formatError(error)}`,
     });
     return null;
+  }
+}
+
+async function deletePartialBase(
+  sandbox: CloudSandbox,
+  onEvent: ServiceEventSink | undefined,
+): Promise<void> {
+  try {
+    await sandbox.delete();
+  } catch (error) {
+    emitServiceEvent(onEvent, {
+      type: "message",
+      level: "warning",
+      message: `Could not delete partial base environment. ${formatError(error)}`,
+    });
   }
 }
 

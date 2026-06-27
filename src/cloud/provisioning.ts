@@ -82,7 +82,6 @@ async function provisionCloudChange(
   const cloud = options.config.cloud?.vercel ?? {};
   const ports = cloud.ports ?? [...DEFAULT_PORTS];
   const timeoutMs = cloud.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const vercelTeam = resolveVercelTeam(repos[0]?.remote ?? "", options.config);
 
   const group = baseSnapshotGroup(input.source);
   const baseName = await ensureBaseSnapshot({
@@ -123,6 +122,7 @@ async function provisionCloudChange(
 
   const pipelines = new Map<string, AsyncGenerator<RepoPipelineState>>();
   for (const repo of repos) {
+    const vercelTeam = resolveVercelTeam(repo.remote, options.config);
     pipelines.set(
       repo.name,
       cloudRepoPipelineGenerator({
@@ -219,14 +219,33 @@ export async function* cloudRepoPipelineGenerator(
         ? [
             {
               cmd: "git",
-              args: ["clone", httpsCloneUrl(repo.remote), repo.name],
+              args: [
+                "clone",
+                "--branch",
+                repo.defaultBranch,
+                httpsCloneUrl(repo.remote),
+                repo.name,
+              ],
               cwd: SANDBOX_WORKDIR,
             },
             { cmd: "git", args: ["checkout", "-B", branchName], cwd: repoDir },
           ]
         : [
-            { cmd: "git", args: ["fetch", "origin"], cwd: repoDir },
-            { cmd: "git", args: ["checkout", "-B", branchName], cwd: repoDir },
+            {
+              cmd: "git",
+              args: ["fetch", "origin", repo.defaultBranch],
+              cwd: repoDir,
+            },
+            {
+              cmd: "git",
+              args: [
+                "checkout",
+                "-B",
+                branchName,
+                `origin/${repo.defaultBranch}`,
+              ],
+              cwd: repoDir,
+            },
           ];
 
     for (const command of gitCommands) {

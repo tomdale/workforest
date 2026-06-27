@@ -12,6 +12,7 @@ import {
 } from "./credentials.ts";
 import { cloudSandboxName } from "./tags.ts";
 import {
+  deleteSandbox,
   listManagedSandboxes,
   resumeSandboxSession,
   stopSandbox,
@@ -38,8 +39,9 @@ export async function runCloudInvocation(
       case "cloud.status":
         return await runCloudStatus(credentials, operands[0], json);
       case "cloud.stop":
-      case "cloud.delete":
         return await runCloudStop(credentials, operands[0], json);
+      case "cloud.delete":
+        return await runCloudDelete(credentials, operands[0], json);
       case "cloud.attach":
         return await runCloudAttach(credentials, operands[0]);
       default:
@@ -100,6 +102,24 @@ async function runCloudStop(
     return jsonSuccess({ stopped: selector });
   }
   return success(reportOutput(`Stopped cloud workspace: ${selector}`));
+}
+
+async function runCloudDelete(
+  credentials: CloudCredentials,
+  selector: string | undefined,
+  json: boolean,
+): Promise<CommandResult> {
+  if (!selector) {
+    throw new UsageError("A change name is required.");
+  }
+  const deleted = await deleteSandbox(cloudSandboxName(selector), credentials);
+  if (!deleted) {
+    throw new OperationalError(`No cloud workspace found for "${selector}".`);
+  }
+  if (json) {
+    return jsonSuccess({ deleted: selector });
+  }
+  return success(reportOutput(`Deleted cloud workspace: ${selector}`));
 }
 
 /**

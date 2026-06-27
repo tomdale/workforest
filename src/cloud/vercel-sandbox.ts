@@ -1,4 +1,4 @@
-import { type NetworkPolicy, Sandbox } from "@vercel/sandbox";
+import { APIError, type NetworkPolicy, Sandbox } from "@vercel/sandbox";
 import type { CloudSandboxMetadata } from "../types.ts";
 import type { CloudCredentials } from "./credentials.ts";
 import {
@@ -179,7 +179,10 @@ export async function getSandbox(
 ): Promise<CloudSandbox | null> {
   try {
     return await Sandbox.get({ ...credentials, name });
-  } catch {
+  } catch (error) {
+    if (!isSandboxNotFound(error)) {
+      throw error;
+    }
     return null;
   }
 }
@@ -206,6 +209,17 @@ export async function stopSandbox(
   const sandbox = await getSandbox(name, credentials);
   if (!sandbox) return false;
   await sandbox.stop();
+  return true;
+}
+
+/** Delete a sandbox by name. Returns false if absent. */
+export async function deleteSandbox(
+  name: string,
+  credentials: CloudCredentials,
+): Promise<boolean> {
+  const sandbox = await getSandbox(name, credentials);
+  if (!sandbox) return false;
+  await sandbox.delete();
   return true;
 }
 
@@ -275,4 +289,27 @@ export async function runToCompletion(
     next = await stream.next();
   }
   return next.value;
+}
+
+function isSandboxNotFound(error: unknown): boolean {
+  if (error instanceof APIError && error.response.status === 404) {
+    return true;
+  }
+  if (!isRecord(error)) return false;
+  const response = error["response"];
+  if (isRecord(response) && response["status"] === 404) {
+    return true;
+  }
+  const json = error["json"];
+  if (isRecord(json)) {
+    const code = json["code"];
+    if (code === "not_found" || code === "sandbox_not_found") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
