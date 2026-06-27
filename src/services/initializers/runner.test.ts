@@ -19,7 +19,6 @@ vi.mock("@wf-plugin/core", async () => {
 });
 
 import {
-  activePluginPackageNames,
   builtInInitializerIds,
   runSingleRepoInitializersGenerator,
 } from "./index.ts";
@@ -78,14 +77,7 @@ afterEach(async () => {
 });
 
 describe("initializer runner", () => {
-  it("uses the hardcoded active plugins by default", () => {
-    expect(activePluginPackageNames).toEqual([
-      "@wf-plugin/package-managers",
-      "@wf-plugin/vercel",
-      "@wf-plugin/turbo",
-      "@wf-plugin/codex-cli",
-      "@wf-plugin/claude-cli",
-    ]);
+  it("uses the built-in initializer registry by default", () => {
     expect(builtInInitializerIds).toEqual([
       "pnpm-install",
       "yarn-install",

@@ -8,7 +8,6 @@ import {
 } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../../config.ts";
 import {
-  builtInPluginPackageNames,
   builtInPluginPackages,
   getPluginId,
   getPluginMetadata,
@@ -605,5 +604,3 @@ export async function* runSingleRepoInitializersGenerator({
 }
 
 const activePluginPackages = builtInPluginPackages;
-
-export const activePluginPackageNames = builtInPluginPackageNames;
