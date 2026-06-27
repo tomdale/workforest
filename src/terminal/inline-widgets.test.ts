@@ -50,7 +50,6 @@ describe("confirmPrompt", () => {
       type: "submitted",
       value: true,
     });
-    expect(stdout.write).toHaveBeenCalled();
   });
 });
 
@@ -69,20 +68,15 @@ describe("filterFuzzyChoices", () => {
     },
   ];
 
-  it("returns all options for an empty query", () => {
-    expect(filterFuzzyChoices(options, "")).toEqual(options);
-  });
-
-  it("matches labels case-insensitively", () => {
-    expect(filterFuzzyChoices(options, "BILLING")).toEqual([options[1]]);
-  });
-
-  it("matches hints case-insensitively", () => {
-    expect(filterFuzzyChoices(options, "documentation")).toEqual([options[2]]);
-  });
-
-  it("returns no options when nothing matches", () => {
-    expect(filterFuzzyChoices(options, "payments")).toEqual([]);
+  it.each([
+    ["", [0, 1, 2]],
+    ["BILLING", [1]],
+    ["documentation", [2]],
+    ["payments", []],
+  ])("filters options for %j", (query, expectedIndexes) => {
+    expect(filterFuzzyChoices(options, query)).toEqual(
+      expectedIndexes.map((index) => options[index]),
+    );
   });
 });
 

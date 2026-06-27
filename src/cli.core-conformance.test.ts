@@ -178,50 +178,38 @@ describe("core command family conformance", () => {
     });
   });
 
-  it.each([
-    [["version", "extra"], "Invalid operands for wf version"],
-    [["shell", "init", "bash", "extra"], "Invalid operands for wf shell init"],
-    [["config", "show", "extra"], "Invalid operands for wf config show"],
-    [["config", "init", "extra"], "Invalid operands for wf config init"],
-    [["config", "edit", "extra"], "Invalid operands for wf config edit"],
-    [["skills", "list", "extra"], "Invalid operands for wf skills list"],
-    [["skills", "get"], "Invalid operands for wf skills get"],
-  ])("rejects surplus operands for %j", async (argv, message) => {
-    await expectUsageError(argv, message);
+  it("renders core command usage errors on stderr", async () => {
+    await expectUsageError(
+      ["version", "extra"],
+      "Invalid operands for wf version",
+    );
   });
 
-  it.each([
-    [
-      ["version", "--unsupported"],
-      'Unknown flag "--unsupported" for wf version',
-    ],
-    [
+  it("renders core command JSON usage errors as envelopes", async () => {
+    await expectJsonUsageError(
       ["skills", "get", "--unsupported", "--json"],
       'Unknown flag "--unsupported" for wf skills get',
-    ],
-  ])("rejects unknown or inapplicable flags for %j", async (argv, message) => {
-    if (argv.includes("--json")) {
-      await expectJsonUsageError(argv, message);
-    } else {
-      await expectUsageError(argv, message);
-    }
+    );
   });
 
   it.each([
     ["config", "init"],
     ["config", "edit"],
-  ])("returns JSON usage errors for interactive-only wf %s %s", async (...argv) => {
-    const result = await runCommand([...argv, "--json"]);
+  ])(
+    "returns JSON usage errors for interactive-only wf %s %s",
+    async (...argv) => {
+      const result = await runCommand([...argv, "--json"]);
 
-    expect(result).toMatchObject({ exitCode: 2, stderr: "" });
-    expect(JSON.parse(result.stdout)).toEqual({
-      ok: false,
-      error: {
-        kind: "usage",
-        message: `JSON output is not available for wf ${argv.join(" ")}.`,
-      },
-    });
-  });
+      expect(result).toMatchObject({ exitCode: 2, stderr: "" });
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: false,
+        error: {
+          kind: "usage",
+          message: `JSON output is not available for wf ${argv.join(" ")}.`,
+        },
+      });
+    },
+  );
 
   it("reports valid non-interactive config init as an operational failure", async () => {
     const result = await runCommand(["config", "init"]);

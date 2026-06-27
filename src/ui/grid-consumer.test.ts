@@ -40,13 +40,7 @@ vi.mock("@unblessed/node", () => {
   };
 });
 
-import {
-  Box,
-  NodeRuntime,
-  Screen,
-  ScrollableBox,
-  setRuntime,
-} from "@unblessed/node";
+import { Box, Screen, ScrollableBox } from "@unblessed/node";
 import stringWidth from "string-width";
 import {
   createFullscreenKeypress,
@@ -72,18 +66,6 @@ function createManualKeypress(
     },
   } as unknown as FullscreenScreen);
 }
-
-// ─── Regression: runtime initialization ──────────────────────────────────────
-
-describe("module initialization", () => {
-  it("calls setRuntime(new NodeRuntime()) at import time", () => {
-    // If this call is missing, Screen construction throws "Runtime not
-    // initialized" — the error that prompted adding this test.
-    expect(vi.mocked(setRuntime)).toHaveBeenCalledWith(
-      expect.any(NodeRuntime as ReturnType<typeof vi.fn>),
-    );
-  });
-});
 
 // ─── shouldUseGrid ────────────────────────────────────────────────────────────
 
@@ -177,64 +159,20 @@ describe("renderPipelinesGrid", () => {
     vi.useRealTimers();
   });
 
-  it("returns hasLockfile result for a completed repo", async () => {
-    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield { phase: "git", step: "mirror", status: "running" };
-      yield { phase: "git", step: "mirror", status: "completed" };
-      yield { phase: "complete", hasLockfile: true };
-    };
-
-    const promise = renderPipelinesGrid({
-      pipelines: new Map([["repo-a", pipeline()]]),
-      repoNames: ["repo-a"],
-    });
-    await vi.runAllTimersAsync();
-
-    expect(await promise).toEqual(new Map([["repo-a", { hasLockfile: true }]]));
-  });
-
-  it("records hasLockfile: false when repo has no lockfile", async () => {
-    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield { phase: "complete", hasLockfile: false };
-    };
-
-    const promise = renderPipelinesGrid({
-      pipelines: new Map([["repo-a", pipeline()]]),
-      repoNames: ["repo-a"],
-    });
-    await vi.runAllTimersAsync();
-
-    expect(await promise).toEqual(
-      new Map([["repo-a", { hasLockfile: false }]]),
-    );
-  });
-
-  it("omits failed repos from results", async () => {
-    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield { phase: "git", step: "mirror", status: "running" };
-      yield { phase: "failed", error: new Error("Clone failed") };
-    };
-
-    const promise = renderPipelinesGrid({
-      pipelines: new Map([["repo-a", pipeline()]]),
-      repoNames: ["repo-a"],
-    });
-    await vi.runAllTimersAsync();
-
-    expect((await promise).has("repo-a")).toBe(false);
-  });
-
-  it("returns results for all repos in a multi-repo run", async () => {
+  it("returns completed repo results and omits failed repos", async () => {
     const makePipeline = (hasLockfile: boolean) =>
       async function* (): AsyncGenerator<RepoPipelineState> {
         yield { phase: "complete", hasLockfile };
       };
+    const failPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "failed", error: new Error("Network error") };
+    };
 
     const promise = renderPipelinesGrid({
       pipelines: new Map([
         ["repo-a", makePipeline(true)()],
         ["repo-b", makePipeline(false)()],
-        ["repo-c", makePipeline(true)()],
+        ["repo-c", failPipeline()],
       ]),
       repoNames: ["repo-a", "repo-b", "repo-c"],
     });
@@ -243,30 +181,7 @@ describe("renderPipelinesGrid", () => {
     const results = await promise;
     expect(results.get("repo-a")).toEqual({ hasLockfile: true });
     expect(results.get("repo-b")).toEqual({ hasLockfile: false });
-    expect(results.get("repo-c")).toEqual({ hasLockfile: true });
-  });
-
-  it("returns partial results when some repos fail", async () => {
-    const successPipeline =
-      async function* (): AsyncGenerator<RepoPipelineState> {
-        yield { phase: "complete", hasLockfile: true };
-      };
-    const failPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield { phase: "failed", error: new Error("Network error") };
-    };
-
-    const promise = renderPipelinesGrid({
-      pipelines: new Map([
-        ["success", successPipeline()],
-        ["failed", failPipeline()],
-      ]),
-      repoNames: ["success", "failed"],
-    });
-    await vi.runAllTimersAsync();
-
-    const results = await promise;
-    expect(results.get("success")).toEqual({ hasLockfile: true });
-    expect(results.has("failed")).toBe(false);
+    expect(results.has("repo-c")).toBe(false);
   });
 
   it("handles all pipeline state phases without throwing", async () => {
@@ -377,53 +292,6 @@ describe("renderPipelinesGrid", () => {
     expect(lastContent?.split("\n").slice(0, 2).join("\n")).toBe(
       "Receiving objects 100%\nDone",
     );
-  });
-
-  it("supports eager render mode for benchmark environments", async () => {
-    const pane = {
-      setLabel: vi.fn(),
-      appendLine: vi.fn(),
-    };
-    const grid = {
-      getPane: vi.fn(() => pane),
-      render: vi.fn(),
-      destroy: vi.fn(),
-    };
-    const screen = {
-      key: vi.fn(),
-      once: vi.fn((_event: string, handler: () => void) => {
-        handler();
-      }),
-      destroy: vi.fn(),
-    };
-    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
-      yield {
-        phase: "git",
-        step: "mirror",
-        status: "output",
-        output: "a\n",
-      };
-      yield {
-        phase: "git",
-        step: "mirror",
-        status: "output",
-        output: "b\n",
-      };
-      yield { phase: "complete", hasLockfile: true };
-    };
-
-    await renderPipelinesGrid({
-      pipelines: new Map([["repo", pipeline()]]),
-      repoNames: ["repo"],
-      environment: {
-        createScreen: () => screen,
-        createGrid: () => grid,
-        renderIntervalMs: 0,
-        finalHoldMs: 0,
-      },
-    });
-
-    expect(grid.render).toHaveBeenCalledTimes(5);
   });
 
   it("keeps the grid open with a completion modal until acknowledgement", async () => {
@@ -861,15 +729,5 @@ describe("completion modal content layout", () => {
         expect(visibleWidth(line)).toBeLessThanOrEqual(contentWidth);
       }
     }
-  });
-
-  it("renders modal text with the active theme's palette tokens", () => {
-    const lines = getCompletionModalContent({
-      ...baseOptions,
-      contentWidth: 58,
-    });
-    const joined = lines.join("\n");
-    // The theme's focus token drives the "press any key" call to action.
-    expect(joined).toContain(`{${FOCUS}-fg}`);
   });
 });

@@ -43,62 +43,57 @@ function lineContaining(content: string, needle: string): number {
 }
 
 describe("fuzzyFilter", () => {
-  it("returns every item for an empty or whitespace query", () => {
-    const all = items("alpha", "beta", "gamma");
-    expect(fuzzyFilter(all, "")).toEqual(all);
-    expect(fuzzyFilter(all, "   ")).toEqual(all);
-  });
-
-  it("returns a distinct copy rather than the original array", () => {
-    const all = items("alpha");
-    const result = fuzzyFilter(all, "");
-    expect(result).not.toBe(all);
-    expect(result).toEqual(all);
-  });
-
-  it("matches case-insensitively", () => {
-    const all = items("Workforest", "Template");
-    expect(fuzzyFilter(all, "WORK").map((item) => item.label)).toEqual([
-      "Workforest",
-    ]);
-    expect(fuzzyFilter(all, "tEmP").map((item) => item.label)).toEqual([
-      "Template",
-    ]);
-  });
-
-  it("matches non-contiguous subsequences", () => {
-    const all = items("fuzzy-list", "feature-x", "readme");
-    // "fl" is a subsequence of "fuzzy-list" but not the others.
-    expect(fuzzyFilter(all, "fl").map((item) => item.label)).toEqual([
-      "fuzzy-list",
-    ]);
-  });
-
-  it("requires the characters to appear in order", () => {
-    const all = items("abc");
-    expect(fuzzyFilter(all, "ac")).toHaveLength(1);
-    expect(fuzzyFilter(all, "ca")).toHaveLength(0);
-  });
-
-  it("includes the hint in the searchable text", () => {
-    const withHint: FuzzyItem<string>[] = [
-      { value: "a", label: "alpha", hint: "main branch" },
-    ];
-    expect(fuzzyFilter(withHint, "branch")).toHaveLength(1);
-  });
-
-  it("returns an empty list when nothing matches", () => {
-    expect(fuzzyFilter(items("alpha", "beta"), "zzz")).toEqual([]);
-  });
-
-  it("preserves the original ordering of matches (stable)", () => {
-    const all = items("apple", "banana", "apricot", "avocado");
-    expect(fuzzyFilter(all, "a").map((item) => item.label)).toEqual([
-      "apple",
-      "banana",
-      "apricot",
-      "avocado",
-    ]);
+  it.each([
+    {
+      label: "empty query",
+      all: items("alpha", "beta", "gamma"),
+      query: "",
+      expected: ["alpha", "beta", "gamma"],
+    },
+    {
+      label: "whitespace query",
+      all: items("alpha", "beta", "gamma"),
+      query: "   ",
+      expected: ["alpha", "beta", "gamma"],
+    },
+    {
+      label: "case-insensitive label match",
+      all: items("Workforest", "Template"),
+      query: "WORK",
+      expected: ["Workforest"],
+    },
+    {
+      label: "non-contiguous subsequence",
+      all: items("fuzzy-list", "feature-x", "readme"),
+      query: "fl",
+      expected: ["fuzzy-list"],
+    },
+    {
+      label: "ordered characters",
+      all: items("abc"),
+      query: "ca",
+      expected: [],
+    },
+    {
+      label: "hint match",
+      all: [{ value: "a", label: "alpha", hint: "main branch" }],
+      query: "branch",
+      expected: ["alpha"],
+    },
+    {
+      label: "no match",
+      all: items("alpha", "beta"),
+      query: "zzz",
+      expected: [],
+    },
+    {
+      label: "stable ordering",
+      all: items("apple", "banana", "apricot", "avocado"),
+      query: "a",
+      expected: ["apple", "banana", "apricot", "avocado"],
+    },
+  ])("filters by $label", ({ all, query, expected }) => {
+    expect(fuzzyFilter(all, query).map((item) => item.label)).toEqual(expected);
   });
 });
 

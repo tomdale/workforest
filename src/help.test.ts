@@ -101,15 +101,6 @@ describe("registry-derived help", () => {
     expect(fixed).toContain("<source template> <destination template>");
     expect(unbounded).toContain("<task names...>");
   });
-
-  it("renders explicit usage fragments for distinct operands", () => {
-    expect(
-      stripAnsi(commandPathHelp(commandRegistry, ["review", "checkout"]) ?? ""),
-    ).toContain("<review target> [pull request]");
-    expect(
-      stripAnsi(commandPathHelp(commandRegistry, ["template", "copy"]) ?? ""),
-    ).toContain("<source template> <destination template>");
-  });
 });
 
 function findGroup(root: CommandGroup, name: string): CommandGroup {

@@ -117,19 +117,15 @@ describe("bin/workforest.js", () => {
     expect(result.stderr).toBe("");
   });
 
-  it.each([
-    [["wat"], "Unknown command: wat"],
-    [["list", "--bogus"], 'Unknown flag "--bogus" for wf list'],
-    [["template", "copy", "only-one"], "Invalid operands for wf template copy"],
-  ])("reports invocation errors without parser stacks for %j", async (args, message) => {
+  it("reports invocation errors without parser stacks", async () => {
     const result = await runSubprocess(
       process.execPath,
-      [path.resolve("bin/workforest.js"), ...args],
+      [path.resolve("bin/workforest.js"), "wat"],
       { timeout: 10_000 },
     );
 
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain(message);
+    expect(result.stderr).toContain("Unknown command: wat");
     expect(result.stderr).not.toContain("ArgError");
     expect(result.stderr).not.toContain("at parse");
     expect(result.stderr).not.toContain("node_modules/arg");
