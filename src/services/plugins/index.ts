@@ -47,14 +47,6 @@ export type NormalizedPluginCapabilityMetadata = Required<
 
 const require = createRequire(import.meta.url);
 
-const BUILT_IN_PLUGIN_PACKAGE_NAMES = [
-  "@wf-plugin/package-managers",
-  "@wf-plugin/vercel",
-  "@wf-plugin/turbo",
-  "@wf-plugin/codex-cli",
-  "@wf-plugin/claude-cli",
-] as const;
-
 export const builtInPluginPackages: PluginPackage[] = [
   {
     manifest: loadPluginManifest("@wf-plugin/package-managers"),
@@ -77,8 +69,6 @@ export const builtInPluginPackages: PluginPackage[] = [
     module: claudeCliPlugin,
   },
 ];
-
-export const builtInPluginPackageNames = [...BUILT_IN_PLUGIN_PACKAGE_NAMES];
 
 export function loadPluginManifest(packageName: string): PluginPackageManifest {
   const manifestPath = require.resolve(`${packageName}/package.json`);
