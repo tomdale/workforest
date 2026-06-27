@@ -17,11 +17,7 @@ vi.mock("@wf-plugin/core", async () => {
   };
 });
 
-import {
-  MAX_CONCURRENT_ENV_PULLS,
-  resolveVercelRepoLinkTarget,
-  default as vercelLinkInitializer,
-} from "./initializers/vercel-link.ts";
+import vercelLinkInitializer from "./initializers/vercel-link.ts";
 
 const tempDirs: string[] = [];
 
@@ -60,51 +56,35 @@ afterEach(async () => {
   );
 });
 
-describe("resolveVercelRepoLinkTarget", () => {
-  it("uses built-in GitHub owner defaults", () => {
-    expect(
-      resolveVercelRepoLinkTarget("git@github.com:vercel/omniagent.git", {}),
-    ).toEqual({
-      kind: "link",
-      githubOwner: "vercel",
-      githubSlug: "vercel/omniagent",
-      team: "vercel",
-    });
-  });
+describe("vercelLinkInitializer.execute", () => {
+  it("skips non-GitHub remotes", async () => {
+    const repoDir = await createRepoDir({ "vercel.json": "{}\n" });
 
-  it("prefers repo overrides over owner mappings", () => {
-    expect(
-      resolveVercelRepoLinkTarget("git@github.com:vercel/omniagent.git", {
-        vercelLink: {
-          teamByGitHubOwner: {
-            vercel: "vercel",
-          },
-          repoOverrides: {
-            "vercel/omniagent": {
-              team: "custom-team",
-            },
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@gitlab.com:vercel/omniagent.git",
+            defaultBranch: "main",
           },
         },
-      }),
-    ).toEqual({
-      kind: "link",
-      githubOwner: "vercel",
-      githubSlug: "vercel/omniagent",
-      team: "custom-team",
-    });
+        {},
+      ),
+    );
+
+    expect(states).toEqual([
+      {
+        status: "skipped",
+        reason: "Vercel auto-link only supports GitHub repositories.",
+      },
+    ]);
+    expect(runCommandGeneratorMock).not.toHaveBeenCalled();
   });
 
-  it("skips non-GitHub remotes", () => {
-    expect(
-      resolveVercelRepoLinkTarget("git@gitlab.com:vercel/omniagent.git", {}),
-    ).toEqual({
-      kind: "skip",
-      reason: "Vercel auto-link only supports GitHub repositories.",
-    });
-  });
-});
-
-describe("vercelLinkInitializer.execute", () => {
   it("skips when no team mapping is available", async () => {
     const repoDir = await createRepoDir({
       "vercel.json": "{}\n",
@@ -225,7 +205,7 @@ describe("vercelLinkInitializer.execute", () => {
               path.join(options.cwd, ".vercel", "repo.json"),
               JSON.stringify({
                 projects: Array.from(
-                  { length: MAX_CONCURRENT_ENV_PULLS + 2 },
+                  { length: 8 },
                   (_, index) => ({
                     directory: `apps/project-${index}`,
                   }),
@@ -267,8 +247,8 @@ describe("vercelLinkInitializer.execute", () => {
           state.status === "running" &&
           state.message?.startsWith("vercel env pull (cwd: apps/project-"),
       ),
-    ).toHaveLength(MAX_CONCURRENT_ENV_PULLS + 2);
-    expect(maxActiveEnvPulls).toBe(MAX_CONCURRENT_ENV_PULLS);
+    ).toHaveLength(8);
+    expect(maxActiveEnvPulls).toBe(6);
     expect(states.at(-1)).toEqual({ status: "completed" });
   });
 
@@ -342,7 +322,7 @@ describe("vercelLinkInitializer.execute", () => {
             vercelLink: {
               repoOverrides: {
                 "vercel/omniagent": {
-                  team: "vercel",
+                  team: "custom-team",
                 },
               },
             },
@@ -368,6 +348,11 @@ describe("vercelLinkInitializer.execute", () => {
       { status: "running", message: "vercel env pull" },
       { status: "completed" },
     ]);
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "vercel",
+      ["link", "--yes", "--repo", "--scope", "custom-team"],
+      { cwd: repoDir },
+    );
     expect(runCommandGeneratorMock).toHaveBeenCalledWith(
       "vercel",
       ["env", "pull", "--environment", "development", "--yes"],

@@ -24,11 +24,6 @@ const CONFIG_FILENAME = "config.json";
 const LEGACY_CONFIG_DIR = ".workforest";
 const XDG_CONFIG_DIR = "workforest";
 
-export const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
-  vercel: "vercel",
-  "vercel-labs": "vercel-labs",
-};
-
 /**
  * Get the cache directory, respecting WORKFOREST_CACHE_DIR environment variable.
  */

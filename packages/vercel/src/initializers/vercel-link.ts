@@ -10,12 +10,12 @@ import {
   type WorkspaceConfig,
 } from "@wf-plugin/core";
 
-export const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
+const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
   vercel: "vercel",
   "vercel-labs": "vercel-labs",
 };
 
-export const MAX_CONCURRENT_ENV_PULLS = 6;
+const MAX_CONCURRENT_ENV_PULLS = 6;
 
 type VercelRepoLinkTarget =
   | {
@@ -26,7 +26,7 @@ type VercelRepoLinkTarget =
     }
   | { kind: "skip"; reason: string };
 
-export function resolveVercelRepoLinkTarget(
+function resolveVercelRepoLinkTarget(
   remote: string,
   config: WorkspaceConfig,
 ): VercelRepoLinkTarget {
@@ -74,10 +74,7 @@ export function resolveVercelRepoLinkTarget(
   };
 }
 
-async function* execute(
-  context: InitializerContext,
-  _metadata: Record<string, unknown>,
-) {
+async function* execute(context: InitializerContext) {
   const { repoDir } = context;
   const target = resolveVercelRepoLinkTarget(
     context.repo.remote,
