@@ -75,19 +75,6 @@ describe("commandRegistry", () => {
     );
   });
 
-  it("keeps the legacy templates command hidden but resolvable", () => {
-    const templateGroup = findGroup(commandRegistry.root, "template");
-    const manage = templateGroup.children.find(
-      (child) => child.name === "manage",
-    );
-
-    expect(manage).toMatchObject({
-      kind: "leaf",
-      visibility: "hidden",
-      handler: "template.manage",
-    });
-  });
-
   it("defines complete metadata for every leaf", () => {
     for (const leaf of collectLeaves(commandRegistry)) {
       expect(leaf.summary).not.toBe("");

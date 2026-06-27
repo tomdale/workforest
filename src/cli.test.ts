@@ -29,10 +29,6 @@ const promptSelectMock = vi.hoisted(() =>
 );
 const promptConfirmMock = vi.hoisted(() => vi.fn());
 const promptTextMock = vi.hoisted(() => vi.fn());
-const runTemplateManagerMock = vi.hoisted(() =>
-  vi.fn(async () => ({ type: "quit" as const })),
-);
-const shouldUseTemplateManagerMock = vi.hoisted(() => vi.fn(() => true));
 const shouldUseGridMock = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock("./ui/prompts/index.ts", async () => {
@@ -47,11 +43,6 @@ vi.mock("./ui/prompts/index.ts", async () => {
     promptText: promptTextMock,
   };
 });
-
-vi.mock("./ui/template-manager.ts", () => ({
-  runTemplateManager: runTemplateManagerMock,
-  shouldUseTemplateManager: shouldUseTemplateManagerMock,
-}));
 
 vi.mock("./ui/grid-consumer.ts", async () => {
   const actual = await vi.importActual<typeof import("./ui/grid-consumer.ts")>(
@@ -109,10 +100,6 @@ afterEach(async () => {
   promptConfirmMock.mockReset();
   promptSelectMock.mockClear();
   promptTextMock.mockReset();
-  runTemplateManagerMock.mockReset();
-  runTemplateManagerMock.mockResolvedValue({ type: "quit" });
-  shouldUseTemplateManagerMock.mockReset();
-  shouldUseTemplateManagerMock.mockReturnValue(true);
   shouldUseGridMock.mockReset();
   shouldUseGridMock.mockReturnValue(false);
 
@@ -357,42 +344,6 @@ describe("cli", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("opens the interactive templates UI for the legacy command", async () => {
-    const xdgConfigHome = await createTempDir("workforest-xdg-");
-    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: true,
-    });
-
-    await createTemplate("demo", {
-      repos: ["vercel/front"],
-      description: "Demo template",
-    });
-
-    process.argv = ["node", "wf", "template", "manage"];
-    process.exitCode = undefined;
-
-    await cli();
-
-    expect(shouldUseTemplateManagerMock).toHaveBeenCalled();
-    expect(runTemplateManagerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        templatesDir: path.join(xdgConfigHome, "workforest", "templates"),
-        templates: [
-          expect.objectContaining({
-            id: "demo",
-            config: expect.objectContaining({
-              description: "Demo template",
-              repos: ["vercel/front"],
-            }),
-          }),
-        ],
-      }),
-    );
-    expect(process.exitCode).toBeUndefined();
-  });
-
   it("lists templates for wf template list outside a TTY", async () => {
     const xdgConfigHome = await createTempDir("workforest-xdg-");
     const logs: string[] = [];
@@ -415,7 +366,6 @@ describe("cli", () => {
 
     await cli();
 
-    expect(runTemplateManagerMock).not.toHaveBeenCalled();
     expect(logs.join("\n")).toContain("Templates");
     expect(logs.join("\n")).toContain("demo");
     expect(process.exitCode).toBeUndefined();
@@ -436,7 +386,6 @@ describe("cli", () => {
 
     await cli();
 
-    expect(runTemplateManagerMock).not.toHaveBeenCalled();
     expect(logs.join("\n")).toContain("Usage: wf template");
     expect(process.exitCode).toBeUndefined();
   });

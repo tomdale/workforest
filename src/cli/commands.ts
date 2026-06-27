@@ -1380,25 +1380,6 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["report"],
           }),
           leaf({
-            name: "manage",
-            path: ["template", "manage"],
-            visibility: hidden,
-            summary: "Open the templates dashboard",
-            description:
-              "Legacy compatibility entrypoint for the templates dashboard. Requires an interactive terminal; without a TTY (or under `$CI`/`$WORKFOREST_NO_TUI`) it falls back to `wf template list` and exits 0. For scripted use, drive the individual subcommands directly.",
-            handler: "template.manage",
-            help: nestedHelp("template", "manage"),
-            examples: [
-              {
-                command: "wf templates",
-                description:
-                  "Browse and edit all templates in an interactive screen.",
-              },
-            ],
-            outputModes: ["interactive"],
-            tty: requiredStdin,
-          }),
-          leaf({
             name: "suggest",
             path: ["template", "suggest"],
             summary: "Suggest templates from PR history",

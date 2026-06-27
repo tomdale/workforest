@@ -39,18 +39,8 @@ afterEach(async () => {
 });
 
 describe("template command conformance", () => {
-  const legacyManagerUsage = ["Usage: wf", "template", "manage"].join(" ");
-  const legacyManagerInvalid = [
-    "Invalid operands for wf",
-    "template",
-    "manage",
-  ].join(" ");
   const helpCases = [
     { argv: ["template"], usage: "Usage: wf template" },
-    {
-      argv: ["template", "manage"],
-      usage: legacyManagerUsage,
-    },
     {
       argv: ["template", "suggest"],
       usage: "Usage: wf template suggest",
@@ -80,11 +70,6 @@ describe("template command conformance", () => {
   });
 
   const invalidCases = [
-    {
-      label: "legacy manager surplus operands",
-      argv: ["template", "manage", "extra"],
-      message: legacyManagerInvalid,
-    },
     {
       label: "template list surplus operands",
       argv: ["template", "list", "extra"],
@@ -171,10 +156,6 @@ describe("template command conformance", () => {
   });
 
   const flagScopes = [
-    {
-      argv: ["template", "manage"],
-      foreign: ["--description", "foreign"],
-    },
     {
       argv: ["template", "list"],
       foreign: ["--force"],

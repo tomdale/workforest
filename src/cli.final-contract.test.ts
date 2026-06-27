@@ -62,14 +62,6 @@ describe("final CLI contract", () => {
     expect(() => resolve(argv)).toThrow();
   });
 
-  it("keeps the legacy templates command resolvable for compatibility", () => {
-    const legacyPath = ["template", "manage"];
-
-    expect(resolve(legacyPath)).toMatchObject({
-      canonicalPath: legacyPath,
-    });
-  });
-
   it.each([
     ["task delete", ["task", "delete"]],
     ["cache delete", ["cache", "delete"]],

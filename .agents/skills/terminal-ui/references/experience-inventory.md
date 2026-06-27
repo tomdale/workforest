@@ -29,9 +29,9 @@ Status values:
 | Parallel repository setup grid | `wf start`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
-| Template browser and manager | `wf templates` | `src/ui/template-manager.ts` | Canonical |
-| Template create/edit/copy forms | `wf templates` | Prompt timeline with preview and confirmation in `src/ui/index.ts` | Canonical |
-| Template file conflict resolution | Template manager | Select and confirm prompts in `src/cli.ts` | Canonical |
+| Template browser and manager | `wf templates` | Templates route in `src/dashboard/index.ts` | Canonical |
+| Template create/edit/copy forms | `wf template new|edit|copy` | Prompts in `src/cli.ts` | Canonical |
+| Template file conflict resolution | `wf template add-file` | Select and confirm prompts in `src/cli.ts` | Canonical |
 | Workspace picker | `wf switch` | Select prompt in `src/cli.ts` | Canonical |
 | Fuzzy workspace finder | `wf switch` | Fuzzy-select prompt in `src/cli.ts` | Canonical |
 | Config initialization | `wf config init` | Prompt timeline with preview and confirmation in `src/cli.ts` | Canonical |

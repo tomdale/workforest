@@ -18,7 +18,6 @@ describe("resolveCommand", () => {
     [["cache"], ["cache"], "dashboard.open"],
     [["cache", "doctor", "front"], ["cache", "doctor"], "cache.doctor"],
     [["review", "checkout", "123"], ["review", "checkout"], "review.checkout"],
-    [["template", "manage"], ["template", "manage"], "template.manage"],
     [["shell", "init", "zsh"], ["shell", "init"], "shell.init"],
     [["config"], ["config"], "config.show"],
     [["skills"], ["skills"], "skills.list"],
