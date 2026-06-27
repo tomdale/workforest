@@ -1,12 +1,12 @@
 import chalk from "chalk";
-import { terminalSymbol } from "./theme.ts";
 
 /**
- * The single source of truth for every color and symbol a fullscreen surface
- * draws. There is exactly one theme; surfaces read tokens by *semantic role* —
- * they never hardcode a color or glyph — so the role→meaning mapping stays fixed
- * (success is always "success", whatever color the theme paints it) and every
- * surface renders identically no matter how it was launched.
+ * The single source of truth for every color and symbol the app draws. There is
+ * exactly one theme; surfaces read tokens by *semantic role* — they never
+ * hardcode a color or glyph — so the role→meaning mapping stays fixed (success
+ * is always "success", whatever color the theme paints it) and every surface
+ * renders consistently. Fullscreen surfaces resolve roles to truecolor; inline
+ * output resolves the same roles to 16-color ANSI ({@link inlinePalette}).
  *
  * State is carried by these semantic role tokens, not by the theme's chrome
  * accent. Decorative confetti may be as colorful as it likes, but those colors
@@ -18,13 +18,20 @@ export type Rgb = readonly [number, number, number];
 /**
  * A color is either one of the terminal's 16 named ANSI colors — which honor the
  * user's own terminal palette and degrade cleanly — or an explicit truecolor RGB
- * triple for themes that want a specific shade. The default theme uses named
- * colors so it looks identical to the pre-theme app on every terminal.
+ * triple for a specific shade. The fullscreen theme uses RGB for its precise
+ * cyberpunk palette; the inline palette uses named ANSI colors (see
+ * {@link inlinePalette}).
  */
 export type ThemeColor =
   | Readonly<{ kind: "named"; name: NamedColor }>
   | Readonly<{ kind: "rgb"; rgb: Rgb }>;
 
+/**
+ * The 16 ANSI colors: the 8 standard colors, `gray` (a.k.a. bright black), and
+ * the 7 remaining bright variants. Named colors honor the user's own terminal
+ * palette and degrade cleanly on 8/16-color terminals, so the inline theme is
+ * built from these rather than truecolor RGB.
+ */
 export type NamedColor =
   | "black"
   | "red"
@@ -34,13 +41,20 @@ export type NamedColor =
   | "magenta"
   | "cyan"
   | "white"
-  | "gray";
+  | "gray"
+  | "redBright"
+  | "greenBright"
+  | "yellowBright"
+  | "blueBright"
+  | "magentaBright"
+  | "cyanBright"
+  | "whiteBright";
 
-export const named = (name: NamedColor): ThemeColor => ({
+const named = (name: NamedColor): ThemeColor => ({
   kind: "named",
   name,
 });
-export const rgb = (r: number, g: number, b: number): ThemeColor => ({
+const rgb = (r: number, g: number, b: number): ThemeColor => ({
   kind: "rgb",
   rgb: [r, g, b],
 });
@@ -52,8 +66,6 @@ export type ThemePalette = Readonly<{
   success: ThemeColor;
   warning: ThemeColor;
   error: ThemeColor;
-  /** Cancellation and destructive emphasis. */
-  cancel: ThemeColor;
   /** Hints, labels, inactive chrome. */
   muted: ThemeColor;
   /** Primary content. */
@@ -83,7 +95,7 @@ export type ThemeDecoration = Readonly<{
   confettiGlyphs: readonly string[];
 }>;
 
-/** Semantic symbol roles. Default values come from {@link terminalSymbol}. */
+/** Semantic symbol roles; the concrete glyphs live in {@link DEFAULT_SYMBOLS}. */
 export type ThemeSymbols = Readonly<{
   active: string;
   done: string;
@@ -121,14 +133,26 @@ const NAMED_HEX: Record<NamedColor, string> = {
   cyan: "#00ffff",
   white: "#ffffff",
   gray: "#808080",
+  redBright: "#ff5555",
+  greenBright: "#55ff55",
+  yellowBright: "#ffff55",
+  blueBright: "#5555ff",
+  magentaBright: "#ff55ff",
+  cyanBright: "#55ffff",
+  whiteBright: "#ffffff",
 };
 
-/** A color string @unblessed understands: a named color or a `#rrggbb` hex. */
+/**
+ * A color string @unblessed understands: a base ANSI name (`red`, `gray`) or a
+ * `#rrggbb` hex. The `*Bright` names aren't part of blessed's color vocabulary,
+ * so they fall back to their hex; only the inline (chalk) path uses them anyway.
+ */
 export function toBlessed(color: ThemeColor): string {
-  return color.kind === "named" ? color.name : toHex(color);
+  if (color.kind === "rgb") return toHex(color);
+  return color.name.endsWith("Bright") ? toHex(color) : color.name;
 }
 
-export function toHex(color: ThemeColor): string {
+function toHex(color: ThemeColor): string {
   if (color.kind === "named") return NAMED_HEX[color.name];
   const [r, g, b] = color.rgb;
   return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
@@ -156,22 +180,26 @@ export function toChalk(color: ThemeColor): (value: string) => string {
   return (value: string) => styler(value);
 }
 
+/**
+ * The canonical glyph vocabulary — the literal characters every surface draws,
+ * defined in exactly one place. The inline layer (theme.ts) re-exports them.
+ */
 const DEFAULT_SYMBOLS: ThemeSymbols = {
-  active: terminalSymbol.active,
-  done: terminalSymbol.done,
-  cancel: terminalSymbol.cancel,
-  radioOn: terminalSymbol.radioOn,
-  radioOff: terminalSymbol.radioOff,
-  checkOn: terminalSymbol.checkOn,
-  checkOff: terminalSymbol.checkOff,
-  info: terminalSymbol.info,
-  success: terminalSymbol.success,
-  warning: terminalSymbol.warning,
-  error: terminalSymbol.error,
+  active: "◆",
+  done: "◇",
+  cancel: "⊘",
+  radioOn: "●",
+  radioOff: "○",
+  checkOn: "◼",
+  checkOff: "◻",
+  info: "●",
+  success: "✔︎",
+  warning: "▲",
+  error: "✗",
   statusRunning: "↻", // ⟳
-  statusComplete: terminalSymbol.success,
-  statusFailed: terminalSymbol.error,
-  statusPending: terminalSymbol.radioOff,
+  statusComplete: "✔︎",
+  statusFailed: "✗",
+  statusPending: "○",
   statusCancelled: "⊘",
 };
 
@@ -198,7 +226,6 @@ const THEME: Theme = {
     success: rgb(...CYBERPUNK_CYAN),
     warning: rgb(255, 196, 0),
     error: rgb(...CYBERPUNK_RED),
-    cancel: rgb(...CYBERPUNK_RED),
     muted: rgb(90, 70, 100),
     primary: rgb(...CYBERPUNK_RED),
     // A reddish grey: mostly neutral, warmed by a red tint (green == blue, so no
@@ -227,4 +254,30 @@ const THEME: Theme = {
 
 export function activeTheme(): Theme {
   return THEME;
+}
+
+/**
+ * The inline (non-fullscreen) palette. It carries the same semantic roles as
+ * {@link THEME} but in the 16 named ANSI colors instead of truecolor RGB, so
+ * plain `wf` output honors the user's terminal palette and degrades cleanly on
+ * 8/16-color terminals — where the fullscreen theme's truecolor reds would be
+ * approximated unpredictably. Roles keep their meaning (success is still
+ * "success"); only the color depth changes. ANSI has one grey, so `muted` and
+ * `dim` share it, and `primary`/`error` both land on red exactly as the
+ * truecolor theme collapses them onto the cyberpunk red.
+ */
+const INLINE_ANSI_PALETTE: ThemePalette = {
+  focus: named("whiteBright"),
+  success: named("cyan"),
+  warning: named("yellow"),
+  error: named("red"),
+  muted: named("gray"),
+  primary: named("red"),
+  dim: named("gray"),
+  accent: named("cyan"),
+};
+
+/** The 16-color ANSI palette used for inline (non-fullscreen) terminal output. */
+export function inlinePalette(): ThemePalette {
+  return INLINE_ANSI_PALETTE;
 }

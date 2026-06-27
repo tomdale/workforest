@@ -414,7 +414,7 @@ function actionLabel(
   }
   if (mode === "multi") {
     return chosen.length > 0
-      ? "✓ create (or add more)"
+      ? "⏎ create (or add more)"
       : "· add one or more repositories";
   }
   return mode === "template"

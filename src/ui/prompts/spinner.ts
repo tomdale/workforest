@@ -45,7 +45,7 @@ export function spinner(): Spinner {
   const surface = new InlineSurface(process.stdout);
 
   function draw(): void {
-    const frame = terminalColor.accent(SPINNER_FRAMES[frameIndex]);
+    const frame = terminalColor.accent(SPINNER_FRAMES[frameIndex] ?? "");
     surface.render([`  ${barColor(S_BAR)}  ${frame} ${currentMessage}`]);
     frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
   }

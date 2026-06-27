@@ -7,6 +7,12 @@ import {
   type TemplateAgentsMdState,
 } from "../templates/agents-md.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
+import {
+  type ReportField,
+  type ReportSection,
+  renderReport,
+} from "../terminal/report.ts";
+import type { StatusTone } from "../terminal/status-indicator.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
 import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
@@ -167,56 +173,102 @@ export function renderChangeStatus(
   status: ChangeStatus,
   options: RenderChangeStatusOptions = {},
 ): string {
-  const lines = ["Change status", "", "Summary"];
-  lines.push(...renderFields(summaryFields(status.summary), 2));
-
-  lines.push(
-    "",
-    status.type === "repository-change" ? "Repository" : "Repositories",
-  );
-  for (const repo of status.repositories) {
-    lines.push(`  ${repo.line}`);
-    if (repo.details.length > 0) {
-      lines.push(...renderFields(repo.details, 4));
-    }
-  }
-
-  lines.push("", "Tasks");
-  if (status.tasks.length === 0) {
-    lines.push("  No nested tasks.");
-  } else {
-    for (const task of status.tasks) {
-      lines.push(`  ${task.line}`);
-      if (task.details.length > 0) {
-        lines.push(...renderFields(task.details, 4));
-      }
-    }
-  }
+  const sections: ReportSection[] = [
+    { title: "Summary", fields: compactPaths(summaryFields(status.summary)) },
+    {
+      title:
+        status.type === "repository-change" ? "Repository" : "Repositories",
+      entries: status.repositories.map((repo) => ({
+        title: repo.name,
+        tone: repositoryTone(repo.state),
+        description: statusTail(repo.line, repo.name),
+        details: compactPaths(repo.details),
+      })),
+    },
+    status.tasks.length === 0
+      ? { title: "Tasks", note: "No nested tasks." }
+      : {
+          title: "Tasks",
+          entries: status.tasks.map((task) => ({
+            title: task.selector,
+            tone: taskTone(task.state),
+            description: statusTail(task.line, task.selector),
+            details: compactPaths(task.details),
+          })),
+        },
+  ];
 
   if (status.initialization) {
-    lines.push("", "Initialization");
-    lines.push(
-      ...renderFields(
+    sections.push({
+      title: "Initialization",
+      fields: compactPaths(
         initializationFields(status.initialization, status.type),
-        2,
       ),
-    );
+    });
   }
 
   if (status.guidance) {
-    lines.push("", "Guidance", `  AGENTS.md: ${status.guidance}`);
+    sections.push({
+      title: "Guidance",
+      fields: [{ label: "AGENTS.md", value: status.guidance }],
+    });
   }
 
-  lines.push("", "Next steps");
-  for (const step of status.nextSteps) {
-    lines.push(`  ${step}`);
-  }
+  sections.push({
+    title: "Next steps",
+    entries: status.nextSteps.map((step) => ({ title: step, tone: "info" })),
+  });
 
   if (options.note) {
-    lines.push("", "Note", `  ${options.note}`);
+    sections.push({ title: "Note", note: options.note });
   }
 
-  return lines.join("\n");
+  return renderReport({ title: "Change status", sections });
+}
+
+/** Maps a repository's working-tree state onto a status tone. */
+function repositoryTone(state: ChangeRepositoryStatus["state"]): StatusTone {
+  switch (state) {
+    case "clean":
+      return "success";
+    case "dirty":
+      return "warning";
+    case "stale":
+      return "cancelled";
+  }
+}
+
+/** Maps a nested task's state onto a status tone. */
+function taskTone(state: ChangeTaskStatus["state"]): StatusTone {
+  switch (state) {
+    case "ready":
+      return "success";
+    case "failed":
+      return "error";
+    case "stale":
+      return "cancelled";
+  }
+}
+
+/**
+ * A repository/task one-liner is `"{name} - {summary}"`. The report renders the
+ * name as the entry title and re-adds the " - " separator before the
+ * description, so we hand back just the summary tail.
+ */
+function statusTail(line: string, name: string): string {
+  const prefix = `${name} - `;
+  return line.startsWith(prefix) ? line.slice(prefix.length) : line;
+}
+
+/** Path/Log values are absolute on disk; compact `$HOME` to `~` for display. */
+function compactPaths(fields: readonly StatusDetail[]): ReportField[] {
+  return fields.map((field) => ({
+    label: field.label,
+    value:
+      field.label === "Path" || field.label === "Log"
+        ? compactHome(field.value)
+        : field.value,
+  }));
 }
 
 async function workspaceGuidanceState(
@@ -779,21 +831,6 @@ function deriveNextSteps(
     steps.push("No immediate blockers.");
   }
   return steps;
-}
-
-function renderFields(
-  fields: readonly StatusDetail[],
-  indent: number,
-): string[] {
-  const labelWidth = Math.max(0, ...fields.map((field) => field.label.length));
-  const prefix = " ".repeat(indent);
-  return fields.map((field) => {
-    const value =
-      field.label === "Path" || field.label === "Log"
-        ? compactHome(field.value)
-        : field.value;
-    return `${prefix}${`${field.label}:`.padEnd(labelWidth + 1)} ${value}`;
-  });
 }
 
 function formatTypeLabel(type: ChangeInventoryEntry["type"]): string {

@@ -2,11 +2,15 @@ import { type Dirent, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
+import chalk from "chalk";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import {
   formatTemplateIdentifier,
   validateTemplateIdentifier,
 } from "../templates/index.ts";
+import { type StatusTone, statusLabel } from "../terminal/status-indicator.ts";
+import { padRight } from "../terminal/text.ts";
+import { terminalColor } from "../terminal/theme.ts";
 import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
@@ -109,17 +113,17 @@ export function renderChangeList(
   ) {
     return [
       "No Workforest changes found.",
-      "Start one: wf start <change> <repo|@template>",
+      terminalColor.muted("Start one: wf start <change> <repo|@template>"),
     ].join("\n");
   }
 
-  const lines = ["Changes"];
+  const lines = [terminalColor.primary(chalk.bold("Changes"))];
   if (inventory.workspaces.length > 0) {
-    lines.push("", "Workspaces");
+    lines.push("", terminalColor.accent(chalk.bold("Workspaces")));
     for (const [groupName, entries] of groupWorkspaceEntries(
       inventory.workspaces,
     )) {
-      lines.push(`  ${groupName}`);
+      lines.push(`  ${terminalColor.focus(groupName)}`);
       lines.push(formatWorkspaceHeader(options.paths === true));
       for (const entry of entries) {
         lines.push(formatWorkspaceRow(entry, options));
@@ -130,11 +134,11 @@ export function renderChangeList(
   }
 
   if (inventory.repositories.length > 0) {
-    lines.push("", "Repositories");
+    lines.push("", terminalColor.accent(chalk.bold("Repositories")));
     for (const [repoName, entries] of groupRepositoryEntries(
       inventory.repositories,
     )) {
-      lines.push(`  ${repoName}`);
+      lines.push(`  ${terminalColor.focus(repoName)}`);
       lines.push(formatRepositoryHeader(options.paths === true));
       for (const entry of entries) {
         lines.push(formatRepositoryRow(entry, options));
@@ -146,7 +150,9 @@ export function renderChangeList(
 
   lines.push(
     "",
-    `${inventory.totals.workspaces} workspace${inventory.totals.workspaces === 1 ? "" : "s"}, ${inventory.totals.repositories} repository change${inventory.totals.repositories === 1 ? "" : "s"}`,
+    terminalColor.muted(
+      `${inventory.totals.workspaces} workspace${inventory.totals.workspaces === 1 ? "" : "s"}, ${inventory.totals.repositories} repository change${inventory.totals.repositories === 1 ? "" : "s"}`,
+    ),
   );
   return lines.join("\n");
 }
@@ -385,17 +391,18 @@ function groupEntries<Entry>(
 }
 
 function formatWorkspaceHeader(showPaths: boolean): string {
-  return `    ${formatColumns(
-    ["Change", "Repos", "State", "Updated"],
-    showPaths,
-  )}`;
+  return terminalColor.muted(
+    `    ${formatColumns(["Change", "Repos", "State", "Updated"], showPaths)}`,
+  );
 }
 
 function formatRepositoryHeader(showPaths: boolean): string {
-  return `    ${formatColumns(
-    ["Change", "Repository", "State", "Updated"],
-    showPaths,
-  )}`;
+  return terminalColor.muted(
+    `    ${formatColumns(
+      ["Change", "Repository", "State", "Updated"],
+      showPaths,
+    )}`,
+  );
 }
 
 function formatWorkspaceRow(
@@ -404,10 +411,10 @@ function formatWorkspaceRow(
 ): string {
   return `    ${formatColumns(
     [
-      entry.changeName,
-      entry.repoSummary,
-      entry.state,
-      formatRelativeTime(entry.modifiedAtMs, options.now),
+      terminalColor.primary(entry.changeName),
+      terminalColor.dim(entry.repoSummary),
+      statusLabel(stateTone(entry.state), entry.state),
+      terminalColor.accent(formatRelativeTime(entry.modifiedAtMs, options.now)),
     ],
     options.paths === true,
     entry.path,
@@ -420,14 +427,19 @@ function formatRepositoryRow(
 ): string {
   return `    ${formatColumns(
     [
-      entry.changeName,
-      entry.repository,
-      entry.state,
-      formatRelativeTime(entry.modifiedAtMs, options.now),
+      terminalColor.primary(entry.changeName),
+      terminalColor.dim(entry.repository),
+      statusLabel(stateTone(entry.state), entry.state),
+      terminalColor.accent(formatRelativeTime(entry.modifiedAtMs, options.now)),
     ],
     options.paths === true,
     entry.path,
   )}`;
+}
+
+/** A change is `ready` when its worktrees exist; otherwise its files are gone. */
+function stateTone(state: ChangeState): StatusTone {
+  return state === "ready" ? "success" : "cancelled";
 }
 
 function formatColumns(
@@ -438,10 +450,10 @@ function formatColumns(
   const widths = [24, 18, 8];
   const columns = values.map((value, index) => {
     const width = widths[index];
-    return width ? value.padEnd(width) : value;
+    return width ? padRight(value, width) : value;
   });
   return showPath && entryPath
-    ? [...columns, compactHome(entryPath)].join("  ")
+    ? [...columns, terminalColor.muted(compactHome(entryPath))].join("  ")
     : columns.join("  ");
 }
 

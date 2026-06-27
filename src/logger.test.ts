@@ -7,7 +7,7 @@ describe("log", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses the shared semantic symbols and output streams", () => {
+  it("renders the shared inline grammar: bar, semantic glyph, message", () => {
     const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -17,13 +17,28 @@ describe("log", () => {
     log.warn("Setup incomplete");
     log.error("Workspace failed");
 
-    expect(stripAnsi(String(stdout.mock.calls[0]?.[0]))).toBe("●");
-    expect(stdout.mock.calls[0]?.[1]).toBe("Reading config");
-    expect(stripAnsi(String(stdout.mock.calls[1]?.[0]))).toBe("✓");
-    expect(stdout.mock.calls[1]?.[1]).toBe("Workspace ready");
-    expect(stripAnsi(String(warning.mock.calls[0]?.[0]))).toBe("▲");
-    expect(warning.mock.calls[0]?.[1]).toBe("Setup incomplete");
-    expect(stripAnsi(String(stderr.mock.calls[0]?.[0]))).toBe("✗");
-    expect(stderr.mock.calls[0]?.[1]).toBe("Workspace failed");
+    expect(stripAnsi(String(stdout.mock.calls[0]?.[0]))).toBe(
+      "  │  ● Reading config",
+    );
+    expect(stripAnsi(String(stdout.mock.calls[1]?.[0]))).toBe(
+      "  │  ✔︎ Workspace ready",
+    );
+    expect(stripAnsi(String(warning.mock.calls[0]?.[0]))).toBe(
+      "  │  ▲ Setup incomplete",
+    );
+    expect(stripAnsi(String(stderr.mock.calls[0]?.[0]))).toBe(
+      "  │  ✗ Workspace failed",
+    );
+  });
+
+  it("joins multiple arguments into one grammar line", () => {
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    log.info("Run:", "cd ~/work");
+
+    expect(stripAnsi(String(stdout.mock.calls[0]?.[0]))).toBe(
+      "  │  ● Run: cd ~/work",
+    );
+    expect(stdout.mock.calls[0]?.[1]).toBeUndefined();
   });
 });

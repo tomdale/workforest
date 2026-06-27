@@ -1789,6 +1789,12 @@ function taskListReportSections(
         .sort((left, right) => left.slug.localeCompare(right.slug))
         .map((entry) => ({
           title: entry.slug,
+          tone:
+            entry.state === "ready"
+              ? ("success" as const)
+              : entry.state === "failed"
+                ? ("error" as const)
+                : ("cancelled" as const),
           details: [
             { label: "Branch", value: entry.branch },
             { label: "Status", value: entry.state },
@@ -2380,8 +2386,11 @@ async function runTemplateList(json: boolean): Promise<CommandResult> {
   }
 
   if (templates.length === 0) {
-    log.info("No templates configured.");
-    log.info(`Templates directory: ${getTemplatesDir()}`);
+    printReport({
+      title: "Templates",
+      sections: [{ note: "No templates configured." }],
+      footer: `Directory: ${getTemplatesDir()}`,
+    });
     return templateSuccess();
   }
 

@@ -148,6 +148,7 @@ export function renderAiStatus(status: AiStatus): string {
   const model = status.model ?? "(provider default)";
   const providerEntries = status.providers.map((provider) => ({
     title: `${provider.label} (${provider.id})`,
+    tone: provider.available ? ("success" as const) : ("pending" as const),
     description: provider.available ? "available" : "unavailable",
     details: [
       { label: "Selected", value: provider.selected ? "yes" : "no" },

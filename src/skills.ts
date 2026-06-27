@@ -234,7 +234,14 @@ async function runSkillsList(
   }
 
   if (skills.length === 0) {
-    return success(humanOutput("No skills found."));
+    return success(
+      reportOutput(
+        renderReport({
+          title: "Agent skills",
+          sections: [{ note: "No skills found." }],
+        }),
+      ),
+    );
   }
 
   return success(

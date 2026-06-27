@@ -5,13 +5,11 @@ export const S_BAR_START = "┌";
 export const S_BAR = "│";
 export const S_BAR_END = "└";
 export const S_BAR_H = "─";
-export const S_CONNECTOR = "├";
 
 // Prompt state
 export const S_STEP_ACTIVE = terminalColor.accent(terminalSymbol.active);
 export const S_STEP_DONE = terminalColor.muted(terminalSymbol.done);
 export const S_STEP_CANCEL = terminalColor.error(terminalSymbol.cancel);
-export const S_STEP_ERROR = terminalColor.warning(terminalSymbol.errorStep);
 
 // Select / radio
 export const S_RADIO_ON = terminalColor.accent(terminalSymbol.radioOn);

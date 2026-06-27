@@ -25,12 +25,21 @@ import {
 } from "./repositories.ts";
 import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
 import { renderReport } from "./terminal/report.ts";
-import { terminalColor, terminalSymbol } from "./terminal/theme.ts";
+import { type StatusTone, statusLabel } from "./terminal/status-indicator.ts";
+import { terminalColor } from "./terminal/theme.ts";
 import {
   isInteractive,
   promptConfirm,
   withSpinner,
 } from "./ui/prompts/index.ts";
+import {
+  barColor,
+  S_BAR,
+  S_ERROR,
+  S_INFO,
+  S_SUCCESS,
+  S_WARNING,
+} from "./ui/prompts/symbols.ts";
 
 export async function runCacheInvocation(
   invocation: ParsedInvocation,
@@ -160,11 +169,12 @@ async function runCacheList(json: boolean): Promise<CommandResult> {
   }
   if (repositories.length === 0) {
     return success(
-      humanOutput(
-        [
-          formatMessage("info", "No cached repositories."),
-          formatMessage("info", `Cache directory: ${getCacheDir()}`),
-        ].join("\n"),
+      reportOutput(
+        renderReport({
+          title: "Cached repositories",
+          sections: [{ note: "No cached repositories." }],
+          footer: `Directory: ${getCacheDir()}`,
+        }),
       ),
     );
   }
@@ -177,6 +187,7 @@ async function runCacheList(json: boolean): Promise<CommandResult> {
           {
             entries: repositories.map((repository) => ({
               title: repositoryDisplayName(repository),
+              tone: healthTone(repository),
               description: healthSummary(repository),
               details: [
                 { label: "Size", value: formatByteSize(repository.sizeBytes) },
@@ -355,7 +366,12 @@ function renderCacheHealth(
     return withExitCode(jsonSuccess(repositories.map(toJson)), unhealthy);
   } else if (repositories.length === 0) {
     return success(
-      humanOutput(formatMessage("info", "No cached repositories.")),
+      reportOutput(
+        renderReport({
+          title: "Repository cache health",
+          sections: [{ note: "No cached repositories." }],
+        }),
+      ),
     );
   } else {
     return withExitCode(
@@ -367,6 +383,7 @@ function renderCacheHealth(
               {
                 entries: repositories.map((repository) => ({
                   title: repositoryDisplayName(repository),
+                  tone: healthTone(repository),
                   description: healthSummary(repository),
                   details:
                     repository.issues.length > 0
@@ -564,7 +581,13 @@ function renderRepositoryInfo(repository: CachedRepository): string {
     sections: [
       {
         fields: [
-          { label: "Health", value: healthSummary(repository) },
+          {
+            label: "Health",
+            value: statusLabel(
+              healthTone(repository),
+              healthSummary(repository),
+            ),
+          },
           { label: "Remote", value: repository.remote ?? "(missing)" },
           {
             label: "Default branch",
@@ -582,7 +605,10 @@ function renderRepositoryInfo(repository: CachedRepository): string {
         ? [
             {
               title: "Issues",
-              entries: repository.issues.map((issue) => ({ title: issue })),
+              entries: repository.issues.map((issue) => ({
+                title: issue,
+                tone: "warning" as const,
+              })),
             },
           ]
         : []),
@@ -590,24 +616,22 @@ function renderRepositoryInfo(repository: CachedRepository): string {
         title: "Worktrees",
         entries:
           repository.worktrees.length > 0
-            ? repository.worktrees.map((worktree) => ({
-                title: worktree.path,
-                details: [
-                  {
-                    label: "Branch",
-                    value: worktree.detached
-                      ? "(detached)"
-                      : (worktree.branch ?? "(unknown)"),
-                  },
-                  {
-                    label: "State",
-                    value:
-                      worktree.prunable || !worktree.exists
-                        ? "stale"
-                        : "active",
-                  },
-                ],
-              }))
+            ? repository.worktrees.map((worktree) => {
+                const stale = worktree.prunable || !worktree.exists;
+                return {
+                  title: worktree.path,
+                  tone: stale ? ("cancelled" as const) : ("success" as const),
+                  details: [
+                    {
+                      label: "Branch",
+                      value: worktree.detached
+                        ? "(detached)"
+                        : (worktree.branch ?? "(unknown)"),
+                    },
+                    { label: "State", value: stale ? "stale" : "active" },
+                  ],
+                };
+              })
             : [{ title: "(none)" }],
       },
     ],
@@ -640,6 +664,12 @@ function healthSummary(repository: CachedRepository): string {
   if (repository.health === "healthy") return "healthy";
   if (repository.health === "invalid") return "invalid";
   return `needs attention: ${repository.issues.join("; ")}`;
+}
+
+function healthTone(repository: CachedRepository): StatusTone {
+  if (repository.health === "healthy") return "success";
+  if (repository.health === "invalid") return "error";
+  return "warning";
 }
 
 function formatDate(date: Date | null): string {
@@ -704,11 +734,17 @@ function formatMessage(
   kind: "error" | "info" | "success" | "warning",
   message: string,
 ): string {
-  const symbol = {
-    error: terminalColor.error(terminalSymbol.error),
-    info: terminalColor.accent(terminalSymbol.info),
-    success: terminalColor.success(terminalSymbol.success),
-    warning: terminalColor.warning(terminalSymbol.warning),
+  const glyph = {
+    error: S_ERROR,
+    info: S_INFO,
+    success: S_SUCCESS,
+    warning: S_WARNING,
   }[kind];
-  return `${symbol} ${message}`;
+  const tint = {
+    error: terminalColor.error,
+    info: (value: string) => value,
+    success: terminalColor.success,
+    warning: terminalColor.warning,
+  }[kind];
+  return `  ${barColor(S_BAR)}  ${glyph} ${tint(message)}`;
 }

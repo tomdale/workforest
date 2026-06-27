@@ -14,7 +14,7 @@ import {
   validateTemplateIdentifier,
 } from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
-import { promptConfirm } from "../ui/prompts/index.ts";
+import { cancel, promptConfirm } from "../ui/prompts/index.ts";
 import {
   resolveWorkforestContext,
   type WorkforestManagedContext,
@@ -229,13 +229,17 @@ async function promoteRepositoryChange(
     currentRepo.name,
   );
 
-  await confirmPromotion({
+  const promote = await confirmPromotion({
     sourcePath: target.sourcePath,
     destinationPath,
     addedRepos: sourceRepos.repos,
     yes: options.yes,
     options,
   });
+  if (!promote) {
+    cancel("Promotion cancelled.");
+    return success();
+  }
 
   if (await pathExists(destinationPath)) {
     throw new OperationalError(
@@ -387,25 +391,22 @@ async function confirmPromotion({
   addedRepos: readonly RepoConfig[];
   yes: boolean;
   options: RunAddCommandOptions;
-}): Promise<void> {
+}): Promise<boolean> {
   log.info(`Source: ${sourcePath}`);
   log.info(`Destination: ${destinationPath}`);
   log.info(
     `Adding: ${addedRepos.length > 0 ? addedRepos.map((repo) => repo.name).join(", ") : "(none)"}`,
   );
-  if (yes) return;
+  if (yes) return true;
   if (!options.interactive) {
     throw new UsageError(
       "Promoting a repository change requires --yes without an interactive terminal.",
     );
   }
-  const confirmed = await (options.confirm ?? promptConfirm)(
+  return (options.confirm ?? promptConfirm)(
     "Promote repository change into a workspace?",
     false,
   );
-  if (!confirmed) {
-    throw new OperationalError("Promotion cancelled.");
-  }
 }
 
 async function resolveCurrentRepo(repoName: string): Promise<RepoConfig> {

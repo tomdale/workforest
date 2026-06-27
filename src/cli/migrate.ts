@@ -12,6 +12,12 @@ import { validateRepositoryComponent } from "../repository-components.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
 import { formatTemplateIdentifier } from "../templates/index.ts";
+import {
+  type ReportEntry,
+  type ReportSection,
+  renderReport,
+} from "../terminal/report.ts";
+import type { StatusTone } from "../terminal/status-indicator.ts";
 import type {
   RepoConfig,
   WorkspaceConfig,
@@ -240,101 +246,89 @@ export async function migrateWorkspaceLayout(
 export function renderWorkspaceMigration(
   result: WorkspaceMigrationResult,
 ): string {
-  const lines = [
-    result.applied ? "Workspace migration" : "Workspace migration plan",
-  ];
+  const title = result.applied
+    ? "Workspace migration"
+    : "Workspace migration plan";
+  const sections: ReportSection[] = [];
+  const pushSection = (
+    sectionTitle: string,
+    entries: readonly ReportEntry[],
+  ) => {
+    if (entries.length > 0) sections.push({ title: sectionTitle, entries });
+  };
 
-  if (
-    result.planned.length === 0 &&
-    result.migrated.length === 0 &&
-    result.blocked.length === 0 &&
-    result.repositoryDirectories.planned.length === 0 &&
-    result.repositoryDirectories.migrated.length === 0 &&
-    result.repositoryDirectories.blocked.length === 0 &&
-    result.repositoryMetadata.planned.length === 0 &&
-    result.repositoryMetadata.migrated.length === 0 &&
-    result.repositoryMetadata.blocked.length === 0
-  ) {
-    lines.push(
-      "",
-      "No workspace directories, repository directories, or repository metadata need migration.",
-    );
-    return lines.join("\n");
+  pushSection(
+    "Ready",
+    result.planned.map((entry) => workspaceEntry(entry, "pending")),
+  );
+  pushSection(
+    "Moved",
+    result.migrated.map((entry) => workspaceEntry(entry, "success")),
+  );
+  pushSection(
+    "Blocked",
+    result.blocked.map((entry) => workspaceEntry(entry, "error", entry.reason)),
+  );
+  pushSection(
+    "Repository directories ready",
+    result.repositoryDirectories.planned.map((entry) =>
+      repositoryDirectoryEntry(entry, "pending"),
+    ),
+  );
+  pushSection(
+    "Repository directories moved",
+    result.repositoryDirectories.migrated.map((entry) =>
+      repositoryDirectoryEntry(entry, "success"),
+    ),
+  );
+  pushSection(
+    "Repository directories blocked",
+    result.repositoryDirectories.blocked.map((entry) =>
+      repositoryDirectoryEntry(entry, "error", entry.reason),
+    ),
+  );
+  pushSection(
+    "Repository metadata ready",
+    result.repositoryMetadata.planned.map((entry) =>
+      repositoryMetadataEntry(entry, "pending"),
+    ),
+  );
+  pushSection(
+    "Repository metadata written",
+    result.repositoryMetadata.migrated.map((entry) =>
+      repositoryMetadataEntry(entry, "success"),
+    ),
+  );
+  pushSection(
+    "Repository metadata blocked",
+    result.repositoryMetadata.blocked.map((entry) =>
+      repositoryMetadataEntry(entry, "error", entry.reason),
+    ),
+  );
+
+  if (sections.length === 0) {
+    return renderReport({
+      title,
+      sections: [
+        {
+          note: "No workspace directories, repository directories, or repository metadata need migration.",
+        },
+      ],
+    });
   }
 
-  if (result.planned.length > 0) {
-    lines.push("", "Ready");
-    for (const entry of result.planned) {
-      lines.push(formatMigrationEntry(entry));
-    }
-  }
+  const hasPlanned =
+    result.planned.length > 0 ||
+    result.repositoryDirectories.planned.length > 0 ||
+    result.repositoryMetadata.planned.length > 0;
 
-  if (result.migrated.length > 0) {
-    lines.push("", "Moved");
-    for (const entry of result.migrated) {
-      lines.push(formatMigrationEntry(entry));
-    }
-  }
-
-  if (result.blocked.length > 0) {
-    lines.push("", "Blocked");
-    for (const entry of result.blocked) {
-      lines.push(formatMigrationEntry(entry, entry.reason));
-    }
-  }
-
-  if (result.repositoryDirectories.planned.length > 0) {
-    lines.push("", "Repository directories ready");
-    for (const entry of result.repositoryDirectories.planned) {
-      lines.push(formatRepositoryDirectoryEntry(entry));
-    }
-  }
-
-  if (result.repositoryDirectories.migrated.length > 0) {
-    lines.push("", "Repository directories moved");
-    for (const entry of result.repositoryDirectories.migrated) {
-      lines.push(formatRepositoryDirectoryEntry(entry));
-    }
-  }
-
-  if (result.repositoryDirectories.blocked.length > 0) {
-    lines.push("", "Repository directories blocked");
-    for (const entry of result.repositoryDirectories.blocked) {
-      lines.push(formatRepositoryDirectoryEntry(entry, entry.reason));
-    }
-  }
-
-  if (result.repositoryMetadata.planned.length > 0) {
-    lines.push("", "Repository metadata ready");
-    for (const entry of result.repositoryMetadata.planned) {
-      lines.push(formatRepositoryMetadataEntry(entry));
-    }
-  }
-
-  if (result.repositoryMetadata.migrated.length > 0) {
-    lines.push("", "Repository metadata written");
-    for (const entry of result.repositoryMetadata.migrated) {
-      lines.push(formatRepositoryMetadataEntry(entry));
-    }
-  }
-
-  if (result.repositoryMetadata.blocked.length > 0) {
-    lines.push("", "Repository metadata blocked");
-    for (const entry of result.repositoryMetadata.blocked) {
-      lines.push(formatRepositoryMetadataEntry(entry, entry.reason));
-    }
-  }
-
-  if (
-    !result.applied &&
-    (result.planned.length > 0 ||
-      result.repositoryDirectories.planned.length > 0 ||
-      result.repositoryMetadata.planned.length > 0)
-  ) {
-    lines.push("", "Run: wf migrate workspaces --apply");
-  }
-
-  return lines.join("\n");
+  return renderReport({
+    title,
+    sections,
+    ...(!result.applied && hasPlanned
+      ? { footer: "Run: wf migrate workspaces --apply" }
+      : {}),
+  });
 }
 
 function hasMigrationBlockers(result: WorkspaceMigrationResult): boolean {
@@ -716,45 +710,57 @@ async function restoreTemporaryMove(
   }
 }
 
-function formatMigrationEntry(
+function workspaceEntry(
   entry: WorkspaceMigrationEntry,
-  suffix?: string,
-): string {
-  const details = suffix ? ` (${suffix})` : "";
-  return [
-    `  ${entry.selector}${details}`,
-    `    ${compactHome(entry.source)}`,
-    `    -> ${compactHome(entry.target)}`,
-  ].join("\n");
+  tone: StatusTone,
+  reason?: string,
+): ReportEntry {
+  return {
+    title: entry.selector,
+    tone,
+    ...(reason ? { description: reason } : {}),
+    details: [
+      { label: "From", value: compactHome(entry.source) },
+      { label: "To", value: compactHome(entry.target) },
+    ],
+  };
 }
 
-function formatRepositoryDirectoryEntry(
+function repositoryDirectoryEntry(
   entry:
     | RepositoryDirectoryMigrationEntry
     | BlockedRepositoryDirectoryMigrationEntry,
-  suffix?: string,
-): string {
-  const details = suffix ? ` (${suffix})` : "";
-  return [
-    `  ${entry.selector}${details}`,
-    `    ${compactHome(entry.source)}`,
-    `    -> ${compactHome(entry.target)}`,
-    `    metadata: ${compactHome(entry.metadataPath)}`,
-  ].join("\n");
+  tone: StatusTone,
+  reason?: string,
+): ReportEntry {
+  return {
+    title: entry.selector,
+    tone,
+    ...(reason ? { description: reason } : {}),
+    details: [
+      { label: "From", value: compactHome(entry.source) },
+      { label: "To", value: compactHome(entry.target) },
+      { label: "Metadata", value: compactHome(entry.metadataPath) },
+    ],
+  };
 }
 
-function formatRepositoryMetadataEntry(
+function repositoryMetadataEntry(
   entry:
     | RepositoryMetadataMigrationEntry
     | BlockedRepositoryMetadataMigrationEntry,
-  suffix?: string,
-): string {
-  const details = suffix ? ` (${suffix})` : "";
-  return [
-    `  ${entry.selector}${details}`,
-    `    ${compactHome(entry.worktreePath)}`,
-    `    -> ${compactHome(entry.metadataPath)}`,
-  ].join("\n");
+  tone: StatusTone,
+  reason?: string,
+): ReportEntry {
+  return {
+    title: entry.selector,
+    tone,
+    ...(reason ? { description: reason } : {}),
+    details: [
+      { label: "Worktree", value: compactHome(entry.worktreePath) },
+      { label: "Metadata", value: compactHome(entry.metadataPath) },
+    ],
+  };
 }
 
 function pathsEqual(left: string, right: string): boolean {
