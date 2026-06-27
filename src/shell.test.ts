@@ -46,6 +46,7 @@ describe("shell integration", () => {
 
     expect(script).toContain("__workforest_invoke()");
     expect(script).toContain('case "$1" in');
+    expect(script).toContain('""|start|add|switch');
     expect(script).toContain(
       "start|add|switch|finish|delete|task|review|template",
     );
