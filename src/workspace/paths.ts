@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { validateRepositoryComponent } from "../repository-components.ts";
+import { validateTemplateIdentifier } from "../templates/index.ts";
 import type { WorkspaceConfig } from "../types.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 
@@ -144,5 +145,5 @@ function expandHome(value: string): string {
 function validateChangeGroupName(value: string): string {
   return value === ADHOC_WORKSPACE_GROUP
     ? value
-    : validateResourceName(value, "Workspace group");
+    : validateTemplateIdentifier(value);
 }

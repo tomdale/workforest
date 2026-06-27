@@ -20,7 +20,12 @@ import {
   refreshAndMaterializeTemplateAgentsMd,
   refreshTemplateAgentsMd,
 } from "./agents-md.ts";
-import { createTemplate, loadTemplate, type Template } from "./index.ts";
+import {
+  createTemplate,
+  createTemplateVariant,
+  loadTemplate,
+  type Template,
+} from "./index.ts";
 
 const originalXdgConfigHome = process.env["XDG_CONFIG_HOME"];
 const originalCacheDir = process.env["WORKFOREST_CACHE_DIR"];
@@ -100,6 +105,48 @@ async function publish(
 }
 
 describe("template AGENTS.md artifacts", () => {
+  it("does not remove parent authored guidance when forcing a variant refresh", async () => {
+    const config = await mkdtemp(path.join(os.tmpdir(), "wf-agents-config-"));
+    roots.push(config);
+    process.env["XDG_CONFIG_HOME"] = config;
+    await createTemplate("settings", {
+      repos: ["vercel/front"],
+      "AGENTS.md": { focus: "Settings flow", paths: { front: ["src"] } },
+    });
+    await createTemplateVariant("settings", "chat", {
+      "AGENTS.md": { focus: "Chat settings flow" },
+    });
+    const parentAgents = path.join(
+      config,
+      "workforest",
+      "templates",
+      "settings",
+      "files",
+      "AGENTS.md",
+    );
+    await mkdir(path.dirname(parentAgents), { recursive: true });
+    await writeFile(parentAgents, "parent guidance\n", "utf8");
+    const variant = await loadTemplate("settings+chat");
+    if (!variant) throw new Error("Expected variant");
+
+    await expect(
+      refreshTemplateAgentsMd(
+        variant,
+        [
+          {
+            name: "front",
+            remote: "git@github.com:vercel/front.git",
+            defaultBranch: "main",
+          },
+        ],
+        { force: true },
+      ),
+    ).rejects.toThrow("inherits files/AGENTS.md from its parent");
+    await expect(readFile(parentAgents, "utf8")).resolves.toBe(
+      "parent guidance\n",
+    );
+  });
+
   it("asks the provider to author markdown from compact exploration context", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "wf-agents-explore-"));
     roots.push(root);

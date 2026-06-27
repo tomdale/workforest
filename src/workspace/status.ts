@@ -6,7 +6,7 @@ import {
   getWorkspaceAgentsMdStatus,
   type TemplateAgentsMdState,
 } from "../templates/agents-md.ts";
-import { loadTemplate } from "../templates/index.ts";
+import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
 import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
@@ -226,7 +226,12 @@ async function workspaceGuidanceState(
   const metadata = await readWorkspaceMetadata(entry.path).catch(() => null);
   const templateId = metadata?.workspace.template_id;
   if (!templateId) return undefined;
-  const template = await loadTemplate(templateId);
+  const template = await loadTemplate(
+    formatTemplateIdentifier({
+      parent: templateId,
+      variant: metadata.workspace.template_variant,
+    }),
+  );
   if (!template) return "missing";
   return (await getWorkspaceAgentsMdStatus(template, entry.path)).state;
 }

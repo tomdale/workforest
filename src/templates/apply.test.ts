@@ -11,7 +11,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyTemplateGenerator, copyTemplateFiles } from "./apply.ts";
-import { createTemplate, loadTemplate } from "./index.ts";
+import {
+  createTemplate,
+  createTemplateVariant,
+  loadTemplate,
+} from "./index.ts";
 
 const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 
@@ -148,6 +152,56 @@ describe("copyTemplateFiles", () => {
     expect(
       await readFile(path.join(workspaceDir, "front", ".env.local"), "utf8"),
     ).toBe("FEATURE_FLAG=1\n");
+  });
+
+  it("copies parent files before variant files and lets variants override them", async () => {
+    const xdgConfigHome = await createTempDir("workforest-templates-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+    });
+    await createTemplateVariant("demo", "chat");
+
+    const templateRoot = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+    );
+    const parentFilesDir = path.join(templateRoot, "files");
+    const variantFilesDir = path.join(
+      templateRoot,
+      "variants",
+      "chat",
+      "files",
+    );
+    await mkdir(parentFilesDir, { recursive: true });
+    await mkdir(variantFilesDir, { recursive: true });
+    await writeFile(path.join(parentFilesDir, ".envrc"), "parent\n", "utf8");
+    await writeFile(
+      path.join(parentFilesDir, "shared.txt"),
+      "parent\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(variantFilesDir, "shared.txt"),
+      "variant\n",
+      "utf8",
+    );
+
+    const template = await loadTemplate("demo+chat");
+    if (!template) throw new Error("Expected template.");
+
+    await copyTemplateFiles(template, workspaceDir);
+
+    await expect(
+      readFile(path.join(workspaceDir, ".envrc"), "utf8"),
+    ).resolves.toBe("parent\n");
+    await expect(
+      readFile(path.join(workspaceDir, "shared.txt"), "utf8"),
+    ).resolves.toBe("variant\n");
   });
 
   it("fails when a copied file would overwrite an existing file", async () => {

@@ -31,6 +31,7 @@ describe("commandRegistry", () => {
         "suggest",
         "new",
         "edit",
+        "variant",
         "add-file",
         "agents-md",
         "copy",

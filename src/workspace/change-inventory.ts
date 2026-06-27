@@ -3,6 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
+import {
+  formatTemplateIdentifier,
+  validateTemplateIdentifier,
+} from "../templates/index.ts";
 import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
@@ -162,8 +166,7 @@ async function collectWorkspaceChanges(
         await workspaceInventoryEntryFromMetadata({
           metadata: directMetadata,
           path: candidate.path,
-          groupName:
-            directMetadata.workspace.template_id ?? ADHOC_WORKSPACE_GROUP,
+          groupName: groupNameFromMetadata(directMetadata),
           changeName: directMetadata.workspace.feature_name,
         }),
       );
@@ -477,6 +480,15 @@ function compactHome(value: string): string {
       : value;
 }
 
+function groupNameFromMetadata(metadata: WorkspaceMetadata): string {
+  const templateId = metadata.workspace.template_id;
+  if (!templateId) return ADHOC_WORKSPACE_GROUP;
+  return formatTemplateIdentifier({
+    parent: templateId,
+    variant: metadata.workspace.template_variant,
+  });
+}
+
 function safeRepositoryName(value: string): string | null {
   try {
     return validateRepositoryComponent(value, "Repository name");
@@ -498,7 +510,11 @@ function safeWorkspaceGroupName(value: string): string | null {
     return value;
   }
 
-  return safeResourceName(value);
+  try {
+    return validateTemplateIdentifier(value);
+  } catch {
+    return null;
+  }
 }
 
 function trimTrailingBlank(lines: string[]): void {

@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { refreshAndMaterializeTemplateAgentsMd } from "../templates/agents-md.ts";
 import { applyTemplateGenerator } from "../templates/apply.ts";
-import { loadTemplate } from "../templates/index.ts";
+import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
 import {
@@ -477,7 +477,12 @@ export async function runRepoInitializationWorker({
     defaultBranch: repoMetadata.default_branch,
   };
   const template = metadata.workspace.template_id
-    ? await loadTemplate(metadata.workspace.template_id)
+    ? await loadTemplate(
+        formatTemplateIdentifier({
+          parent: metadata.workspace.template_id,
+          variant: metadata.workspace.template_variant,
+        }),
+      )
     : null;
   let stopping = false;
   let checkingCancellation = false;
@@ -675,7 +680,12 @@ export async function finalizeWorkspaceInitialization(
       (state) => state.status === "cancelled",
     );
     const template = metadata.workspace.template_id
-      ? await loadTemplate(metadata.workspace.template_id)
+      ? await loadTemplate(
+          formatTemplateIdentifier({
+            parent: metadata.workspace.template_id,
+            variant: metadata.workspace.template_variant,
+          }),
+        )
       : null;
 
     if (template?.config["AGENTS.md"]) {

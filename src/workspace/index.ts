@@ -16,7 +16,7 @@ import {
   copyTemplateFiles,
   type HookState,
 } from "../templates/apply.ts";
-import { loadTemplate } from "../templates/index.ts";
+import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import {
@@ -69,6 +69,7 @@ export type StampWorkspaceOptions = {
   workspaceDir: string;
   repos: readonly RepoConfig[];
   templateId?: string;
+  templateVariant?: string;
   onEvent?: ServiceEventSink;
 };
 
@@ -139,6 +140,7 @@ export async function* stampWorkspaceGenerator({
   workspaceDir,
   repos,
   templateId,
+  templateVariant,
 }: StampWorkspaceOptions): AsyncGenerator<WorkspaceState> {
   validateResourceName(featureName, "Workspace name");
   if (repos.length === 0) {
@@ -172,12 +174,20 @@ export async function* stampWorkspaceGenerator({
     repos,
     ...(description !== undefined ? { description } : {}),
     ...(templateId !== undefined ? { templateId } : {}),
+    ...(templateVariant !== undefined ? { templateVariant } : {}),
   });
 
   yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
 
   // Start template loading early (runs in parallel with git operations)
-  const templatePromise = templateId ? loadTemplate(templateId) : null;
+  const templatePromise = templateId
+    ? loadTemplate(
+        formatTemplateIdentifier({
+          parent: templateId,
+          variant: templateVariant,
+        }),
+      )
+    : null;
 
   // Phase A: Unified parallel git operations per repo
   // Each repo runs: mirror → cleanup (if needed) → worktree → lockfile check
@@ -348,6 +358,7 @@ export async function* stampWorkspaceGenerator({
     })),
     ...(description && { description }),
     ...(templateId && { templateId }),
+    ...(templateVariant && { templateVariant }),
   });
 
   yield { phase: "finalize", message: "Writing VS Code workspace file" };
@@ -370,6 +381,7 @@ export async function stampWorkspace(
     workspaceDir,
     repos,
     templateId,
+    templateVariant,
     onEvent,
   } = options;
   if (repos.length === 0) {
@@ -388,7 +400,14 @@ export async function stampWorkspace(
   const isNewWorkspace = !(await pathExists(workspaceDir));
   await ensureDir(workspaceDir);
   const effectiveBranchName = branchName ?? featureName;
-  const template = templateId ? await loadTemplate(templateId) : null;
+  const template = templateId
+    ? await loadTemplate(
+        formatTemplateIdentifier({
+          parent: templateId,
+          variant: templateVariant,
+        }),
+      )
+    : null;
 
   await writeInitialWorkspaceMetadata({
     workspaceDir,
@@ -397,6 +416,7 @@ export async function stampWorkspace(
     repos,
     ...(description !== undefined ? { description } : {}),
     ...(templateId !== undefined ? { templateId } : {}),
+    ...(templateVariant !== undefined ? { templateVariant } : {}),
   });
   await initializeWorkspaceInitialization({ workspaceDir, repos });
 
@@ -1003,6 +1023,7 @@ export async function writeInitialWorkspaceMetadata({
   featureName,
   description,
   templateId,
+  templateVariant,
   branchName,
   repos,
 }: Omit<StampWorkspaceOptions, "branchName"> & {
@@ -1019,6 +1040,7 @@ export async function writeInitialWorkspaceMetadata({
     })),
     ...(description && { description }),
     ...(templateId && { templateId }),
+    ...(templateVariant && { templateVariant }),
   });
 }
 

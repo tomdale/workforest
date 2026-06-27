@@ -9,7 +9,7 @@ import {
   WORKFOREST_ENVIRONMENT_VARIABLES,
 } from "../environment.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
-import type { TemplateConfig } from "../types.ts";
+import type { TemplateConfig, TemplateConfigOverride } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import {
   resolveContainedPath,
@@ -19,12 +19,22 @@ import { isSlug } from "../utils/slug.ts";
 
 const XDG_TEMPLATES_DIR = "workforest/templates";
 const TEMPLATE_FILENAME_JSONC = "template.jsonc";
+const VARIANTS_DIR = "variants";
 
 export type Template = {
   id: string;
   path: string;
+  directory: string;
+  parentId: string;
+  variantId?: string;
+  parentPath?: string;
   config: TemplateConfig;
 };
+
+export type TemplateIdentifier = Readonly<{
+  parent: string;
+  variant?: string | undefined;
+}>;
 
 export function getTemplatesDir(): string {
   const configDir = readEnvironmentVariable(
@@ -61,6 +71,7 @@ export async function listTemplates(): Promise<Template[]> {
 
     if (template) {
       templates.push(template);
+      templates.push(...(await listTemplateVariants(templateId)));
     }
   }
 
@@ -70,9 +81,9 @@ export async function listTemplates(): Promise<Template[]> {
 export async function loadTemplate(
   templateId: string,
 ): Promise<Template | null> {
-  validateTemplateName(templateId);
+  const identifier = parseTemplateIdentifier(templateId);
   const templatesDir = getTemplatesDir();
-  const templateDir = resolveContainedPath(templatesDir, templateId);
+  const templateDir = resolveContainedPath(templatesDir, identifier.parent);
 
   const templatePath = resolveContainedPath(
     templateDir,
@@ -83,20 +94,52 @@ export async function loadTemplate(
   }
 
   try {
-    const raw = await fs.readFile(templatePath, "utf8");
-    const parsed: unknown = parseJsonc(raw);
+    const parentConfig = await readTemplateConfig(templatePath);
+    if (!identifier.variant) {
+      return {
+        id: identifier.parent,
+        path: templatePath,
+        directory: templateDir,
+        parentId: identifier.parent,
+        config: parentConfig,
+      };
+    }
 
-    if (!isValidTemplateConfig(parsed)) {
+    const variantDir = resolveContainedPath(
+      templateDir,
+      VARIANTS_DIR,
+      identifier.variant,
+    );
+    const variantPath = resolveContainedPath(
+      variantDir,
+      TEMPLATE_FILENAME_JSONC,
+    );
+    if (!(await pathExists(variantPath))) {
+      return null;
+    }
+    const raw = await fs.readFile(variantPath, "utf8");
+    const parsed: unknown = parseJsonc(raw);
+    if (!isValidTemplateConfigOverride(parsed)) {
       throw new Error(
-        `Invalid template config at ${templatePath}: missing required fields`,
+        `Invalid template variant config at ${variantPath}: expected a partial template config`,
       );
     }
-    validateTemplateConfigPaths(parsed);
+    const config = mergeTemplateConfig(parentConfig, parsed);
+    if (!isValidTemplateConfig(config)) {
+      throw new Error(
+        `Invalid template config at ${variantPath}: variant did not produce required fields`,
+      );
+    }
+    validateTemplateConfigPaths(config);
 
     return {
-      id: templateId,
-      path: templatePath,
-      config: normalizeTemplateConfig(parsed),
+      id: formatTemplateIdentifier(identifier),
+      path: variantPath,
+      directory: variantDir,
+      parentId: identifier.parent,
+      variantId: identifier.variant,
+      parentPath: templatePath,
+      config: normalizeTemplateConfig(config),
     };
   } catch (error_) {
     if ((error_ as NodeJS.ErrnoException).code === "ENOENT") {
@@ -104,6 +147,71 @@ export async function loadTemplate(
     }
     throw error_;
   }
+}
+
+async function listTemplateVariants(parentId: string): Promise<Template[]> {
+  const templatesDir = getTemplatesDir();
+  const variantsDir = resolveContainedPath(
+    templatesDir,
+    parentId,
+    VARIANTS_DIR,
+  );
+  let entries: Array<{ isDirectory(): boolean; name: string }>;
+  try {
+    entries = await fs.readdir(variantsDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  const variants: Template[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const loaded = await loadTemplate(`${parentId}+${entry.name}`);
+    if (loaded) variants.push(loaded);
+  }
+  return variants;
+}
+
+async function readTemplateConfig(
+  templatePath: string,
+): Promise<TemplateConfig> {
+  const raw = await fs.readFile(templatePath, "utf8");
+  const parsed: unknown = parseJsonc(raw);
+
+  if (!isValidTemplateConfig(parsed)) {
+    throw new Error(
+      `Invalid template config at ${templatePath}: missing required fields`,
+    );
+  }
+  validateTemplateConfigPaths(parsed);
+  return normalizeTemplateConfig(parsed);
+}
+
+export async function createTemplateVariant(
+  parentId: string,
+  variantId: string,
+  config: TemplateConfigOverride = {},
+): Promise<void> {
+  const parent = validateTemplateName(parentId);
+  const variant = validateTemplateName(variantId);
+  if (!(await loadTemplate(parent))) {
+    throw new Error(`Template "${parent}" not found.`);
+  }
+  if (!isValidTemplateConfigOverride(config)) {
+    throw new Error("Variant config must be a partial template config.");
+  }
+  const templatesDir = getTemplatesDir();
+  const variantDir = resolveContainedPath(
+    templatesDir,
+    parent,
+    VARIANTS_DIR,
+    variant,
+  );
+  const variantPath = resolveContainedPath(variantDir, TEMPLATE_FILENAME_JSONC);
+  await ensureDir(variantDir);
+  await fs.writeFile(variantPath, generateTemplateVariantJsonc(config), "utf8");
 }
 
 export async function createTemplate(
@@ -213,6 +321,24 @@ function generateTemplateJsonc(config: TemplateConfig): string {
   return `${lines.join("\n")}\n`;
 }
 
+function generateTemplateVariantJsonc(config: TemplateConfigOverride): string {
+  const lines: string[] = ["{"];
+  lines.push("  // Variant overrides are partial.");
+  lines.push("  // Missing fields inherit from the parent template.");
+  lines.push("  // Arrays and scalar values replace inherited values.");
+  lines.push(
+    "  // Plain objects merge recursively; null removes inherited optional fields.",
+  );
+  const entries = Object.entries(config);
+  for (const [index, [key, value]] of entries.entries()) {
+    lines.push(
+      `  ${JSON.stringify(key)}: ${JSON.stringify(value, null, 2).replace(/\n/g, "\n  ")}${index === entries.length - 1 ? "" : ","}`,
+    );
+  }
+  lines.push("}");
+  return `${lines.join("\n")}\n`;
+}
+
 function normalizeTemplateConfig(config: TemplateConfig): TemplateConfig {
   const hasBranchPrefix = Object.hasOwn(config, "branchPrefix");
   const { branchPrefix: _branchPrefix, ...rest } = config;
@@ -263,14 +389,89 @@ export async function deleteTemplate(templateId: string): Promise<void> {
   await fs.rm(templateDir, { recursive: true, force: true });
 }
 
+export function parseTemplateIdentifier(
+  templateId: string,
+): TemplateIdentifier {
+  const parts = templateId.split("+");
+  if (parts.length === 1) {
+    return { parent: validateTemplateName(parts[0] ?? "") };
+  }
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error("Template id must be <template> or <template>+<variant>.");
+  }
+  return {
+    parent: validateTemplateName(parts[0]),
+    variant: validateTemplateName(parts[1]),
+  };
+}
+
+export function formatTemplateIdentifier(
+  identifier: TemplateIdentifier,
+): string {
+  return identifier.variant
+    ? `${identifier.parent}+${identifier.variant}`
+    : identifier.parent;
+}
+
 export function validateTemplateName(templateId: string): string {
   validateResourceName(templateId, "Template name");
+  if (templateId.includes("+")) {
+    throw new Error(
+      "Template name must not contain '+'. Use <template>+<variant> when referencing variants.",
+    );
+  }
   if (!isSlug(templateId)) {
     throw new Error(
       "Template name must be lowercase words separated by single hyphens.",
     );
   }
   return templateId;
+}
+
+export function validateTemplateIdentifier(templateId: string): string {
+  return formatTemplateIdentifier(parseTemplateIdentifier(templateId));
+}
+
+function mergeTemplateConfig(
+  parent: TemplateConfig,
+  override: TemplateConfigOverride,
+): TemplateConfig {
+  return mergeConfigValues(parent, override) as TemplateConfig;
+}
+
+function mergeConfigValues(parent: unknown, override: unknown): unknown {
+  if (override === null) {
+    return undefined;
+  }
+  if (override === undefined) {
+    return cloneJson(parent);
+  }
+  if (
+    isPlainObject(parent) &&
+    isPlainObject(override) &&
+    !Array.isArray(parent) &&
+    !Array.isArray(override)
+  ) {
+    const result: Record<string, unknown> = { ...parent };
+    for (const [key, value] of Object.entries(override)) {
+      const merged = mergeConfigValues(result[key], value);
+      if (merged === undefined) {
+        delete result[key];
+      } else {
+        result[key] = merged;
+      }
+    }
+    return result;
+  }
+  return cloneJson(override);
+}
+
+function cloneJson<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function validateTemplateConfigPaths(config: TemplateConfig): void {
@@ -455,5 +656,123 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
     }
   }
 
+  return true;
+}
+
+function isValidTemplateConfigOverride(
+  value: unknown,
+): value is TemplateConfigOverride {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const config = value as Record<string, unknown>;
+  const allowedKeys = new Set([
+    "repos",
+    "description",
+    "branchPrefix",
+    "hooks",
+    "AGENTS.md",
+    "disableInitializers",
+  ]);
+  for (const key of Object.keys(config)) {
+    if (!allowedKeys.has(key)) return false;
+  }
+
+  if (
+    config["repos"] !== undefined &&
+    config["repos"] !== null &&
+    (!Array.isArray(config["repos"]) ||
+      config["repos"].some((repo) => typeof repo !== "string"))
+  ) {
+    return false;
+  }
+  if (
+    config["description"] !== undefined &&
+    config["description"] !== null &&
+    typeof config["description"] !== "string"
+  ) {
+    return false;
+  }
+  if (
+    config["branchPrefix"] !== undefined &&
+    config["branchPrefix"] !== null &&
+    typeof config["branchPrefix"] !== "string"
+  ) {
+    return false;
+  }
+  if (
+    config["disableInitializers"] !== undefined &&
+    config["disableInitializers"] !== null
+  ) {
+    const value = config["disableInitializers"];
+    if (typeof value !== "boolean" && !Array.isArray(value)) return false;
+    if (
+      Array.isArray(value) &&
+      value.some((item) => typeof item !== "string")
+    ) {
+      return false;
+    }
+  }
+  if (config["hooks"] !== undefined && config["hooks"] !== null) {
+    if (
+      !isValidTemplateConfig({
+        repos: ["placeholder/repo"],
+        hooks: config["hooks"],
+      })
+    ) {
+      return false;
+    }
+  }
+  if (config["AGENTS.md"] !== undefined && config["AGENTS.md"] !== null) {
+    if (!isValidAgentsMdConfigOverride(config["AGENTS.md"])) return false;
+  }
+  return true;
+}
+
+function isValidAgentsMdConfigOverride(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const agents = value as Record<string, unknown>;
+  const allowedKeys = new Set(["focus", "paths", "maxAgeHours"]);
+  for (const key of Object.keys(agents)) {
+    if (!allowedKeys.has(key)) return false;
+  }
+  if (
+    agents["focus"] !== undefined &&
+    agents["focus"] !== null &&
+    (typeof agents["focus"] !== "string" || !agents["focus"].trim())
+  ) {
+    return false;
+  }
+  if (
+    agents["maxAgeHours"] !== undefined &&
+    agents["maxAgeHours"] !== null &&
+    (!Number.isInteger(agents["maxAgeHours"]) ||
+      (agents["maxAgeHours"] as number) <= 0)
+  ) {
+    return false;
+  }
+  if (agents["paths"] !== undefined && agents["paths"] !== null) {
+    if (
+      agents["paths"] === null ||
+      typeof agents["paths"] !== "object" ||
+      Array.isArray(agents["paths"])
+    ) {
+      return false;
+    }
+    for (const paths of Object.values(
+      agents["paths"] as Record<string, unknown>,
+    )) {
+      if (
+        paths !== null &&
+        (!Array.isArray(paths) ||
+          paths.some((item) => typeof item !== "string" || !item))
+      ) {
+        return false;
+      }
+    }
+  }
   return true;
 }

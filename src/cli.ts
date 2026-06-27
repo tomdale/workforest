@@ -67,10 +67,13 @@ import {
 } from "./templates/agents-md.ts";
 import {
   createTemplate,
+  createTemplateVariant,
   deleteTemplate,
+  formatTemplateIdentifier,
   getTemplatesDir,
   listTemplates,
   loadTemplate,
+  validateTemplateIdentifier,
   validateTemplateName,
 } from "./templates/index.ts";
 import { createAgentOutputStream } from "./terminal/agent-output.ts";
@@ -1448,7 +1451,12 @@ async function runTaskStart(
     });
 
     const template = metadata.workspace.template_id
-      ? await loadTemplate(metadata.workspace.template_id)
+      ? await loadTemplate(
+          formatTemplateIdentifier({
+            parent: metadata.workspace.template_id,
+            variant: metadata.workspace.template_variant,
+          }),
+        )
       : null;
     const { config: workspaceConfig } = await loadWorkspaceConfig();
     const branchPrefix = resolveBranchPrefix(
@@ -2190,6 +2198,8 @@ async function runTemplateInvocation(
     }
     case "template.new":
       return runTemplateNew(invocation, json);
+    case "template.variant.new":
+      return runTemplateVariantNew(invocation, json);
     case "template.edit":
       if (json) return unsupportedJson(invocation);
       return runTemplateEdit(invocation.beforeDoubleDash[0] ?? "");
@@ -2315,7 +2325,10 @@ function templateJson(
   return {
     id: template.id,
     path: template.path,
-    directory: path.dirname(template.path),
+    directory: template.directory,
+    parentId: template.parentId,
+    variantId: template.variantId ?? null,
+    parentPath: template.parentPath ?? null,
     config: template.config,
   };
 }
@@ -2449,6 +2462,13 @@ async function runTemplateShow(
   const filesDir = path.join(path.dirname(template.path), "files");
   const hasFiles = await pathExists(filesDir);
   const guidance = await getTemplateAgentsMdStatus(template);
+  const variants =
+    template.variantId === undefined
+      ? (await listTemplates()).filter(
+          (candidate) =>
+            candidate.parentId === template.id && candidate.variantId,
+        )
+      : [];
 
   if (json) {
     return jsonSuccess({
@@ -2456,6 +2476,7 @@ async function runTemplateShow(
       branchPrefixSummary,
       filesDir: hasFiles ? filesDir : null,
       guidance,
+      variants: variants.map(templateJson),
     });
   }
 
@@ -2492,9 +2513,89 @@ async function runTemplateShow(
             },
           ]
         : []),
+      ...(variants.length > 0
+        ? [
+            {
+              title: "Variants",
+              entries: variants.map((variant) => ({
+                title: variant.id,
+                ...(variant.config.description
+                  ? { description: variant.config.description }
+                  : {}),
+              })),
+            },
+          ]
+        : []),
     ],
     footer: `Config: ${template.path}`,
   });
+  return templateSuccess();
+}
+
+async function runTemplateVariantNew(
+  invocation: ParsedInvocation,
+  json: boolean,
+): Promise<CommandResult> {
+  const operands = invocation.beforeDoubleDash;
+  let parentId: string | undefined;
+  let variantId: string | undefined;
+
+  if (operands.length >= 2) {
+    parentId = operands[0];
+    variantId = operands[1];
+  } else {
+    variantId = operands[0];
+    const workspaceDir = await detectWorkspaceFromCwd();
+    if (workspaceDir) {
+      const metadata = await readWorkspaceMetadata(workspaceDir);
+      parentId = metadata?.workspace.template_id;
+    }
+  }
+
+  if (!parentId || !variantId) {
+    if (json) {
+      throw new UsageError("Usage: wf template variant new <parent> <variant>");
+    }
+    log.error("Usage: wf template variant new <parent> <variant>");
+    return templateFailure();
+  }
+
+  validateTemplateName(parentId);
+  validateTemplateName(variantId);
+  const canonicalId = formatTemplateIdentifier({
+    parent: parentId,
+    variant: variantId,
+  });
+  if (await loadTemplate(canonicalId)) {
+    if (json) {
+      throw new OperationalError(`Template "${canonicalId}" already exists.`);
+    }
+    log.error(`Template "${canonicalId}" already exists.`);
+    return templateFailure();
+  }
+
+  const description =
+    typeof invocation.flags["description"] === "string"
+      ? invocation.flags["description"].trim()
+      : isInteractive()
+        ? (
+            await promptText("Description", { placeholder: "(optional)" })
+          ).trim()
+        : "";
+  await createTemplateVariant(parentId, variantId, {
+    ...(description ? { description } : {}),
+  });
+  const created = await loadTemplate(canonicalId);
+  if (json) {
+    return jsonSuccess({
+      action: "created",
+      template: created ? templateJson(created) : { id: canonicalId },
+    });
+  }
+  log.success(`Template variant "${canonicalId}" created.`);
+  log.info(
+    `Location: ${getTemplatesDir()}/${parentId}/variants/${variantId}/template.jsonc`,
+  );
   return templateSuccess();
 }
 
@@ -2591,6 +2692,7 @@ async function runTemplateDelete(
   force: boolean,
   json: boolean,
 ): Promise<CommandResult> {
+  validateTemplateName(templateId);
   const template = await loadTemplate(templateId);
   if (!template) {
     if (json) {
@@ -2633,6 +2735,7 @@ async function runTemplateDelete(
 }
 
 async function runTemplateEdit(templateId: string): Promise<CommandResult> {
+  validateTemplateName(templateId);
   if (!isInteractive()) {
     log.error("Template editing requires an interactive terminal.");
     return templateFailure();
@@ -2715,7 +2818,7 @@ async function runTemplateAddFile(
 
     let candidateTemplate: Awaited<ReturnType<typeof loadTemplate>> = null;
     try {
-      validateTemplateName(firstInput);
+      validateTemplateIdentifier(firstInput);
       candidateTemplate = await loadTemplate(firstInput);
     } catch {
       // The first argument is a workspace-relative source path, not a template.
@@ -2782,7 +2885,10 @@ async function runTemplateAddFile(
       return templateFailure();
     }
 
-    templateId = metadata.workspace.template_id;
+    templateId = formatTemplateIdentifier({
+      parent: metadata.workspace.template_id,
+      variant: metadata.workspace.template_variant,
+    });
   }
 
   const template = resolvedTemplate ?? (await loadTemplate(templateId));
@@ -3128,6 +3234,8 @@ async function runTemplateCopy(
   destId: string,
   json: boolean,
 ): Promise<CommandResult> {
+  validateTemplateName(sourceId);
+  validateTemplateName(destId);
   // Load source template
   const sourceTemplate = await loadTemplate(sourceId);
   if (!sourceTemplate) {

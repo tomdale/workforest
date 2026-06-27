@@ -1462,6 +1462,52 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["interactive"],
             tty: requiredStdin,
           }),
+          group({
+            name: "variant",
+            path: ["template", "variant"],
+            summary: "Manage template variants",
+            description:
+              "Create one-level variants below a parent template. Variants inherit parent settings and store only partial overrides under variants/<variant>/template.jsonc.",
+            help: nestedHelp("template", "variant"),
+            children: [
+              leaf({
+                name: "new",
+                path: ["template", "variant", "new"],
+                summary: "Create a template variant",
+                description:
+                  "Creates a variant under a parent template. Use <parent> <variant>, or from inside a template workspace pass only <variant> to use that workspace's parent template.",
+                handler: "template.variant.new",
+                help: nestedHelp("template", "variant"),
+                operands: {
+                  variants: [
+                    {
+                      beforeDoubleDash: cardinality(
+                        1,
+                        2,
+                        "variant",
+                        "[parent] <variant>",
+                      ),
+                      delimiter: "forbidden",
+                    },
+                  ],
+                },
+                flags: [
+                  stringFlag("description", "--description", "description", {
+                    short: "-d",
+                    description:
+                      "Set the variant's description; otherwise prompted in a terminal.",
+                  }),
+                ],
+                examples: [
+                  {
+                    command: "wf template variant new vercel-agent chat",
+                    description:
+                      "Create @vercel-agent+chat as a variant of vercel-agent.",
+                  },
+                ],
+              }),
+            ],
+          }),
           leaf({
             name: "add-file",
             path: ["template", "add-file"],

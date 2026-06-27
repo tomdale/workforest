@@ -48,6 +48,8 @@ export type ResolvedStartSource =
   | Readonly<{
       kind: "template";
       templateId: string;
+      templateVariant?: string;
+      groupName: string;
       repos: readonly RepoConfig[];
       branchPrefix?: string;
     }>;
@@ -253,7 +255,7 @@ async function createWorkspaceChange(
 ): Promise<CreateChangeResult> {
   const { changeName, branchName, directories, source } = input;
   const groupName =
-    source.kind === "template" ? source.templateId : ADHOC_WORKSPACE_GROUP;
+    source.kind === "template" ? source.groupName : ADHOC_WORKSPACE_GROUP;
   const workspaceDir = getWorkspaceChangePath(
     directories,
     groupName,
@@ -264,7 +266,14 @@ async function createWorkspaceChange(
     branchName,
     workspaceDir,
     repos: source.repos,
-    ...(source.kind === "template" ? { templateId: source.templateId } : {}),
+    ...(source.kind === "template"
+      ? {
+          templateId: source.templateId,
+          ...(source.templateVariant
+            ? { templateVariant: source.templateVariant }
+            : {}),
+        }
+      : {}),
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   };
 
@@ -365,7 +374,9 @@ async function resolveChosenSource(
     if (!loaded) throw new UsageError(`Unknown template: @${template.name}`);
     return {
       kind: "template",
-      templateId: loaded.id,
+      groupName: loaded.id,
+      templateId: loaded.parentId,
+      ...(loaded.variantId ? { templateVariant: loaded.variantId } : {}),
       repos: await resolveRepositorySpecifiers(loaded.config.repos),
       ...(loaded.config.branchPrefix !== undefined
         ? { branchPrefix: loaded.config.branchPrefix }

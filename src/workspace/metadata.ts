@@ -4,6 +4,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
+import { validateTemplateName } from "../templates/index.ts";
 import type {
   ReviewWorktreeMetadata,
   TaskMetadata,
@@ -30,6 +31,7 @@ export type WriteMetadataOptions = {
   featureName: string;
   description?: string;
   templateId?: string;
+  templateVariant?: string;
   type?: "review";
   review?: {
     owner: string;
@@ -58,6 +60,9 @@ function metadataFromOptions(options: WriteMetadataOptions): WorkspaceMetadata {
       feature_name: options.featureName,
       ...(options.description ? { description: options.description } : {}),
       ...(options.templateId ? { template_id: options.templateId } : {}),
+      ...(options.templateVariant
+        ? { template_variant: options.templateVariant }
+        : {}),
       ...(options.type ? { type: options.type } : {}),
       ...(options.review ? { review: options.review } : {}),
     },
@@ -797,7 +802,19 @@ function validateWorkspaceMetadata(
     `${source}.workspace.template_id`,
   );
   if (templateId !== undefined) {
-    validateResourceName(templateId, "Template name");
+    validateTemplateName(templateId);
+  }
+  const templateVariant = optionalString(
+    workspace["template_variant"],
+    `${source}.workspace.template_variant`,
+  );
+  if (templateVariant !== undefined) {
+    validateTemplateName(templateVariant);
+    if (templateId === undefined) {
+      throw new Error(
+        `${source}.workspace.template_variant requires workspace.template_id.`,
+      );
+    }
   }
 
   if (workspace["type"] !== undefined && workspace["type"] !== "review") {

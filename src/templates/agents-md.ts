@@ -89,6 +89,19 @@ export function agentsMdDirectory(template: Template): string {
   return path.join(path.dirname(template.path), ARTIFACT_DIR);
 }
 
+function authoredAgentsMdPaths(template: Template): string[] {
+  return [
+    ...(template.parentPath
+      ? [path.join(path.dirname(template.parentPath), "files", "AGENTS.md")]
+      : []),
+    path.join(path.dirname(template.path), "files", "AGENTS.md"),
+  ];
+}
+
+function ownedAuthoredAgentsMdPath(template: Template): string {
+  return path.join(path.dirname(template.path), "files", "AGENTS.md");
+}
+
 export function agentsMdScopeFingerprint(template: Template): string {
   return sha256(
     JSON.stringify({
@@ -107,8 +120,8 @@ export async function getTemplateAgentsMdStatus(
     return status(template, "disabled", null, null);
   }
   if (
-    await pathExists(
-      path.join(path.dirname(template.path), "files", "AGENTS.md"),
+    (await Promise.all(authoredAgentsMdPaths(template).map(pathExists))).some(
+      Boolean,
     )
   ) {
     return status(template, "conflict", await readManifest(template), null);
@@ -165,14 +178,32 @@ export async function refreshTemplateAgentsMd(
       `Template "${template.id}" does not enable AGENTS.md generation.`,
     );
   validateConfiguredRepositories(config, repos);
-  const authoredPath = path.join(
-    path.dirname(template.path),
-    "files",
-    "AGENTS.md",
-  );
-  if ((await pathExists(authoredPath)) && !options.force) {
+  const ownedAuthoredPath = ownedAuthoredAgentsMdPath(template);
+  const inheritedAuthoredPaths = (
+    await Promise.all(
+      (template.parentPath
+        ? [path.join(path.dirname(template.parentPath), "files", "AGENTS.md")]
+        : []
+      ).map(async (candidate) =>
+        (await pathExists(candidate)) ? candidate : null,
+      ),
+    )
+  ).filter((candidate): candidate is string => candidate !== null);
+  const existingOwnedAuthoredPath = (await pathExists(ownedAuthoredPath))
+    ? ownedAuthoredPath
+    : null;
+  const existingAuthoredPaths = [
+    ...inheritedAuthoredPaths,
+    ...(existingOwnedAuthoredPath ? [existingOwnedAuthoredPath] : []),
+  ];
+  if (existingAuthoredPaths.length > 0 && !options.force) {
     throw new Error(
       `Template contains files/AGENTS.md. Remove it or refresh with --force.`,
+    );
+  }
+  if (inheritedAuthoredPaths.length > 0 && options.force) {
+    throw new Error(
+      `Template inherits files/AGENTS.md from its parent. Remove it from the parent template before refreshing "${template.id}".`,
     );
   }
   options.onProgress?.("Synchronizing clean default-branch sources…");
@@ -199,9 +230,11 @@ export async function refreshTemplateAgentsMd(
       }),
     );
 
-    if ((await pathExists(authoredPath)) && options.force) {
-      await backupFile(authoredPath);
-      await fs.rm(authoredPath);
+    if (options.force) {
+      if (existingOwnedAuthoredPath) {
+        await backupFile(existingOwnedAuthoredPath);
+        await fs.rm(existingOwnedAuthoredPath);
+      }
     }
     options.onProgress?.("Publishing guidance…");
 

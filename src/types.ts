@@ -51,6 +51,15 @@ export type TemplateConfig = {
   disableInitializers?: boolean | string[];
 };
 
+export type TemplateConfigOverride = {
+  repos?: string[] | null;
+  "AGENTS.md"?: TemplateAgentsMdConfigOverride | null;
+  description?: string | null;
+  hooks?: Hook[] | null;
+  branchPrefix?: string | null;
+  disableInitializers?: boolean | string[] | null;
+};
+
 export type TemplateAgentsMdConfig = {
   /** The cross-repository workflow and components the generated guidance covers. */
   focus: string;
@@ -58,6 +67,12 @@ export type TemplateAgentsMdConfig = {
   paths?: Record<string, string[]>;
   /** Guidance lifetime. Defaults to 24 hours. */
   maxAgeHours?: number;
+};
+
+export type TemplateAgentsMdConfigOverride = {
+  focus?: string | null;
+  paths?: Record<string, string[] | null> | null;
+  maxAgeHours?: number | null;
 };
 
 export type Hook = {
@@ -93,6 +108,7 @@ export type WorkspaceMetadata = {
     feature_name: string;
     description?: string;
     template_id?: string;
+    template_variant?: string;
     type?: "review";
     review?: {
       owner: string;

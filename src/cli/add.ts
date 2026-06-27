@@ -8,7 +8,11 @@ import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
 import { invalidateWorkspaceAgentsMd } from "../templates/agents-md.ts";
-import { loadTemplate } from "../templates/index.ts";
+import {
+  formatTemplateIdentifier,
+  loadTemplate,
+  validateTemplateIdentifier,
+} from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
 import { promptConfirm } from "../ui/prompts/index.ts";
 import {
@@ -135,6 +139,7 @@ export function parseAddOperands(
     if (!templateName) {
       throw new UsageError("Template source must be @<template>.");
     }
+    validateTemplateIdentifier(templateName);
     return { kind: "template", templateName };
   }
 
@@ -172,7 +177,14 @@ async function addToWorkspaceChange(
       `Added ${result.addedRepos.length} repo${result.addedRepos.length === 1 ? "" : "s"} to ${target.metadata.workspace.feature_name}.`,
     );
     const templateId = target.metadata.workspace.template_id;
-    const template = templateId ? await loadTemplate(templateId) : null;
+    const template = templateId
+      ? await loadTemplate(
+          formatTemplateIdentifier({
+            parent: templateId,
+            variant: target.metadata.workspace.template_variant,
+          }),
+        )
+      : null;
     if (template) {
       await invalidateWorkspaceAgentsMd(template, target.workspaceDir).catch(
         (error: unknown) => {
@@ -203,7 +215,7 @@ async function promoteRepositoryChange(
   const sourceRepos = await resolvePromotionRepos(parsed, currentRepo);
   const groupName =
     sourceRepos.kind === "template"
-      ? sourceRepos.templateId
+      ? sourceRepos.groupName
       : ADHOC_WORKSPACE_GROUP;
   const workspaceDir = getWorkspaceChangePath(
     directories,
@@ -248,7 +260,12 @@ async function promoteRepositoryChange(
       },
     ],
     ...(sourceRepos.kind === "template"
-      ? { templateId: sourceRepos.templateId }
+      ? {
+          templateId: sourceRepos.templateId,
+          ...(sourceRepos.templateVariant
+            ? { templateVariant: sourceRepos.templateVariant }
+            : {}),
+        }
       : {}),
   });
   await writeVSCodeWorkspaceFile(workspaceDir, [currentRepo], {
@@ -313,6 +330,8 @@ async function resolvePromotionRepos(
   | Readonly<{
       kind: "template";
       templateId: string;
+      templateVariant?: string;
+      groupName: string;
       repos: readonly RepoConfig[];
     }>
 > {
@@ -349,7 +368,9 @@ async function resolvePromotionRepos(
 
   return {
     kind: "template",
-    templateId: template.id,
+    groupName: template.id,
+    templateId: template.parentId,
+    ...(template.variantId ? { templateVariant: template.variantId } : {}),
     repos: templateRepos.filter((_, index) => index !== currentIndex),
   };
 }

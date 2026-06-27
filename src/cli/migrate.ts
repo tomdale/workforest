@@ -11,6 +11,7 @@ import {
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
+import { formatTemplateIdentifier } from "../templates/index.ts";
 import type {
   RepoConfig,
   WorkspaceConfig,
@@ -350,7 +351,12 @@ function migrationEntryFromMetadata(
   config: WorkspaceConfig,
 ): WorkspaceMigrationEntry {
   const directories = resolveWorkforestDirectories(config);
-  const groupName = metadata.workspace.template_id ?? ADHOC_WORKSPACE_GROUP;
+  const groupName = metadata.workspace.template_id
+    ? formatTemplateIdentifier({
+        parent: metadata.workspace.template_id,
+        variant: metadata.workspace.template_variant,
+      })
+    : ADHOC_WORKSPACE_GROUP;
   const changeName = metadata.workspace.feature_name;
   const target = getWorkspaceChangePath(directories, groupName, changeName);
 

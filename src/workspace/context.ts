@@ -1,5 +1,6 @@
 import path from "node:path";
 import { validateRepositoryComponent } from "../repository-components.ts";
+import { validateTemplateIdentifier } from "../templates/index.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import type { WorkforestDirectories } from "./paths.ts";
 import {
@@ -328,7 +329,7 @@ function safeWorkspaceGroupName(value: string): string | null {
   }
 
   try {
-    return validateResourceName(value, "Workspace group");
+    return validateTemplateIdentifier(value);
   } catch {
     return null;
   }

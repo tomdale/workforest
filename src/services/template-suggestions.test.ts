@@ -378,6 +378,8 @@ function template(id: string, repos: string[]): Template {
   return {
     id,
     path: `/tmp/${id}/template.jsonc`,
+    directory: `/tmp/${id}`,
+    parentId: id,
     config: { repos },
   };
 }

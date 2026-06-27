@@ -3,7 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 import { afterEach, describe, expect, it } from "vitest";
-import { createTemplate, deleteTemplate, loadTemplate } from "./index.ts";
+import {
+  createTemplate,
+  createTemplateVariant,
+  deleteTemplate,
+  formatTemplateIdentifier,
+  listTemplates,
+  loadTemplate,
+  parseTemplateIdentifier,
+  validateTemplateIdentifier,
+} from "./index.ts";
 
 const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 
@@ -29,6 +38,29 @@ afterEach(async () => {
 });
 
 describe("templates", () => {
+  it("parses and formats canonical template variant identifiers", () => {
+    expect(parseTemplateIdentifier("vercel-agent+chat")).toEqual({
+      parent: "vercel-agent",
+      variant: "chat",
+    });
+    expect(
+      formatTemplateIdentifier({ parent: "vercel-agent", variant: "chat" }),
+    ).toBe("vercel-agent+chat");
+    expect(validateTemplateIdentifier("vercel-agent")).toBe("vercel-agent");
+    expect(validateTemplateIdentifier("vercel-agent+chat")).toBe(
+      "vercel-agent+chat",
+    );
+
+    for (const invalid of [
+      "vercel-agent+chat+extra",
+      "vercel-agent+",
+      "+chat",
+      "vercel-agent/chat",
+    ]) {
+      expect(() => validateTemplateIdentifier(invalid)).toThrow();
+    }
+  });
+
   it("preserves branch prefixes when loading", async () => {
     const configHome = await createTemplatesHome();
     const templatePath = path.join(
@@ -121,6 +153,65 @@ describe("templates", () => {
     await expect(
       readFile(path.join(templateDir, "AGENTS.md"), "utf8"),
     ).rejects.toThrow();
+  });
+
+  it("loads variants as effective merged templates", async () => {
+    await createTemplatesHome();
+    await createTemplate("vercel-agent", {
+      repos: ["vercel/front", "vercel/api"],
+      description: "Parent template",
+      branchPrefix: "tomdale/",
+      disableInitializers: ["pnpm-install", "vercel-link"],
+      hooks: [
+        { name: "parent", run: "pnpm install", in: "front" },
+        { name: "other", run: "pnpm test", in: "api" },
+      ],
+      "AGENTS.md": {
+        focus: "Parent workflow",
+        paths: { front: ["app"], api: ["src"] },
+        maxAgeHours: 12,
+      },
+    });
+    await createTemplateVariant("vercel-agent", "chat", {
+      description: "Chat workflow",
+      branchPrefix: null,
+      hooks: [{ name: "chat", run: "pnpm chat", in: "front" }],
+      disableInitializers: ["pnpm-install"],
+      "AGENTS.md": {
+        focus: "Chat workflow",
+        paths: { api: null, front: ["app/chat"] },
+      },
+    });
+
+    const template = await loadTemplate("vercel-agent+chat");
+
+    expect(template).toMatchObject({
+      id: "vercel-agent+chat",
+      parentId: "vercel-agent",
+      variantId: "chat",
+    });
+    expect(template?.config).toEqual({
+      repos: ["vercel/front", "vercel/api"],
+      description: "Chat workflow",
+      disableInitializers: ["pnpm-install"],
+      hooks: [{ name: "chat", run: "pnpm chat", in: "front" }],
+      "AGENTS.md": {
+        focus: "Chat workflow",
+        paths: { front: ["app/chat"] },
+        maxAgeHours: 12,
+      },
+    });
+  });
+
+  it("lists parent templates and variants by canonical id", async () => {
+    await createTemplatesHome();
+    await createTemplate("vercel-agent", { repos: ["vercel/front"] });
+    await createTemplateVariant("vercel-agent", "chat");
+
+    await expect(listTemplates()).resolves.toMatchObject([
+      { id: "vercel-agent" },
+      { id: "vercel-agent+chat" },
+    ]);
   });
 
   it.each([

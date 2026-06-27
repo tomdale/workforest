@@ -12,7 +12,7 @@ import {
 } from "./cli/start.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
-import { createTemplate } from "./templates/index.ts";
+import { createTemplate, createTemplateVariant } from "./templates/index.ts";
 import { buildCreateChangeInput } from "./workspace/create-change.ts";
 import {
   type RepoInitializationState,
@@ -295,6 +295,49 @@ describe("wf start", () => {
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Workspaces", "vercel-agent", "auth-fix"),
     ]);
+  });
+
+  it("routes a template variant to a canonical group and split metadata", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    await createTemplate("vercel-agent", {
+      repos: ["front"],
+      branchPrefix: "agent",
+    });
+    await createTemplateVariant("vercel-agent", "chat", {
+      branchPrefix: "chat",
+    });
+    const stamped = fakeStampWorkspace();
+
+    await runStartCommand(invocation(["auth-fix", "@vercel-agent+chat"]), {
+      interactive: false,
+      writeShellCdPath: fixture.writeShellCdPath,
+      stampWorkspace: stamped,
+    });
+
+    expect(stamped).toHaveBeenCalledWith({
+      featureName: "auth-fix",
+      branchName: "chat/auth-fix",
+      workspaceDir: path.join(
+        fixture.baseDir,
+        "Workspaces",
+        "vercel-agent+chat",
+        "auth-fix",
+      ),
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          defaultBranch: "main",
+        },
+      ],
+      templateId: "vercel-agent",
+      templateVariant: "chat",
+    });
   });
 
   it("uses an explicit branch for a template start instead of the template branch prefix", async () => {

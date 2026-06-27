@@ -3,7 +3,10 @@ import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
-import { loadTemplate } from "../templates/index.ts";
+import {
+  loadTemplate,
+  validateTemplateIdentifier,
+} from "../templates/index.ts";
 import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
 import {
   buildBranchName,
@@ -98,7 +101,7 @@ export function parseStartOperands(
     if (!templateName) {
       throw new UsageError("Template source must be @<template>.");
     }
-    validateResourceName(templateName, "Template name");
+    validateTemplateIdentifier(templateName);
     return { changeName, source: { kind: "template", templateName } };
   }
 
@@ -158,7 +161,9 @@ async function resolveTemplateStartSource(
 
   return {
     kind: "template",
-    templateId: template.id,
+    groupName: template.id,
+    templateId: template.parentId,
+    ...(template.variantId ? { templateVariant: template.variantId } : {}),
     repos: await resolveRepositorySpecifiers(template.config.repos),
     ...(template.config.branchPrefix !== undefined
       ? { branchPrefix: template.config.branchPrefix }

@@ -26,7 +26,24 @@ export async function copyTemplateFiles(
   template: Template,
   workspaceDir: string,
 ): Promise<void> {
-  const templateDir = path.dirname(template.path);
+  const templateDirs = [
+    ...(template.parentPath ? [path.dirname(template.parentPath)] : []),
+    path.dirname(template.path),
+  ];
+  const copiedTargets = new Set<string>();
+  for (const templateDir of templateDirs) {
+    await copyTemplateFilesLayer(templateDir, workspaceDir, {
+      skipRootAgentsMd: template.config["AGENTS.md"] !== undefined,
+      copiedTargets,
+    });
+  }
+}
+
+async function copyTemplateFilesLayer(
+  templateDir: string,
+  workspaceDir: string,
+  options: { skipRootAgentsMd: boolean; copiedTargets: Set<string> },
+): Promise<void> {
   const templateDirStat = await fs.lstat(templateDir);
   if (templateDirStat.isSymbolicLink()) {
     throw new Error(
@@ -56,7 +73,7 @@ export async function copyTemplateFiles(
     templateFilesDir,
     workspaceDir,
     workspaceDir,
-    template.config["AGENTS.md"] !== undefined,
+    options,
   );
 }
 
@@ -64,7 +81,7 @@ async function copyDirectoryContents(
   sourceDir: string,
   targetDir: string,
   workspaceDir: string,
-  skipRootAgentsMd = false,
+  options: { skipRootAgentsMd: boolean; copiedTargets: Set<string> },
 ): Promise<void> {
   await assertContainedPathWithoutSymlinks(workspaceDir, targetDir);
   await fs.mkdir(targetDir, { recursive: true });
@@ -73,7 +90,7 @@ async function copyDirectoryContents(
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
     if (
-      skipRootAgentsMd &&
+      options.skipRootAgentsMd &&
       sourceDir.endsWith(`${path.sep}${TEMPLATE_FILES_DIR}`) &&
       entry.name === "AGENTS.md"
     ) {
@@ -88,7 +105,10 @@ async function copyDirectoryContents(
       );
     }
     if (entry.isDirectory()) {
-      await copyDirectoryContents(sourcePath, targetPath, workspaceDir, false);
+      await copyDirectoryContents(sourcePath, targetPath, workspaceDir, {
+        ...options,
+        skipRootAgentsMd: false,
+      });
       continue;
     }
     if (!entry.isFile()) {
@@ -97,7 +117,12 @@ async function copyDirectoryContents(
 
     await assertContainedPathWithoutSymlinks(workspaceDir, targetPath);
     try {
-      await fs.copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
+      if (options.copiedTargets.has(targetPath)) {
+        await fs.copyFile(sourcePath, targetPath);
+      } else {
+        await fs.copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
+        options.copiedTargets.add(targetPath);
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         throw new Error(
