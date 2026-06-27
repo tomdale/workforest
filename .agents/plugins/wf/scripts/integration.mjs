@@ -35,6 +35,15 @@ function runCommand(command, args, options = {}) {
   return result.status ?? 1;
 }
 
+function runGitWithInput(args, input, options = {}) {
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    input,
+    stdio: ["pipe", "pipe", "pipe"],
+    ...options,
+  }).trim();
+}
+
 function gitSucceeds(args, options = {}) {
   try {
     runGit(args, options);
@@ -214,12 +223,26 @@ function findEntry(identifier) {
   return branchMatches[0];
 }
 
+function entryForIdentifier(identifier) {
+  const entry = findEntry(identifier);
+  if (entry) return entry;
+  const head = branchHead(identifier);
+  if (!head) return null;
+  return {
+    id: identifier,
+    timestamp: "",
+    branch: identifier,
+    sha: head,
+  };
+}
+
 function printHelp() {
   console.log(`Usage:
-  integration-queue.mjs enqueue [branch]
-  integration-queue.mjs list [--json]
-  integration-queue.mjs refresh <branch|id>
-  integration-queue.mjs dequeue <branch|id>`);
+  integration.mjs enqueue [branch]
+  integration.mjs list [--json]
+  integration.mjs refresh <branch|id>
+  integration.mjs sync-worktree <branch|id>
+  integration.mjs dequeue <branch|id>`);
 }
 
 function enqueue(branchArg) {
@@ -263,6 +286,100 @@ function dequeue(identifier) {
   }
   runGit(["update-ref", "-d", entry.id]);
   return entry;
+}
+
+function parseWorktreeList(output) {
+  const entries = [];
+  let current = null;
+  for (const line of output.split("\n")) {
+    if (!line) {
+      if (current) entries.push(current);
+      current = null;
+      continue;
+    }
+    if (line.startsWith("worktree ")) {
+      if (current) entries.push(current);
+      current = { path: line.slice("worktree ".length), branch: null };
+      continue;
+    }
+    if (current && line.startsWith("branch ")) {
+      current.branch = line.slice("branch ".length);
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+
+function worktreeForBranch(branch) {
+  const worktrees = parseWorktreeList(runGit(["worktree", "list", "--porcelain"]));
+  return (
+    worktrees.find((worktree) => worktree.branch === `refs/heads/${branch}`) ?? null
+  );
+}
+
+function patchIdForCommit(commit) {
+  const patch = runGit(["show", "--format=medium", commit]);
+  const output = runGitWithInput(["patch-id", "--stable"], patch);
+  const [patchId = ""] = output.split(/\s+/);
+  return patchId;
+}
+
+function latestEquivalentCommitOnMain(commit) {
+  const targetPatchId = patchIdForCommit(commit);
+  if (!targetPatchId) return null;
+  const commits = runGitAllowEmpty(["rev-list", MAIN_BRANCH]);
+  if (!commits) return null;
+  for (const candidate of commits.split("\n").filter(Boolean)) {
+    if (patchIdForCommit(candidate) === targetPatchId) return candidate;
+  }
+  return null;
+}
+
+function integrationTargetFor(entry) {
+  if (gitSucceeds(["merge-base", "--is-ancestor", entry.sha, MAIN_BRANCH])) {
+    return runGit(["rev-parse", MAIN_BRANCH]);
+  }
+  const equivalent = latestEquivalentCommitOnMain(entry.sha);
+  if (equivalent) return equivalent;
+  return null;
+}
+
+function syncWorktree(identifier) {
+  const entry = entryForIdentifier(identifier);
+  if (!entry) {
+    throw new Error(`No queue entry or branch found for ${identifier}`);
+  }
+  const worktree = worktreeForBranch(entry.branch);
+  if (!worktree) {
+    return {
+      ...entry,
+      status: "skipped",
+      reason: `No worktree found with ${entry.branch} checked out.`,
+    };
+  }
+  const dirty = runGitAllowEmpty(["status", "--porcelain"], { cwd: worktree.path });
+  if (dirty) {
+    return {
+      ...entry,
+      status: "skipped",
+      reason: `Worktree has uncommitted changes at ${worktree.path}.`,
+    };
+  }
+  const target = integrationTargetFor(entry);
+  if (!target) {
+    return {
+      ...entry,
+      status: "skipped",
+      reason: `No commit on ${MAIN_BRANCH} contains ${entry.sha}.`,
+    };
+  }
+  runGit(["reset", "--hard", target], { cwd: worktree.path });
+  return {
+    ...entry,
+    status: "updated",
+    worktree: worktree.path,
+    target,
+  };
 }
 
 function printList(jsonOutput) {
@@ -316,6 +433,14 @@ function main(argv) {
     const identifier = rest[0];
     if (!identifier) throw new Error("dequeue requires a branch name or queue id");
     const result = dequeue(identifier);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "sync-worktree") {
+    const identifier = rest[0];
+    if (!identifier) throw new Error("sync-worktree requires a branch name or queue id");
+    const result = syncWorktree(identifier);
     console.log(JSON.stringify(result, null, 2));
     return;
   }

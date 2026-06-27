@@ -24,11 +24,15 @@ Use this skill when processing queued branches into local `main`.
 7. Run `pnpm check` before fast-forwarding `main`.
 8. Hold `workforest-main.lock` while fast-forwarding local `main`.
 9. Push `origin main:main` after a successful local integration.
-10. After the integration queue is fully processed, always run `pnpm check` in the `main` worktree.
+10. After a successful push, update the original integrated branch worktree to
+    the corresponding commit on `main` with the queue helper. This preserves
+    the ancestry proof used by `wf finish`. The helper must skip dirty or
+    missing source worktrees.
+11. After the integration queue is fully processed, always run `pnpm check` in the `main` worktree.
 
 ## Workflow
 
-1. List queued entries with `.agents/plugins/wf/scripts/integration-queue.mjs list`.
+1. List queued entries with `.agents/plugins/wf/scripts/integration.mjs list`.
 2. Pick the oldest ready entry that is not stale or already integrated.
 3. Verify the queued SHA still matches the branch `HEAD`.
 4. Inspect the change set relative to the current merge base and current `main`.
@@ -45,11 +49,15 @@ Use this skill when processing queued branches into local `main`.
 10. Under the shared `workforest-main.lock`, rebase the integration branch onto
     the latest local `main`, rerun `pnpm check`, and fast-forward `main`.
 11. Push `origin main:main` while holding the same shared lock.
-12. Dequeue the integrated queue entry.
-13. Remove the temporary integration worktree and delete its merged helper branch.
-14. Repeat steps 2-13 until no ready queue entries remain.
-15. From the `main` worktree, run `pnpm check` once more after the queue is complete. Run this final check even when the queue was already empty and no entries were integrated.
-16. After all queued integrations are complete, offer to run `wf finish` for
+12. Run `.agents/plugins/wf/scripts/integration.mjs sync-worktree <branch|id>`.
+    If it reports `updated`, the source worktree now points at the integrated
+    commit reachable from `main`. If it reports `skipped`, keep going but report
+    the reason before offering `wf finish`.
+13. Dequeue the integrated queue entry.
+14. Remove the temporary integration worktree and delete its merged helper branch.
+15. Repeat steps 2-14 until no ready queue entries remain.
+16. From the `main` worktree, run `pnpm check` once more after the queue is complete. Run this final check even when the queue was already empty and no entries were integrated.
+17. After all queued integrations are complete, offer to run `wf finish` for
     every worktree integrated during this run. Run it only after the user
     confirms, and only for worktrees whose integration is verified in Git
     history.

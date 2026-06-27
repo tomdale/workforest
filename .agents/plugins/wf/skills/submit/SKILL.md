@@ -32,7 +32,7 @@ Use this skill when a feature branch is done and should be queued for the local 
    - After the subagent returns, review its reported commit SHA and remaining dirty state, then re-run `git status --short` and `git rev-parse HEAD`.
    - If the user declines, the subagent refuses because the changes are unrelated/ambiguous, or `git status --short` remains non-empty, stop and ask the user to clean, commit, or stash the remaining changes before enqueueing.
 4. Require `git status --short` to be empty before continuing.
-5. Enqueue the current branch with `.agents/plugins/wf/scripts/integration-queue.mjs enqueue`.
+5. Enqueue the current branch with `.agents/plugins/wf/scripts/integration.mjs enqueue`.
    If validation fails, fix the reported errors, commit the fixes, and rerun
    enqueue.
 6. Report:
