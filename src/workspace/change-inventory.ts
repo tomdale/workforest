@@ -8,9 +8,17 @@ import {
   formatTemplateIdentifier,
   validateTemplateIdentifier,
 } from "../templates/index.ts";
-import { type StatusTone, statusLabel } from "../terminal/status-indicator.ts";
+import {
+  renderTerminalDocAnsi,
+  renderTerminalDocPlain,
+  type TerminalDoc,
+  type TerminalLineInput,
+  type TerminalSpan,
+  terminalSpan,
+} from "../terminal/render-model.ts";
+import type { StatusTone } from "../terminal/status-indicator.ts";
 import { padRight } from "../terminal/text.ts";
-import { terminalColor } from "../terminal/theme.ts";
+import { terminalSymbol } from "../terminal/theme.ts";
 import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
@@ -107,23 +115,42 @@ export function renderChangeList(
   inventory: ChangeInventory,
   options: RenderChangeListOptions = {},
 ): string {
+  return renderInlineDoc(changeListDoc(inventory, options));
+}
+
+export function changeListDoc(
+  inventory: ChangeInventory,
+  options: RenderChangeListOptions = {},
+): TerminalDoc {
   if (
     inventory.totals.workspaces === 0 &&
     inventory.totals.repositories === 0
   ) {
-    return [
-      "No Workforest changes found.",
-      terminalColor.muted("Start one: wf start <change> <repo|@template>"),
-    ].join("\n");
+    return {
+      lines: [
+        { spans: [terminalSpan("No Workforest changes found.")] },
+        {
+          spans: [
+            terminalSpan("Start one: wf start <change> <repo|@template>", {
+              role: "muted",
+            }),
+          ],
+        },
+      ],
+    };
   }
 
-  const lines = [terminalColor.primary(chalk.bold("Changes"))];
+  const lines: TerminalLineInput[] = [
+    [terminalSpan("Changes", { role: "primary", emphasis: "bold" })],
+  ];
   if (inventory.workspaces.length > 0) {
-    lines.push("", terminalColor.accent(chalk.bold("Workspaces")));
+    lines.push("", [
+      terminalSpan("Workspaces", { role: "accent", emphasis: "bold" }),
+    ]);
     for (const [groupName, entries] of groupWorkspaceEntries(
       inventory.workspaces,
     )) {
-      lines.push(`  ${terminalColor.focus(groupName)}`);
+      lines.push(["  ", terminalSpan(groupName, { role: "focus" })]);
       lines.push(formatWorkspaceHeader(options.paths === true));
       for (const entry of entries) {
         lines.push(formatWorkspaceRow(entry, options));
@@ -134,11 +161,13 @@ export function renderChangeList(
   }
 
   if (inventory.repositories.length > 0) {
-    lines.push("", terminalColor.accent(chalk.bold("Repositories")));
+    lines.push("", [
+      terminalSpan("Repositories", { role: "accent", emphasis: "bold" }),
+    ]);
     for (const [repoName, entries] of groupRepositoryEntries(
       inventory.repositories,
     )) {
-      lines.push(`  ${terminalColor.focus(repoName)}`);
+      lines.push(["  ", terminalSpan(repoName, { role: "focus" })]);
       lines.push(formatRepositoryHeader(options.paths === true));
       for (const entry of entries) {
         lines.push(formatRepositoryRow(entry, options));
@@ -148,13 +177,13 @@ export function renderChangeList(
     trimTrailingBlank(lines);
   }
 
-  lines.push(
-    "",
-    terminalColor.muted(
+  lines.push("", [
+    terminalSpan(
       `${inventory.totals.workspaces} workspace${inventory.totals.workspaces === 1 ? "" : "s"}, ${inventory.totals.repositories} repository change${inventory.totals.repositories === 1 ? "" : "s"}`,
+      { role: "muted" },
     ),
-  );
-  return lines.join("\n");
+  ]);
+  return { lines: lines.map((line) => normalizeLine(line)) };
 }
 
 async function collectWorkspaceChanges(
@@ -390,51 +419,70 @@ function groupEntries<Entry>(
   return [...grouped.entries()];
 }
 
-function formatWorkspaceHeader(showPaths: boolean): string {
-  return terminalColor.muted(
-    `    ${formatColumns(["Change", "Repos", "State", "Updated"], showPaths)}`,
-  );
+function formatWorkspaceHeader(showPaths: boolean): TerminalLineInput {
+  return [
+    "    ",
+    ...formatColumns(
+      ["Change", "Repos", "State", "Updated"].map((value) =>
+        terminalSpan(value, { role: "muted" }),
+      ),
+      showPaths,
+    ),
+  ];
 }
 
-function formatRepositoryHeader(showPaths: boolean): string {
-  return terminalColor.muted(
-    `    ${formatColumns(
-      ["Change", "Repository", "State", "Updated"],
+function formatRepositoryHeader(showPaths: boolean): TerminalLineInput {
+  return [
+    "    ",
+    ...formatColumns(
+      ["Change", "Repository", "State", "Updated"].map((value) =>
+        terminalSpan(value, { role: "muted" }),
+      ),
       showPaths,
-    )}`,
-  );
+    ),
+  ];
 }
 
 function formatWorkspaceRow(
   entry: WorkspaceChangeInventoryEntry,
   options: RenderChangeListOptions,
-): string {
-  return `    ${formatColumns(
-    [
-      terminalColor.primary(entry.changeName),
-      terminalColor.dim(entry.repoSummary),
-      statusLabel(stateTone(entry.state), entry.state),
-      terminalColor.accent(formatRelativeTime(entry.modifiedAtMs, options.now)),
-    ],
-    options.paths === true,
-    entry.path,
-  )}`;
+): TerminalLineInput {
+  return [
+    "    ",
+    ...formatColumns(
+      [
+        terminalSpan(entry.changeName, { role: "primary" }),
+        terminalSpan(entry.repoSummary, { role: "dim" }),
+        statusLabelSpan(stateTone(entry.state), entry.state),
+        terminalSpan(formatRelativeTime(entry.modifiedAtMs, options.now), {
+          role: "accent",
+        }),
+      ],
+      options.paths === true,
+      entry.path,
+    ),
+  ];
 }
 
 function formatRepositoryRow(
   entry: RepositoryChangeInventoryEntry,
   options: RenderChangeListOptions,
-): string {
-  return `    ${formatColumns(
-    [
-      terminalColor.primary(entry.changeName),
-      terminalColor.dim(entry.repository),
-      statusLabel(stateTone(entry.state), entry.state),
-      terminalColor.accent(formatRelativeTime(entry.modifiedAtMs, options.now)),
-    ],
-    options.paths === true,
-    entry.path,
-  )}`;
+): TerminalLineInput {
+  return [
+    "    ",
+    ...formatColumns(
+      [
+        terminalSpan(entry.changeName, { role: "primary" }),
+        terminalSpan(entry.repository, { role: "dim" }),
+        statusLabelSpan(stateTone(entry.state), entry.state),
+        terminalSpan(formatRelativeTime(entry.modifiedAtMs, options.now), {
+          role: "accent",
+        }),
+      ],
+      options.paths === true,
+      entry.path,
+    ),
+  ];
 }
 
 /** A change is `ready` when its worktrees exist; otherwise its files are gone. */
@@ -443,18 +491,21 @@ function stateTone(state: ChangeState): StatusTone {
 }
 
 function formatColumns(
-  values: readonly string[],
+  values: readonly TerminalSpan[],
   showPath: boolean,
   entryPath?: string,
-): string {
+): TerminalLineInput {
   const widths = [24, 18, 8];
   const columns = values.map((value, index) => {
     const width = widths[index];
-    return width ? padRight(value, width) : value;
+    return width ? { ...value, text: padRight(value.text, width) } : value;
   });
   return showPath && entryPath
-    ? [...columns, terminalColor.muted(compactHome(entryPath))].join("  ")
-    : columns.join("  ");
+    ? intersperseSpans([
+        ...columns,
+        terminalSpan(compactHome(entryPath), { role: "muted" }),
+      ])
+    : intersperseSpans(columns);
 }
 
 function summarizeRepos(repos: readonly string[]): string {
@@ -529,8 +580,68 @@ function safeWorkspaceGroupName(value: string): string | null {
   }
 }
 
-function trimTrailingBlank(lines: string[]): void {
+function trimTrailingBlank(lines: TerminalLineInput[]): void {
   while (lines.at(-1) === "") {
     lines.pop();
   }
+}
+
+function statusLabelSpan(tone: StatusTone, label: string): TerminalSpan {
+  return terminalSpan(`${statusGlyphText(tone)} ${label}`, {
+    role: statusRole(tone),
+  });
+}
+
+function statusGlyphText(tone: StatusTone): string {
+  switch (tone) {
+    case "success":
+      return terminalSymbol.statusComplete;
+    case "error":
+      return terminalSymbol.statusFailed;
+    case "warning":
+      return terminalSymbol.warning;
+    case "pending":
+      return terminalSymbol.statusPending;
+    case "cancelled":
+      return terminalSymbol.statusCancelled;
+    case "info":
+      return terminalSymbol.info;
+  }
+}
+
+function statusRole(tone: StatusTone): NonNullable<TerminalSpan["role"]> {
+  switch (tone) {
+    case "success":
+      return "success";
+    case "error":
+      return "error";
+    case "warning":
+      return "warning";
+    case "pending":
+    case "cancelled":
+      return "muted";
+    case "info":
+      return "accent";
+  }
+}
+
+function intersperseSpans(spans: readonly TerminalSpan[]): TerminalLineInput {
+  return spans.flatMap((span, index) => (index === 0 ? [span] : ["  ", span]));
+}
+
+function normalizeLine(line: TerminalLineInput): TerminalDoc["lines"][number] {
+  if (typeof line === "string") {
+    return { spans: [terminalSpan(line)] };
+  }
+  return {
+    spans: line.map((span) =>
+      typeof span === "string" ? terminalSpan(span) : span,
+    ),
+  };
+}
+
+function renderInlineDoc(doc: TerminalDoc): string {
+  return chalk.level > 0
+    ? renderTerminalDocAnsi(doc)
+    : renderTerminalDocPlain(doc);
 }

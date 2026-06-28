@@ -13,7 +13,16 @@ import type {
 } from "./cli/types.ts";
 import { loadWorkspaceConfig } from "./config.ts";
 import { getTemplatesDir, listTemplates } from "./templates/index.ts";
-import { helpColor } from "./terminal/theme.ts";
+import {
+  renderTerminalDocAnsi,
+  renderTerminalDocPlain,
+  type TerminalDoc,
+  type TerminalLineInput,
+  type TerminalSpan,
+  type TerminalSpanInput,
+  terminalDoc,
+  terminalSpan,
+} from "./terminal/render-model.ts";
 
 export type RootHelpContext = Readonly<{
   configPath: string;
@@ -563,15 +572,25 @@ function isVisible(
 }
 
 export function renderHelp(content: string): string {
+  return renderInlineDoc(helpDoc(content));
+}
+
+export function helpDoc(content: string): TerminalDoc {
   const lines = content.trim().split("\n");
   let section = "";
 
-  return lines
-    .map((line) => {
+  return terminalDoc(
+    lines.map((line) => {
       const usage = line.match(/^(\s*)(Usage:|\s{7})(.*)$/);
       if (usage) {
         const [, indent = "", label = "", syntax = ""] = usage;
-        return `${indent}${label.trim() ? helpHeading(label) : " ".repeat(label.length)}${styleCommandSyntax(syntax)}`;
+        return [
+          indent,
+          ...(label.trim()
+            ? helpHeading(label)
+            : [terminalSpan(" ".repeat(label.length))]),
+          ...styleCommandSyntax(syntax),
+        ];
       }
 
       const heading = line.match(/^([^ ].*):$/);
@@ -583,7 +602,12 @@ export function renderHelp(content: string): string {
       const row = line.match(/^(\s+)(.*?\S)(\s{2,})(\S.*)$/);
       if (row) {
         const [, indent = "", key = "", gap = "", description = ""] = row;
-        return `${indent}${styleRowKey(key, section)}${gap}${styleDescription(description)}`;
+        return [
+          indent,
+          ...styleRowKey(key, section),
+          gap,
+          ...styleDescription(description),
+        ];
       }
 
       if (["Examples", "Start here (for AI agents)"].includes(section)) {
@@ -593,65 +617,75 @@ export function renderHelp(content: string): string {
           // Command lines are indented two spaces; example outcome prose is
           // indented deeper and reads as a sentence, not a command.
           return indent.length >= 4
-            ? `${indent}${styleDescription(rest)}`
-            : `${indent}${styleExample(rest)}`;
+            ? [indent, ...styleDescription(rest)]
+            : [indent, ...styleExample(rest)];
         }
       }
 
       const metadata = line.match(/^([A-Z][^:]+:)(\s+)(.+)$/);
       if (metadata) {
         const [, label = "", gap = "", value = ""] = metadata;
-        return helpColor.metadata(`${label}${gap}${value}`);
+        return [terminalSpan(`${label}${gap}${value}`, { role: "muted" })];
       }
 
       const title = line.match(/^(wf(?:\s+\S+)*)(\s+-\s+)(.+)$/);
       if (title) {
         const [, command = "", separator = "", description = ""] = title;
-        return `${styleCommandSyntax(command)}${helpColor.metadata(separator)}${styleDescription(description)}`;
+        return [
+          ...styleCommandSyntax(command),
+          terminalSpan(separator, { role: "muted" }),
+          ...styleDescription(description),
+        ];
       }
 
       return line;
-    })
-    .join("\n");
+    }),
+  );
 }
 
-function helpHeading(value: string): string {
-  return helpColor.heading(chalk.bold(value));
+function helpHeading(value: string): TerminalSpan[] {
+  return [terminalSpan(value, { role: "accent", emphasis: "bold" })];
 }
 
-function styleCommandSyntax(value: string): string {
+function styleCommandSyntax(value: string): TerminalLineInput {
   return styleTokens(value, true);
 }
 
-function styleOptionSyntax(value: string): string {
+function styleOptionSyntax(value: string): TerminalLineInput {
   return styleTokens(value, false);
 }
 
-function styleTokens(value: string, colorBareWords: boolean): string {
+function styleTokens(
+  value: string,
+  colorBareWords: boolean,
+): TerminalLineInput {
   const tokens =
     /(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|<[^>]+>|\[[^\]]+\]|(?:^|\s)[a-z][\w|.-]*(?=\s|$)/gi;
 
-  return value.replace(tokens, (token) => {
+  return tokenize(value, tokens, (token) => {
     const normalized = token.trimStart();
     const prefix = token.slice(0, token.length - normalized.length);
 
     if (normalized === "wf" || normalized === "workforest") {
-      return `${prefix}${helpColor.program(chalk.bold(normalized))}`;
+      return [
+        prefix,
+        terminalSpan(normalized, { role: "focus", emphasis: "bold" }),
+      ];
     }
     if (normalized.startsWith("-")) {
-      return `${prefix}${helpColor.option(normalized)}`;
+      return [prefix, terminalSpan(normalized, { role: "warning" })];
     }
     if (normalized.startsWith("<") || normalized.startsWith("[")) {
-      return `${prefix}${helpColor.argument(normalized)}`;
+      return [prefix, terminalSpan(normalized, { role: "accent" })];
     }
     if (colorBareWords) {
-      return `${prefix}${helpColor.command(normalized)}`;
+      return [prefix, terminalSpan(normalized, { role: "accent" })];
     }
-    return token;
+    return [token];
   });
 }
 
-function styleRowKey(value: string, section: string): string {
+function styleRowKey(value: string, section: string): TerminalLineInput {
   if (section === "Options") {
     return styleOptionSyntax(value);
   }
@@ -661,18 +695,22 @@ function styleRowKey(value: string, section: string): string {
   return styleCommandSyntax(value);
 }
 
-function styleExample(value: string): string {
-  return value.replace(
+function styleExample(value: string): TerminalLineInput {
+  return tokenize(
+    value,
     /"[^"]*"|'[^']*'|(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|(?:^|\s)(?:add|add-file|cache|checkout|config|confetti|copy|delete|dev|doctor|edit|eval|finish|get|info|init|list|manage|open|path|prune|repair|review|shell|show|simulate|skills|start|status|switch|task|template|update|version)(?=\s|$)|(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)\S+|\b\d+\b/gi,
     (token) => {
       const normalized = token.trimStart();
       const prefix = token.slice(0, token.length - normalized.length);
 
       if (normalized === "wf" || normalized === "workforest") {
-        return `${prefix}${helpColor.program(chalk.bold(normalized))}`;
+        return [
+          prefix,
+          terminalSpan(normalized, { role: "focus", emphasis: "bold" }),
+        ];
       }
       if (normalized.startsWith("-")) {
-        return `${prefix}${helpColor.option(normalized)}`;
+        return [prefix, terminalSpan(normalized, { role: "warning" })];
       }
       if (
         normalized.startsWith('"') ||
@@ -680,18 +718,45 @@ function styleExample(value: string): string {
         /^\d+$/.test(normalized) ||
         normalized.includes("/")
       ) {
-        return `${prefix}${helpColor.argument(normalized)}`;
+        return [prefix, terminalSpan(normalized, { role: "accent" })];
       }
-      return `${prefix}${helpColor.command(normalized)}`;
+      return [prefix, terminalSpan(normalized, { role: "accent" })];
     },
   );
 }
 
-function styleDescription(value: string): string {
+function styleDescription(value: string): TerminalLineInput {
   return value
     .split(/(\([^)]*(?:default|none|current)[^)]*\)|\$[A-Z][A-Z0-9_]*)/gi)
     .map((part, index) =>
-      index % 2 === 1 ? helpColor.metadata(part) : helpColor.description(part),
-    )
-    .join("");
+      index % 2 === 1 ? terminalSpan(part, { role: "muted" }) : part,
+    );
+}
+
+function tokenize(
+  value: string,
+  pattern: RegExp,
+  style: (token: string) => TerminalLineInput,
+): TerminalLineInput {
+  const spans: TerminalSpanInput[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(pattern)) {
+    const token = match[0] ?? "";
+    const index = match.index ?? cursor;
+    if (index > cursor) {
+      spans.push(value.slice(cursor, index));
+    }
+    spans.push(...style(token));
+    cursor = index + token.length;
+  }
+  if (cursor < value.length) {
+    spans.push(value.slice(cursor));
+  }
+  return spans;
+}
+
+function renderInlineDoc(doc: TerminalDoc): string {
+  return chalk.level > 0
+    ? renderTerminalDocAnsi(doc)
+    : renderTerminalDocPlain(doc);
 }
