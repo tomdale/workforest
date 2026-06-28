@@ -294,9 +294,11 @@ async function runInvocation(
     case "switch":
       return runTypedCommand(async () => {
         const { runSwitchCommand } = await import("./cli/switch.ts");
+        const scope = await resolveCurrentScope();
         return runSwitchCommand(invocation, {
           interactive: isInteractive(),
           fullscreen: await shouldUseDashboardTui(),
+          ...(scope ? { scope } : {}),
           writeShellCdPath,
         });
       });

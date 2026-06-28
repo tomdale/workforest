@@ -61,9 +61,18 @@ export async function listCandidates(
     ...inventory.workspaces,
     ...inventory.repositories,
   ];
-  entries.sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
 
-  return entries.map((entry) => candidateFromInventoryEntry(entry, now));
+  return sortEntriesByRecency(entries).map((entry) =>
+    candidateFromInventoryEntry(entry, now),
+  );
+}
+
+export function sortEntriesByRecency<Entry extends { modifiedAtMs: number }>(
+  entries: readonly Entry[],
+): Entry[] {
+  return [...entries].sort(
+    (left, right) => right.modifiedAtMs - left.modifiedAtMs,
+  );
 }
 
 /**

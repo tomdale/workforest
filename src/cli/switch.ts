@@ -1,5 +1,6 @@
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
+import { type Scope, sortEntriesByRecency } from "../entry/entries-data.ts";
 import { log } from "../logger.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
 import {
@@ -24,11 +25,13 @@ export type SwitchPrompt = (
 
 export type SwitchSurface = (
   entries: readonly InventoryEntry[],
+  scope: Scope | undefined,
 ) => Promise<InventoryEntry | null>;
 
 export type RunSwitchCommandOptions = Readonly<{
   interactive: boolean;
   fullscreen?: boolean;
+  scope?: Scope;
   writeShellCdPath: (targetDir: string) => Promise<void>;
   prompt?: SwitchPrompt;
   surface?: SwitchSurface;
@@ -52,6 +55,7 @@ export async function runSwitchCommand(
     }
     entry = await promptForSwitchTarget(config, {
       fullscreen: options.fullscreen === true,
+      ...(options.scope ? { scope: options.scope } : {}),
       ...(options.prompt ? { prompt: options.prompt } : {}),
       ...(options.surface ? { surface: options.surface } : {}),
     });
@@ -106,12 +110,16 @@ async function promptForSwitchTarget(
   config: Awaited<ReturnType<typeof loadWorkspaceConfig>>["config"],
   options: {
     fullscreen: boolean;
+    scope?: Scope;
     prompt?: SwitchPrompt;
     surface?: SwitchSurface;
   },
 ): Promise<InventoryEntry | null> {
   const inventory = await collectInventory(config);
-  const entries = [...inventory.workspaces, ...inventory.repositories];
+  const entries = sortEntriesByRecency([
+    ...inventory.workspaces,
+    ...inventory.repositories,
+  ]);
   if (entries.length === 0) {
     throw new OperationalError(
       "No worktrees or workspaces found.\nStart one: wf new <name> <repo|@template>",
@@ -120,7 +128,7 @@ async function promptForSwitchTarget(
 
   if (options.fullscreen && !options.prompt) {
     const surface = options.surface ?? runDefaultSwitchSurface;
-    return surface(entries);
+    return surface(entries, options.scope);
   }
 
   const prompt = options.prompt ?? promptFuzzySelect;
@@ -140,9 +148,10 @@ async function promptForSwitchTarget(
 
 async function runDefaultSwitchSurface(
   entries: readonly InventoryEntry[],
+  scope: Scope | undefined,
 ): Promise<InventoryEntry | null> {
   const { runSwitchSurface } = await import("../entry/switch-surface.ts");
-  return runSwitchSurface(entries);
+  return runSwitchSurface(entries, scope);
 }
 
 function switchCandidateDescription(entry: InventoryEntry): string {

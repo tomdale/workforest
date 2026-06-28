@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import stripAnsi from "strip-ansi";
@@ -110,6 +110,7 @@ describe("wf switch", () => {
 
   it("uses all changes as fuzzy candidates when no selector is provided", async () => {
     const fixture = await createSwitchFixture();
+    await pinSwitchFixtureMtimes(fixture.baseDir);
     const promptCalls: Parameters<SwitchPrompt>[1][] = [];
 
     await runSwitchCommand(invocation([]), {
@@ -127,14 +128,11 @@ describe("wf switch", () => {
 
     expect(promptCalls).toHaveLength(1);
     const labels = promptCalls[0]?.options.map((option) => option.label);
-    expect(labels).toEqual(
-      expect.arrayContaining([
-        "vercel-agent/auth-fix",
-        "_adhoc/auth-fix",
-        "workforest/cli-redesign",
-      ]),
-    );
-    expect(labels).toHaveLength(3);
+    expect(labels).toEqual([
+      "_adhoc/auth-fix",
+      "workforest/cli-redesign",
+      "vercel-agent/auth-fix",
+    ]);
     const optionsByLabel = new Map(
       promptCalls[0]?.options.map((option) => [option.label, option]),
     );
@@ -154,6 +152,7 @@ describe("wf switch", () => {
 
   it("uses the fullscreen surface when no selector is provided", async () => {
     const fixture = await createSwitchFixture();
+    await pinSwitchFixtureMtimes(fixture.baseDir);
     const surfaceCalls: string[][] = [];
 
     await runSwitchCommand(invocation([]), {
@@ -171,15 +170,31 @@ describe("wf switch", () => {
     });
 
     expect(surfaceCalls).toEqual([
-      expect.arrayContaining([
-        "vercel-agent/auth-fix",
-        "_adhoc/auth-fix",
-        "workforest/cli-redesign",
-      ]),
+      ["_adhoc/auth-fix", "workforest/cli-redesign", "vercel-agent/auth-fix"],
     ]);
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Workspaces", "vercel-agent", "auth-fix"),
     ]);
+  });
+
+  it("passes the current scope to the fullscreen surface", async () => {
+    const fixture = await createSwitchFixture();
+    const scope = { kind: "repo", name: "workforest" } as const;
+    let seenScope: unknown;
+
+    await runSwitchCommand(invocation([]), {
+      interactive: true,
+      fullscreen: true,
+      scope,
+      writeShellCdPath: fixture.writeShellCdPath,
+      surface: async (_entries, currentScope) => {
+        seenScope = currentScope;
+        return null;
+      },
+    });
+
+    expect(seenScope).toEqual(scope);
+    expect(fixture.cdTargets).toEqual([]);
   });
 });
 
@@ -270,6 +285,28 @@ async function createSwitchFixture(): Promise<{
       cdTargets.push(targetDir);
     },
   };
+}
+
+async function pinSwitchFixtureMtimes(baseDir: string): Promise<void> {
+  const now = (Date.now() / 1000 + 10 * 86_400) * 1000;
+  const nowSec = now / 1000;
+  await Promise.all([
+    utimes(
+      path.join(baseDir, "Workspaces", "_adhoc", "auth-fix"),
+      nowSec - 60,
+      nowSec - 60,
+    ),
+    utimes(
+      path.join(baseDir, "Repos", "workforest", "cli-redesign"),
+      nowSec - 300,
+      nowSec - 300,
+    ),
+    utimes(
+      path.join(baseDir, "Workspaces", "vercel-agent", "auth-fix"),
+      nowSec - 600,
+      nowSec - 600,
+    ),
+  ]);
 }
 
 async function createTempDir(prefix: string): Promise<string> {
