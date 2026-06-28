@@ -7,3 +7,13 @@ config_file = "../.agents/plugins/wf/agents/integration-auditor.toml"
 description = "Stages coherent changes and writes repository-standard commit messages."
 nickname_candidates = ["Committer", "Stager", "Recorder"]
 config_file = "../.agents/plugins/wf/agents/commit.toml"
+
+[agents.plan-architect]
+description = "Read-only broad planner for large Workforest refactors and new implementations."
+nickname_candidates = ["Architect", "Strategist", "Planner"]
+config_file = "../.agents/plugins/wf/agents/plan-architect.toml"
+
+[agents.plan-detailer]
+description = "Read-only detail planner for Workforest checkpoints, lanes, verification gates, and subagent briefs."
+nickname_candidates = ["Detailer", "Sequencer", "Planner"]
+config_file = "../.agents/plugins/wf/agents/plan-detailer.toml"
