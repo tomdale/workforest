@@ -19,6 +19,7 @@ import { isSlug } from "../utils/slug.ts";
 
 const XDG_TEMPLATES_DIR = "workforest/templates";
 const TEMPLATE_FILENAME_JSONC = "template.jsonc";
+const TEMPLATE_FILENAME_JSON = "template.json";
 const VARIANTS_DIR = "variants";
 
 export type Template = {
@@ -85,11 +86,8 @@ export async function loadTemplate(
   const templatesDir = getTemplatesDir();
   const templateDir = resolveContainedPath(templatesDir, identifier.parent);
 
-  const templatePath = resolveContainedPath(
-    templateDir,
-    TEMPLATE_FILENAME_JSONC,
-  );
-  if (!(await pathExists(templatePath))) {
+  const templatePath = await resolveTemplateConfigPath(templateDir);
+  if (!templatePath) {
     return null;
   }
 
@@ -110,11 +108,8 @@ export async function loadTemplate(
       VARIANTS_DIR,
       identifier.variant,
     );
-    const variantPath = resolveContainedPath(
-      variantDir,
-      TEMPLATE_FILENAME_JSONC,
-    );
-    if (!(await pathExists(variantPath))) {
+    const variantPath = await resolveTemplateConfigPath(variantDir);
+    if (!variantPath) {
       return null;
     }
     const raw = await fs.readFile(variantPath, "utf8");
@@ -147,6 +142,22 @@ export async function loadTemplate(
     }
     throw error_;
   }
+}
+
+async function resolveTemplateConfigPath(
+  templateDir: string,
+): Promise<string | null> {
+  const jsoncPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSONC);
+  if (await pathExists(jsoncPath)) {
+    return jsoncPath;
+  }
+
+  const jsonPath = resolveContainedPath(templateDir, TEMPLATE_FILENAME_JSON);
+  if (await pathExists(jsonPath)) {
+    return jsonPath;
+  }
+
+  return null;
 }
 
 async function listTemplateVariants(parentId: string): Promise<Template[]> {

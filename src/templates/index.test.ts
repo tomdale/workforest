@@ -106,6 +106,89 @@ describe("templates", () => {
     expect(templateConfig).toMatchObject({ branchPrefix: "tomdale" });
   });
 
+  it("loads legacy template.json configs when template.jsonc is absent", async () => {
+    const configHome = await createTemplatesHome();
+    const templatePath = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "demo",
+      "template.json",
+    );
+
+    await mkdir(path.dirname(templatePath), { recursive: true });
+    await writeFile(
+      templatePath,
+      JSON.stringify({
+        repos: ["vercel/front"],
+        description: "Legacy template",
+      }),
+      "utf8",
+    );
+
+    const template = await loadTemplate("demo");
+
+    expect(template).toMatchObject({
+      id: "demo",
+      path: templatePath,
+      config: {
+        repos: ["vercel/front"],
+        description: "Legacy template",
+      },
+    });
+  });
+
+  it("prefers template.jsonc when both template config files exist", async () => {
+    const configHome = await createTemplatesHome();
+    const templateDir = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "demo",
+    );
+
+    await mkdir(templateDir, { recursive: true });
+    await writeFile(
+      path.join(templateDir, "template.json"),
+      JSON.stringify({ repos: ["vercel/api"], description: "Legacy" }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(templateDir, "template.jsonc"),
+      JSON.stringify({ repos: ["vercel/front"], description: "Canonical" }),
+      "utf8",
+    );
+
+    const template = await loadTemplate("demo");
+
+    expect(template).toMatchObject({
+      path: path.join(templateDir, "template.jsonc"),
+      config: {
+        repos: ["vercel/front"],
+        description: "Canonical",
+      },
+    });
+  });
+
+  it("continues creating templates as template.jsonc", async () => {
+    const configHome = await createTemplatesHome();
+
+    await createTemplate("demo", { repos: ["vercel/front"] });
+
+    const templateDir = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "demo",
+    );
+    await expect(
+      readFile(path.join(templateDir, "template.jsonc"), "utf8"),
+    ).resolves.toContain('"repos"');
+    await expect(
+      readFile(path.join(templateDir, "template.json"), "utf8"),
+    ).rejects.toThrow();
+  });
+
   it("preserves an explicit empty override when creating templates", async () => {
     const configHome = await createTemplatesHome();
 
@@ -199,6 +282,40 @@ describe("templates", () => {
         focus: "Chat workflow",
         paths: { front: ["app/chat"] },
         maxAgeHours: 12,
+      },
+    });
+  });
+
+  it("loads legacy template.json variant configs when template.jsonc is absent", async () => {
+    const configHome = await createTemplatesHome();
+    await createTemplate("vercel-agent", {
+      repos: ["vercel/front"],
+      description: "Parent template",
+    });
+    const variantPath = path.join(
+      configHome,
+      "workforest",
+      "templates",
+      "vercel-agent",
+      "variants",
+      "chat",
+      "template.json",
+    );
+    await mkdir(path.dirname(variantPath), { recursive: true });
+    await writeFile(
+      variantPath,
+      JSON.stringify({ description: "Legacy variant" }),
+      "utf8",
+    );
+
+    const template = await loadTemplate("vercel-agent+chat");
+
+    expect(template).toMatchObject({
+      id: "vercel-agent+chat",
+      path: variantPath,
+      config: {
+        repos: ["vercel/front"],
+        description: "Legacy variant",
       },
     });
   });
