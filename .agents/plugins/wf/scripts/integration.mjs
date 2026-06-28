@@ -35,15 +35,6 @@ function runCommand(command, args, options = {}) {
   return result.status ?? 1;
 }
 
-function runGitWithInput(args, input, options = {}) {
-  return execFileSync("git", args, {
-    encoding: "utf8",
-    input,
-    stdio: ["pipe", "pipe", "pipe"],
-    ...options,
-  }).trim();
-}
-
 function gitSucceeds(args, options = {}) {
   try {
     runGit(args, options);
@@ -241,7 +232,7 @@ function printHelp() {
   integration.mjs enqueue [branch]
   integration.mjs list [--json]
   integration.mjs refresh <branch|id>
-  integration.mjs sync-worktree <branch|id>
+  integration.mjs sync-worktree <branch|id> [--target <commit>]
   integration.mjs dequeue <branch|id>`);
 }
 
@@ -317,34 +308,48 @@ function worktreeForBranch(branch) {
   );
 }
 
-function patchIdForCommit(commit) {
-  const patch = runGit(["show", "--format=medium", commit]);
-  const output = runGitWithInput(["patch-id", "--stable"], patch);
-  const [patchId = ""] = output.split(/\s+/);
-  return patchId;
+function mainHead() {
+  return runGit(["rev-parse", MAIN_BRANCH]);
 }
 
-function latestEquivalentCommitOnMain(commit) {
-  const targetPatchId = patchIdForCommit(commit);
-  if (!targetPatchId) return null;
-  const commits = runGitAllowEmpty(["rev-list", MAIN_BRANCH]);
-  if (!commits) return null;
-  for (const candidate of commits.split("\n").filter(Boolean)) {
-    if (patchIdForCommit(candidate) === targetPatchId) return candidate;
+function resolveExplicitTarget(target) {
+  const resolved =
+    runGitAllowEmpty(["rev-parse", "--verify", "--quiet", `${target}^{commit}`]) ||
+    null;
+  if (!resolved) {
+    throw new Error(`Target ${target} does not name a commit.`);
   }
-  return null;
+  if (!gitSucceeds(["merge-base", "--is-ancestor", resolved, MAIN_BRANCH])) {
+    throw new Error(`Target ${target} is not reachable from ${MAIN_BRANCH}.`);
+  }
+  return resolved;
 }
 
-function integrationTargetFor(entry) {
+function allQueuedPatchesAreOnMain(commit) {
+  const mergeBase = runGitAllowEmpty(["merge-base", commit, MAIN_BRANCH]);
+  if (!mergeBase) return false;
+
+  const output = runGitAllowEmpty(["cherry", MAIN_BRANCH, commit, mergeBase]);
+  if (!output) return false;
+
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .every((line) => line.startsWith("-"));
+}
+
+function integrationTargetFor(entry, explicitTarget) {
+  if (explicitTarget) return resolveExplicitTarget(explicitTarget);
+
   if (gitSucceeds(["merge-base", "--is-ancestor", entry.sha, MAIN_BRANCH])) {
-    return runGit(["rev-parse", MAIN_BRANCH]);
+    return mainHead();
   }
-  const equivalent = latestEquivalentCommitOnMain(entry.sha);
-  if (equivalent) return equivalent;
+  if (allQueuedPatchesAreOnMain(entry.sha)) return mainHead();
   return null;
 }
 
-function syncWorktree(identifier) {
+function syncWorktree(identifier, options = {}) {
   const entry = entryForIdentifier(identifier);
   if (!entry) {
     throw new Error(`No queue entry or branch found for ${identifier}`);
@@ -365,7 +370,15 @@ function syncWorktree(identifier) {
       reason: `Worktree has uncommitted changes at ${worktree.path}.`,
     };
   }
-  const target = integrationTargetFor(entry);
+  const head = branchHead(entry.branch);
+  if (head && head !== entry.sha) {
+    return {
+      ...entry,
+      status: "skipped",
+      reason: `Branch ${entry.branch} has moved from queued SHA ${entry.sha} to ${head}.`,
+    };
+  }
+  const target = integrationTargetFor(entry, options.target);
   if (!target) {
     return {
       ...entry,
@@ -380,6 +393,31 @@ function syncWorktree(identifier) {
     worktree: worktree.path,
     target,
   };
+}
+
+function parseSyncArgs(args) {
+  const [identifier, ...rest] = args;
+  if (!identifier) throw new Error("sync-worktree requires a branch name or queue id");
+
+  let target = null;
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === "--target") {
+      const value = rest[index + 1];
+      if (!value) throw new Error("sync-worktree --target requires a commit");
+      target = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--target=")) {
+      target = arg.slice("--target=".length);
+      if (!target) throw new Error("sync-worktree --target requires a commit");
+      continue;
+    }
+    throw new Error(`Unknown sync-worktree option: ${arg}`);
+  }
+
+  return { identifier, target };
 }
 
 function printList(jsonOutput) {
@@ -438,9 +476,8 @@ function main(argv) {
   }
 
   if (command === "sync-worktree") {
-    const identifier = rest[0];
-    if (!identifier) throw new Error("sync-worktree requires a branch name or queue id");
-    const result = syncWorktree(identifier);
+    const { identifier, target } = parseSyncArgs(rest);
+    const result = syncWorktree(identifier, target ? { target } : {});
     console.log(JSON.stringify(result, null, 2));
     return;
   }

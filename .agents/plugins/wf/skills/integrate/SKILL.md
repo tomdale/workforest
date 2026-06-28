@@ -26,8 +26,11 @@ Use this skill when processing queued branches into local `main`.
 8. Hold `workforest-main.lock` while fast-forwarding local `main`.
 9. Push `origin main:main` after a successful local integration.
 10. After a successful push, update the original integrated branch worktree to
-    the corresponding commit on `main` with the queue helper. This preserves
-    the ancestry proof used by `wf delete`. The helper must skip dirty or
+    the corresponding pushed commit on `main` with the queue helper. Pass the
+    exact commit that was checked, fast-forwarded, and pushed as
+    `--target <sha>`, especially after conflict resolution or manual
+    integration. This backports integration-time adjustments and preserves the
+    ancestry proof used by `wf delete`. The helper must skip dirty, stale, or
     missing source worktrees.
 11. Do not run an extra queue-empty `pnpm check`. If the queue is empty at the
     start of the integration run, report that there is nothing to integrate and
@@ -55,7 +58,8 @@ Use this skill when processing queued branches into local `main`.
 10. Under the shared `workforest-main.lock`, rebase the integration branch onto
     the latest local `main`, rerun `pnpm check`, and fast-forward `main`.
 11. Push `origin main:main` while holding the same shared lock.
-12. Run `.agents/plugins/wf/scripts/integration.mjs sync-worktree <branch|id>`.
+12. Capture the pushed `main` commit, then run
+    `.agents/plugins/wf/scripts/integration.mjs sync-worktree <branch|id> --target <pushed-main-sha>`.
     If it reports `updated`, the source worktree now points at the integrated
     commit reachable from `main`. If it reports `skipped`, keep going but report
     the reason before offering `wf delete`.
