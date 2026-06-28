@@ -177,6 +177,39 @@ describe("cached repository inventory", () => {
     ]);
   });
 
+  it("flags a bare mirror whose HEAD points to a missing local default branch", async () => {
+    const cacheDir = await createCacheDir();
+    const mirrorDir = path.join(cacheDir, "myapp.git");
+    await createMirror(
+      cacheDir,
+      "myapp.git",
+      "git@github.com:mycompany/myapp.git",
+    );
+    const sentinelPath = path.join(cacheDir, "sentinel.txt");
+    await writeFile(sentinelPath, "object\n", "utf8");
+    const { stdout: objectId } = await execFileAsync(
+      "git",
+      ["hash-object", "-w", sentinelPath],
+      { cwd: mirrorDir },
+    );
+    await execFileAsync(
+      "git",
+      ["update-ref", "refs/remotes/origin/main", objectId.trim()],
+      { cwd: mirrorDir },
+    );
+    await execFileAsync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], {
+      cwd: mirrorDir,
+    });
+
+    const repositories = await listCachedRepositories();
+
+    expect(repositories[0]).toMatchObject({
+      name: "myapp",
+      health: "attention",
+      issues: ["HEAD points to missing local branch refs/heads/main"],
+    });
+  });
+
   it("keeps cache entries with non-repository component names visible", async () => {
     const cacheDir = await createCacheDir();
     const invalidDir = path.join(cacheDir, "-old mirror.git");

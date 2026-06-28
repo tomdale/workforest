@@ -518,6 +518,11 @@ async function inspectCachedRepository(
     );
   }
 
+  const headIssue = await readHeadIssue(mirrorPath);
+  if (headIssue) {
+    issues.push(headIssue);
+  }
+
   return {
     name: identity?.name ?? fallbackName,
     slug: identity?.slug ?? null,
@@ -568,6 +573,40 @@ async function readDefaultBranch(mirrorPath: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+async function readHeadIssue(mirrorPath: string): Promise<string | null> {
+  let branch: string;
+  try {
+    const { stdout } = await runGit(["symbolic-ref", "--short", "HEAD"], {
+      cwd: mirrorPath,
+    });
+    branch = stdout.trim().replace(/^origin\//, "");
+  } catch {
+    return "HEAD is not a symbolic branch ref";
+  }
+
+  if (!branch) {
+    return "HEAD does not name a branch";
+  }
+
+  try {
+    await runGit(["rev-parse", "--verify", "HEAD"], { cwd: mirrorPath });
+    return null;
+  } catch {
+    // Empty bare repositories also have an unresolved HEAD. Only report the
+    // repaired-cache failure mode when the matching remote default ref exists.
+  }
+
+  try {
+    await runGit(["rev-parse", "--verify", `refs/remotes/origin/${branch}`], {
+      cwd: mirrorPath,
+    });
+  } catch {
+    return null;
+  }
+
+  return `HEAD points to missing local branch refs/heads/${branch}`;
 }
 
 async function readGitStorageSize(mirrorPath: string): Promise<number | null> {
