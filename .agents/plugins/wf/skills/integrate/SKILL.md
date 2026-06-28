@@ -13,11 +13,12 @@ Use this skill when processing queued branches into local `main`.
 2. Detect stale queue entries before integration.
 3. Compare incoming branch changes against the merge base with the current `main`.
 4. Use the bundled integration auditor for read-only semantic risk review when the diff is non-trivial.
-   When spawning or prompting the auditor, include this progress contract: after the
-   initial diff scan, send a progress update with reviewed scope, remaining scope, and
-   provisional blockers; if the final audit is not ready within 60 seconds after any
-   update, send another update before continuing; repeat every 60 seconds while still
-   running.
+   When spawning or prompting the auditor, include this progress contract: send an
+   immediate progress update before tool use naming the queued branch or diff range;
+   keep the initial diff scan under 30 seconds; after that scan, send a progress update
+   with reviewed scope, remaining scope, and provisional blockers; if the final audit is
+   not ready within 60 seconds after any update, send another update before continuing;
+   repeat every 60 seconds while still running.
 5. Preserve linear history where possible and resolve conflicts conservatively.
 6. Integrate each queued entry in a dedicated worktree created and removed with
    `wf worktree`. Do not use raw `git worktree` commands for integration worktrees.
@@ -42,9 +43,10 @@ Use this skill when processing queued branches into local `main`.
 4. Inspect the change set relative to the current merge base and current `main`.
 5. If the change is risky or broad, run the bundled auditor in read-only mode before editing.
    Paste the progress contract from the requirements into the auditor prompt. If the
-   auditor stays silent past the first 60-second window, note the contract failure and
-   proceed only when your own diff review shows the change is small and low risk;
-   otherwise restart the auditor with the explicit contract before integrating.
+   auditor does not send its immediate first update or later stays silent past a
+   60-second window, note the contract failure and proceed only when your own diff
+   review shows the change is small and low risk; otherwise restart the auditor with the
+   explicit contract before integrating.
 6. Create a dedicated integration worktree from current `main` using the
    integration-worktree workflow below.
 7. Cherry-pick the queued commits into the integration worktree in order.
