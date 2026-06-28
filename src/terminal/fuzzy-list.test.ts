@@ -304,7 +304,11 @@ describe("createFuzzyList scope switching", () => {
   // The name painted inside the focus-background badge, e.g. "{cyan-bg}{black-fg}
   // front {/black-fg}{/cyan-bg}" → "front". Returns null when no badge is shown.
   function badgedName(row: string): string | null {
-    return row.match(/-bg\}\{[^}]+-fg\} (.+?) \{/)?.[1] ?? null;
+    return (
+      row.match(
+        /(?:-bg\}\{[^}]+-fg\}|\{[^}]+-fg\}\{[^}]+-bg\}) (.+?) \{/,
+      )?.[1] ?? null
+    );
   }
 
   it("renders a fixed scope toggle, moving only the highlight badge on Tab", () => {

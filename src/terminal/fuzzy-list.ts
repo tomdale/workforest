@@ -1,7 +1,13 @@
 import { Box, type Screen } from "@unblessed/node";
-import { escapeBlessedTags } from "./command-stream-adapter.ts";
+import {
+  renderTerminalLineBlessed,
+  type TerminalLineInput,
+  type TerminalSpan,
+  terminalLine,
+  terminalSpan,
+} from "./render-model.ts";
 import { truncate, visibleWidth } from "./text.ts";
-import { activeTheme, bg, fg, type Theme, toBlessed } from "./theme-system.ts";
+import { activeTheme, type Theme, toBlessed } from "./theme-system.ts";
 
 /**
  * A reusable fullscreen fuzzy picker that renders inside a caller-provided
@@ -234,24 +240,25 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     const width = readDimension(container.width, 80);
     const inner = Math.max(10, width - 2);
     const lines = new Array<string>(Math.max(height, 1)).fill("");
-    const palette = theme.palette;
 
     // An optional heading sits above the boxed query input; the scope controls
     // sit between the input and the matching list.
     const showScopeBar = scopeToggle !== undefined;
     const scopeSuffix =
       scopeLabel && !showScopeBar
-        ? `  ${fg(palette.muted, `· ${escapeBlessedTags(scopeLabel)}`)}`
+        ? ["  ", terminalSpan(`· ${scopeLabel}`, { role: "muted" })]
         : "";
     let cursor = 0;
     if (prompt) {
-      lines[cursor++] = `${fg(palette.focus, theme.symbols.active)} ${fg(
-        palette.primary,
-        escapeBlessedTags(prompt),
-      )}${scopeSuffix}`;
+      lines[cursor++] = blessedLine([
+        terminalSpan(theme.symbols.active, { role: "focus" }),
+        " ",
+        terminalSpan(prompt, { role: "primary" }),
+        ...(Array.isArray(scopeSuffix) ? scopeSuffix : []),
+      ]);
     }
 
-    const box = renderInputBox(theme, inner, query, placeholder);
+    const box = renderInputBox(inner, query, placeholder);
     lines[cursor] = box.top;
     lines[cursor + 1] = box.mid;
     lines[cursor + 2] = box.bottom;
@@ -273,15 +280,13 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       // the first list row when the hint is suppressed, else sits below it.
       let row = listTop;
       if (items.length > 0 && row < footerRow) {
-        lines[row++] = `  ${fg(palette.muted, NO_MATCHES)}`;
+        lines[row++] = blessedLine([
+          "  ",
+          terminalSpan(NO_MATCHES, { role: "muted" }),
+        ]);
       }
       if (showAction() && actionRow && row < footerRow) {
-        lines[row] = renderAction(
-          actionRow.label(query),
-          onActionRow(),
-          inner,
-          theme,
-        );
+        lines[row] = renderAction(actionRow.label(query), onActionRow(), inner);
       }
     } else {
       // Candidates and the action row form one scrollable list. The action row
@@ -300,12 +305,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
           if (!item) continue;
           lines[row] = renderItem(item, i === index, inner, theme, columns);
         } else if (actionRow) {
-          lines[row] = renderAction(
-            actionRow.label(query),
-            i === index,
-            inner,
-            theme,
-          );
+          lines[row] = renderAction(actionRow.label(query), i === index, inner);
         }
       }
     }
@@ -483,29 +483,31 @@ const RULE_LEAD = 2;
  * border (and the corners) onto their own rows.
  */
 function renderInputBox(
-  theme: Theme,
   inner: number,
   query: string,
   placeholder: string,
 ): { top: string; mid: string; bottom: string } {
-  const { palette } = theme;
-  const frame = palette.accent;
   const span = Math.max(4, inner - 1);
   const horizontal = "─".repeat(Math.max(0, span - 2));
   // Content sits between "│ " and " │", so one space of padding each side.
   const slot = Math.max(1, span - 4);
 
-  const shown = truncate(
-    escapeBlessedTags(query.length > 0 ? query : placeholder),
-    slot,
-  );
-  const inside =
-    query.length > 0 ? fg(palette.primary, shown) : fg(palette.muted, shown);
+  const shown = truncate(query.length > 0 ? query : placeholder, slot);
+  const inside = terminalSpan(shown, {
+    role: query.length > 0 ? "primary" : "muted",
+  });
   const pad = " ".repeat(Math.max(0, slot - visibleWidth(shown)));
   return {
-    top: fg(frame, `╭${horizontal}╮`),
-    mid: `${fg(frame, "│")} ${inside}${pad} ${fg(frame, "│")}`,
-    bottom: fg(frame, `╰${horizontal}╯`),
+    top: blessedLine(terminalSpan(`╭${horizontal}╮`, { role: "accent" })),
+    mid: blessedLine([
+      terminalSpan("│", { role: "accent" }),
+      " ",
+      inside,
+      pad,
+      " ",
+      terminalSpan("│", { role: "accent" }),
+    ]),
+    bottom: blessedLine(terminalSpan(`╰${horizontal}╯`, { role: "accent" })),
   };
 }
 
@@ -516,18 +518,20 @@ function renderInputBox(
  * passing behind the selection. `plainWidth` is the visible width of `content`.
  */
 function ruledSelection(
-  theme: Theme,
   content: string,
   plainWidth: number,
   inner: number,
 ): string {
-  const red = theme.palette.primary;
-  const lead = fg(red, RULE.repeat(RULE_LEAD));
+  const lead = blessedLine(
+    terminalSpan(RULE.repeat(RULE_LEAD), { role: "primary" }),
+  );
   // [lead][space][content][space][fill] — one space of breathing room on each
   // side of the text. The total stops one column short of `inner`: a line whose
   // width equals the content area wraps in blessed, dropping the last glyph.
   const fill = Math.max(0, inner - RULE_LEAD - plainWidth - 3);
-  return `${lead} ${content} ${fg(red, RULE.repeat(fill))}`;
+  return `${lead} ${content} ${blessedLine(
+    terminalSpan(RULE.repeat(fill), { role: "primary" }),
+  )}`;
 }
 
 type Columns = { name: number; time: number };
@@ -552,16 +556,16 @@ function computeColumns<T>(candidates: FuzzyItem<T>[]): Columns {
   let name = 0;
   let time = 0;
   for (const candidate of candidates) {
-    name = Math.max(name, visibleWidth(escapeBlessedTags(candidate.label)));
+    name = Math.max(name, visibleWidth(candidate.label));
     const { time: stamp } = splitHint(candidate.hint);
-    time = Math.max(time, visibleWidth(escapeBlessedTags(stamp)));
+    time = Math.max(time, visibleWidth(stamp));
   }
   return { name: Math.min(name, NAME_COLUMN_CAP), time };
 }
 
 /** Escape, truncate to `width`, then right-pad with spaces to exactly `width`. */
 function padColumn(text: string, width: number): string {
-  const shown = truncate(escapeBlessedTags(text), width);
+  const shown = truncate(text, width);
   return shown + " ".repeat(Math.max(0, width - visibleWidth(shown)));
 }
 
@@ -597,29 +601,30 @@ export function fitMetaList(meta: string, budget: number): string {
 /**
  * Color an unselected row's metadata cell: repo/template names take the dimmed
  * red, but a template's parenthesized repo list stays grey, so `@name (repos)`
- * reads as a dim-red parent with greyed children. `metaCell` is already escaped.
+ * reads as a dim-red parent with greyed children.
  */
-function colorizeMeta(metaCell: string, theme: Theme): string {
-  const { palette } = theme;
+function colorizeMeta(metaCell: string): TerminalSpan[] {
   if (metaCell.startsWith("@")) {
     const parenAt = metaCell.indexOf(" (");
     if (parenAt !== -1) {
       const name = metaCell.slice(0, parenAt);
       const repos = metaCell.slice(parenAt);
-      return `${fg(palette.dim, name)}${fg(palette.muted, repos)}`;
+      return [
+        terminalSpan(name, { role: "dim" }),
+        terminalSpan(repos, { role: "muted" }),
+      ];
     }
   }
-  return fg(palette.dim, metaCell);
+  return [terminalSpan(metaCell, { role: "dim" })];
 }
 
 function renderItem<T>(
   item: FuzzyItem<T>,
   selected: boolean,
   inner: number,
-  theme: Theme,
+  _theme: Theme,
   columns: Columns,
 ): string {
-  const { palette } = theme;
   const { time, meta } = splitHint(item.hint);
 
   const nameCell = padColumn(item.label, columns.name);
@@ -627,9 +632,7 @@ function renderItem<T>(
   // Three columns for the indent/rule lead, two-space gutters, and one trailing
   // column left free so a full-width line never wraps in blessed.
   const used = 3 + visibleWidth(nameCell) + 2 + visibleWidth(timeCell) + 2;
-  const metaCell = escapeBlessedTags(
-    fitMetaList(meta, Math.max(0, inner - used - 1)),
-  );
+  const metaCell = fitMetaList(meta, Math.max(0, inner - used - 1));
   const plain =
     visibleWidth(nameCell) +
     2 +
@@ -639,37 +642,39 @@ function renderItem<T>(
 
   if (selected) {
     // Selected: name bold white, timestamp and metadata both cyan.
-    const content = `{bold}${fg(palette.focus, nameCell)}{/bold}  ${fg(
-      palette.accent,
-      timeCell,
-    )}  ${fg(palette.accent, metaCell)}`;
-    return ruledSelection(theme, content, plain, inner);
+    const content = blessedLine([
+      terminalSpan(nameCell, { role: "focus", emphasis: "bold" }),
+      "  ",
+      terminalSpan(timeCell, { role: "accent" }),
+      "  ",
+      terminalSpan(metaCell, { role: "accent" }),
+    ]);
+    return ruledSelection(content, plain, inner);
   }
 
   // Unselected: bright-red name, dimmed-red timestamp and repo/template name.
   // For templates the parenthesized repo list stays grey. No bullet — a leading
   // marker would imply radio-button semantics that don't exist.
-  const body = `${fg(palette.primary, nameCell)}  ${fg(
-    palette.dim,
-    timeCell,
-  )}  ${colorizeMeta(metaCell, theme)}`;
-  return `   ${body}`;
+  return blessedLine([
+    "   ",
+    terminalSpan(nameCell, { role: "primary" }),
+    "  ",
+    terminalSpan(timeCell, { role: "dim" }),
+    "  ",
+    ...colorizeMeta(metaCell),
+  ]);
 }
 
-function renderAction(
-  label: string,
-  selected: boolean,
-  inner: number,
-  theme: Theme,
-): string {
-  const { palette } = theme;
+function renderAction(label: string, selected: boolean, inner: number): string {
   const budget = Math.max(1, inner - 3);
-  const text = truncate(escapeBlessedTags(label), budget);
+  const text = truncate(label, budget);
   if (selected) {
-    const content = `{bold}${fg(palette.focus, text)}{/bold}`;
-    return ruledSelection(theme, content, visibleWidth(text), inner);
+    const content = blessedLine(
+      terminalSpan(text, { role: "focus", emphasis: "bold" }),
+    );
+    return ruledSelection(content, visibleWidth(text), inner);
   }
-  return `   ${fg(palette.muted, text)}`;
+  return blessedLine(["   ", terminalSpan(text, { role: "muted" })]);
 }
 
 /**
@@ -681,14 +686,16 @@ function renderAction(
  * accented Tab cue trails the options.
  */
 function renderScopeBar(theme: Theme, toggle: FuzzyScopeToggle): string {
-  const { palette } = theme;
   const segments = toggle.options.map((option, i) =>
     renderScopeOption(theme, option, i === toggle.active),
   );
-  const cue = `${fg(palette.muted, "·")} {bold}${fg(
-    palette.focus,
-    "tab",
-  )}{/bold} ${fg(palette.muted, "switches scope")}`;
+  const cue = blessedLine([
+    terminalSpan("·", { role: "muted" }),
+    " ",
+    terminalSpan("tab", { role: "focus", emphasis: "bold" }),
+    " ",
+    terminalSpan("switches scope", { role: "muted" }),
+  ]);
   return `  ${segments.join("   ")}   ${cue}`;
 }
 
@@ -701,42 +708,49 @@ function renderScopeBar(theme: Theme, toggle: FuzzyScopeToggle): string {
  * "in" of "in workforest") stays muted in both.
  */
 function renderScopeOption(
-  theme: Theme,
+  _theme: Theme,
   option: FuzzyScopeOption,
   active: boolean,
 ): string {
-  const { palette, chrome } = theme;
   const { label } = option;
   const name = option.name ?? label;
   const at = name === label ? -1 : label.lastIndexOf(name);
   const before = at >= 0 ? label.slice(0, at).replace(/\s+$/, "") : "";
   const after =
     at >= 0 ? label.slice(at + name.length).replace(/^\s+/, "") : "";
-  const padded = ` ${escapeBlessedTags(at >= 0 ? name : label)} `;
+  const padded = ` ${at >= 0 ? name : label} `;
 
   const nameCell = active
-    ? bg(palette.focus, fg(chrome.background, padded))
-    : fg(palette.muted, padded);
+    ? terminalSpan(padded, { role: "primary", background: "focus" })
+    : terminalSpan(padded, { role: "muted" });
   // A plain (un-highlighted) space separates the connector from the badge, so
   // the name reads as detached from "in" rather than fused to the highlight.
-  return [
-    before ? `${fg(palette.muted, escapeBlessedTags(before))} ` : "",
+  return blessedLine([
+    ...(before ? [terminalSpan(before, { role: "muted" }), " "] : []),
     nameCell,
-    after ? ` ${fg(palette.muted, escapeBlessedTags(after))}` : "",
-  ].join("");
+    ...(after ? [" ", terminalSpan(after, { role: "muted" })] : []),
+  ]);
 }
 
-function renderFooter(theme: Theme, tabHint?: string): string {
-  const { palette } = theme;
+function renderFooter(_theme: Theme, tabHint?: string): string {
   const hints: ReadonlyArray<readonly [string, string]> = tabHint
     ? [...FOOTER_HINTS, ["tab", tabHint.toUpperCase()]]
     : FOOTER_HINTS;
   return hints
-    .map(
-      ([key, action]) =>
-        `${fg(palette.accent, `[${key}]`)} ${fg(palette.muted, action)}`,
+    .map(([key, action]) =>
+      blessedLine([
+        terminalSpan(`[${key}]`, { role: "accent" }),
+        " ",
+        terminalSpan(action, { role: "muted" }),
+      ]),
     )
     .join("   ");
+}
+
+function blessedLine(input: TerminalLineInput | TerminalSpan): string {
+  return renderTerminalLineBlessed(
+    terminalLine("text" in input ? [input] : input),
+  );
 }
 
 /**

@@ -1,5 +1,4 @@
 import { Box } from "@unblessed/node";
-import { escapeBlessedTags } from "../terminal/command-stream-adapter.ts";
 import {
   createFullscreenScreen,
   type FullscreenScreen,
@@ -10,8 +9,13 @@ import {
   type FuzzyScopeToggle,
 } from "../terminal/fuzzy-list.ts";
 import {
+  renderTerminalDocBlessed,
+  type TerminalLineInput,
+  terminalDoc,
+  terminalSpan,
+} from "../terminal/render-model.ts";
+import {
   activeTheme,
-  fg,
   type Theme,
   toBlessed,
 } from "../terminal/theme-system.ts";
@@ -409,8 +413,8 @@ function actionLabel(
   const typed = query.trim();
   if (typed.length > 0) {
     return mode === "template"
-      ? `✛ use @${escapeBlessedTags(typed.replace(/^@/, ""))}`
-      : `✛ add "${escapeBlessedTags(typed)}"`;
+      ? `✛ use @${typed.replace(/^@/, "")}`
+      : `✛ add "${typed}"`;
   }
   if (mode === "multi") {
     return chosen.length > 0
@@ -468,13 +472,15 @@ function isChosen2(chosen: ChosenSource[], next: ChosenSource): boolean {
 
 /** Phase 2 preview without the (async) inferred-change line. */
 function renderPreviewSync(
-  theme: Theme,
+  _theme: Theme,
   changeName: string,
   mode: SourceMode,
   chosen: ChosenSource[],
   notice: string | null,
 ): string {
-  return previewBaseLines(theme, changeName, mode, chosen, notice).join("\n");
+  return renderTerminalDocBlessed(
+    terminalDoc(previewBaseLines(changeName, mode, chosen, notice)),
+  );
 }
 
 async function renderPreview(
@@ -484,43 +490,44 @@ async function renderPreview(
   chosen: ChosenSource[],
   notice: string | null,
 ): Promise<string> {
-  const lines = previewBaseLines(theme, changeName, mode, chosen, notice);
+  const lines = previewBaseLines(changeName, mode, chosen, notice);
   if (mode === "multi" && chosen.length > 0) {
     lines.push("", await describeInferred(theme, changeName, chosen));
   }
-  return lines.join("\n");
+  return renderTerminalDocBlessed(terminalDoc(lines));
 }
 
 function previewBaseLines(
-  theme: Theme,
   changeName: string,
   mode: SourceMode,
   chosen: ChosenSource[],
   notice: string | null,
-): string[] {
-  const { palette } = theme;
-  const lines: string[] = [
-    `${fg(palette.muted, "new change")}  ${fg(
-      palette.focus,
-      escapeBlessedTags(changeName),
-    )}`,
+): TerminalLineInput[] {
+  const lines: TerminalLineInput[] = [
+    [
+      terminalSpan("new change", { role: "muted" }),
+      "  ",
+      terminalSpan(changeName, { role: "focus" }),
+    ],
   ];
 
   if (mode === "multi" && chosen.length > 0) {
-    const chips = chosen
-      .map((source) =>
+    const chips = chosen.flatMap((source, index) => {
+      const sourceSpan =
         source.kind === "template"
-          ? fg(palette.focus, `@${escapeBlessedTags(source.name)}`)
-          : fg(palette.primary, escapeBlessedTags(source.token)),
-      )
-      .join(fg(palette.muted, " · "));
-    lines.push(`${fg(palette.muted, "sources")}  ${chips}`);
+          ? terminalSpan(`@${source.name}`, { role: "focus" })
+          : terminalSpan(source.token, { role: "primary" });
+      return index === 0
+        ? [sourceSpan]
+        : [terminalSpan(" · ", { role: "muted" }), sourceSpan];
+    });
+    lines.push([terminalSpan("sources", { role: "muted" }), "  ", ...chips]);
   } else {
-    lines.push(fg(palette.muted, modeGuidance(mode)));
+    lines.push(terminalSpan(modeGuidance(mode), { role: "muted" }));
   }
 
   if (notice) {
-    lines.push(fg(palette.warning, escapeBlessedTags(notice)));
+    lines.push(terminalSpan(notice, { role: "warning" }));
   }
 
   return lines;
@@ -538,11 +545,10 @@ function modeGuidance(mode: SourceMode): string {
 }
 
 async function describeInferred(
-  theme: Theme,
+  _theme: Theme,
   changeName: string,
   chosen: ChosenSource[],
-): Promise<string> {
-  const { palette } = theme;
+): Promise<TerminalLineInput> {
   try {
     const result: InferredChange = await inferChange({
       changeName,
@@ -550,14 +556,23 @@ async function describeInferred(
     });
     const tail =
       result.type === "template" && result.repoPreview.length > 0
-        ? `  ${fg(palette.muted, `→ ${result.repoPreview.join(", ")}`)}`
-        : "";
-    return `${fg(palette.success, `→ ${result.type}`)}  ${fg(
-      palette.muted,
-      escapeBlessedTags(result.relativePath),
-    )}  ${fg(palette.muted, escapeBlessedTags(result.branch))}${tail}`;
+        ? [
+            "  ",
+            terminalSpan(`→ ${result.repoPreview.join(", ")}`, {
+              role: "muted",
+            }),
+          ]
+        : [];
+    return [
+      terminalSpan(`→ ${result.type}`, { role: "success" }),
+      "  ",
+      terminalSpan(result.relativePath, { role: "muted" }),
+      "  ",
+      terminalSpan(result.branch, { role: "muted" }),
+      ...tail,
+    ];
   } catch (error) {
     const message = error instanceof Error ? error.message : "cannot resolve";
-    return fg(palette.error, escapeBlessedTags(message));
+    return terminalSpan(message, { role: "error" });
   }
 }
