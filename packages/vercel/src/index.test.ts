@@ -3,8 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runCommandGeneratorMock } = vi.hoisted(() => ({
+const {
+  canRunForegroundTaskMock,
+  runCommandGeneratorMock,
+  runForegroundTaskMock,
+} = vi.hoisted(() => ({
+  canRunForegroundTaskMock: vi.fn(() => true),
   runCommandGeneratorMock: vi.fn(),
+  runForegroundTaskMock: vi.fn(),
 }));
 
 vi.mock("@wf-plugin/core", async () => {
@@ -13,7 +19,9 @@ vi.mock("@wf-plugin/core", async () => {
 
   return {
     ...actual,
+    canRunForegroundTask: canRunForegroundTaskMock,
     runCommandGenerator: runCommandGeneratorMock,
+    runForegroundTask: runForegroundTaskMock,
   };
 });
 
@@ -48,6 +56,13 @@ function sleep(ms: number): Promise<void> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  canRunForegroundTaskMock.mockReturnValue(true);
+  runForegroundTaskMock.mockImplementation(() =>
+    (async function* () {
+      yield { status: "running" as const, message: "foreground login" };
+      yield { status: "completed" as const };
+    })(),
+  );
 });
 
 afterEach(async () => {
@@ -342,5 +357,246 @@ describe("vercelLinkInitializer.execute", () => {
       ["env", "pull", "--environment", "development", "--yes"],
       { cwd: repoDir },
     );
+  });
+
+  it("launches vercel login and retries when preflight auth is missing", async () => {
+    const repoDir = await createRepoDir({
+      ".vercel/project.json": "{}\n",
+      "vercel.json": "{}\n",
+    });
+    let whoamiAttempts = 0;
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          yield { status: "running" as const, message: `vercel ${args[0]}` };
+          if (args[0] === "whoami") {
+            whoamiAttempts += 1;
+            if (whoamiAttempts === 1) {
+              yield {
+                status: "failed" as const,
+                error: new Error("No existing credentials found. Please login."),
+              };
+              return;
+            }
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(runForegroundTaskMock).toHaveBeenCalledWith("vercel", ["login"], {
+      cwd: repoDir,
+    });
+    expect(runCommandGeneratorMock).toHaveBeenNthCalledWith(
+      1,
+      "vercel",
+      ["whoami", "--format", "json", "--non-interactive"],
+      { cwd: repoDir },
+    );
+    expect(runCommandGeneratorMock).toHaveBeenNthCalledWith(
+      2,
+      "vercel",
+      ["whoami", "--format", "json", "--non-interactive"],
+      { cwd: repoDir },
+    );
+    expect(states).toContainEqual(
+      expect.objectContaining({ status: "retrying", attempt: 1 }),
+    );
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("skips auth-dependent work when preflight auth is missing in the background", async () => {
+    const repoDir = await createRepoDir({ "vercel.json": "{}\n" });
+    canRunForegroundTaskMock.mockReturnValue(false);
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        yield {
+          status: "failed" as const,
+          error: new Error("Authentication required. Please login."),
+        };
+      })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(states).toEqual([
+      {
+        status: "skipped",
+        reason:
+          "Vercel authentication required. Run `vercel login`, then rerun setup to link the project and pull development env.",
+      },
+    ]);
+    expect(runForegroundTaskMock).not.toHaveBeenCalled();
+    expect(runCommandGeneratorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves non-auth link failures", async () => {
+    const repoDir = await createRepoDir({ "vercel.json": "{}\n" });
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          if (args[0] === "link") {
+            yield {
+              status: "failed" as const,
+              error: new Error("Project not found for selected scope."),
+            };
+            return;
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(states.at(-1)).toMatchObject({
+      status: "failed",
+      error: expect.objectContaining({
+        message: "Project not found for selected scope.",
+      }),
+    });
+    expect(runForegroundTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("launches vercel login and retries env pull auth failures", async () => {
+    const repoDir = await createRepoDir({
+      ".vercel/project.json": "{}\n",
+      "vercel.json": "{}\n",
+    });
+    let envAttempts = 0;
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          if (args[0] === "env") {
+            envAttempts += 1;
+            if (envAttempts === 1) {
+              yield {
+                status: "failed" as const,
+                error: new Error("Token expired. Please login again."),
+              };
+              return;
+            }
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(runForegroundTaskMock).toHaveBeenCalledWith("vercel", ["login"], {
+      cwd: repoDir,
+    });
+    expect(states).toContainEqual(
+      expect.objectContaining({
+        status: "retrying",
+        reason: "Vercel env pull after Vercel login",
+      }),
+    );
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("skips env pull auth failures in the background", async () => {
+    const repoDir = await createRepoDir({
+      ".vercel/project.json": "{}\n",
+      "vercel.json": "{}\n",
+    });
+    canRunForegroundTaskMock.mockReturnValue(false);
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          if (args[0] === "env") {
+            yield {
+              status: "failed" as const,
+              error: new Error("Authentication required. Please login."),
+            };
+            return;
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(states).toContainEqual({
+      status: "skipped",
+      reason:
+        "Vercel authentication required for env pull. Run `vercel login`, then rerun setup to link the project and pull development env.",
+    });
+    expect(states.at(-1)).toEqual({ status: "completed" });
+    expect(runForegroundTaskMock).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,181 @@
+import path from "node:path";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+const {
+  canRunForegroundTaskMock,
+  runCommandGeneratorMock,
+  runForegroundTaskMock,
+} = vi.hoisted(() => ({
+  canRunForegroundTaskMock: vi.fn(() => true),
+  runCommandGeneratorMock: vi.fn(),
+  runForegroundTaskMock: vi.fn(),
+}));
+
+vi.mock("@wf-plugin/core", async () => {
+  const actual =
+    await vi.importActual<typeof import("@wf-plugin/core")>("@wf-plugin/core");
+
+  return {
+    ...actual,
+    canRunForegroundTask: canRunForegroundTaskMock,
+    runCommandGenerator: runCommandGeneratorMock,
+    runForegroundTask: runForegroundTaskMock,
+  };
+});
+
+import turboLinkInitializer from "./initializers/turbo-link.ts";
+
+async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
+  const states: T[] = [];
+  for await (const state of gen) {
+    states.push(state);
+  }
+  return states;
+}
+
+const context = {
+  repoDir: path.join(process.cwd(), "repo"),
+  workspaceDir: process.cwd(),
+  workspaceConfig: {},
+  repo: {
+    name: "repo",
+    remote: "git@github.com:vercel/repo.git",
+    defaultBranch: "main",
+  },
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  canRunForegroundTaskMock.mockReturnValue(true);
+  runForegroundTaskMock.mockImplementation(() =>
+    (async function* () {
+      yield { status: "running" as const, message: "turbo login" };
+      yield { status: "completed" as const };
+    })(),
+  );
+});
+
+describe("turboLinkInitializer.execute", () => {
+  it("runs turbo link", async () => {
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        yield { status: "running" as const, message: "turbo link --yes" };
+        yield { status: "completed" as const };
+      })(),
+    );
+
+    const states = await collectStates(turboLinkInitializer.execute(context, {}));
+
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "turbo",
+      ["link", "--yes"],
+      { cwd: context.repoDir },
+    );
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("launches turbo login and retries when turbo link reports no user", async () => {
+    let linkAttempts = 0;
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        linkAttempts += 1;
+        yield { status: "running" as const, message: "turbo link --yes" };
+        if (linkAttempts === 1) {
+          yield {
+            status: "failed" as const,
+            error: new Error(
+              "turbo link --yes exited with code 1. x User not found. Please login to Turborepo first by running `npx turbo login`.",
+            ),
+          };
+          return;
+        }
+        yield { status: "completed" as const };
+      })(),
+    );
+
+    const states = await collectStates(turboLinkInitializer.execute(context, {}));
+
+    expect(runForegroundTaskMock).toHaveBeenCalledWith("turbo", ["login"], {
+      cwd: context.repoDir,
+    });
+    expect(runCommandGeneratorMock).toHaveBeenCalledTimes(2);
+    expect(states).toContainEqual({
+      status: "retrying",
+      reason: "Turbo link after Turborepo login",
+      attempt: 1,
+    });
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("launches turbo login and retries when turbo link reports invalid auth", async () => {
+    let linkAttempts = 0;
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        linkAttempts += 1;
+        if (linkAttempts === 1) {
+          yield {
+            status: "failed" as const,
+            error: new Error(
+              "turbo link --yes exited with code 1. x Could not get user information: Error making HTTP request: HTTP status client error (403 Forbidden) for url (https://vercel.com/api/v2/user)",
+            ),
+          };
+          return;
+        }
+        yield { status: "completed" as const };
+      })(),
+    );
+
+    const states = await collectStates(turboLinkInitializer.execute(context, {}));
+
+    expect(runForegroundTaskMock).toHaveBeenCalledWith("turbo", ["login"], {
+      cwd: context.repoDir,
+    });
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("skips auth-dependent link when running in the background", async () => {
+    canRunForegroundTaskMock.mockReturnValue(false);
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        yield {
+          status: "failed" as const,
+          error: new Error(
+            "turbo link --yes exited with code 1. x User not found. Please login to Turborepo first by running `npx turbo login`.",
+          ),
+        };
+      })(),
+    );
+
+    const states = await collectStates(turboLinkInitializer.execute(context, {}));
+
+    expect(states).toEqual([
+      {
+        status: "skipped",
+        reason:
+          "Turborepo authentication required. Run `turbo login`, then rerun setup to link the repository.",
+      },
+    ]);
+    expect(runForegroundTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves non-auth link failures", async () => {
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        yield {
+          status: "failed" as const,
+          error: new Error("turbo link --yes exited with code 1. bad team slug"),
+        };
+      })(),
+    );
+
+    const states = await collectStates(turboLinkInitializer.execute(context, {}));
+
+    expect(states.at(-1)).toMatchObject({
+      status: "failed",
+      error: expect.objectContaining({
+        message: "turbo link --yes exited with code 1. bad team slug",
+      }),
+    });
+    expect(runForegroundTaskMock).not.toHaveBeenCalled();
+  });
+});

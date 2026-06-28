@@ -278,6 +278,52 @@ export async function* runCommandGenerator(
   }
 }
 
+export function canRunForegroundTask(): boolean {
+  return (
+    process.env["WORKFOREST_BACKGROUND_WORKER"] !== "1" &&
+    Boolean(process.stdin.isTTY) &&
+    Boolean(process.stdout.isTTY) &&
+    Boolean(process.stderr.isTTY)
+  );
+}
+
+export async function* runForegroundTask(
+  command: string,
+  args: string[],
+  options: RunCommandOptions = {},
+): TaskGenerator {
+  yield { status: "running", message: `${command} ${args.join(" ")}` };
+
+  const child = spawn(command, args, {
+    cwd: options.cwd,
+    env: createSpawnEnv(options.cwd),
+    stdio: "inherit",
+  });
+
+  const exit = await new Promise<CommandExit>((resolve) => {
+    child.on("error", (error) => resolve({ type: "error", error }));
+    child.on("close", (code) => resolve({ type: "close", code }));
+  });
+
+  if (exit.type === "error") {
+    yield {
+      status: "failed",
+      error: formatCommandStartError(command, args, exit.error),
+    };
+    return;
+  }
+
+  if (exit.code === 0) {
+    yield { status: "completed" };
+    return;
+  }
+
+  yield {
+    status: "failed",
+    error: new Error(`${command} ${args.join(" ")} exited with code ${exit.code}.`),
+  };
+}
+
 function formatCommandStartError(
   command: string,
   args: string[],

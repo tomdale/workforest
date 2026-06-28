@@ -1,11 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
+  canRunForegroundTask,
   pathExists,
+  runForegroundTask,
   runCommandGenerator,
   runParallel,
   type InitializerContext,
   type InitializerDefinition,
+  type TaskState,
   type TaskGenerator,
   type WorkspaceConfig,
 } from "@wf-plugin/core";
@@ -16,6 +19,8 @@ const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
 };
 
 const MAX_CONCURRENT_ENV_PULLS = 6;
+const VERCEL_AUTH_HINT =
+  "Run `vercel login`, then rerun setup to link the project and pull development env.";
 
 type VercelRepoLinkTarget =
   | {
@@ -76,6 +81,7 @@ function resolveVercelRepoLinkTarget(
 
 async function* execute(context: InitializerContext) {
   const { repoDir } = context;
+  const authState: AuthRecoveryState = { loginAttempted: false };
   const target = resolveVercelRepoLinkTarget(
     context.repo.remote,
     context.workspaceConfig ?? {},
@@ -86,19 +92,30 @@ async function* execute(context: InitializerContext) {
     return;
   }
 
-  const args = ["link", "--yes", "--repo", "--scope", target.team];
-  const link = runCommandGenerator("vercel", args, { cwd: repoDir });
-  let completed = false;
-
-  for await (const state of link) {
-    if (state.status === "completed") {
-      completed = true;
-      continue;
-    }
-    yield state;
+  const preflight = runVercelAuthAwareCommand(
+    ["whoami", "--format", "json", "--non-interactive"],
+    repoDir,
+    authState,
+    {
+      commandLabel: "Vercel authentication",
+      skipReason: `Vercel authentication required. ${VERCEL_AUTH_HINT}`,
+    },
+  );
+  const preflightResult = yield* preflight;
+  if (preflightResult !== "completed") {
+    return;
   }
 
-  if (!completed) {
+  const linkResult = yield* runVercelAuthAwareCommand(
+    ["link", "--yes", "--repo", "--scope", target.team],
+    repoDir,
+    authState,
+    {
+      commandLabel: "Vercel link",
+      skipReason: `Vercel authentication required. ${VERCEL_AUTH_HINT}`,
+    },
+  );
+  if (linkResult !== "completed") {
     return;
   }
 
@@ -117,9 +134,12 @@ async function* execute(context: InitializerContext) {
   }
 
   let envPullFailed = false;
-  for await (const { state } of runParallel(createEnvPullTasks(repoDir, envPullTargets.cwd), {
-    maxConcurrent: MAX_CONCURRENT_ENV_PULLS,
-  })) {
+  for await (const { state } of runParallel(
+    createEnvPullTasks(repoDir, envPullTargets.cwd, authState),
+    {
+      maxConcurrent: MAX_CONCURRENT_ENV_PULLS,
+    },
+  )) {
     if (state.status === "completed") {
       continue;
     }
@@ -149,15 +169,20 @@ export default vercelLinkInitializer;
 function createEnvPullTasks(
   repoDir: string,
   cwds: string[],
+  authState: AuthRecoveryState,
 ): Map<string, TaskGenerator> {
   return new Map(
     cwds.map((cwd, index) => [
       String(index),
       withEnvPullCwdLabel(
-        runCommandGenerator(
-          "vercel",
+        runVercelAuthAwareCommand(
           ["env", "pull", "--environment", "development", "--yes"],
-          { cwd },
+          cwd,
+          authState,
+          {
+            commandLabel: "Vercel env pull",
+            skipReason: `Vercel authentication required for env pull. ${VERCEL_AUTH_HINT}`,
+          },
         ),
         repoDir,
         cwd,
@@ -166,8 +191,113 @@ function createEnvPullTasks(
   );
 }
 
+type AuthRecoveryState = {
+  loginAttempted: boolean;
+};
+
+type AuthAwareResult = "completed" | "failed" | "skipped";
+
+type AuthAwareOptions = {
+  commandLabel: string;
+  skipReason: string;
+};
+
+async function* runVercelAuthAwareCommand(
+  args: string[],
+  cwd: string,
+  authState: AuthRecoveryState,
+  options: AuthAwareOptions,
+): AsyncGenerator<TaskState, AuthAwareResult, undefined> {
+  const firstResult = yield* runCommandWithResult("vercel", args, cwd);
+  if (firstResult.status === "completed") {
+    return "completed";
+  }
+
+  if (!isVercelAuthError(firstResult.error)) {
+    yield { status: "failed", error: firstResult.error };
+    return "failed";
+  }
+
+  if (!canRunForegroundTask()) {
+    yield { status: "skipped", reason: options.skipReason };
+    return "skipped";
+  }
+
+  if (authState.loginAttempted) {
+    yield { status: "failed", error: firstResult.error };
+    return "failed";
+  }
+
+  authState.loginAttempted = true;
+  yield {
+    status: "log",
+    level: "warn",
+    message: `${options.commandLabel} requires Vercel login; launching vercel login.`,
+  };
+
+  const loginResult = yield* runCommandWithResult("vercel", ["login"], cwd, {
+    foreground: true,
+  });
+  if (loginResult.status === "failed") {
+    yield { status: "failed", error: loginResult.error };
+    return "failed";
+  }
+
+  yield {
+    status: "retrying",
+    reason: `${options.commandLabel} after Vercel login`,
+    attempt: 1,
+  };
+
+  const retryResult = yield* runCommandWithResult("vercel", args, cwd);
+  if (retryResult.status === "completed") {
+    return "completed";
+  }
+
+  yield { status: "failed", error: retryResult.error };
+  return "failed";
+}
+
+type CommandResult =
+  | { status: "completed" }
+  | { status: "failed"; error: Error };
+
+async function* runCommandWithResult(
+  command: string,
+  args: string[],
+  cwd: string,
+  options: { foreground?: boolean } = {},
+): AsyncGenerator<TaskState, CommandResult, undefined> {
+  const task = options.foreground
+    ? runForegroundTask(command, args, { cwd })
+    : runCommandGenerator(command, args, { cwd });
+
+  for await (const state of task) {
+    if (state.status === "completed") {
+      return { status: "completed" };
+    }
+
+    if (state.status === "failed") {
+      return { status: "failed", error: state.error };
+    }
+
+    yield state;
+  }
+
+  return {
+    status: "failed",
+    error: new Error(`${command} ${args.join(" ")} finished without completion.`),
+  };
+}
+
+function isVercelAuthError(error: Error): boolean {
+  return /\b(auth|authentication|credential|login|logged in|token)\b/i.test(
+    error.message,
+  );
+}
+
 async function* withEnvPullCwdLabel(
-  task: TaskGenerator,
+  task: AsyncGenerator<TaskState, unknown, undefined>,
   repoDir: string,
   cwd: string,
 ): TaskGenerator {
