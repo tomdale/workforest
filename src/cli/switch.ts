@@ -22,10 +22,16 @@ export type SwitchPrompt = (
   options: PromptFuzzySelectOptions<InventoryEntry>,
 ) => Promise<InventoryEntry>;
 
+export type SwitchSurface = (
+  entries: readonly InventoryEntry[],
+) => Promise<InventoryEntry | null>;
+
 export type RunSwitchCommandOptions = Readonly<{
   interactive: boolean;
+  fullscreen?: boolean;
   writeShellCdPath: (targetDir: string) => Promise<void>;
   prompt?: SwitchPrompt;
+  surface?: SwitchSurface;
 }>;
 
 export async function runSwitchCommand(
@@ -44,7 +50,11 @@ export async function runSwitchCommand(
         "wf switch requires a selector without an interactive terminal.",
       );
     }
-    entry = await promptForSwitchTarget(config, options.prompt);
+    entry = await promptForSwitchTarget(config, {
+      fullscreen: options.fullscreen === true,
+      ...(options.prompt ? { prompt: options.prompt } : {}),
+      ...(options.surface ? { surface: options.surface } : {}),
+    });
     if (!entry) return success();
   }
 
@@ -94,7 +104,11 @@ async function resolveSwitchSelector(
 
 async function promptForSwitchTarget(
   config: Awaited<ReturnType<typeof loadWorkspaceConfig>>["config"],
-  prompt: SwitchPrompt = promptFuzzySelect,
+  options: {
+    fullscreen: boolean;
+    prompt?: SwitchPrompt;
+    surface?: SwitchSurface;
+  },
 ): Promise<InventoryEntry | null> {
   const inventory = await collectInventory(config);
   const entries = [...inventory.workspaces, ...inventory.repositories];
@@ -104,6 +118,12 @@ async function promptForSwitchTarget(
     );
   }
 
+  if (options.fullscreen && !options.prompt) {
+    const surface = options.surface ?? runDefaultSwitchSurface;
+    return surface(entries);
+  }
+
+  const prompt = options.prompt ?? promptFuzzySelect;
   try {
     return await prompt("Switch to change", {
       options: buildSwitchCandidates(entries),
@@ -116,6 +136,13 @@ async function promptForSwitchTarget(
     }
     throw error;
   }
+}
+
+async function runDefaultSwitchSurface(
+  entries: readonly InventoryEntry[],
+): Promise<InventoryEntry | null> {
+  const { runSwitchSurface } = await import("../entry/switch-surface.ts");
+  return runSwitchSurface(entries);
 }
 
 function switchCandidateDescription(entry: InventoryEntry): string {

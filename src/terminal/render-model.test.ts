@@ -52,8 +52,32 @@ describe("terminal render model", () => {
     ]);
 
     expect(renderTerminalDocBlessed(doc)).toBe(
-      "{#ffc400-fg}{#121416-bg}{bold}{inverse}Queued{/inverse}{/bold}{/#121416-bg}{/#ffc400-fg}",
+      "{yellow-fg}{#121416-bg}{bold}{inverse}Queued{/inverse}{/bold}{/#121416-bg}{/yellow-fg}",
     );
+  });
+
+  it("renders blessed foregrounds from the fullscreen theme", () => {
+    const doc = terminalDoc([[terminalSpan("metadata", { role: "dim" })]]);
+
+    expect(renderTerminalDocBlessed(doc)).toBe(
+      "{#825a5a-fg}metadata{/#825a5a-fg}",
+    );
+  });
+
+  it("renders blessed palette backgrounds from the fullscreen theme", () => {
+    const doc = terminalDoc([
+      [terminalSpan("badge", { role: "primary", background: "focus" })],
+    ]);
+
+    expect(renderTerminalDocBlessed(doc)).toBe(
+      "{red-fg}{white-bg}badge{/white-bg}{/red-fg}",
+    );
+  });
+
+  it("keeps ANSI foregrounds on the inline palette", () => {
+    const doc = terminalDoc([[terminalSpan("metadata", { role: "dim" })]]);
+
+    expect(renderTerminalDocAnsi(doc)).toContain("\u001B[90m");
   });
 
   it("treats literal spans as undecorated content and escapes blessed tags", () => {

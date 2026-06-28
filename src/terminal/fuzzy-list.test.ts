@@ -257,6 +257,32 @@ describe("createFuzzyList layout", () => {
 
     list.destroy();
   });
+
+  it("uses the fullscreen theme for list row colors", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      items: [
+        { value: "selected", label: "selected", hint: "just now · repo" },
+        { value: "plain", label: "plain", hint: "1h ago · repo" },
+      ],
+    });
+    void list.run();
+
+    const rows = captured.content.split("\n");
+    const selectedRow = rows.find((line) => line.includes("selected"));
+    const plainRow = rows.find((line) => line.includes("plain"));
+    expect(selectedRow).toContain("{white-fg}");
+    expect(selectedRow).toContain("{cyan-fg}");
+    expect(selectedRow).toContain("{red-fg}");
+    expect(plainRow?.match(/\{red-fg\}/g)).toHaveLength(1);
+    expect(plainRow?.match(/\{#825a5a-fg\}/g)).toHaveLength(2);
+    expect(plainRow).not.toContain("{gray-fg}");
+    expect(plainRow).not.toContain("{#ff1c1c-fg}");
+    expect(plainRow).not.toContain("{#22d3ee-fg}");
+
+    list.destroy();
+  });
 });
 
 describe("createFuzzyList scope switching", () => {

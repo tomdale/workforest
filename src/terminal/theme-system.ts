@@ -203,48 +203,34 @@ const DEFAULT_SYMBOLS: ThemeSymbols = {
   statusCancelled: "⊘",
 };
 
-const CYBERPUNK_BACKGROUND: Rgb = [18, 20, 22];
-// Electric neon red — high saturation, pushed bright so it reads as a glow.
-// Blue is kept low (near the green channel) so it stays a true red instead of
-// drifting pink/magenta.
-const CYBERPUNK_RED: Rgb = [255, 28, 28];
-// Electric cyan. Pulled down from near-white so it reads as a vivid, saturated
-// cyan rather than a pale wash — apparent vibrancy peaks below max lightness.
-const CYBERPUNK_CYAN: Rgb = [34, 211, 238];
-const CYBERPUNK_WHITE: Rgb = [245, 240, 242];
-
 /**
- * The one theme the whole app wears. Red dominates: it is the primary text color
- * and the ambient chrome (borders/background). The focused/selected element
- * flips to white (surfaces render it bold) so selection reads against the red.
- * Cyan and amber stay reserved for success/warning state, which red can't carry
- * once it's the default text color. Confetti goes deliberately colorful.
+ * The one theme the whole app wears. Fullscreen surfaces intentionally use
+ * named terminal colors for their core roles so they respect the user's
+ * terminal palette. On the default Workforest palette, red renders as the warm
+ * orange row/rule color and cyan renders as the bright border/metadata accent.
  */
 const THEME: Theme = {
   palette: {
-    focus: rgb(...CYBERPUNK_WHITE),
-    success: rgb(...CYBERPUNK_CYAN),
-    warning: rgb(255, 196, 0),
-    error: rgb(...CYBERPUNK_RED),
+    focus: named("white"),
+    success: named("cyan"),
+    warning: named("yellow"),
+    error: named("red"),
     muted: rgb(90, 70, 100),
-    primary: rgb(...CYBERPUNK_RED),
-    // A reddish grey: mostly neutral, warmed by a red tint (green == blue, so no
-    // pink/salmon lean). Recedes behind the vivid primary while staying clearly
-    // warmer than the neutral muted grey used for template repos.
+    primary: named("red"),
     dim: rgb(130, 90, 90),
-    accent: rgb(...CYBERPUNK_CYAN),
+    accent: named("cyan"),
   },
   chrome: {
-    background: rgb(...CYBERPUNK_BACKGROUND),
-    border: rgb(...CYBERPUNK_RED),
+    background: rgb(18, 20, 22),
+    border: named("cyan"),
   },
   decoration: {
     confettiColors: [
-      rgb(...CYBERPUNK_CYAN),
-      rgb(...CYBERPUNK_RED),
-      rgb(255, 196, 0),
-      rgb(255, 0, 170),
-      rgb(140, 80, 255),
+      named("cyan"),
+      named("red"),
+      named("yellow"),
+      named("magenta"),
+      named("blue"),
       named("white"),
     ],
     confettiGlyphs: ["◜", "◝", "◞", "◟"],
@@ -260,11 +246,8 @@ export function activeTheme(): Theme {
  * The inline (non-fullscreen) palette. It carries the same semantic roles as
  * {@link THEME} but in the 16 named ANSI colors instead of truecolor RGB, so
  * plain `wf` output honors the user's terminal palette and degrades cleanly on
- * 8/16-color terminals — where the fullscreen theme's truecolor reds would be
- * approximated unpredictably. Roles keep their meaning (success is still
- * "success"); only the color depth changes. ANSI has one grey, so `muted` and
- * `dim` share it, and `primary`/`error` both land on red exactly as the
- * truecolor theme collapses them onto the cyberpunk red.
+ * 8/16-color terminals. Roles keep their meaning (success is still "success");
+ * only the color depth changes.
  */
 const INLINE_ANSI_PALETTE: ThemePalette = {
   focus: named("whiteBright"),

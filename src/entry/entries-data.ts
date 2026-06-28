@@ -63,7 +63,7 @@ export async function listCandidates(
   ];
   entries.sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
 
-  return entries.map((entry) => toCandidate(entry, now));
+  return entries.map((entry) => candidateFromInventoryEntry(entry, now));
 }
 
 /**
@@ -112,7 +112,10 @@ export async function dirtyHintFor(path: string): Promise<string | null> {
   }
 }
 
-function toCandidate(entry: InventoryEntry, now: number): Candidate {
+export function candidateFromInventoryEntry(
+  entry: InventoryEntry,
+  now: number = Date.now(),
+): Candidate {
   // Mark template-backed changes with the `@` prefix users already type
   // (`wf new <name> @template`) so a template name reads distinctly from the
   // plain repo names shown for single-repo and adhoc changes, and list the

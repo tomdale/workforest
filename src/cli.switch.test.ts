@@ -151,6 +151,36 @@ describe("wf switch", () => {
       path.join(fixture.baseDir, "Workspaces", "vercel-agent", "auth-fix"),
     ]);
   });
+
+  it("uses the fullscreen surface when no selector is provided", async () => {
+    const fixture = await createSwitchFixture();
+    const surfaceCalls: string[][] = [];
+
+    await runSwitchCommand(invocation([]), {
+      interactive: true,
+      fullscreen: true,
+      writeShellCdPath: fixture.writeShellCdPath,
+      surface: async (entries) => {
+        surfaceCalls.push(entries.map((entry) => entry.selector));
+        const selected = entries.find(
+          (entry) => entry.selector === "vercel-agent/auth-fix",
+        );
+        if (!selected) throw new Error("Expected vercel-agent/auth-fix entry");
+        return selected;
+      },
+    });
+
+    expect(surfaceCalls).toEqual([
+      expect.arrayContaining([
+        "vercel-agent/auth-fix",
+        "_adhoc/auth-fix",
+        "workforest/cli-redesign",
+      ]),
+    ]);
+    expect(fixture.cdTargets).toEqual([
+      path.join(fixture.baseDir, "Workspaces", "vercel-agent", "auth-fix"),
+    ]);
+  });
 });
 
 describe("buildSwitchCandidates", () => {

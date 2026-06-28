@@ -296,6 +296,7 @@ async function runInvocation(
         const { runSwitchCommand } = await import("./cli/switch.ts");
         return runSwitchCommand(invocation, {
           interactive: isInteractive(),
+          fullscreen: await shouldUseDashboardTui(),
           writeShellCdPath,
         });
       });

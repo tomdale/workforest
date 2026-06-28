@@ -107,13 +107,13 @@ function renderAnsiSpan(span: TerminalSpan, chalk: ChalkInstance): string {
   if (span.role) {
     style = compose(
       style,
-      foregroundStyler(resolvePaletteColor(span.role), chalk),
+      foregroundStyler(resolveAnsiPaletteColor(span.role), chalk),
     );
   }
   if (span.background) {
     style = compose(
       style,
-      backgroundStyler(resolveBackgroundColor(span.background), chalk),
+      backgroundStyler(resolveAnsiBackgroundColor(span.background), chalk),
     );
   }
   for (const emphasis of normalizedEmphasis(span.emphasis)) {
@@ -133,12 +133,12 @@ function renderBlessedSpan(span: TerminalSpan): string {
   const open: string[] = [];
   const close: string[] = [];
   if (span.role) {
-    const token = toBlessed(resolveFullscreenPaletteColor(span.role));
+    const token = toBlessed(resolveBlessedPaletteColor(span.role));
     open.push(`{${token}-fg}`);
     close.unshift(`{/${token}-fg}`);
   }
   if (span.background) {
-    const token = toBlessed(resolveBackgroundColor(span.background));
+    const token = toBlessed(resolveBlessedBackgroundColor(span.background));
     open.push(`{${token}-bg}`);
     close.unshift(`{/${token}-bg}`);
   }
@@ -156,19 +156,28 @@ function normalizedEmphasis(
   return typeof emphasis === "string" ? [emphasis] : emphasis;
 }
 
-function resolvePaletteColor(role: TerminalStyleRole): ThemeColor {
+function resolveAnsiPaletteColor(role: TerminalStyleRole): ThemeColor {
   return inlinePalette()[role];
 }
 
-function resolveFullscreenPaletteColor(role: TerminalStyleRole): ThemeColor {
+function resolveBlessedPaletteColor(role: TerminalStyleRole): ThemeColor {
   return activeTheme().palette[role];
 }
 
-function resolveBackgroundColor(role: TerminalBackgroundRole): ThemeColor {
+function resolveAnsiBackgroundColor(role: TerminalBackgroundRole): ThemeColor {
   const theme = activeTheme();
   if (role === "background") return theme.chrome.background;
   if (role === "border") return theme.chrome.border;
   return inlinePalette()[role];
+}
+
+function resolveBlessedBackgroundColor(
+  role: TerminalBackgroundRole,
+): ThemeColor {
+  const theme = activeTheme();
+  if (role === "background") return theme.chrome.background;
+  if (role === "border") return theme.chrome.border;
+  return theme.palette[role];
 }
 
 function compose(
