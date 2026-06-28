@@ -13,11 +13,6 @@ import {
   type WorkspaceConfig,
 } from "@wf-plugin/core";
 
-const DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
-  vercel: "vercel",
-  "vercel-labs": "vercel-labs",
-};
-
 const MAX_CONCURRENT_ENV_PULLS = 6;
 const VERCEL_AUTH_HINT =
   "Run `vercel login`, then rerun setup to link the project and pull development env.";
@@ -62,7 +57,7 @@ function resolveVercelRepoLinkTarget(
   const team =
     repoOverride?.team ??
     config.vercelLink?.teamByGitHubOwner?.[githubOwner] ??
-    DEFAULT_VERCEL_TEAM_BY_GITHUB_OWNER[githubOwner];
+    (isValidVercelScope(githubOwner) ? githubOwner : undefined);
 
   if (!team) {
     return {
@@ -408,4 +403,8 @@ function getGitHubSlug(remote: string): string | null {
   }
 
   return null;
+}
+
+function isValidVercelScope(input: string): boolean {
+  return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(input);
 }

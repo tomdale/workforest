@@ -110,7 +110,7 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
     type: "object",
     description: "Controls automatic Vercel project linking by repository.",
     defaultBehavior:
-      "Unset. Built-in owner mappings still apply for vercel and vercel-labs.",
+      "Unset. GitHub owners that are valid Vercel scopes are used directly.",
     example: {
       teamByGitHubOwner: {
         vercel: "vercel",
@@ -132,7 +132,7 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
         description:
           "Maps a GitHub owner to the Vercel team used for repositories from that owner.",
         defaultBehavior:
-          "No custom mappings. Built-in mappings cover vercel and vercel-labs.",
+          "No custom mappings. GitHub owners that are valid Vercel scopes are used directly.",
       },
       {
         key: "repoOverrides",

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   canRunForegroundTaskMock,
@@ -56,10 +56,13 @@ beforeEach(() => {
 });
 
 describe("turboLinkInitializer.execute", () => {
-  it("runs turbo link", async () => {
+  it("runs turbo link with an inferred Vercel scope", async () => {
     runCommandGeneratorMock.mockImplementation(() =>
       (async function* () {
-        yield { status: "running" as const, message: "turbo link --yes" };
+        yield {
+          status: "running" as const,
+          message: "turbo link --yes --scope vercel",
+        };
         yield { status: "completed" as const };
       })(),
     );
@@ -68,10 +71,95 @@ describe("turboLinkInitializer.execute", () => {
 
     expect(runCommandGeneratorMock).toHaveBeenCalledWith(
       "turbo",
-      ["link", "--yes"],
+      ["link", "--yes", "--scope", "vercel"],
       { cwd: context.repoDir },
     );
     expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("skips when the GitHub owner is not a valid Vercel scope", async () => {
+    const states = await collectStates(
+      turboLinkInitializer.execute(
+        {
+          ...context,
+          repo: {
+            ...context.repo,
+            remote: "git@github.com:SomeOwner/some-repo.git",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(states).toEqual([
+      {
+        status: "skipped",
+        reason:
+          'No Vercel team mapping configured for GitHub owner "SomeOwner".',
+      },
+    ]);
+    expect(runCommandGeneratorMock).not.toHaveBeenCalled();
+  });
+
+  it("infers the Vercel scope from a valid GitHub owner", async () => {
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        yield { status: "completed" as const };
+      })(),
+    );
+
+    await collectStates(
+      turboLinkInitializer.execute(
+        {
+          ...context,
+          repo: {
+            ...context.repo,
+            remote: "git@github.com:some-owner/some-repo.git",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "turbo",
+      ["link", "--yes", "--scope", "some-owner"],
+      { cwd: context.repoDir },
+    );
+  });
+
+  it("uses repo-specific team overrides", async () => {
+    runCommandGeneratorMock.mockImplementation(() =>
+      (async function* () {
+        yield { status: "completed" as const };
+      })(),
+    );
+
+    await collectStates(
+      turboLinkInitializer.execute(
+        {
+          ...context,
+          workspaceConfig: {
+            vercelLink: {
+              repoOverrides: {
+                "some-owner/some-repo": { team: "custom-team" },
+              },
+            },
+          },
+          repo: {
+            ...context.repo,
+            remote: "https://github.com/some-owner/some-repo.git",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "turbo",
+      ["link", "--yes", "--scope", "custom-team"],
+      { cwd: context.repoDir },
+    );
   });
 
   it("launches turbo login and retries when turbo link reports no user", async () => {
@@ -79,12 +167,15 @@ describe("turboLinkInitializer.execute", () => {
     runCommandGeneratorMock.mockImplementation(() =>
       (async function* () {
         linkAttempts += 1;
-        yield { status: "running" as const, message: "turbo link --yes" };
+        yield {
+          status: "running" as const,
+          message: "turbo link --yes --scope vercel",
+        };
         if (linkAttempts === 1) {
           yield {
             status: "failed" as const,
             error: new Error(
-              "turbo link --yes exited with code 1. x User not found. Please login to Turborepo first by running `npx turbo login`.",
+              "turbo link --yes --scope vercel exited with code 1. x User not found. Please login to Turborepo first by running `npx turbo login`.",
             ),
           };
           return;
@@ -116,7 +207,7 @@ describe("turboLinkInitializer.execute", () => {
           yield {
             status: "failed" as const,
             error: new Error(
-              "turbo link --yes exited with code 1. x Could not get user information: Error making HTTP request: HTTP status client error (403 Forbidden) for url (https://vercel.com/api/v2/user)",
+              "turbo link --yes --scope vercel exited with code 1. x Could not get user information: Error making HTTP request: HTTP status client error (403 Forbidden) for url (https://vercel.com/api/v2/user)",
             ),
           };
           return;
@@ -140,7 +231,7 @@ describe("turboLinkInitializer.execute", () => {
         yield {
           status: "failed" as const,
           error: new Error(
-            "turbo link --yes exited with code 1. x User not found. Please login to Turborepo first by running `npx turbo login`.",
+            "turbo link --yes --scope vercel exited with code 1. x User not found. Please login to Turborepo first by running `npx turbo login`.",
           ),
         };
       })(),
@@ -163,7 +254,9 @@ describe("turboLinkInitializer.execute", () => {
       (async function* () {
         yield {
           status: "failed" as const,
-          error: new Error("turbo link --yes exited with code 1. bad team slug"),
+          error: new Error(
+            "turbo link --yes --scope vercel exited with code 1. bad team slug",
+          ),
         };
       })(),
     );
@@ -173,7 +266,8 @@ describe("turboLinkInitializer.execute", () => {
     expect(states.at(-1)).toMatchObject({
       status: "failed",
       error: expect.objectContaining({
-        message: "turbo link --yes exited with code 1. bad team slug",
+        message:
+          "turbo link --yes --scope vercel exited with code 1. bad team slug",
       }),
     });
     expect(runForegroundTaskMock).not.toHaveBeenCalled();

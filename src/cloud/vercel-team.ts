@@ -2,16 +2,11 @@ import type { WorkspaceConfig } from "../types.ts";
 
 /**
  * Resolve the Vercel team for a repo, mirroring the `@wf-plugin/vercel`
- * initializer's rule (repo override → owner mapping → built-in default) so the
- * in-sandbox `vercel link --scope` matches what local changes get. Lifted here
- * rather than imported because the plugin's copy is private and typed against
- * the plugin's own config shape; the logic is small and stable.
+ * initializer's rule (repo override → owner mapping → valid GitHub owner) so
+ * the in-sandbox `vercel link --scope` matches what local changes get. Lifted
+ * here rather than imported because the plugin's copy is private and typed
+ * against the plugin's own config shape; the logic is small and stable.
  */
-const DEFAULT_TEAM_BY_GITHUB_OWNER: Record<string, string> = {
-  vercel: "vercel",
-  "vercel-labs": "vercel-labs",
-};
-
 export function resolveVercelTeam(
   remote: string,
   config: WorkspaceConfig,
@@ -31,7 +26,7 @@ export function resolveVercelTeam(
   return (
     override?.team ??
     config.vercelLink?.teamByGitHubOwner?.[owner] ??
-    DEFAULT_TEAM_BY_GITHUB_OWNER[owner]
+    (isValidVercelScope(owner) ? owner : undefined)
   );
 }
 
@@ -46,6 +41,10 @@ function githubSlug(remote: string): string | null {
   if (https?.[1]) return https[1].replace(/\.git$/, "");
 
   return null;
+}
+
+function isValidVercelScope(input: string): boolean {
+  return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(input);
 }
 
 /**

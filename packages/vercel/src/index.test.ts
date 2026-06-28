@@ -100,7 +100,7 @@ describe("vercelLinkInitializer.execute", () => {
     expect(runCommandGeneratorMock).not.toHaveBeenCalled();
   });
 
-  it("skips when no team mapping is available", async () => {
+  it("skips when the GitHub owner is not a valid Vercel scope", async () => {
     const repoDir = await createRepoDir({
       "vercel.json": "{}\n",
     });
@@ -113,7 +113,7 @@ describe("vercelLinkInitializer.execute", () => {
           workspaceConfig: {},
           repo: {
             name: "some-repo",
-            remote: "git@github.com:some-owner/some-repo.git",
+            remote: "git@github.com:SomeOwner/some-repo.git",
             defaultBranch: "main",
           },
         },
@@ -125,7 +125,7 @@ describe("vercelLinkInitializer.execute", () => {
       {
         status: "skipped",
         reason:
-          'No Vercel team mapping configured for GitHub owner "some-owner".',
+          'No Vercel team mapping configured for GitHub owner "SomeOwner".',
       },
     ]);
     expect(runCommandGeneratorMock).not.toHaveBeenCalled();
@@ -194,6 +194,52 @@ describe("vercelLinkInitializer.execute", () => {
       { cwd: path.join(repoDir, "apps/docs") },
     );
     expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("infers the Vercel scope from a valid GitHub owner", async () => {
+    const repoDir = await createRepoDir({
+      "vercel.json": "{}\n",
+    });
+
+    runCommandGeneratorMock.mockImplementation(
+      (_command: string, args: string[], options: { cwd?: string }) =>
+        (async function* () {
+          if (!options.cwd) {
+            throw new Error("Expected cwd.");
+          }
+          if (args[0] === "link") {
+            await mkdir(path.join(options.cwd, ".vercel"), { recursive: true });
+            await writeFile(
+              path.join(options.cwd, ".vercel", "project.json"),
+              "{}\n",
+              "utf8",
+            );
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "some-repo",
+            remote: "git@github.com:some-owner/some-repo.git",
+            defaultBranch: "main",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+      "vercel",
+      ["link", "--yes", "--repo", "--scope", "some-owner"],
+      { cwd: repoDir },
+    );
   });
 
   it("pulls linked project env files in parallel with a max concurrency cap", async () => {

@@ -10,12 +10,15 @@ describe("resolveVercelTeam", () => {
     );
   });
 
-  it("falls back to built-in owner mappings", () => {
+  it("infers valid GitHub owners as Vercel scopes", () => {
     expect(resolveVercelTeam("git@github.com:vercel/web.git", {})).toBe(
       "vercel",
     );
     expect(resolveVercelTeam("https://github.com/vercel-labs/x.git", {})).toBe(
       "vercel-labs",
+    );
+    expect(resolveVercelTeam("git@github.com:acme-team/web.git", {})).toBe(
+      "acme-team",
     );
   });
 
@@ -36,9 +39,9 @@ describe("resolveVercelTeam", () => {
     ).toBeUndefined();
   });
 
-  it("returns undefined for unmapped owners and non-GitHub remotes", () => {
+  it("returns undefined for invalid Vercel scopes and non-GitHub remotes", () => {
     expect(
-      resolveVercelTeam("git@github.com:unknown/x.git", {}),
+      resolveVercelTeam("git@github.com:UnknownOwner/x.git", {}),
     ).toBeUndefined();
     expect(
       resolveVercelTeam("git@gitlab.com:vercel/x.git", {}),
