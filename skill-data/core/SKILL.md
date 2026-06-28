@@ -1,6 +1,6 @@
 ---
 name: core
-description: Workforest core lifecycle guidance for AI agents. Use when you need the main change, workspace, task, template, cache, review, or cleanup workflow.
+description: Workforest core lifecycle guidance for AI agents. Use when you need the main worktree, workspace, task, template, cache, review, or cleanup workflow.
 ---
 
 # Workforest Core
@@ -10,13 +10,13 @@ Use this skill when you need the main Workforest lifecycle in one place.
 ## Start Work
 
 ```sh
-wf start <change> <repo...|@template>
+wf new <name> <repo...|@template>
 wf status --watch
 wf switch <selector>
 ```
 
-Start a repository change, a workspace from a template, or a follow-up change
-in the current managed context. Use `wf start --help` for the source forms.
+Create a worktree, a workspace from a template, or a follow-up
+in the current managed context. Use `wf new --help` for the source forms.
 
 ## Work The Change
 
@@ -27,23 +27,23 @@ wf add <repo...|@template>
 ```
 
 Use `wf list` for inventory, `wf status` for progress, and `wf add` when a
-single-repo change needs to grow. Use `wf add --help` for the exact cases.
+worktree needs to grow. Use `wf add --help` for the exact cases.
 
 ## Finish Cleanly
 
 ```sh
-wf finish [selector]
+wf delete [selector]
 wf delete <selector> --force
 ```
 
 Finish only after the work is integrated. Delete only when you are intentionally
-abandoning a change. Use `wf finish --help` and `wf delete --help` for the
+abandoning a worktree or workspace. Use `wf delete --help` and `wf delete --help` for the
 selector rules.
 
 ## Tasks, Templates, Reviews
 
 ```sh
-wf task start <task>
+wf task new <task>
 wf task list
 wf templates
 wf review open <repo>

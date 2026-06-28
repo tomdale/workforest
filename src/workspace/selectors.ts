@@ -1,16 +1,13 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import type { WorkspaceConfig } from "../types.ts";
-import {
-  type ChangeInventoryEntry,
-  collectChangeInventory,
-} from "./change-inventory.ts";
+import { collectInventory, type InventoryEntry } from "./inventory.ts";
 import { isPathInsideOrEqual } from "./paths.ts";
 
-export type ChangeSelectorResolution =
+export type SelectorResolution =
   | Readonly<{
       kind: "resolved";
-      entry: ChangeInventoryEntry;
+      entry: InventoryEntry;
     }>
   | Readonly<{
       kind: "outside";
@@ -26,25 +23,25 @@ export type ChangeSelectorResolution =
       hint?: string;
     }>;
 
-export async function resolveChangeSelector(
+export async function resolveSelector(
   config: WorkspaceConfig,
   selector: string | undefined,
   cwd = process.cwd(),
-): Promise<ChangeSelectorResolution> {
-  const inventory = await collectChangeInventory(config);
+): Promise<SelectorResolution> {
+  const inventory = await collectInventory(config);
   const entries = [...inventory.workspaces, ...inventory.repositories];
 
   if (selector) {
     return resolveExplicitSelector(entries, selector);
   }
 
-  return resolveCurrentChange(entries, config, cwd);
+  return resolveCurrentEntry(entries, config, cwd);
 }
 
 function resolveExplicitSelector(
-  entries: readonly ChangeInventoryEntry[],
+  entries: readonly InventoryEntry[],
   selector: string,
-): ChangeSelectorResolution {
+): SelectorResolution {
   if (selector.includes("/")) {
     const matches = entries.filter(
       (candidate) => candidate.selector === selector,
@@ -78,8 +75,8 @@ function resolveExplicitSelector(
 
 function ambiguousSelectorResolution(
   selector: string,
-  matches: readonly ChangeInventoryEntry[],
-): ChangeSelectorResolution {
+  matches: readonly InventoryEntry[],
+): SelectorResolution {
   const selectorCounts = new Map<string, number>();
   for (const entry of matches) {
     selectorCounts.set(
@@ -105,15 +102,15 @@ function ambiguousSelectorResolution(
   };
 }
 
-function formatAmbiguousSelectorMatch(entry: ChangeInventoryEntry): string {
+function formatAmbiguousSelectorMatch(entry: InventoryEntry): string {
   return `${entry.selector} (${entry.type} at ${entry.path})`;
 }
 
-async function resolveCurrentChange(
-  entries: readonly ChangeInventoryEntry[],
+async function resolveCurrentEntry(
+  entries: readonly InventoryEntry[],
   _config: WorkspaceConfig,
   cwd: string,
-): Promise<ChangeSelectorResolution> {
+): Promise<SelectorResolution> {
   const resolvedCwd = await comparablePath(cwd);
   const comparableEntries = await Promise.all(
     entries.map(async (entry) => ({

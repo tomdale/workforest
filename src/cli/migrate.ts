@@ -25,15 +25,15 @@ import type {
 } from "../types.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
-  getRepositoryChangeMetadataPath,
-  readRepositoryChangeMetadata,
+  getWorktreeMetadataPath,
   readWorkspaceMetadata,
-  writeRepositoryChangeMetadata,
+  readWorktreeMetadata,
+  writeWorktreeMetadata,
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  getRepositoryChangePath,
-  getWorkspaceChangePath,
+  getWorkspacePath,
+  getWorktreePath,
   isPathInsideOrEqual,
   resolveWorkforestDirectories,
   TASKS_DIRECTORY_NAME,
@@ -201,7 +201,7 @@ export async function migrateWorkspaceLayout(
   }
   for (const entry of repositoryDirectories.entries) {
     await moveWorkspaceDirectory(entry.source, entry.target);
-    await writeRepositoryChangeMetadata(path.dirname(entry.target), {
+    await writeWorktreeMetadata(path.dirname(entry.target), {
       featureName: entry.changeName,
       branchName: entry.branchName,
       repos: [
@@ -213,7 +213,7 @@ export async function migrateWorkspaceLayout(
     });
   }
   for (const entry of repositoryMetadata.entries) {
-    await writeRepositoryChangeMetadata(path.dirname(entry.worktreePath), {
+    await writeWorktreeMetadata(path.dirname(entry.worktreePath), {
       featureName: entry.changeName,
       branchName: entry.branchName,
       repos: [
@@ -352,7 +352,7 @@ function migrationEntryFromMetadata(
       })
     : ADHOC_WORKSPACE_GROUP;
   const changeName = metadata.workspace.feature_name;
-  const target = getWorkspaceChangePath(directories, groupName, changeName);
+  const target = getWorkspacePath(directories, groupName, changeName);
 
   return {
     source,
@@ -398,10 +398,10 @@ async function planRepositoryDirectoryMigration(
 
       const { changeName } = candidate;
 
-      const target = getRepositoryChangePath(directories, repoName, changeName);
+      const target = getWorktreePath(directories, repoName, changeName);
       if (pathsEqual(source, target)) continue;
 
-      const metadataPath = getRepositoryChangeMetadataPath(
+      const metadataPath = getWorktreeMetadataPath(
         path.dirname(target),
         changeName,
       );
@@ -422,7 +422,7 @@ async function planRepositoryDirectoryMigration(
         continue;
       }
 
-      const existing = await readRepositoryChangeMetadata(
+      const existing = await readWorktreeMetadata(
         path.dirname(target),
         changeName,
       ).catch(() => null);
@@ -560,7 +560,7 @@ async function planRepositoryMetadataMigration(
       const changeName = safeResourceName(change.name);
       if (!changeName) continue;
 
-      const existing = await readRepositoryChangeMetadata(
+      const existing = await readWorktreeMetadata(
         repository.path,
         changeName,
       ).catch(() => null);
@@ -571,10 +571,7 @@ async function planRepositoryMetadataMigration(
         changeName,
         selector: `${repoName}/${changeName}`,
         worktreePath: change.path,
-        metadataPath: getRepositoryChangeMetadataPath(
-          repository.path,
-          changeName,
-        ),
+        metadataPath: getWorktreeMetadataPath(repository.path, changeName),
       };
       const repo = await inferRepoConfig(repoName, change.path);
       if (!repo) {
@@ -777,7 +774,7 @@ function safeRepositoryName(value: string): string | null {
 
 function safeResourceName(value: string): string | null {
   try {
-    return validateResourceName(value, "Change name");
+    return validateResourceName(value, "Name");
   } catch {
     return null;
   }

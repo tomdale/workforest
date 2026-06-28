@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseAddOperands,
   type RunAddCommandOptions,
-  runChangeAddCommand,
+  runAddCommand,
 } from "./cli/add.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
@@ -22,10 +22,10 @@ import { createTemplate } from "./templates/index.ts";
 import type { AddReposOptions, AddReposResult } from "./workspace/index.ts";
 import {
   appendWorkspaceRepos,
-  readRepositoryChangeMetadata,
   readWorkspaceMetadata,
-  writeRepositoryChangeMetadata,
+  readWorktreeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 
 const execFileAsync = promisify(execFile);
@@ -88,12 +88,12 @@ describe("wf add", () => {
       "api.git",
       "git@github.com:vercel/api.git",
     );
-    const workspaceDir = await createWorkspaceChange(fixture);
+    const workspaceDir = await createWorkspace(fixture);
     const comparableWorkspaceDir = await realpath(workspaceDir);
     process.chdir(path.join(workspaceDir, "front"));
     const addReposToWorkspace = fakeAddReposToWorkspace();
 
-    await runChangeAddCommand(invocation(["api"]), {
+    await runAddCommand(invocation(["api"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       addReposToWorkspace,
@@ -120,16 +120,16 @@ describe("wf add", () => {
       "front.git",
       "git@github.com:vercel/front.git",
     );
-    const sourcePath = await createRepositoryChange(fixture);
+    const sourcePath = await createWorktree(fixture);
     process.chdir(sourcePath);
 
     await expect(
-      runChangeAddCommand(invocation(["vercel/api"]), {
+      runAddCommand(invocation(["vercel/api"]), {
         interactive: false,
         writeShellCdPath: fixture.writeShellCdPath,
       }),
     ).rejects.toThrow(
-      "Promoting a repository change requires --yes without an interactive terminal.",
+      "Promoting a worktree requires --yes without an interactive terminal.",
     );
   });
 
@@ -147,7 +147,7 @@ describe("wf add", () => {
         "git@github.com:vercel/api.git",
       ),
     ]);
-    const sourcePath = await createRepositoryChange(fixture);
+    const sourcePath = await createWorktree(fixture);
     const comparableSourcePath = await realpath(sourcePath);
     process.chdir(sourcePath);
     const addReposToWorkspace = fakeAddReposToWorkspace({
@@ -155,7 +155,7 @@ describe("wf add", () => {
     });
     const moveRepoWorktree = fakeMoveRepoWorktree();
 
-    await runChangeAddCommand(invocation(["api"], { yes: true }), {
+    await runAddCommand(invocation(["api"], { yes: true }), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       addReposToWorkspace,
@@ -193,7 +193,7 @@ describe("wf add", () => {
       ],
     });
     await expect(
-      readRepositoryChangeMetadata(
+      readWorktreeMetadata(
         path.join(fixture.baseDir, "Repos", "front"),
         "billing",
       ),
@@ -219,11 +219,11 @@ describe("wf add", () => {
       repos: ["front", "api"],
       branchPrefix: "agent",
     });
-    const sourcePath = await createRepositoryChange(fixture);
+    const sourcePath = await createWorktree(fixture);
     process.chdir(sourcePath);
     const addReposToWorkspace = fakeAddReposToWorkspace();
 
-    await runChangeAddCommand(invocation(["@vercel-agent"], { yes: true }), {
+    await runAddCommand(invocation(["@vercel-agent"], { yes: true }), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       addReposToWorkspace,
@@ -263,11 +263,11 @@ describe("wf add", () => {
       "front.git",
       "git@github.com:vercel/front.git",
     );
-    const sourcePath = await createRepositoryChange(fixture);
+    const sourcePath = await createWorktree(fixture);
     process.chdir(sourcePath);
 
     await expect(
-      runChangeAddCommand(invocation(["front"], { yes: true }), {
+      runAddCommand(invocation(["front"], { yes: true }), {
         interactive: false,
         writeShellCdPath: fixture.writeShellCdPath,
         moveRepoWorktree: fakeMoveRepoWorktree(),
@@ -307,9 +307,7 @@ async function createAddFixture(): Promise<{
   };
 }
 
-async function createWorkspaceChange(fixture: {
-  baseDir: string;
-}): Promise<string> {
+async function createWorkspace(fixture: { baseDir: string }): Promise<string> {
   const workspaceDir = path.join(
     fixture.baseDir,
     "Workspaces",
@@ -325,13 +323,11 @@ async function createWorkspaceChange(fixture: {
   return workspaceDir;
 }
 
-async function createRepositoryChange(fixture: {
-  baseDir: string;
-}): Promise<string> {
+async function createWorktree(fixture: { baseDir: string }): Promise<string> {
   const sourcePath = path.join(fixture.baseDir, "Repos", "front", "billing");
   await mkdir(sourcePath, { recursive: true });
   await writeFile(path.join(sourcePath, "README.md"), "fixture\n", "utf8");
-  await writeRepositoryChangeMetadata(path.dirname(sourcePath), {
+  await writeWorktreeMetadata(path.dirname(sourcePath), {
     featureName: "billing",
     branchName: "billing",
     repos: [metadataRepo("front", "git@github.com:vercel/front.git")],

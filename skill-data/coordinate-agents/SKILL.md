@@ -6,12 +6,12 @@ description: Workforest guidance for delegating parallel subagents with task wor
 # Coordinate Agents
 
 Use this skill when you want independent subagents to work inside the same
-change without stepping on one another.
+worktree or workspace without stepping on one another.
 
 ```sh
-wf task start fix-tests upgrade-deps
+wf task new fix-tests upgrade-deps
 wf task list
-wf task finish fix-tests
+wf task delete fix-tests
 wf task delete upgrade-deps --force
 ```
 
@@ -33,5 +33,5 @@ Use `wf task --help` for the exact task syntax.
 
 ## Finish The Tasks
 
-- Use `wf task finish` after the task branch is merged or cherry-picked.
+- Use `wf task delete` after the task branch is merged or cherry-picked.
 - Use `wf task delete --force` only for intentional abandonment.

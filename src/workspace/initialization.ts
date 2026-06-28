@@ -17,14 +17,14 @@ import {
   type InitializationScope,
   type InitializationTarget,
   normalizeInitializationTarget,
-  repositoryChangeInitializationScope,
   workspaceInitializationScope,
+  worktreeInitializationScope,
 } from "./initialization-scope.ts";
 import {
-  readRepositoryChangeMetadata,
   readWorkspaceMetadata,
-  updateRepositoryChangeRepo,
+  readWorktreeMetadata,
   updateWorkspaceRepo,
+  updateWorktreeRepo,
 } from "./metadata.ts";
 import {
   type RepoPipelineState,
@@ -41,8 +41,8 @@ export const REPO_INITIALIZER_WORKER = "repo-initializer";
 
 export {
   type InitializationTarget,
-  repositoryChangeInitializationScope,
   workspaceInitializationScope,
+  worktreeInitializationScope,
 } from "./initialization-scope.ts";
 
 export type RepoInitializationStatus =
@@ -151,7 +151,7 @@ export async function initializeWorkspaceInitialization({
   });
 }
 
-export async function initializeRepositoryChangeSetup({
+export async function initializeWorktreeSetup({
   repoRootDir,
   changeName,
   repo,
@@ -161,7 +161,7 @@ export async function initializeRepositoryChangeSetup({
   repo: RepoConfig;
 }): Promise<void> {
   await initializeScopedInitialization({
-    scope: repositoryChangeInitializationScope({ repoRootDir, changeName }),
+    scope: worktreeInitializationScope({ repoRootDir, changeName }),
     repos: [repo],
     message: "Creating repository worktree",
   });
@@ -1206,7 +1206,7 @@ async function readInitializationMetadata(
 ): Promise<Awaited<ReturnType<typeof readWorkspaceMetadata>>> {
   return scope.kind === "workspace"
     ? readWorkspaceMetadata(scope.workspaceDir)
-    : readRepositoryChangeMetadata(scope.repoRootDir, scope.changeName);
+    : readWorktreeMetadata(scope.repoRootDir, scope.changeName);
 }
 
 async function updateInitializationRepoMetadata(
@@ -1218,7 +1218,7 @@ async function updateInitializationRepoMetadata(
     return;
   }
 
-  await updateRepositoryChangeRepo(scope.repoRootDir, scope.changeName, repo);
+  await updateWorktreeRepo(scope.repoRootDir, scope.changeName, repo);
 }
 
 function resolveInitializationScope({

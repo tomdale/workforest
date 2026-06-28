@@ -36,7 +36,7 @@ afterAll(async () => {
 
 describe("expected CLI errors", () => {
   it.each([
-    [["status"], 1, "Not in a Workforest change."],
+    [["status"], 1, "Not in a Workforest worktree or workspace."],
     [["cache", "show", "missing"], 1, "Cached repository not found: missing"],
     [["skills", "get", "missing"], 1, "Skill not found: missing"],
     [["wat"], 2, "Unknown command: wat"],

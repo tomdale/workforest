@@ -2,12 +2,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveWorkforestContext } from "./context.ts";
 import {
-  getRepositoryChangePath,
   getRepositoryTaskPath,
   getReviewRepoPath,
-  getWorkspaceChangePath,
+  getWorkspacePath,
   getWorkspaceRepoPath,
   getWorkspaceTaskPath,
+  getWorktreePath,
   isPathInsideOrEqual,
   resolveWorkforestDirectories,
 } from "./paths.ts";
@@ -23,10 +23,10 @@ const roots = resolveWorkforestDirectories({
 
 describe("Workforest path helpers", () => {
   it("builds repository, workspace, review, and task paths", () => {
-    expect(getRepositoryChangePath(roots, "workforest", "cli-redesign")).toBe(
+    expect(getWorktreePath(roots, "workforest", "cli-redesign")).toBe(
       path.join("/workspace", "Repos", "workforest", "cli-redesign"),
     );
-    expect(getWorkspaceChangePath(roots, "vercel-agent", "auth-fix")).toBe(
+    expect(getWorkspacePath(roots, "vercel-agent", "auth-fix")).toBe(
       path.join("/workspace", "Workspaces", "vercel-agent", "auth-fix"),
     );
     expect(getWorkspaceRepoPath(roots, "vercel-agent", "auth-fix", "api")).toBe(
@@ -63,9 +63,9 @@ describe("Workforest path helpers", () => {
   });
 
   it("rejects unsafe path components", () => {
-    expect(() =>
-      getRepositoryChangePath(roots, "workforest", "../escape"),
-    ).toThrow("Change name");
+    expect(() => getWorktreePath(roots, "workforest", "../escape")).toThrow(
+      "Name",
+    );
     expect(() =>
       getWorkspaceRepoPath(roots, "vercel-agent", "auth-fix", "../api"),
     ).toThrow("Repository name");
@@ -101,7 +101,7 @@ describe("resolveWorkforestContext", () => {
         roots,
       ),
     ).toMatchObject({
-      kind: "repository-change",
+      kind: "worktree",
       selector: "workforest/cli-redesign",
       repoName: "workforest",
       changeName: "cli-redesign",
@@ -115,7 +115,7 @@ describe("resolveWorkforestContext", () => {
         roots,
       ),
     ).toMatchObject({
-      kind: "template-workspace-change",
+      kind: "template-workspace",
       selector: "vercel-agent/auth-fix",
     });
 
@@ -152,7 +152,7 @@ describe("resolveWorkforestContext", () => {
         roots,
       ),
     ).toMatchObject({
-      kind: "template-workspace-change",
+      kind: "template-workspace",
       selector: "vercel-agent/auth-fix",
     });
 
@@ -168,7 +168,7 @@ describe("resolveWorkforestContext", () => {
         roots,
       ),
     ).toMatchObject({
-      kind: "template-workspace-change",
+      kind: "template-workspace",
       selector: "vercel-agent/auth-fix",
     });
   });
@@ -180,7 +180,7 @@ describe("resolveWorkforestContext", () => {
         roots,
       ),
     ).toMatchObject({
-      kind: "adhoc-workspace-change",
+      kind: "adhoc-workspace",
       selector: "_adhoc/billing",
     });
   });
@@ -201,7 +201,7 @@ describe("resolveWorkforestContext", () => {
       ),
     ).toMatchObject({
       kind: "nested-task",
-      parentKind: "repository-change",
+      parentKind: "worktree",
       parentSelector: "workforest/cli-redesign",
       taskName: "parser",
     });
@@ -221,7 +221,7 @@ describe("resolveWorkforestContext", () => {
       ),
     ).toMatchObject({
       kind: "nested-task",
-      parentKind: "workspace-change",
+      parentKind: "workspace",
       parentSelector: "vercel-agent/auth-fix",
       repoName: "api",
       taskName: "parser",

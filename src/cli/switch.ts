@@ -9,18 +9,18 @@ import {
   promptFuzzySelect,
 } from "../ui/prompts/index.ts";
 import {
-  type ChangeInventoryEntry,
-  collectChangeInventory,
-} from "../workspace/change-inventory.ts";
-import { resolveChangeSelector } from "../workspace/selectors.ts";
+  collectInventory,
+  type InventoryEntry,
+} from "../workspace/inventory.ts";
+import { resolveSelector } from "../workspace/selectors.ts";
 import { OperationalError, UsageError } from "./errors.ts";
 import { success } from "./output.ts";
 import type { CommandResult, ParsedInvocation } from "./types.ts";
 
 export type SwitchPrompt = (
   message: string,
-  options: PromptFuzzySelectOptions<ChangeInventoryEntry>,
-) => Promise<ChangeInventoryEntry>;
+  options: PromptFuzzySelectOptions<InventoryEntry>,
+) => Promise<InventoryEntry>;
 
 export type RunSwitchCommandOptions = Readonly<{
   interactive: boolean;
@@ -34,7 +34,7 @@ export async function runSwitchCommand(
 ): Promise<CommandResult> {
   const selector = invocation.beforeDoubleDash[0];
   const { config } = await loadWorkspaceConfig();
-  let entry: ChangeInventoryEntry | null;
+  let entry: InventoryEntry | null;
 
   if (selector) {
     entry = await resolveSwitchSelector(config, selector);
@@ -55,10 +55,8 @@ export async function runSwitchCommand(
   return success();
 }
 
-export function buildSwitchCandidates(
-  entries: readonly ChangeInventoryEntry[],
-): {
-  value: ChangeInventoryEntry;
+export function buildSwitchCandidates(entries: readonly InventoryEntry[]): {
+  value: InventoryEntry;
   label: string;
   description: string;
 }[] {
@@ -72,37 +70,37 @@ export function buildSwitchCandidates(
 async function resolveSwitchSelector(
   config: Awaited<ReturnType<typeof loadWorkspaceConfig>>["config"],
   selector: string,
-): Promise<ChangeInventoryEntry> {
-  const resolution = await resolveChangeSelector(config, selector);
+): Promise<InventoryEntry> {
+  const resolution = await resolveSelector(config, selector);
   if (resolution.kind === "resolved") {
     return resolution.entry;
   }
   if (resolution.kind === "missing") {
-    throw new UsageError(`Unknown change selector: ${resolution.selector}`);
+    throw new UsageError(`Unknown selector: ${resolution.selector}`);
   }
   if (resolution.kind === "ambiguous") {
     throw new UsageError(
       [
-        `Ambiguous change selector "${resolution.selector}".`,
+        `Ambiguous selector "${resolution.selector}".`,
         "Matches:",
         ...resolution.matches.map((match) => `  ${match}`),
-        resolution.hint ?? "Use <group>/<change>.",
+        resolution.hint ?? "Use <group>/<name>.",
       ].join("\n"),
     );
   }
 
-  throw new OperationalError("Not in a Workforest change.");
+  throw new OperationalError("Not in a Workforest worktree or workspace.");
 }
 
 async function promptForSwitchTarget(
   config: Awaited<ReturnType<typeof loadWorkspaceConfig>>["config"],
   prompt: SwitchPrompt = promptFuzzySelect,
-): Promise<ChangeInventoryEntry | null> {
-  const inventory = await collectChangeInventory(config);
+): Promise<InventoryEntry | null> {
+  const inventory = await collectInventory(config);
   const entries = [...inventory.workspaces, ...inventory.repositories];
   if (entries.length === 0) {
     throw new OperationalError(
-      "No Workforest changes found.\nStart one: wf start <change> <repo|@template>",
+      "No worktrees or workspaces found.\nStart one: wf new <name> <repo|@template>",
     );
   }
 
@@ -120,13 +118,13 @@ async function promptForSwitchTarget(
   }
 }
 
-function switchCandidateDescription(entry: ChangeInventoryEntry): string {
+function switchCandidateDescription(entry: InventoryEntry): string {
   const searchText =
-    entry.type === "repository-change"
+    entry.type === "worktree"
       ? `${entry.repository} ${entry.path}`
       : `${entry.repos.join(", ")} ${entry.path}`;
   return [
-    entry.type === "repository-change" ? "repository" : entry.groupName,
+    entry.type === "worktree" ? "repository" : entry.groupName,
     entry.changeName,
     compactHome(searchText),
   ].join(" - ");

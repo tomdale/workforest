@@ -8,7 +8,7 @@ const {
   cleanupWorkspaceWorktreesGeneratorMock,
   pathExistsMock,
   readWorkspaceMetadataMock,
-  removeRepositoryChangeMetadataMock,
+  removeWorktreeMetadataMock,
 } = vi.hoisted(() => ({
   accessMock: vi.fn(),
   rmMock: vi.fn(),
@@ -17,7 +17,7 @@ const {
   cleanupWorkspaceWorktreesGeneratorMock: vi.fn(),
   pathExistsMock: vi.fn(),
   readWorkspaceMetadataMock: vi.fn(),
-  removeRepositoryChangeMetadataMock: vi.fn(),
+  removeWorktreeMetadataMock: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -41,7 +41,7 @@ vi.mock("./index.ts", () => ({
 vi.mock("./metadata.ts", () => ({
   hasWorkspaceMetadata: vi.fn(async () => true),
   readWorkspaceMetadata: readWorkspaceMetadataMock,
-  removeRepositoryChangeMetadata: removeRepositoryChangeMetadataMock,
+  removeWorktreeMetadata: removeWorktreeMetadataMock,
 }));
 
 vi.mock("./repository.ts", () => ({
@@ -50,9 +50,9 @@ vi.mock("./repository.ts", () => ({
 
 import {
   type CleanupState,
-  cleanupRepositoryChange,
   cleanupWorkspace,
   cleanupWorkspaceGenerator,
+  cleanupWorktree,
   previewCleanup,
 } from "./cleanup.ts";
 
@@ -99,7 +99,7 @@ beforeEach(() => {
       },
     ],
   });
-  removeRepositoryChangeMetadataMock.mockResolvedValue(undefined);
+  removeWorktreeMetadataMock.mockResolvedValue(undefined);
 });
 
 describe("cleanupWorkspaceGenerator", () => {
@@ -172,15 +172,15 @@ describe("cleanupWorkspaceGenerator", () => {
   });
 });
 
-describe("cleanupRepositoryChange", () => {
+describe("cleanupWorktree", () => {
   it("removes the change directory while preserving mirrors when the mirror is missing", async () => {
     pathExistsMock.mockResolvedValue(false);
     const states: CleanupState[] = [];
 
     await expect(
-      cleanupRepositoryChange({
+      cleanupWorktree({
         repoName: "api",
-        changePath: "/tmp/repos/api/demo",
+        targetPath: "/tmp/repos/api/demo",
         onState: (state) => {
           states.push(state);
         },
@@ -197,7 +197,7 @@ describe("cleanupRepositoryChange", () => {
       recursive: true,
       force: true,
     });
-    expect(removeRepositoryChangeMetadataMock).toHaveBeenCalledWith(
+    expect(removeWorktreeMetadataMock).toHaveBeenCalledWith(
       "/tmp/repos/api",
       "demo",
     );
@@ -223,9 +223,9 @@ describe("cleanupRepositoryChange", () => {
     const states: CleanupState[] = [];
 
     await expect(
-      cleanupRepositoryChange({
+      cleanupWorktree({
         repoName: "api",
-        changePath: "/tmp/repos/api/demo",
+        targetPath: "/tmp/repos/api/demo",
         dryRun: true,
         onState: (state) => {
           states.push(state);
@@ -239,7 +239,7 @@ describe("cleanupRepositoryChange", () => {
 
     expect(cleanupWorkspaceWorktreesGeneratorMock).not.toHaveBeenCalled();
     expect(rmMock).not.toHaveBeenCalled();
-    expect(removeRepositoryChangeMetadataMock).not.toHaveBeenCalled();
+    expect(removeWorktreeMetadataMock).not.toHaveBeenCalled();
     expect(states).toContainEqual({
       phase: "remove-dir",
       message: "Would remove directory: /tmp/repos/api/demo (dry-run)",

@@ -227,7 +227,7 @@ describe("cli", () => {
       errors.push(args.join(" "));
     });
 
-    process.argv = ["node", "wf", "start", "fix-auth", "myapp"];
+    process.argv = ["node", "wf", "new", "fix-auth", "myapp"];
     process.exitCode = undefined;
 
     await cli();
@@ -244,12 +244,11 @@ describe("cli", () => {
     ["templates", "Usage: wf templates"],
     ["tasks", "Usage: wf tasks"],
     ["reviews", "Usage: wf reviews"],
-    ["start", "Usage: wf start"],
+    ["new", "Usage: wf new"],
     ["add", "Usage: wf add"],
     ["switch", "Usage: wf switch"],
     ["list", "Usage: wf list"],
     ["status", "Usage: wf status"],
-    ["finish", "Usage: wf finish"],
     ["delete", "Usage: wf delete"],
     ["ai", "Usage: wf ai"],
     ["migrate", "Usage: wf migrate"],
@@ -279,9 +278,8 @@ describe("cli", () => {
   });
 
   it.each([
-    [["task", "start", "--help"], "Usage: wf task start"],
+    [["task", "new", "--help"], "Usage: wf task new"],
     [["task", "list", "--help"], "Usage: wf task list"],
-    [["task", "finish", "--help"], "Usage: wf task finish"],
     [["task", "delete", "--help"], "Usage: wf task delete"],
     [["ai", "status", "--help"], "Usage: wf ai status"],
     [["migrate", "workspaces", "--help"], "Usage: wf migrate workspaces"],

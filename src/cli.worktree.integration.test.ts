@@ -196,7 +196,7 @@ async function tempDir(prefix: string): Promise<string> {
 function runWorktree(cacheDir: string, args: readonly string[], cwd?: string) {
   return runSubprocess(
     process.execPath,
-    [path.resolve("bin/workforest.js"), "worktree", ...args],
+    [path.resolve("bin/workforest.js"), "cache", "worktree", ...args],
     {
       cwd,
       env: {

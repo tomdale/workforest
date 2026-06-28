@@ -51,20 +51,20 @@ vi.mock("./sources-data.ts", async () => {
   };
 });
 
-import { runChangeEntry } from "./surface.ts";
+import { runEntry } from "./surface.ts";
 
-describe("runChangeEntry", () => {
+describe("runEntry", () => {
   it("preselects an explicit target while showing the target picker", async () => {
-    const commitChange = vi.fn(async () => {});
+    const commit = vi.fn(async () => {});
     fuzzyResults.push(
       { kind: "action", query: "cloud-fix" },
       { kind: "item", value: { kind: "repo", id: "tomdale/workforest" } },
       { kind: "item", value: "cloud" },
     );
 
-    await runChangeEntry("create", {
+    await runEntry("create", {
       initialTarget: "cloud",
-      commitChange,
+      commit,
     });
 
     expect(createFuzzyListMock).toHaveBeenCalledTimes(3);
@@ -86,7 +86,7 @@ describe("runChangeEntry", () => {
     expect(
       targetOptions?.initialSelected?.({ value: "local", label: "Local" }),
     ).toBe(false);
-    expect(commitChange).toHaveBeenCalledWith({
+    expect(commit).toHaveBeenCalledWith({
       changeName: "cloud-fix",
       sources: [{ kind: "repo", token: "tomdale/workforest" }],
       target: "cloud",

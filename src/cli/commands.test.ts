@@ -11,19 +11,17 @@ describe("commandRegistry", () => {
   it("defines the exact visible command tree", () => {
     expect(visibleTree(commandRegistry.root)).toEqual({
       dashboard: null,
-      start: null,
+      new: null,
       list: null,
       status: null,
       add: null,
       switch: null,
-      finish: null,
       delete: null,
       ai: ["status"],
       migrate: ["workspaces"],
-      task: ["start", "list", "finish", "delete"],
+      task: ["new", "list", "delete"],
       cloud: ["list", "status", "attach", "stop", "delete"],
-      cache: ["list", "show", "sync", "doctor", "delete", "clean"],
-      worktree: ["list", "add", "move", "remove"],
+      cache: ["list", "show", "sync", "doctor", "delete", "clean", "worktree"],
       review: ["open", "checkout"],
       template: [
         "list",

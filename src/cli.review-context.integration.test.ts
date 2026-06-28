@@ -138,15 +138,15 @@ describe("review command directory contexts", () => {
       const fixture = await createReviewFixture();
       const cwd = cwdFor(fixture);
       const cases = [
-        [["delete"], "Expected 1 selector"],
-        [["task", "delete"], "Expected 1 or more task names"],
-        [["cache", "delete"], "Expected 1 or more repositories"],
+        [["delete"], 1, "Not in a Workforest worktree or workspace."],
+        [["task", "delete"], 2, "Expected 1 or more task names"],
+        [["cache", "delete"], 2, "Expected 1 or more repositories"],
       ] as const;
 
-      for (const [args, message] of cases) {
+      for (const [args, exitCode, message] of cases) {
         const result = await runCli(fixture, cwd, args);
 
-        expect(result.exitCode).toBe(2);
+        expect(result.exitCode).toBe(exitCode);
         expect(result.stdout).toBe("");
         expect(result.stderr).toContain(message);
         expectStackFree(result);

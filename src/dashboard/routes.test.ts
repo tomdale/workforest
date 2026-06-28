@@ -9,7 +9,7 @@ import {
 describe("dashboard routes", () => {
   it.each([
     [["dashboard"], "home"],
-    [["start"], "start"],
+    [["new"], "new"],
     [["templates"], "templates"],
     [["tasks"], "tasks"],
     [["reviews"], "reviews"],
@@ -21,10 +21,10 @@ describe("dashboard routes", () => {
 
   it("exposes route-specific action models", () => {
     expect(
-      dashboardActionsForRoute(getDashboardRoute("start")).map(
+      dashboardActionsForRoute(getDashboardRoute("new")).map(
         (action) => action.id,
       ),
-    ).toEqual(["start.repository", "start.template", "start.adhoc"]);
+    ).toEqual(["new.worktree", "new.template", "new.adhoc"]);
 
     expect(
       dashboardActionsForRoute(getDashboardRoute("cache")).map(
@@ -40,8 +40,8 @@ describe("dashboard routes", () => {
   });
 
   it("formats command actions for display", () => {
-    expect(formatDashboardCommand(["start", "<change>", "<repo>"])).toBe(
-      "wf start <change> <repo>",
+    expect(formatDashboardCommand(["new", "<name>", "<repo>"])).toBe(
+      "wf new <name> <repo>",
     );
   });
 });

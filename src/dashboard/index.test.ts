@@ -63,15 +63,15 @@ describe("dashboard rendering", () => {
     const startCommand = activateDashboardAction(openedStart);
 
     expect(openedStart.routeIndex).toBe(1);
-    expect(openedStart.operationMessage).toBe("Opened Start");
+    expect(openedStart.operationMessage).toBe("Opened New");
     expect(startCommand.command).toBeNull();
     expect(startCommand.state.operationMessage).toBe(
-      "wf start <change> <repo> needs operands before it can run",
+      "wf new <name> <repo> needs operands before it can run",
     );
   });
 
   it.each([
-    ["changes", 0, ["list"], "wf list"],
+    ["list", 0, ["list"], "wf list"],
     ["cache", 1, ["cache", "doctor"], "wf cache doctor"],
     ["config", 0, ["config", "show"], "wf config show"],
     ["help", 1, ["help", "workflow"], "wf help workflow"],

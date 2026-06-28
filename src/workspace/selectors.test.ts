@@ -2,11 +2,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  writeRepositoryChangeMetadata,
-  writeWorkspaceMetadata,
-} from "./metadata.ts";
-import { resolveChangeSelector } from "./selectors.ts";
+import { writeWorkspaceMetadata, writeWorktreeMetadata } from "./metadata.ts";
+import { resolveSelector } from "./selectors.ts";
 
 const tempDirs: string[] = [];
 
@@ -16,12 +13,12 @@ afterEach(async () => {
   );
 });
 
-describe("resolveChangeSelector", () => {
+describe("resolveSelector", () => {
   it("resolves exact group/change selectors", async () => {
     const base = await createInventoryFixture();
 
     await expect(
-      resolveChangeSelector({ directory: { base } }, "vercel-agent/auth-fix"),
+      resolveSelector({ directory: { base } }, "vercel-agent/auth-fix"),
     ).resolves.toMatchObject({
       kind: "resolved",
       entry: {
@@ -35,12 +32,12 @@ describe("resolveChangeSelector", () => {
     const base = await createInventoryFixture();
 
     await expect(
-      resolveChangeSelector({ directory: { base } }, "cli-redesign"),
+      resolveSelector({ directory: { base } }, "cli-redesign"),
     ).resolves.toMatchObject({
       kind: "resolved",
       entry: {
         selector: "workforest/cli-redesign",
-        type: "repository-change",
+        type: "worktree",
       },
     });
   });
@@ -49,7 +46,7 @@ describe("resolveChangeSelector", () => {
     const base = await createInventoryFixture();
 
     await expect(
-      resolveChangeSelector({ directory: { base } }, "auth-fix"),
+      resolveSelector({ directory: { base } }, "auth-fix"),
     ).resolves.toEqual({
       kind: "ambiguous",
       selector: "auth-fix",
@@ -75,7 +72,7 @@ describe("resolveChangeSelector", () => {
       },
     );
 
-    const resolution = await resolveChangeSelector(
+    const resolution = await resolveSelector(
       { directory: { base } },
       "workforest/cli-redesign",
     );
@@ -88,7 +85,7 @@ describe("resolveChangeSelector", () => {
     if (resolution.kind !== "ambiguous") return;
     expect(resolution.matches).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("repository-change"),
+        expect.stringContaining("worktree"),
         expect.stringContaining("template-workspace"),
       ]),
     );
@@ -122,7 +119,7 @@ describe("resolveChangeSelector", () => {
       },
     );
 
-    const resolution = await resolveChangeSelector(
+    const resolution = await resolveSelector(
       { directory: { base } },
       "cli-redesign",
     );
@@ -134,7 +131,7 @@ describe("resolveChangeSelector", () => {
     });
     if (resolution.kind !== "ambiguous") return;
     expect(resolution.matches).toHaveLength(2);
-    expect(resolution.matches.join("\n")).toContain("repository-change");
+    expect(resolution.matches.join("\n")).toContain("worktree");
     expect(resolution.matches.join("\n")).toContain("template-workspace");
   });
 
@@ -151,7 +148,7 @@ describe("resolveChangeSelector", () => {
     await mkdir(cwd, { recursive: true });
 
     await expect(
-      resolveChangeSelector({ directory: { base } }, undefined, cwd),
+      resolveSelector({ directory: { base } }, undefined, cwd),
     ).resolves.toMatchObject({
       kind: "resolved",
       entry: {
@@ -165,7 +162,7 @@ describe("resolveChangeSelector", () => {
     const reposRoot = path.join(base, "Repos");
 
     await expect(
-      resolveChangeSelector({ directory: { base } }, undefined, reposRoot),
+      resolveSelector({ directory: { base } }, undefined, reposRoot),
     ).resolves.toEqual({ kind: "outside" });
   });
 });
@@ -209,7 +206,7 @@ async function createInventoryFixture(): Promise<string> {
       ],
     },
   );
-  await writeRepositoryChangeMetadata(path.join(base, "Repos", "workforest"), {
+  await writeWorktreeMetadata(path.join(base, "Repos", "workforest"), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [

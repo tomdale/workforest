@@ -19,74 +19,69 @@ import { padRight } from "../terminal/text.ts";
 import { terminalSymbol } from "../terminal/theme.ts";
 import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
-import {
-  listRepositoryChangeMetadata,
-  readWorkspaceMetadata,
-} from "./metadata.ts";
+import { listWorktreeMetadata, readWorkspaceMetadata } from "./metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
   resolveWorkforestDirectories,
   type WorkforestDirectories,
 } from "./paths.ts";
 
-export type ChangeState = "ready" | "stale";
+export type EntryState = "ready" | "stale";
 
-export type WorkspaceChangeInventoryEntry = Readonly<{
+export type WorkspaceInventoryEntry = Readonly<{
   type: "template-workspace" | "adhoc-workspace";
   selector: string;
   groupName: string;
   changeName: string;
   repos: readonly string[];
   repoSummary: string;
-  state: ChangeState;
+  state: EntryState;
   modifiedAt: string;
   modifiedAtMs: number;
   path: string;
 }>;
 
-export type RepositoryChangeInventoryEntry = Readonly<{
-  type: "repository-change";
+export type WorktreeInventoryEntry = Readonly<{
+  type: "worktree";
   selector: string;
   groupName: string;
   changeName: string;
   repository: string;
-  state: ChangeState;
+  state: EntryState;
   modifiedAt: string;
   modifiedAtMs: number;
   path: string;
 }>;
 
-export type ChangeInventoryEntry =
-  | WorkspaceChangeInventoryEntry
-  | RepositoryChangeInventoryEntry;
+export type InventoryEntry = WorkspaceInventoryEntry | WorktreeInventoryEntry;
 
-export type ChangeInventory = Readonly<{
-  workspaces: readonly WorkspaceChangeInventoryEntry[];
-  repositories: readonly RepositoryChangeInventoryEntry[];
+export type Inventory = Readonly<{
+  workspaces: readonly WorkspaceInventoryEntry[];
+  repositories: readonly WorktreeInventoryEntry[];
   totals: Readonly<{
     workspaces: number;
     repositories: number;
   }>;
 }>;
 
-export type ChangeInventoryFilters = Readonly<{
+export type InventoryFilters = Readonly<{
   repo?: string;
   group?: string;
 }>;
 
-export type RenderChangeListOptions = Readonly<{
+export type RenderListOptions = Readonly<{
   paths?: boolean;
   now?: number;
 }>;
 
-export async function collectChangeInventory(
+export async function collectInventory(
   config: WorkspaceConfig,
-  filters: ChangeInventoryFilters = {},
-): Promise<ChangeInventory> {
+  filters: InventoryFilters = {},
+): Promise<Inventory> {
   const directories = resolveWorkforestDirectories(config);
   const [workspaces, repositories] = await Promise.all([
-    collectWorkspaceChanges(directories),
-    collectRepositoryChanges(directories),
+    collectWorkspaces(directories),
+    collectWorktrees(directories),
   ]);
   const filteredWorkspaces = workspaces.filter(
     (entry) =>
@@ -100,8 +95,8 @@ export async function collectChangeInventory(
   );
 
   return {
-    workspaces: sortWorkspaceChanges(filteredWorkspaces),
-    repositories: sortRepositoryChanges(filteredRepositories),
+    workspaces: sortWorkspaces(filteredWorkspaces),
+    repositories: sortWorktrees(filteredRepositories),
     totals: {
       workspaces: filteredWorkspaces.length,
       repositories: filteredRepositories.length,
@@ -109,16 +104,16 @@ export async function collectChangeInventory(
   };
 }
 
-export function renderChangeList(
-  inventory: ChangeInventory,
-  options: RenderChangeListOptions = {},
+export function renderList(
+  inventory: Inventory,
+  options: RenderListOptions = {},
 ): string {
-  return renderInlineDoc(changeListDoc(inventory, options));
+  return renderTerminalDocInline(inventoryDoc(inventory, options));
 }
 
-export function changeListDoc(
-  inventory: ChangeInventory,
-  options: RenderChangeListOptions = {},
+export function inventoryDoc(
+  inventory: Inventory,
+  options: RenderListOptions = {},
 ): TerminalDoc {
   if (
     inventory.totals.workspaces === 0 &&
@@ -126,10 +121,10 @@ export function changeListDoc(
   ) {
     return {
       lines: [
-        { spans: [terminalSpan("No Workforest changes found.")] },
+        { spans: [terminalSpan("No worktrees or workspaces found.")] },
         {
           spans: [
-            terminalSpan("Start one: wf start <change> <repo|@template>", {
+            terminalSpan("Start one: wf new <name> <repo|@template>", {
               role: "muted",
             }),
           ],
@@ -177,18 +172,18 @@ export function changeListDoc(
 
   lines.push("", [
     terminalSpan(
-      `${inventory.totals.workspaces} workspace${inventory.totals.workspaces === 1 ? "" : "s"}, ${inventory.totals.repositories} repository change${inventory.totals.repositories === 1 ? "" : "s"}`,
+      `${inventory.totals.workspaces} workspace${inventory.totals.workspaces === 1 ? "" : "s"}, ${inventory.totals.repositories} worktree${inventory.totals.repositories === 1 ? "" : "s"}`,
       { role: "muted" },
     ),
   ]);
   return { lines: lines.map((line) => normalizeLine(line)) };
 }
 
-async function collectWorkspaceChanges(
+async function collectWorkspaces(
   directories: WorkforestDirectories,
-): Promise<WorkspaceChangeInventoryEntry[]> {
+): Promise<WorkspaceInventoryEntry[]> {
   const candidates = await readChildDirectories(directories.workspaces);
-  const entries: WorkspaceChangeInventoryEntry[] = [];
+  const entries: WorkspaceInventoryEntry[] = [];
 
   for (const candidate of candidates) {
     const directMetadata = await readWorkspaceMetadata(candidate.path).catch(
@@ -215,8 +210,8 @@ async function collectWorkspaceChanges(
       const changeName = safeResourceName(change.name);
       if (!changeName) continue;
 
-      const changePath = path.join(group.path, changeName);
-      const metadata = await readWorkspaceMetadata(changePath).catch(
+      const targetPath = path.join(group.path, changeName);
+      const metadata = await readWorkspaceMetadata(targetPath).catch(
         () => null,
       );
       if (!metadata) continue;
@@ -224,7 +219,7 @@ async function collectWorkspaceChanges(
       entries.push(
         await workspaceInventoryEntryFromMetadata({
           metadata,
-          path: changePath,
+          path: targetPath,
           groupName,
           changeName,
         }),
@@ -237,7 +232,7 @@ async function collectWorkspaceChanges(
 
 async function workspaceInventoryEntryFromMetadata({
   metadata,
-  path: changePath,
+  path: targetPath,
   groupName,
   changeName,
 }: {
@@ -245,12 +240,12 @@ async function workspaceInventoryEntryFromMetadata({
   path: string;
   groupName: string;
   changeName: string;
-}): Promise<WorkspaceChangeInventoryEntry> {
+}): Promise<WorkspaceInventoryEntry> {
   const repos = metadata.repos.map((repo) => repo.name);
-  const repoPaths = repos.map((repo) => path.join(changePath, repo));
+  const repoPaths = repos.map((repo) => path.join(targetPath, repo));
   const modifiedAtMs = await newestMtimeMs([
-    changePath,
-    path.join(changePath, ".workforest"),
+    targetPath,
+    path.join(targetPath, ".workforest"),
     ...repoPaths,
   ]);
 
@@ -267,41 +262,39 @@ async function workspaceInventoryEntryFromMetadata({
     state: await aggregatePathState(repoPaths),
     modifiedAt: new Date(modifiedAtMs).toISOString(),
     modifiedAtMs,
-    path: changePath,
+    path: targetPath,
   };
 }
 
-async function collectRepositoryChanges(
+async function collectWorktrees(
   directories: WorkforestDirectories,
-): Promise<RepositoryChangeInventoryEntry[]> {
+): Promise<WorktreeInventoryEntry[]> {
   const repositories = await readChildDirectories(directories.repos);
-  const entries: RepositoryChangeInventoryEntry[] = [];
+  const entries: WorktreeInventoryEntry[] = [];
 
   for (const repository of repositories) {
     const repoName = safeRepositoryName(repository.name);
     if (!repoName) continue;
 
-    const changes = await listRepositoryChangeMetadata(repository.path).catch(
-      () => [],
-    );
+    const changes = await listWorktreeMetadata(repository.path).catch(() => []);
     for (const change of changes) {
       const changeName = change.metadata.workspace.feature_name;
-      const changePath = path.join(repository.path, changeName);
+      const targetPath = path.join(repository.path, changeName);
 
       const modifiedAtMs = await newestMtimeMs([
-        changePath,
+        targetPath,
         change.metadataPath,
       ]);
       entries.push({
-        type: "repository-change",
+        type: "worktree",
         selector: `${repoName}/${changeName}`,
         groupName: repoName,
         changeName,
         repository: repoName,
-        state: await aggregatePathState([changePath]),
+        state: await aggregatePathState([targetPath]),
         modifiedAt: new Date(modifiedAtMs).toISOString(),
         modifiedAtMs,
-        path: changePath,
+        path: targetPath,
       });
     }
   }
@@ -311,7 +304,7 @@ async function collectRepositoryChanges(
 
 async function aggregatePathState(
   repoPaths: readonly string[],
-): Promise<ChangeState> {
+): Promise<EntryState> {
   if (repoPaths.length === 0) {
     return "stale";
   }
@@ -353,9 +346,9 @@ async function newestMtimeMs(paths: readonly string[]): Promise<number> {
   return newest === 0 ? Date.now() : newest;
 }
 
-function sortWorkspaceChanges(
-  entries: readonly WorkspaceChangeInventoryEntry[],
-): WorkspaceChangeInventoryEntry[] {
+function sortWorkspaces(
+  entries: readonly WorkspaceInventoryEntry[],
+): WorkspaceInventoryEntry[] {
   return [...entries].sort(
     (left, right) =>
       compareWorkspaceGroups(left.groupName, right.groupName) ||
@@ -363,9 +356,9 @@ function sortWorkspaceChanges(
   );
 }
 
-function sortRepositoryChanges(
-  entries: readonly RepositoryChangeInventoryEntry[],
-): RepositoryChangeInventoryEntry[] {
+function sortWorktrees(
+  entries: readonly WorktreeInventoryEntry[],
+): WorktreeInventoryEntry[] {
   return [...entries].sort(
     (left, right) =>
       left.groupName.localeCompare(right.groupName) ||
@@ -394,14 +387,14 @@ function compareEntries(
 }
 
 function groupWorkspaceEntries(
-  entries: readonly WorkspaceChangeInventoryEntry[],
-): Array<[string, WorkspaceChangeInventoryEntry[]]> {
+  entries: readonly WorkspaceInventoryEntry[],
+): Array<[string, WorkspaceInventoryEntry[]]> {
   return groupEntries(entries, (entry) => entry.groupName);
 }
 
 function groupRepositoryEntries(
-  entries: readonly RepositoryChangeInventoryEntry[],
-): Array<[string, RepositoryChangeInventoryEntry[]]> {
+  entries: readonly WorktreeInventoryEntry[],
+): Array<[string, WorktreeInventoryEntry[]]> {
   return groupEntries(entries, (entry) => entry.groupName);
 }
 
@@ -442,8 +435,8 @@ function formatRepositoryHeader(showPaths: boolean): TerminalLineInput {
 }
 
 function formatWorkspaceRow(
-  entry: WorkspaceChangeInventoryEntry,
-  options: RenderChangeListOptions,
+  entry: WorkspaceInventoryEntry,
+  options: RenderListOptions,
 ): TerminalLineInput {
   return [
     "    ",
@@ -463,8 +456,8 @@ function formatWorkspaceRow(
 }
 
 function formatRepositoryRow(
-  entry: RepositoryChangeInventoryEntry,
-  options: RenderChangeListOptions,
+  entry: WorktreeInventoryEntry,
+  options: RenderListOptions,
 ): TerminalLineInput {
   return [
     "    ",
@@ -483,8 +476,8 @@ function formatRepositoryRow(
   ];
 }
 
-/** A change is `ready` when its worktrees exist; otherwise its files are gone. */
-function stateTone(state: ChangeState): StatusTone {
+/** An entry is `ready` when its worktrees exist; otherwise its files are gone. */
+function stateTone(state: EntryState): StatusTone {
   return state === "ready" ? "success" : "cancelled";
 }
 
@@ -560,7 +553,7 @@ function safeRepositoryName(value: string): string | null {
 
 function safeResourceName(value: string): string | null {
   try {
-    return validateResourceName(value, "Change name");
+    return validateResourceName(value, "Name");
   } catch {
     return null;
   }
@@ -636,8 +629,4 @@ function normalizeLine(line: TerminalLineInput): TerminalDoc["lines"][number] {
       typeof span === "string" ? terminalSpan(span) : span,
     ),
   };
-}
-
-function renderInlineDoc(doc: TerminalDoc): string {
-  return renderTerminalDocInline(doc);
 }

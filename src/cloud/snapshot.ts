@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { NetworkPolicy } from "@vercel/sandbox";
 import type { ServiceEventSink } from "../services/events.ts";
 import { emitServiceEvent } from "../services/events.ts";
-import type { ResolvedStartSource } from "../workspace/create-change.ts";
+import type { ResolvedSource } from "../workspace/create.ts";
 import type { CloudCredentials } from "./credentials.ts";
 import { baseSandboxName } from "./tags.ts";
 import {
@@ -29,7 +29,7 @@ export type CloudRepo = Readonly<{ name: string; remote: string }>;
  * their id (so every change from a template shares one warm base); ad-hoc and
  * single-repo sets key on a short hash of their sorted remotes.
  */
-export function baseSnapshotGroup(source: ResolvedStartSource): string {
+export function baseSnapshotGroup(source: ResolvedSource): string {
   if (source.kind === "template") {
     return `tpl-${source.templateId}`;
   }

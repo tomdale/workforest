@@ -83,13 +83,6 @@ export type DeleteTasksResult = {
   removed: TaskMetadata[];
 };
 
-export type FinishTasksOptions = {
-  workspaceDir: string;
-  slugs: readonly string[];
-  parentRepoName?: string;
-  dryRun?: boolean;
-};
-
 export type CreateRepositoryTasksOptions = {
   parentRepoDir: string;
   repo: RepoConfig;
@@ -120,14 +113,12 @@ type RemoveWorkspaceTasksOptions = {
   parentRepoName: string | undefined;
   force: boolean;
   dryRun: boolean;
-  mode: "delete" | "finish";
 };
 
 type RemoveRepositoryTasksInternalOptions = RepositoryTasksOptions & {
   slugs: readonly string[];
   force: boolean;
   dryRun: boolean;
-  mode: "delete" | "finish";
 };
 
 type CreateTaskState =
@@ -262,7 +253,7 @@ export async function createRepositoryTasks({
   const resolvedParentRepoDir = path.resolve(parentRepoDir);
   const repoRootDir = path.dirname(resolvedParentRepoDir);
   const repoName = validateRepositoryComponent(repo.name, "Repository name");
-  const safeChangeName = validateResourceName(changeName, "Change name");
+  const safeName = validateResourceName(changeName, "Name");
   validateRequestedSlugs(slugs);
 
   const baseBranch = await getCurrentBranch(resolvedParentRepoDir);
@@ -270,7 +261,7 @@ export async function createRepositoryTasks({
 
   if (!dryRun && !force && (await isGitDirty(resolvedParentRepoDir))) {
     throw new Error(
-      `Repository change "${repoName}/${safeChangeName}" has uncommitted changes. Commit or stash them before creating tasks, or pass --force.`,
+      `Repository change "${repoName}/${safeName}" has uncommitted changes. Commit or stash them before creating tasks, or pass --force.`,
     );
   }
 
@@ -278,7 +269,7 @@ export async function createRepositoryTasks({
     repoRootDir,
     parentRepoDir: resolvedParentRepoDir,
     repoName,
-    changeName: safeChangeName,
+    changeName: safeName,
     slugs,
     baseBranch,
     baseSha,
@@ -368,8 +359,8 @@ export async function listRepositoryTasks({
   const resolvedParentRepoDir = path.resolve(parentRepoDir);
   const repoRootDir = path.dirname(resolvedParentRepoDir);
   const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
-  const safeChangeName = validateResourceName(changeName, "Change name");
-  const slugs = await listRepositoryTaskSlugs(repoRootDir, safeChangeName);
+  const safeName = validateResourceName(changeName, "Name");
+  const slugs = await listRepositoryTaskSlugs(repoRootDir, safeName);
   if (slugs.length === 0) {
     return [];
   }
@@ -381,7 +372,7 @@ export async function listRepositoryTasks({
   const entries: TaskListEntry[] = [];
 
   for (const slug of slugs) {
-    const relativePath = repositoryTaskRelativePath(safeChangeName, slug);
+    const relativePath = repositoryTaskRelativePath(safeName, slug);
     const absolutePath = resolveContainedPath(repoRootDir, relativePath);
     const setupLog = await repositoryTaskSetupLog(
       repoRootDir,
@@ -426,23 +417,6 @@ export async function deleteTasks({
     parentRepoName,
     force,
     dryRun,
-    mode: "delete",
-  });
-}
-
-export async function finishTasks({
-  workspaceDir,
-  slugs,
-  parentRepoName,
-  dryRun = false,
-}: FinishTasksOptions): Promise<DeleteTasksResult> {
-  return removeWorkspaceTasks({
-    workspaceDir,
-    slugs,
-    parentRepoName,
-    force: false,
-    dryRun,
-    mode: "finish",
   });
 }
 
@@ -461,25 +435,6 @@ export async function deleteRepositoryTasks({
     slugs,
     force,
     dryRun,
-    mode: "delete",
-  });
-}
-
-export async function finishRepositoryTasks({
-  parentRepoDir,
-  repoName,
-  changeName,
-  slugs,
-  dryRun = false,
-}: RemoveRepositoryTasksOptions): Promise<DeleteTasksResult> {
-  return removeRepositoryTasks({
-    parentRepoDir,
-    repoName,
-    changeName,
-    slugs,
-    force: false,
-    dryRun,
-    mode: "finish",
   });
 }
 
@@ -489,7 +444,6 @@ async function removeWorkspaceTasks({
   parentRepoName,
   force,
   dryRun,
-  mode,
 }: RemoveWorkspaceTasksOptions): Promise<DeleteTasksResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const metadata = await requireWorkspaceMetadata(resolvedWorkspaceDir);
@@ -519,11 +473,6 @@ async function removeWorkspaceTasks({
     const exists = await pathExists(absolutePath);
 
     if (!exists) {
-      if (mode === "finish") {
-        throw new Error(
-          `Task "${entry.slug}" is stale. Run wf task delete ${entry.slug} --repo ${entry.parent_repo} --force to remove its metadata.`,
-        );
-      }
       await pruneStaleWorktree(parentRepoDir);
       await deleteBranchIfPossible(parentRepoDir, entry.branch, false);
       removed.push(entry);
@@ -532,9 +481,7 @@ async function removeWorkspaceTasks({
 
     if (!force && (await isGitDirty(absolutePath))) {
       throw new Error(
-        mode === "finish"
-          ? `Task "${entry.slug}" has uncommitted changes. Commit or discard them before finishing the task.`
-          : `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
+        `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
       );
     }
 
@@ -543,9 +490,7 @@ async function removeWorkspaceTasks({
       !(await isTemporaryBranchMerged(resolvedWorkspaceDir, entry))
     ) {
       throw new Error(
-        mode === "finish"
-          ? `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or run wf task delete ${entry.slug} --repo ${entry.parent_repo} --force to abandon it.`
-          : `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
+        `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
       );
     }
 
@@ -582,18 +527,17 @@ async function removeRepositoryTasks({
   slugs,
   force,
   dryRun,
-  mode,
 }: RemoveRepositoryTasksInternalOptions): Promise<DeleteTasksResult> {
   const resolvedParentRepoDir = path.resolve(parentRepoDir);
   const repoRootDir = path.dirname(resolvedParentRepoDir);
   const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
-  const safeChangeName = validateResourceName(changeName, "Change name");
+  const safeName = validateResourceName(changeName, "Name");
   validateRequestedSlugs(slugs);
 
   const available = await listRepositoryTasks({
     parentRepoDir: resolvedParentRepoDir,
     repoName: safeRepoName,
-    changeName: safeChangeName,
+    changeName: safeName,
   });
   const targets = resolveRemovalTargets(available, slugs, safeRepoName);
 
@@ -608,11 +552,6 @@ async function removeRepositoryTasks({
     const exists = await pathExists(absolutePath);
 
     if (!exists) {
-      if (mode === "finish") {
-        throw new Error(
-          `Task "${entry.slug}" is stale. Run wf task delete ${entry.slug} --force to remove it.`,
-        );
-      }
       await pruneStaleWorktree(resolvedParentRepoDir);
       await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, false);
       removed.push(entry);
@@ -621,9 +560,7 @@ async function removeRepositoryTasks({
 
     if (!force && (await isGitDirty(absolutePath))) {
       throw new Error(
-        mode === "finish"
-          ? `Task "${entry.slug}" has uncommitted changes. Commit or discard them before finishing the task.`
-          : `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
+        `Task "${entry.slug}" has uncommitted changes. Commit, discard, or pass --force.`,
       );
     }
 
@@ -632,9 +569,7 @@ async function removeRepositoryTasks({
       !(await isBranchMerged(resolvedParentRepoDir, entry.branch))
     ) {
       throw new Error(
-        mode === "finish"
-          ? `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or run wf task delete ${entry.slug} --force to abandon it.`
-          : `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
+        `Task branch "${entry.branch}" is not merged into ${entry.parent_repo}. Merge it first or pass --force.`,
       );
     }
 

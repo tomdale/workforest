@@ -32,7 +32,7 @@ export function resolveWorkforestDirectories(
   };
 }
 
-export function getRepositoryChangePath(
+export function getWorktreePath(
   directories: WorkforestDirectories,
   repoName: string,
   changeName: string,
@@ -40,19 +40,19 @@ export function getRepositoryChangePath(
   return path.join(
     directories.repos,
     validateRepositoryComponent(repoName, "Repository name"),
-    validateResourceName(changeName, "Change name"),
+    validateResourceName(changeName, "Name"),
   );
 }
 
-export function getWorkspaceChangePath(
+export function getWorkspacePath(
   directories: WorkforestDirectories,
   groupName: string,
   changeName: string,
 ): string {
   return path.join(
     directories.workspaces,
-    validateChangeGroupName(groupName),
-    validateResourceName(changeName, "Change name"),
+    validateGroupName(groupName),
+    validateResourceName(changeName, "Name"),
   );
 }
 
@@ -63,7 +63,7 @@ export function getWorkspaceRepoPath(
   repoName: string,
 ): string {
   return path.join(
-    getWorkspaceChangePath(directories, groupName, changeName),
+    getWorkspacePath(directories, groupName, changeName),
     validateRepositoryComponent(repoName, "Repository name"),
   );
 }
@@ -88,7 +88,7 @@ export function getRepositoryTaskPath(
     directories.repos,
     validateRepositoryComponent(repoName, "Repository name"),
     TASKS_DIRECTORY_NAME,
-    validateResourceName(changeName, "Change name"),
+    validateResourceName(changeName, "Name"),
     validateResourceName(taskName, "Task name"),
   );
 }
@@ -101,7 +101,7 @@ export function getWorkspaceTaskPath(
   taskName: string,
 ): string {
   return path.join(
-    getWorkspaceChangePath(directories, groupName, changeName),
+    getWorkspacePath(directories, groupName, changeName),
     TASKS_DIRECTORY_NAME,
     validateRepositoryComponent(repoName, "Repository name"),
     validateResourceName(taskName, "Task name"),
@@ -142,7 +142,7 @@ function expandHome(value: string): string {
   return value;
 }
 
-function validateChangeGroupName(value: string): string {
+function validateGroupName(value: string): string {
   return value === ADHOC_WORKSPACE_GROUP
     ? value
     : validateTemplateIdentifier(value);

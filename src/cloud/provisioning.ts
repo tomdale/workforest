@@ -3,10 +3,7 @@ import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import type { RepoConfig, WorkspaceConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
 import { runCommand } from "../utils/exec.ts";
-import type {
-  CreateChangeInput,
-  ResolvedStartSource,
-} from "../workspace/create-change.ts";
+import type { CreateInput, ResolvedSource } from "../workspace/create.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import {
   type CloudCredentials,
@@ -42,7 +39,7 @@ const DEFAULT_PORTS: readonly number[] = [3000];
  */
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1000;
 
-export type CreateCloudChangeOptions = Readonly<{
+export type CreateCloudOptions = Readonly<{
   interactive: boolean;
   onEvent?: ServiceEventSink;
   config: WorkspaceConfig;
@@ -51,25 +48,25 @@ export type CreateCloudChangeOptions = Readonly<{
 /**
  * Provision a cloud workspace: a single persistent Vercel Sandbox with every
  * source repo cloned onto a new branch and dependencies installed — the remote
- * counterpart of {@link createChange}. Near-instant spin-up comes from forking a
+ * counterpart of {@link create}. Near-instant spin-up comes from forking a
  * per-template base snapshot; the per-repo pipeline then fetches, branches, and
  * pulls env on top, rendered through the same grid the local path uses.
  */
-export async function createCloudChange(
-  input: CreateChangeInput,
-  options: CreateCloudChangeOptions,
+export async function createCloud(
+  input: CreateInput,
+  options: CreateCloudOptions,
 ): Promise<void> {
   const credentials = await resolveCloudCredentials(options.config);
   try {
-    await provisionCloudChange(input, options, credentials);
+    await provisionCloud(input, options, credentials);
   } catch (error) {
     throw describeCloudError(error, credentials);
   }
 }
 
-async function provisionCloudChange(
-  input: CreateChangeInput,
-  options: CreateCloudChangeOptions,
+async function provisionCloud(
+  input: CreateInput,
+  options: CreateCloudOptions,
   credentials: CloudCredentials,
 ): Promise<void> {
   const repos = reposOf(input.source);
@@ -442,7 +439,7 @@ function reportReady(
 }
 
 /** Repos for a resolved start source, in a single uniform list. */
-function reposOf(source: ResolvedStartSource): readonly RepoConfig[] {
+function reposOf(source: ResolvedSource): readonly RepoConfig[] {
   if (source.kind === "repository") return [source.repo];
   return source.repos;
 }

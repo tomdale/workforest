@@ -8,8 +8,8 @@ import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import {
-  readRepositoryChangeMetadata,
   readWorkspaceMetadata,
+  readWorktreeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
 
@@ -148,7 +148,7 @@ describe("wf migrate workspaces", () => {
 
   it("previews repository metadata backfills without changing files", async () => {
     const { baseDir } = await createMigrationFixture();
-    await createRepositoryChange(baseDir, "workforest", "cli-redesign");
+    await createWorktree(baseDir, "workforest", "cli-redesign");
 
     const result = await executeCli(["migrate", "workspaces"]);
     const rendered = renderResult(result);
@@ -157,7 +157,7 @@ describe("wf migrate workspaces", () => {
     expect(rendered.stdout).toContain("Repository metadata ready");
     expect(rendered.stdout).toContain("workforest/cli-redesign");
     await expect(
-      readRepositoryChangeMetadata(
+      readWorktreeMetadata(
         path.join(baseDir, "Repos", "workforest"),
         "cli-redesign",
       ),
@@ -166,7 +166,7 @@ describe("wf migrate workspaces", () => {
 
   it("previews legacy repo-only directory moves without changing files", async () => {
     const { baseDir, cacheDir } = await createMigrationFixture();
-    const source = await createLegacyRepositoryChange(
+    const source = await createLegacyWorktree(
       baseDir,
       cacheDir,
       "workforest",
@@ -190,11 +190,7 @@ describe("wf migrate workspaces", () => {
 
   it("ignores legacy-looking repo-only directories that are not cached worktrees", async () => {
     const { baseDir } = await createMigrationFixture();
-    const source = await createRepositoryChangeIn(
-      baseDir,
-      "workforest",
-      "main",
-    );
+    const source = await createWorktreeIn(baseDir, "workforest", "main");
 
     const result = await executeCli(["migrate", "workspaces"]);
     const rendered = renderResult(result);
@@ -208,7 +204,7 @@ describe("wf migrate workspaces", () => {
 
   it("moves legacy repo-only directories into repository change paths", async () => {
     const { baseDir, cacheDir } = await createMigrationFixture();
-    const source = await createLegacyRepositoryChange(
+    const source = await createLegacyWorktree(
       baseDir,
       cacheDir,
       "workforest",
@@ -242,10 +238,7 @@ describe("wf migrate workspaces", () => {
       execFileAsync("git", ["status", "--short"], { cwd: target }),
     ).resolves.toHaveProperty("stdout");
     await expect(
-      readRepositoryChangeMetadata(
-        path.join(baseDir, "Repos", "workforest"),
-        "main",
-      ),
+      readWorktreeMetadata(path.join(baseDir, "Repos", "workforest"), "main"),
     ).resolves.toMatchObject({
       workspace: { feature_name: "main" },
       repos: [
@@ -261,7 +254,7 @@ describe("wf migrate workspaces", () => {
 
   it("writes repository metadata under the repo root", async () => {
     const { baseDir } = await createMigrationFixture();
-    await createRepositoryChange(baseDir, "workforest", "cli-redesign");
+    await createWorktree(baseDir, "workforest", "cli-redesign");
 
     const result = await executeCli(["migrate", "workspaces", "--apply"]);
     const rendered = renderResult(result);
@@ -269,7 +262,7 @@ describe("wf migrate workspaces", () => {
     expect(result.exitCode).toBe(0);
     expect(rendered.stdout).toContain("Repository metadata written");
     await expect(
-      readRepositoryChangeMetadata(
+      readWorktreeMetadata(
         path.join(baseDir, "Repos", "workforest"),
         "cli-redesign",
       ),
@@ -309,19 +302,15 @@ async function createTempDir(prefix: string): Promise<string> {
   return dir;
 }
 
-async function createRepositoryChange(
+async function createWorktree(
   baseDir: string,
   repoName: string,
   changeName: string,
 ): Promise<string> {
-  return createRepositoryChangeIn(
-    path.join(baseDir, "Repos"),
-    repoName,
-    changeName,
-  );
+  return createWorktreeIn(path.join(baseDir, "Repos"), repoName, changeName);
 }
 
-async function createLegacyRepositoryChange(
+async function createLegacyWorktree(
   baseDir: string,
   cacheDir: string,
   repoName: string,
@@ -368,7 +357,7 @@ async function createLegacyRepositoryChange(
   return changeDir;
 }
 
-async function createRepositoryChangeIn(
+async function createWorktreeIn(
   rootDir: string,
   repoName: string,
   changeName: string,

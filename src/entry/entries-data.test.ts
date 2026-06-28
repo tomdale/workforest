@@ -12,18 +12,18 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "../workspace/metadata.ts";
 import {
-  type ChangeCandidate,
-  type ChangeScope,
+  type Candidate,
   candidateInScope,
-  cdToChange,
+  cdToEntry,
   dirtyHintFor,
-  filterChangeCandidates,
-  listChangeCandidates,
-} from "./changes-data.ts";
+  filterCandidates,
+  listCandidates,
+  type Scope,
+} from "./entries-data.ts";
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -38,7 +38,7 @@ afterEach(async () => {
   );
 });
 
-describe("listChangeCandidates", () => {
+describe("listCandidates", () => {
   it("flattens workspaces and repositories sorted by most-recently modified", async () => {
     const { baseDir } = await createInventoryFixture();
 
@@ -65,7 +65,7 @@ describe("listChangeCandidates", () => {
       nowSec - 259_200,
     );
 
-    const candidates = await listChangeCandidates(now);
+    const candidates = await listCandidates(now);
     const bySelector = new Map(candidates.map((c) => [c.selector, c]));
 
     expect(bySelector.get("vercel-agent/auth-fix")).toMatchObject({
@@ -94,28 +94,28 @@ describe("listChangeCandidates", () => {
 
   it("returns an empty list when there are no changes", async () => {
     await createConfigFixture();
-    expect(await listChangeCandidates()).toEqual([]);
+    expect(await listCandidates()).toEqual([]);
   });
 });
 
-describe("filterChangeCandidates", () => {
-  const candidates: ChangeCandidate[] = [
+describe("filterCandidates", () => {
+  const candidates: Candidate[] = [
     candidate("vercel-agent/auth-fix", "auth-fix", "workspace"),
     candidate("_adhoc/billing", "billing", "workspace"),
     candidate("workforest/cli-redesign", "cli-redesign", "repository"),
   ];
 
   it("returns all candidates for an empty query", () => {
-    expect(filterChangeCandidates(candidates, "  ")).toEqual(candidates);
+    expect(filterCandidates(candidates, "  ")).toEqual(candidates);
   });
 
   it("matches case-insensitive subsequences and preserves order", () => {
-    const matches = filterChangeCandidates(candidates, "AUF");
+    const matches = filterCandidates(candidates, "AUF");
     expect(matches.map((c) => c.selector)).toEqual(["vercel-agent/auth-fix"]);
   });
 
   it("matches against the selector path too", () => {
-    const matches = filterChangeCandidates(candidates, "workforest");
+    const matches = filterCandidates(candidates, "workforest");
     expect(matches.map((c) => c.selector)).toEqual(["workforest/cli-redesign"]);
   });
 });
@@ -127,7 +127,7 @@ describe("candidateInScope", () => {
   const adhocChange = candidate("_adhoc/billing", "billing", "workspace");
 
   it("matches repository changes under a repo scope", () => {
-    const scope: ChangeScope = { kind: "repo", name: "front" };
+    const scope: Scope = { kind: "repo", name: "front" };
     expect(candidateInScope(repoChange, scope)).toBe(true);
     expect(candidateInScope(otherRepoChange, scope)).toBe(false);
     // A workspace change never belongs to a repo scope, even by name.
@@ -135,26 +135,26 @@ describe("candidateInScope", () => {
   });
 
   it("matches workspace changes under a template scope", () => {
-    const scope: ChangeScope = { kind: "template", name: "agent" };
+    const scope: Scope = { kind: "template", name: "agent" };
     expect(candidateInScope(templateChange, scope)).toBe(true);
     expect(candidateInScope(adhocChange, scope)).toBe(false);
     expect(candidateInScope(repoChange, scope)).toBe(false);
   });
 
   it("matches the adhoc group under an adhoc scope", () => {
-    const scope: ChangeScope = { kind: "adhoc", name: "_adhoc" };
+    const scope: Scope = { kind: "adhoc", name: "_adhoc" };
     expect(candidateInScope(adhocChange, scope)).toBe(true);
     expect(candidateInScope(templateChange, scope)).toBe(false);
   });
 });
 
-describe("cdToChange", () => {
+describe("cdToEntry", () => {
   it("writes the change directory to the shell handoff file", async () => {
     const dir = await createTempDir("workforest-cd-");
     const cdFile = path.join(dir, "cd-target");
     process.env["WORKFOREST_CD_PATH_FILE"] = cdFile;
 
-    await cdToChange(candidate("workforest/x", "x", "repository", "/tmp/x"));
+    await cdToEntry(candidate("workforest/x", "x", "repository", "/tmp/x"));
 
     expect((await readFile(cdFile, "utf8")).trim()).toBe(
       path.resolve("/tmp/x"),
@@ -182,9 +182,9 @@ describe("dirtyHintFor", () => {
 function candidate(
   selector: string,
   changeName: string,
-  kind: ChangeCandidate["kind"],
+  kind: Candidate["kind"],
   candidatePath = `/tmp/${changeName}`,
-): ChangeCandidate {
+): Candidate {
   return {
     selector,
     changeName,
@@ -241,7 +241,7 @@ async function createInventoryFixture(): Promise<{ baseDir: string }> {
       metadataRepo("api", "git@github.com:vercel/api.git"),
     ],
   });
-  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+  await writeWorktreeMetadata(path.dirname(repoChange), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [

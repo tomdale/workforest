@@ -14,13 +14,13 @@ import {
   appendTasks,
   appendWorkspaceRepos,
   getMetadataPath,
-  listRepositoryChangeMetadata,
-  readRepositoryChangeMetadata,
+  listWorktreeMetadata,
   readWorkspaceMetadata,
-  removeRepositoryChangeMetadata,
+  readWorktreeMetadata,
   removeTasks,
-  writeRepositoryChangeMetadata,
+  removeWorktreeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./metadata.ts";
 
 const tempDirs: string[] = [];
@@ -478,7 +478,7 @@ describe("repository change metadata", () => {
   it("writes repository change metadata under the repo root", async () => {
     const repoRootDir = await createWorkspaceDir();
 
-    await writeRepositoryChangeMetadata(repoRootDir, {
+    await writeWorktreeMetadata(repoRootDir, {
       featureName: "fix-auth-bug",
       branchName: "tomdale/fix-auth-bug",
       repos: [
@@ -492,7 +492,7 @@ describe("repository change metadata", () => {
     });
 
     await expect(
-      readRepositoryChangeMetadata(repoRootDir, "fix-auth-bug"),
+      readWorktreeMetadata(repoRootDir, "fix-auth-bug"),
     ).resolves.toMatchObject({
       workspace: { feature_name: "fix-auth-bug" },
       repos: [
@@ -508,7 +508,7 @@ describe("repository change metadata", () => {
 
   it("lists and removes repository change metadata", async () => {
     const repoRootDir = await createWorkspaceDir();
-    await writeRepositoryChangeMetadata(repoRootDir, {
+    await writeWorktreeMetadata(repoRootDir, {
       featureName: "alpha",
       repos: [
         {
@@ -519,7 +519,7 @@ describe("repository change metadata", () => {
         },
       ],
     });
-    await writeRepositoryChangeMetadata(repoRootDir, {
+    await writeWorktreeMetadata(repoRootDir, {
       featureName: "beta",
       repos: [
         {
@@ -531,17 +531,17 @@ describe("repository change metadata", () => {
       ],
     });
 
-    await expect(listRepositoryChangeMetadata(repoRootDir)).resolves.toEqual([
+    await expect(listWorktreeMetadata(repoRootDir)).resolves.toEqual([
       expect.objectContaining({ changeName: "alpha" }),
       expect.objectContaining({ changeName: "beta" }),
     ]);
 
-    await removeRepositoryChangeMetadata(repoRootDir, "alpha");
+    await removeWorktreeMetadata(repoRootDir, "alpha");
 
     await expect(
-      readRepositoryChangeMetadata(repoRootDir, "alpha"),
+      readWorktreeMetadata(repoRootDir, "alpha"),
     ).resolves.toBeNull();
-    await expect(listRepositoryChangeMetadata(repoRootDir)).resolves.toEqual([
+    await expect(listWorktreeMetadata(repoRootDir)).resolves.toEqual([
       expect.objectContaining({ changeName: "beta" }),
     ]);
   });

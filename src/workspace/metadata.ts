@@ -46,7 +46,7 @@ export type WriteMetadataOptions = {
   }[];
 };
 
-export type RepositoryChangeMetadataEntry = Readonly<{
+export type WorktreeMetadataEntry = Readonly<{
   changeName: string;
   metadataPath: string;
   metadata: WorkspaceMetadata;
@@ -86,17 +86,17 @@ export async function writeWorkspaceMetadata(
   await saveWorkspaceMetadata(workspaceDir, metadataFromOptions(options));
 }
 
-export async function writeRepositoryChangeMetadata(
+export async function writeWorktreeMetadata(
   repoRootDir: string,
   options: WriteMetadataOptions,
 ): Promise<void> {
-  const changeName = validateResourceName(options.featureName, "Change name");
+  const changeName = validateResourceName(options.featureName, "Name");
   const metadata = metadataFromOptions({ ...options, featureName: changeName });
-  const metadataPath = getRepositoryChangeMetadataPath(repoRootDir, changeName);
+  const metadataPath = getWorktreeMetadataPath(repoRootDir, changeName);
 
   await withWorkspaceMetadataLock(repoRootDir, async () => {
     await writeMetadataFile(metadataPath, repoRootDir, metadata, {
-      source: "repository change metadata",
+      source: "worktree metadata",
       ensureParent: async () => {
         await assertRepositoryMetadataPathNotSymlink(repoRootDir);
         await fs.mkdir(path.dirname(metadataPath), { recursive: true });
@@ -106,44 +106,41 @@ export async function writeRepositoryChangeMetadata(
   });
 }
 
-export async function readRepositoryChangeMetadata(
+export async function readWorktreeMetadata(
   repoRootDir: string,
   changeName: string,
 ): Promise<WorkspaceMetadata | null> {
-  const safeChangeName = validateResourceName(changeName, "Change name");
-  const metadataPath = getRepositoryChangeMetadataPath(
-    repoRootDir,
-    safeChangeName,
-  );
+  const safeName = validateResourceName(changeName, "Name");
+  const metadataPath = getWorktreeMetadataPath(repoRootDir, safeName);
   const metadata = await readMetadataFile(
     metadataPath,
     repoRootDir,
-    "repository change metadata",
+    "worktree metadata",
   );
   if (!metadata) {
     return null;
   }
-  if (metadata.workspace.feature_name !== safeChangeName) {
+  if (metadata.workspace.feature_name !== safeName) {
     throw new Error(
-      `${metadataPath}.workspace.feature_name must match "${safeChangeName}".`,
+      `${metadataPath}.workspace.feature_name must match "${safeName}".`,
     );
   }
   return metadata;
 }
 
-export async function removeRepositoryChangeMetadata(
+export async function removeWorktreeMetadata(
   repoRootDir: string,
   changeName: string,
 ): Promise<void> {
-  const metadataPath = getRepositoryChangeMetadataPath(repoRootDir, changeName);
+  const metadataPath = getWorktreeMetadataPath(repoRootDir, changeName);
   await withWorkspaceMetadataLock(repoRootDir, async () => {
     await fs.rm(metadataPath, { force: true });
   });
 }
 
-export async function listRepositoryChangeMetadata(
+export async function listWorktreeMetadata(
   repoRootDir: string,
-): Promise<RepositoryChangeMetadataEntry[]> {
+): Promise<WorktreeMetadataEntry[]> {
   const metadataRoot =
     await assertRepositoryMetadataPathNotSymlink(repoRootDir);
   const changesDir = path.join(metadataRoot, REPOSITORY_CHANGES_METADATA_DIR);
@@ -158,7 +155,7 @@ export async function listRepositoryChangeMetadata(
     throw error;
   }
 
-  const changes: RepositoryChangeMetadataEntry[] = [];
+  const changes: WorktreeMetadataEntry[] = [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     const changeName = safeResourceName(entry.name.slice(0, -".json".length));
@@ -168,7 +165,7 @@ export async function listRepositoryChangeMetadata(
     const metadata = await readMetadataFile(
       metadataPath,
       repoRootDir,
-      "repository change metadata",
+      "worktree metadata",
     );
     if (!metadata) continue;
     if (metadata.workspace.feature_name !== changeName) {
@@ -277,21 +274,18 @@ export async function updateWorkspaceRepo(
   });
 }
 
-export async function updateRepositoryChangeRepo(
+export async function updateWorktreeRepo(
   repoRootDir: string,
   changeName: string,
   repo: WorkspaceRepoMetadata,
 ): Promise<WorkspaceMetadata> {
-  const safeChangeName = validateResourceName(changeName, "Change name");
+  const safeName = validateResourceName(changeName, "Name");
   return withWorkspaceMetadataLock(repoRootDir, async () => {
-    const metadata = await readRepositoryChangeMetadata(
-      repoRootDir,
-      safeChangeName,
-    );
+    const metadata = await readWorktreeMetadata(repoRootDir, safeName);
 
     if (!metadata) {
       throw new Error(
-        `Repository change metadata not found at ${getRepositoryChangeMetadataPath(repoRootDir, safeChangeName)}`,
+        `Repository change metadata not found at ${getWorktreeMetadataPath(repoRootDir, safeName)}`,
       );
     }
 
@@ -305,13 +299,10 @@ export async function updateRepositoryChangeRepo(
             index === existingIndex ? repo : entry,
           );
     const nextMetadata = { ...metadata, repos };
-    const metadataPath = getRepositoryChangeMetadataPath(
-      repoRootDir,
-      safeChangeName,
-    );
+    const metadataPath = getWorktreeMetadataPath(repoRootDir, safeName);
 
     await writeMetadataFile(metadataPath, repoRootDir, nextMetadata, {
-      source: "repository change metadata",
+      source: "worktree metadata",
       ensureParent: async () => {
         await assertRepositoryMetadataPathNotSymlink(repoRootDir);
         await fs.mkdir(path.dirname(metadataPath), { recursive: true });
@@ -412,14 +403,14 @@ export function getMetadataPath(workspaceDir: string): string {
   );
 }
 
-export function getRepositoryChangeMetadataPath(
+export function getWorktreeMetadataPath(
   repoRootDir: string,
   changeName: string,
 ): string {
   return path.join(
     getRepositoryMetadataDirPath(repoRootDir),
     REPOSITORY_CHANGES_METADATA_DIR,
-    `${validateResourceName(changeName, "Change name")}.json`,
+    `${validateResourceName(changeName, "Name")}.json`,
   );
 }
 
@@ -773,7 +764,7 @@ function looksLikeToml(content: string): boolean {
 
 function safeResourceName(value: string): string | null {
   try {
-    return validateResourceName(value, "Change name");
+    return validateResourceName(value, "Name");
   } catch {
     return null;
   }

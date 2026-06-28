@@ -11,19 +11,17 @@ describe("shell command model", () => {
       "tasks",
       "reviews",
       "dashboard",
-      "start",
+      "new",
       "list",
       "status",
       "add",
       "switch",
-      "finish",
       "delete",
       "ai",
       "migrate",
       "task",
       "cloud",
       "cache",
-      "worktree",
       "review",
       "template",
       "shell",
@@ -40,18 +38,18 @@ describe("shell command model", () => {
   it("derives scoped commands and flags from leaf metadata", () => {
     const model = createShellCommandModel(commandRegistry);
     const task = model.commands.find((command) => command.name === "task");
-    const start = task?.children.find((command) => command.name === "start");
-    const worktree = model.commands.find(
+    const taskNew = task?.children.find((command) => command.name === "new");
+    const cache = model.commands.find((command) => command.name === "cache");
+    const worktree = cache?.children.find(
       (command) => command.name === "worktree",
     );
 
     expect(task?.children.map((command) => command.name)).toEqual([
-      "start",
+      "new",
       "list",
-      "finish",
       "delete",
     ]);
-    expect(start?.flags.map((flag) => flag.long)).toEqual([
+    expect(taskNew?.flags.map((flag) => flag.long)).toEqual([
       "--repo",
       "--dry-run",
       "--force",

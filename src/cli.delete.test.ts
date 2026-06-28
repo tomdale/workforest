@@ -2,20 +2,20 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OperationalError, UsageError } from "./cli/errors.ts";
-import { runChangeDeleteCommand, runFinishCommand } from "./cli/finish.ts";
+import { runDeleteCommand } from "./cli/delete.ts";
+import { OperationalError } from "./cli/errors.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
-import type { ChangeInventoryEntry } from "./workspace/change-inventory.ts";
+import type { InventoryEntry } from "./workspace/inventory.ts";
 import {
-  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 import type {
-  ChangeRepositoryStatus,
-  ChangeStatus,
-  ChangeTaskStatus,
   DirtySummary,
+  RepositoryStatus,
+  Status,
+  TaskStatus,
 } from "./workspace/status.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -30,11 +30,11 @@ afterEach(async () => {
   );
 });
 
-describe("wf finish", () => {
-  it("refuses dirty and unintegrated repository changes", async () => {
+describe("wf delete", () => {
+  it("refuses dirty and unintegrated worktrees", async () => {
     const fixture = await createCleanupFixture();
-    const cleanupRepositoryChange = vi.fn();
-    const buildChangeStatus = vi.fn(async (entry: ChangeInventoryEntry) =>
+    const cleanupWorktree = vi.fn();
+    const buildStatus = vi.fn(async (entry: InventoryEntry) =>
       statusFor(entry, {
         repositories: [
           repositoryStatus({
@@ -46,13 +46,13 @@ describe("wf finish", () => {
       }),
     );
 
-    const error = await runFinishCommand(
+    const error = await runDeleteCommand(
       invocation(["workforest/cli-redesign"]),
       {
         interactive: false,
         writeShellCdPath: async () => {},
-        buildChangeStatus,
-        cleanupRepositoryChange,
+        buildStatus,
+        cleanupWorktree,
         resolveRepositorySpecifiers: async () => [],
       },
     ).catch((caught: unknown) => caught);
@@ -60,7 +60,7 @@ describe("wf finish", () => {
     expect(error).toBeInstanceOf(OperationalError);
     expect(error).toMatchObject({
       message: expect.stringContaining(
-        "Cannot finish workforest/cli-redesign.",
+        "Cannot delete workforest/cli-redesign.",
       ),
     });
     expect(error).toMatchObject({
@@ -70,50 +70,41 @@ describe("wf finish", () => {
     });
     expect(error).toMatchObject({
       message: expect.stringContaining(
-        "Merge the change branch first, or pass --force if it was integrated another way.",
+        "Merge the branch first, or pass --force if it was integrated another way.",
       ),
     });
-    expect(cleanupRepositoryChange).not.toHaveBeenCalled();
+    expect(cleanupWorktree).not.toHaveBeenCalled();
   });
 
-  it("uses --force to clean a repository change when Workforest cannot prove integration", async () => {
+  it("uses --force to delete a worktree when Workforest cannot prove integration", async () => {
     const fixture = await createCleanupFixture();
     const cdTargets: string[] = [];
-    const cleanupRepositoryChange = vi.fn(async () => ({
+    const cleanupWorktree = vi.fn(async () => ({
       dryRun: false,
       removedRepos: ["workforest"],
       deletedBranches: [],
     }));
-    const buildChangeStatus = vi.fn(async (entry: ChangeInventoryEntry) =>
-      statusFor(entry, {
-        repositories: [
-          repositoryStatus({
-            path: fixture.repoChange,
-            state: "dirty",
-            integrated: false,
-          }),
-        ],
-      }),
-    );
+    const buildStatus = vi.fn();
 
-    await runFinishCommand(
+    await runDeleteCommand(
       invocation(["workforest/cli-redesign"], { force: true }),
       {
         interactive: false,
-        writeShellCdPath: async (targetDir) => {
+        writeShellCdPath: async (targetDir: string) => {
           cdTargets.push(targetDir);
         },
-        buildChangeStatus,
-        cleanupRepositoryChange,
+        buildStatus,
+        cleanupWorktree,
         resolveRepositorySpecifiers: async () => [],
         cwd: path.join(fixture.repoChange, "src"),
       },
     );
 
-    expect(cleanupRepositoryChange).toHaveBeenCalledWith(
+    expect(buildStatus).not.toHaveBeenCalled();
+    expect(cleanupWorktree).toHaveBeenCalledWith(
       expect.objectContaining({
         repoName: "workforest",
-        changePath: fixture.repoChange,
+        targetPath: fixture.repoChange,
       }),
     );
     expect(cdTargets).toEqual([path.dirname(fixture.repoChange)]);
@@ -122,7 +113,7 @@ describe("wf finish", () => {
   it("refuses unmerged nested tasks", async () => {
     const fixture = await createCleanupFixture();
     const cleanupWorkspace = vi.fn();
-    const buildChangeStatus = vi.fn(async (entry: ChangeInventoryEntry) =>
+    const buildStatus = vi.fn(async (entry: InventoryEntry) =>
       statusFor(entry, {
         repositories: [
           repositoryStatus({
@@ -136,76 +127,76 @@ describe("wf finish", () => {
     );
 
     await expect(
-      runFinishCommand(invocation(["_adhoc/experiment"]), {
+      runDeleteCommand(invocation(["_adhoc/experiment"]), {
         interactive: false,
         writeShellCdPath: async () => {},
-        buildChangeStatus,
+        buildStatus,
         cleanupWorkspace,
       }),
     ).rejects.toThrow("wf task delete fix-tests --repo api --force");
     expect(cleanupWorkspace).not.toHaveBeenCalled();
   });
-});
 
-describe("wf delete", () => {
-  it("requires an explicit selector", async () => {
-    await createCleanupFixture();
-
-    await expect(
-      runChangeDeleteCommand(invocation([]), {
-        interactive: false,
-        writeShellCdPath: async () => {},
-      }),
-    ).rejects.toBeInstanceOf(UsageError);
-  });
-
-  it("requires --force without an interactive terminal", async () => {
-    await createCleanupFixture();
-
-    await expect(
-      runChangeDeleteCommand(invocation(["_adhoc/experiment"]), {
-        interactive: false,
-        writeShellCdPath: async () => {},
-      }),
-    ).rejects.toThrow(
-      "Deleting a change requires --force without an interactive terminal.",
-    );
-  });
-
-  it("does not delete when interactive confirmation is rejected", async () => {
-    await createCleanupFixture();
-    const cleanupWorkspace = vi.fn();
-
-    await runChangeDeleteCommand(invocation(["_adhoc/experiment"]), {
-      interactive: true,
-      writeShellCdPath: async () => {},
-      confirm: async () => false,
-      cleanupWorkspace,
-    });
-
-    expect(cleanupWorkspace).not.toHaveBeenCalled();
-  });
-
-  it("deletes a workspace change without integration proof when forced", async () => {
+  it("deletes a verified-clean workspace without --force", async () => {
     const fixture = await createCleanupFixture();
     const cleanupWorkspace = vi.fn(async () => ({
       dryRun: false,
       removedRepos: ["api", "front"],
       deletedBranches: [],
     }));
-    const buildChangeStatus = vi.fn();
-
-    await runChangeDeleteCommand(
-      invocation(["_adhoc/experiment"], { force: true }),
-      {
-        interactive: false,
-        writeShellCdPath: async () => {},
-        buildChangeStatus,
-        cleanupWorkspace,
-      },
+    const buildStatus = vi.fn(async (entry: InventoryEntry) =>
+      statusFor(entry, {
+        repositories: [
+          repositoryStatus({
+            name: "api",
+            path: path.join(fixture.workspace, "api"),
+            integrated: true,
+          }),
+        ],
+      }),
     );
 
-    expect(buildChangeStatus).not.toHaveBeenCalled();
+    await runDeleteCommand(invocation(["_adhoc/experiment"]), {
+      interactive: false,
+      writeShellCdPath: async () => {},
+      buildStatus,
+      cleanupWorkspace,
+    });
+
+    expect(cleanupWorkspace).toHaveBeenCalledWith(
+      fixture.workspace,
+      expect.objectContaining({ keepMirrors: true }),
+    );
+  });
+
+  it("errors when run with no selector outside a worktree or workspace", async () => {
+    await createCleanupFixture();
+
+    await expect(
+      runDeleteCommand(invocation([]), {
+        interactive: false,
+        writeShellCdPath: async () => {},
+      }),
+    ).rejects.toThrow("Not in a Workforest worktree or workspace.");
+  });
+
+  it("deletes a workspace without integration proof when forced", async () => {
+    const fixture = await createCleanupFixture();
+    const cleanupWorkspace = vi.fn(async () => ({
+      dryRun: false,
+      removedRepos: ["api", "front"],
+      deletedBranches: [],
+    }));
+    const buildStatus = vi.fn();
+
+    await runDeleteCommand(invocation(["_adhoc/experiment"], { force: true }), {
+      interactive: false,
+      writeShellCdPath: async () => {},
+      buildStatus,
+      cleanupWorkspace,
+    });
+
+    expect(buildStatus).not.toHaveBeenCalled();
     expect(cleanupWorkspace).toHaveBeenCalledWith(
       fixture.workspace,
       expect.objectContaining({ keepMirrors: true }),
@@ -232,7 +223,7 @@ async function createCleanupFixture(): Promise<{
     mkdir(path.join(workspace, "api"), { recursive: true }),
     mkdir(path.join(workspace, "front"), { recursive: true }),
   ]);
-  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+  await writeWorktreeMetadata(path.dirname(repoChange), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [
@@ -274,17 +265,16 @@ function invocation(
 }
 
 function statusFor(
-  entry: ChangeInventoryEntry,
+  entry: InventoryEntry,
   overrides: Readonly<{
-    repositories?: readonly ChangeRepositoryStatus[];
-    tasks?: readonly ChangeTaskStatus[];
+    repositories?: readonly RepositoryStatus[];
+    tasks?: readonly TaskStatus[];
   }> = {},
-): ChangeStatus {
+): Status {
   return {
     selector: entry.selector,
     type: entry.type,
-    typeLabel:
-      entry.type === "repository-change" ? "repository change" : "workspace",
+    typeLabel: entry.type === "worktree" ? "repository change" : "workspace",
     groupName: entry.groupName,
     changeName: entry.changeName,
     path: entry.path,
@@ -304,8 +294,8 @@ function statusFor(
 }
 
 function repositoryStatus(
-  overrides: Partial<ChangeRepositoryStatus> = {},
-): ChangeRepositoryStatus {
+  overrides: Partial<RepositoryStatus> = {},
+): RepositoryStatus {
   const name = overrides.name ?? "workforest";
   const repoPath = overrides.path ?? `/tmp/${name}`;
 
@@ -325,9 +315,7 @@ function repositoryStatus(
   };
 }
 
-function taskStatus(
-  overrides: Partial<ChangeTaskStatus> = {},
-): ChangeTaskStatus {
+function taskStatus(overrides: Partial<TaskStatus> = {}): TaskStatus {
   return {
     selector: overrides.selector ?? "api/fix-tests",
     parentRepo: overrides.parentRepo ?? "api",

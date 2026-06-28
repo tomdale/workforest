@@ -16,15 +16,15 @@ import {
   buildRepoInitializerWorkerEnvironment,
   cancelRepoInitializations,
   getInitializationDir,
-  initializeRepositoryChangeSetup,
   initializeWorkspaceInitialization,
+  initializeWorktreeSetup,
   REPO_INITIALIZER_WORKER,
   readRepoInitializationState,
   readWorkspaceInitializationState,
-  repositoryChangeInitializationScope,
   retryRepoInitializations,
   runRepoInitializationWorker,
   startRepoInitialization,
+  worktreeInitializationScope,
 } from "./initialization.ts";
 import { writeWorkspaceMetadata } from "./metadata.ts";
 
@@ -260,21 +260,21 @@ describe("background repository initialization", () => {
       path.join(os.tmpdir(), "workforest-repo-initialization-"),
     );
     tempDirs.push(repoRootDir);
-    const firstScope = repositoryChangeInitializationScope({
+    const firstScope = worktreeInitializationScope({
       repoRootDir,
       changeName: "first-change",
     });
-    const secondScope = repositoryChangeInitializationScope({
+    const secondScope = worktreeInitializationScope({
       repoRootDir,
       changeName: "second-change",
     });
 
-    await initializeRepositoryChangeSetup({
+    await initializeWorktreeSetup({
       repoRootDir,
       changeName: "first-change",
       repo,
     });
-    await initializeRepositoryChangeSetup({
+    await initializeWorktreeSetup({
       repoRootDir,
       changeName: "second-change",
       repo,

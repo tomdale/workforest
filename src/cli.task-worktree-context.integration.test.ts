@@ -18,8 +18,8 @@ import {
 import {
   appendTasks,
   readWorkspaceMetadata,
-  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 
 const CLI_MODULE_URL = pathToFileURL(path.resolve("src/cli.ts")).href;
@@ -77,7 +77,7 @@ describe("task command workspace context", () => {
       fixture.workspaceDir,
       fixture.env,
       "task",
-      "start",
+      "new",
       "from-root",
       "--dry-run",
     );
@@ -90,7 +90,7 @@ describe("task command workspace context", () => {
       fixture.workspaceDir,
       fixture.env,
       "task",
-      "start",
+      "new",
       "from-root",
       "--repo",
       "front",
@@ -105,7 +105,7 @@ describe("task command workspace context", () => {
         cwd,
         fixture.env,
         "task",
-        "start",
+        "new",
         cwd === fixture.frontRepoDir ? "from-primary" : "from-task",
         "--dry-run",
       );
@@ -178,25 +178,25 @@ describe("task command workspace context", () => {
   }, 60_000);
 });
 
-describe("task command repository-change context", () => {
+describe("task command worktree context", () => {
   it("infers the parent repository change from repo task paths", async () => {
     const fixture = await createRepositoryTaskFixture();
 
-    const fromRepositoryChange = await runCli(
+    const fromWorktree = await runCli(
       fixture.parentRepoDir,
       fixture.env,
       "task",
       "list",
     );
-    expectSuccess(fromRepositoryChange);
-    expect(fromRepositoryChange.stdout).toContain("existing-task");
-    expect(fromRepositoryChange.stdout).toContain("_tasks/my-feature");
+    expectSuccess(fromWorktree);
+    expect(fromWorktree.stdout).toContain("existing-task");
+    expect(fromWorktree.stdout).toContain("_tasks/my-feature");
 
     const fromTaskWorktree = await runCli(
       fixture.taskDir,
       fixture.env,
       "task",
-      "start",
+      "new",
       "from-task",
       "--dry-run",
     );
@@ -212,16 +212,13 @@ describe("task command repository-change context", () => {
       "--repo",
       "docs",
     );
-    expectUsageFailure(
-      wrongRepo,
-      "Current repository change is front/my-feature",
-    );
+    expectUsageFailure(wrongRepo, "Current worktree is front/my-feature");
 
     const finishTask = await runCli(
       fixture.taskDir,
       fixture.env,
       "task",
-      "finish",
+      "delete",
       "existing-task",
     );
     expectSuccess(finishTask);
@@ -340,7 +337,7 @@ async function createRepositoryTaskFixture(): Promise<RepositoryTaskFixture> {
   );
   await initializeRepository(parentRepoDir, "tomdale/my-feature");
   await createLinkedWorktree(parentRepoDir, taskDir, "tomdale/existing-task");
-  await writeRepositoryChangeMetadata(path.dirname(parentRepoDir), {
+  await writeWorktreeMetadata(path.dirname(parentRepoDir), {
     featureName: "my-feature",
     branchName: "tomdale/my-feature",
     repos: [

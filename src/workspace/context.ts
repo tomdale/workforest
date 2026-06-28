@@ -9,8 +9,8 @@ import {
   TASKS_DIRECTORY_NAME,
 } from "./paths.ts";
 
-export type RepositoryChangeContext = Readonly<{
-  kind: "repository-change";
+export type WorktreeContext = Readonly<{
+  kind: "worktree";
   selector: string;
   repoName: string;
   changeName: string;
@@ -23,16 +23,16 @@ export type RepositoryRootContext = Readonly<{
   path: string;
 }>;
 
-export type TemplateWorkspaceChangeContext = Readonly<{
-  kind: "template-workspace-change";
+export type TemplateWorkspaceContext = Readonly<{
+  kind: "template-workspace";
   selector: string;
   groupName: string;
   changeName: string;
   path: string;
 }>;
 
-export type AdhocWorkspaceChangeContext = Readonly<{
-  kind: "adhoc-workspace-change";
+export type AdhocWorkspaceContext = Readonly<{
+  kind: "adhoc-workspace";
   selector: string;
   groupName: typeof ADHOC_WORKSPACE_GROUP;
   changeName: string;
@@ -56,7 +56,7 @@ export type NestedTaskContext = Readonly<{
   changeName: string;
   taskName: string;
   path: string;
-  parentKind: "repository-change" | "workspace-change";
+  parentKind: "worktree" | "workspace";
   groupName?: string;
 }>;
 
@@ -72,10 +72,10 @@ export type OutsideWorkforestContext = Readonly<{
 }>;
 
 export type WorkforestManagedContext =
-  | RepositoryChangeContext
+  | WorktreeContext
   | RepositoryRootContext
-  | TemplateWorkspaceChangeContext
-  | AdhocWorkspaceChangeContext
+  | TemplateWorkspaceContext
+  | AdhocWorkspaceContext
   | WorkspaceRepoContext
   | NestedTaskContext
   | ReviewCheckoutContext
@@ -151,40 +151,40 @@ function resolveRepositoryContext(
     if (!third || !fourth) {
       return null;
     }
-    const safeChangeName = safeResourceName(third);
+    const safeName = safeResourceName(third);
     const safeTaskName = safeResourceName(fourth);
-    if (!safeChangeName || !safeTaskName) {
+    if (!safeName || !safeTaskName) {
       return null;
     }
     const taskPath = path.join(
       directories.repos,
       safeRepoName,
       TASKS_DIRECTORY_NAME,
-      safeChangeName,
+      safeName,
       safeTaskName,
     );
     return {
       kind: "nested-task",
-      parentKind: "repository-change",
-      parentSelector: `${safeRepoName}/${safeChangeName}`,
+      parentKind: "worktree",
+      parentSelector: `${safeRepoName}/${safeName}`,
       repoName: safeRepoName,
-      changeName: safeChangeName,
+      changeName: safeName,
       taskName: safeTaskName,
       path: taskPath,
     };
   }
 
-  const safeChangeName = safeResourceName(second);
-  if (!safeChangeName) {
+  const safeName = safeResourceName(second);
+  if (!safeName) {
     return null;
   }
-  const changePath = path.join(repositoryRootPath, safeChangeName);
+  const targetPath = path.join(repositoryRootPath, safeName);
   return {
-    kind: "repository-change",
-    selector: `${safeRepoName}/${safeChangeName}`,
+    kind: "worktree",
+    selector: `${safeRepoName}/${safeName}`,
     repoName: safeRepoName,
-    changeName: safeChangeName,
-    path: changePath,
+    changeName: safeName,
+    path: targetPath,
   };
 }
 
@@ -202,17 +202,17 @@ function resolveWorkspaceContext(
     return null;
   }
   const safeGroupName = safeWorkspaceGroupName(groupName);
-  const safeChangeName = safeResourceName(changeName);
-  if (!safeGroupName || !safeChangeName) {
+  const safeName = safeResourceName(changeName);
+  if (!safeGroupName || !safeName) {
     return null;
   }
 
   const workspacePath = path.join(
     directories.workspaces,
     safeGroupName,
-    safeChangeName,
+    safeName,
   );
-  const selector = `${safeGroupName}/${safeChangeName}`;
+  const selector = `${safeGroupName}/${safeName}`;
 
   if (third === TASKS_DIRECTORY_NAME) {
     if (!fourth || !fifth) {
@@ -225,11 +225,11 @@ function resolveWorkspaceContext(
     }
     return {
       kind: "nested-task",
-      parentKind: "workspace-change",
+      parentKind: "workspace",
       parentSelector: selector,
       groupName: safeGroupName,
       repoName: safeRepoName,
-      changeName: safeChangeName,
+      changeName: safeName,
       taskName: safeTaskName,
       path: path.join(
         workspacePath,
@@ -244,17 +244,17 @@ function resolveWorkspaceContext(
   if (!safeRepoName) {
     return safeGroupName === ADHOC_WORKSPACE_GROUP
       ? {
-          kind: "adhoc-workspace-change",
+          kind: "adhoc-workspace",
           selector,
           groupName: ADHOC_WORKSPACE_GROUP,
-          changeName: safeChangeName,
+          changeName: safeName,
           path: workspacePath,
         }
       : {
-          kind: "template-workspace-change",
+          kind: "template-workspace",
           selector,
           groupName: safeGroupName,
-          changeName: safeChangeName,
+          changeName: safeName,
           path: workspacePath,
         };
   }
@@ -263,7 +263,7 @@ function resolveWorkspaceContext(
     kind: "workspace-repo",
     selector,
     groupName: safeGroupName,
-    changeName: safeChangeName,
+    changeName: safeName,
     repoName: safeRepoName,
     workspacePath,
     path: path.join(workspacePath, safeRepoName),
@@ -317,7 +317,7 @@ function safeRepositoryComponent(value: string): string | null {
 
 function safeResourceName(value: string): string | null {
   try {
-    return validateResourceName(value, "Change name");
+    return validateResourceName(value, "Name");
   } catch {
     return null;
   }

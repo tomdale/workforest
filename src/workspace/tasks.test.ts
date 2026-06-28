@@ -350,7 +350,7 @@ describe("workspace tasks", () => {
     ).resolves.not.toHaveProperty("tasks");
   });
 
-  it("refuses to finish stale workspace tasks", async () => {
+  it("prunes stale workspace tasks on delete", async () => {
     const workspaceDir = await createWorkspaceDir();
     await appendTasks(workspaceDir, [
       {
@@ -364,19 +364,19 @@ describe("workspace tasks", () => {
         setup_status: "ready",
       },
     ]);
-    const { finishTasks } = await import("./tasks.ts");
+    runGitMock.mockResolvedValue({ stdout: "", stderr: "" });
+    const { deleteTasks } = await import("./tasks.ts");
 
-    await expect(
-      finishTasks({
-        workspaceDir,
-        slugs: ["fix-tests"],
-        parentRepoName: "front",
-      }),
-    ).rejects.toThrow('Task "fix-tests" is stale.');
-    expect(runGitMock).not.toHaveBeenCalled();
-    await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
-      tasks: [expect.objectContaining({ slug: "fix-tests" })],
+    const result = await deleteTasks({
+      workspaceDir,
+      slugs: ["fix-tests"],
+      parentRepoName: "front",
     });
+
+    expect(result.removed.map((entry) => entry.slug)).toEqual(["fix-tests"]);
+    await expect(
+      readWorkspaceMetadata(workspaceDir),
+    ).resolves.not.toHaveProperty("tasks");
   });
 
   it("refuses destructive cleanup when a setup log ancestor is a symlink", async () => {
@@ -418,7 +418,7 @@ describe("workspace tasks", () => {
     expect(runGitMock).not.toHaveBeenCalled();
   });
 
-  it("creates repository-change tasks under the reserved change task path", async () => {
+  it("creates worktree tasks under the reserved change task path", async () => {
     const repoRootDir = await mkdtemp(
       path.join(os.tmpdir(), "workforest-repo-"),
     );
@@ -467,7 +467,7 @@ describe("workspace tasks", () => {
     );
   });
 
-  it("lists repository-change tasks from reserved task directories", async () => {
+  it("lists worktree tasks from reserved task directories", async () => {
     const repoRootDir = await mkdtemp(
       path.join(os.tmpdir(), "workforest-repo-"),
     );
@@ -502,7 +502,7 @@ describe("workspace tasks", () => {
     ]);
   });
 
-  it("finishes merged repository-change tasks", async () => {
+  it("deletes merged worktree tasks", async () => {
     const repoRootDir = await mkdtemp(
       path.join(os.tmpdir(), "workforest-repo-"),
     );
@@ -510,7 +510,7 @@ describe("workspace tasks", () => {
     const parentRepoDir = path.join(repoRootDir, "my-feature");
     const taskDir = path.join(repoRootDir, "_tasks", "my-feature", "fix-tests");
     await mkdir(taskDir, { recursive: true });
-    const { finishRepositoryTasks } = await import("./tasks.ts");
+    const { deleteRepositoryTasks } = await import("./tasks.ts");
 
     runGitMock
       .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
@@ -523,7 +523,7 @@ describe("workspace tasks", () => {
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     await expect(
-      finishRepositoryTasks({
+      deleteRepositoryTasks({
         parentRepoDir,
         repoName: "front",
         changeName: "my-feature",

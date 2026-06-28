@@ -5,17 +5,15 @@ import { resolveCommand } from "./cli/resolve-command.ts";
 import type { ResolvedCommand } from "./cli/types.ts";
 
 const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
-  ["start"],
+  ["new"],
   ["add"],
   ["switch"],
   ["list"],
   ["status"],
-  ["finish"],
   ["delete"],
   ["migrate", "workspaces"],
-  ["task", "start"],
+  ["task", "new"],
   ["task", "list"],
-  ["task", "finish"],
   ["task", "delete"],
   ["cache", "list"],
   ["cache", "show"],
@@ -23,10 +21,10 @@ const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["cache", "doctor"],
   ["cache", "delete"],
   ["cache", "clean"],
-  ["worktree", "list"],
-  ["worktree", "add"],
-  ["worktree", "move"],
-  ["worktree", "remove"],
+  ["cache", "worktree", "list"],
+  ["cache", "worktree", "add"],
+  ["cache", "worktree", "move"],
+  ["cache", "worktree", "remove"],
   ["review", "open"],
   ["review", "checkout"],
   ["template", "open"],
@@ -46,7 +44,6 @@ describe("final CLI contract", () => {
   it.each([
     ["task delete", ["task", "delete"]],
     ["cache delete", ["cache", "delete"]],
-    ["delete", ["delete"]],
   ] as const)("%s requires an explicit target", (_name, argv) => {
     expect(() => parseInvocation(resolve(argv))).toThrow(/Invalid operands/);
   });

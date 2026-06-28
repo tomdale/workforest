@@ -15,7 +15,7 @@ pnpm biome check .      # Lint and format check
 pnpm biome check --write .  # Auto-fix lint/format issues
 
 # Run CLI during development
-node bin/workforest.js start <change> <org/repo...|@template>
+node bin/workforest.js new <name> <org/repo...|@template>
 node bin/workforest.js templates
 ```
 
@@ -64,23 +64,28 @@ This silently bypasses large parts of the CLI:
 - Any code path gated on `process.stdout.isTTY` is invisible to automated tests
 
 **After any change that touches the TUI, prompt flow, or
-`wf start` end-to-end path, smoke-test in a real terminal using
+`wf new` end-to-end path, smoke-test in a real terminal using
 tmux:**
 
 ```bash
-# Spin up a PTY session that exercises the full interactive path
+# Open the interactive entry surface in a real PTY.
+# Use a scratch config dir so the smoke test can't touch real workspaces.
+CFG=$(mktemp -d)
 tmux new-session -d -s wf-smoke -x 120 -y 40
-tmux send-keys -t wf-smoke 'pnpm exec tsx bin/workforest.js dev simulate new --speed fast' Enter
-sleep 1
+tmux send-keys -t wf-smoke \
+  "WORKFOREST_USE_SOURCE_CLI=1 WORKFOREST_CONFIG_DIR=$CFG pnpm exec tsx bin/workforest.js" Enter
+sleep 8
 tmux capture-pane -t wf-smoke -p   # inspect what the user actually sees
-# Drive the prompts, then watch the TUI grid render
+tmux send-keys -t wf-smoke Escape  # cancel without creating anything
 tmux kill-session -t wf-smoke
 ```
 
 Key things to verify:
-- Inline prompts render and accept input correctly
+- Inline prompts and the fuzzy entry surface render and accept input correctly
 - `shouldUseGrid()` returns `true` in the tmux PTY (it has a real TTY)
-- The `@unblessed` grid appears and updates as repos are set up
+- The `@unblessed` setup grid appears and updates as repos are set up — this
+  only happens on a real `wf new <name> <repo>`, so exercise it against a
+  throwaway name and clean up afterward with `wf delete`
 - The process exits cleanly after completion
 
 Do not rely solely on `pnpm test` to validate user-facing behavior — the test suite

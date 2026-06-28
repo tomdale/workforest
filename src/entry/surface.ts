@@ -20,68 +20,68 @@ import {
   toBlessed,
 } from "../terminal/theme-system.ts";
 import {
-  type ChangeCandidate,
-  type ChangeScope,
+  type Candidate,
   candidateInScope,
-  cdToChange,
-  listChangeCandidates,
-} from "./changes-data.ts";
+  cdToEntry,
+  listCandidates,
+  type Scope,
+} from "./entries-data.ts";
 import {
   type ChosenSource,
-  type InferredChange,
-  inferChange,
+  type InferredEntry,
+  inferEntry,
   listSourceCandidates,
   type SourceCandidate,
 } from "./sources-data.ts";
 
 /**
- * The universal "go to or create a change" surface — the interactive front door
- * opened by bare `wf` (go-or-create) and `wf start` (create-only).
+ * The universal "go to or create a worktree or workspace" surface, opened by
+ * bare `wf` (go-or-create) and `wf new` (create-only).
  *
  * It is one continuous fullscreen flow: Phase 1 resolves a change name (matching
  * existing changes in go-mode), Phase 2 accumulates sources for a new change,
  * and on commit the surface tears itself down and hands off to the setup grid +
- * confetti (driven by {@link ChangeEntryDeps.commitChange}). It never returns to
+ * confetti (driven by {@link EntryDeps.commit}). It never returns to
  * the normal terminal until the work is done.
  */
 
-export type ChangeEntryMode = "go" | "create";
+export type EntryMode = "go" | "create";
 
 /** Where a new change is provisioned: this machine, or a cloud sandbox. */
-export type ChangeTarget = "local" | "cloud";
+export type EntryTarget = "local" | "cloud";
 
-export type ChangeEntryDeps = Readonly<{
+export type EntryDeps = Readonly<{
   /**
    * Resolve the chosen name + sources into a real change: build worktrees, run
    * setup through the grid, show the confetti modal, and cd on acknowledgement.
    * Injected so the surface stays decoupled from the creation core. `target`
    * selects local vs cloud provisioning.
    */
-  commitChange: (intent: {
+  commit: (intent: {
     changeName: string;
     sources: ChosenSource[];
-    target: ChangeTarget;
+    target: EntryTarget;
   }) => Promise<void>;
   /** Target highlighted first when the command line supplies a preference. */
-  initialTarget?: ChangeTarget;
+  initialTarget?: EntryTarget;
   /**
    * The Workforest container the command was launched from, when inside one.
    * Phase 1 defaults its change list to this scope (Tab toggles to all changes)
    * and Phase 2 defaults its source mode and highlight to it.
    */
-  scope?: ChangeScope;
+  scope?: Scope;
 }>;
 
 type Phase1Result =
-  | { kind: "cd"; candidate: ChangeCandidate }
+  | { kind: "cd"; candidate: Candidate }
   | { kind: "create"; changeName: string }
   | { kind: "cancel" };
 
 const PREVIEW_HEIGHT = 7;
 
-export async function runChangeEntry(
-  mode: ChangeEntryMode,
-  deps: ChangeEntryDeps,
+export async function runEntry(
+  mode: EntryMode,
+  deps: EntryDeps,
 ): Promise<void> {
   const screen = createFullscreenScreen();
   let torn = false;
@@ -95,7 +95,7 @@ export async function runChangeEntry(
     const phase1 = await runPhase1(screen, mode, deps.scope);
     if (phase1.kind === "cancel") return;
     if (phase1.kind === "cd") {
-      await cdToChange(phase1.candidate);
+      await cdToEntry(phase1.candidate);
       return;
     }
 
@@ -107,15 +107,13 @@ export async function runChangeEntry(
 
     // Hand off to the setup grid + confetti, which owns its own screen.
     teardown();
-    await deps.commitChange({ changeName: phase1.changeName, sources, target });
+    await deps.commit({ changeName: phase1.changeName, sources, target });
   } finally {
     teardown();
   }
 }
 
-function toChangeItems(
-  candidates: ChangeCandidate[],
-): FuzzyItem<ChangeCandidate>[] {
+function toEntryItems(candidates: Candidate[]): FuzzyItem<Candidate>[] {
   return candidates.map((candidate) => ({
     value: candidate,
     label: candidate.changeName,
@@ -125,10 +123,10 @@ function toChangeItems(
 
 async function runPhase1(
   screen: FullscreenScreen,
-  mode: ChangeEntryMode,
-  scope: ChangeScope | undefined,
+  mode: EntryMode,
+  scope: Scope | undefined,
 ): Promise<Phase1Result> {
-  const candidates = mode === "go" ? await listChangeCandidates() : [];
+  const candidates = mode === "go" ? await listCandidates() : [];
 
   // When launched inside a Workforest container, default the list to that
   // scope's changes; fall back to the full list when the scope has none.
@@ -145,19 +143,19 @@ async function runPhase1(
   const scopeName = scope ? describeScope(scope) : "";
   const scopeOptions = [
     { label: `in ${scopeName}`, name: scopeName },
-    { label: "all changes" },
+    { label: "all" },
   ];
   const activeScopeIndex = (): number => (showingScoped ? 0 : 1);
-  const itemsNow = (): FuzzyItem<ChangeCandidate>[] =>
-    toChangeItems(showingScoped ? scoped : candidates);
+  const itemsNow = (): FuzzyItem<Candidate>[] =>
+    toEntryItems(showingScoped ? scoped : candidates);
 
   const placeholder =
     mode === "go"
-      ? "type to find a change, or a new name to create one"
-      : "type a name for the new change";
+      ? "type to find one, or a new name to create one"
+      : "type a name to create one";
 
   while (true) {
-    const list = createFuzzyList<ChangeCandidate>({
+    const list = createFuzzyList<Candidate>({
       screen,
       items: itemsNow(),
       placeholder,
@@ -177,9 +175,7 @@ async function runPhase1(
         label: (query) => {
           const name = query.trim();
           if (name) return `✛ Create "${name}"`;
-          return mode === "go"
-            ? "✛ Create a new change"
-            : "✛ Type a name to create a change";
+          return mode === "go" ? "✛ Create new" : "✛ Type a name to create one";
         },
       },
     });
@@ -195,12 +191,12 @@ async function runPhase1(
 }
 
 /** A short human label for a scope, e.g. "front" or "vercel-agent". */
-function describeScope(scope: ChangeScope): string {
+function describeScope(scope: Scope): string {
   return scope.name;
 }
 
 /**
- * The kind of change being assembled. Each mode maps to one of `wf start`'s
+ * The kind of change being assembled. Each mode maps to one of `wf new`'s
  * outcomes and filters the source list accordingly:
  * - `repo`     — one repository (a single-repo change)
  * - `template` — one saved `@template` (a template workspace)
@@ -232,7 +228,7 @@ function modeScopeToggle(mode: SourceMode): FuzzyScopeToggle {
 }
 
 /** The mode to open Phase 2 in, defaulted from the launch scope. */
-function initialMode(scope: ChangeScope | undefined): SourceMode {
+function initialMode(scope: Scope | undefined): SourceMode {
   switch (scope?.kind) {
     case "template":
       return "template";
@@ -249,7 +245,7 @@ function initialMode(scope: ChangeScope | undefined): SourceMode {
  * (without auto-adding it). Only meaningful for the single-source modes.
  */
 function preselectFor(
-  scope: ChangeScope | undefined,
+  scope: Scope | undefined,
   mode: SourceMode,
 ): ((candidate: SourceCandidate) => boolean) | undefined {
   if (!scope) return undefined;
@@ -268,7 +264,7 @@ function preselectFor(
 async function runPhase2(
   screen: FullscreenScreen,
   changeName: string,
-  scope: ChangeScope | undefined,
+  scope: Scope | undefined,
 ): Promise<ChosenSource[] | null> {
   const candidates = await listSourceCandidates();
   const repoCandidates = candidates.filter(
@@ -388,11 +384,11 @@ async function runPhase2(
  */
 async function runTargetStep(
   screen: FullscreenScreen,
-  initialTarget: ChangeTarget = "local",
-): Promise<ChangeTarget | null> {
-  const list = createFuzzyList<ChangeTarget>({
+  initialTarget: EntryTarget = "local",
+): Promise<EntryTarget | null> {
+  const list = createFuzzyList<EntryTarget>({
     screen,
-    prompt: "Where should this change run?",
+    prompt: "Where should this run?",
     items: [
       { value: "local", label: "Local", hint: "worktrees on this machine" },
       { value: "cloud", label: "Cloud", hint: "Vercel Sandbox" },
@@ -422,8 +418,8 @@ function actionLabel(
       : "· add one or more repositories";
   }
   return mode === "template"
-    ? "· select a template to create the change"
-    : "· select a repository to create the change";
+    ? "· select a template to create it"
+    : "· select a repository to create it";
 }
 
 function sourceFromCandidate(candidate: SourceCandidate): ChosenSource {
@@ -550,7 +546,7 @@ async function describeInferred(
   chosen: ChosenSource[],
 ): Promise<TerminalLineInput> {
   try {
-    const result: InferredChange = await inferChange({
+    const result: InferredEntry = await inferEntry({
       changeName,
       sources: chosen,
     });

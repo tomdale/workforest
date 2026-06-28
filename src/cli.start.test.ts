@@ -6,20 +6,20 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "./cli/errors.ts";
 import {
-  parseStartOperands,
-  type RunStartCommandOptions,
-  runStartCommand,
-} from "./cli/start.ts";
+  parseNewOperands,
+  type RunNewCommandOptions,
+  runNewCommand,
+} from "./cli/new.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { createTemplate, createTemplateVariant } from "./templates/index.ts";
-import { buildCreateChangeInput } from "./workspace/create-change.ts";
+import { buildCreateInput } from "./workspace/create.ts";
 import {
   type RepoInitializationState,
   readRepoInitializationState,
 } from "./workspace/initialization.ts";
 import {
-  readRepositoryChangeMetadata,
+  readWorktreeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
 
@@ -30,14 +30,14 @@ const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 const ORIGINAL_CWD = process.cwd();
 const tempDirs: string[] = [];
 type CreateSingleWorktree = NonNullable<
-  RunStartCommandOptions["createSingleWorktree"]
+  RunNewCommandOptions["createSingleWorktree"]
 >;
 type StartRepoInitialization = NonNullable<
-  RunStartCommandOptions["startRepoInitialization"]
+  RunNewCommandOptions["startRepoInitialization"]
 >;
-type StampWorkspace = NonNullable<RunStartCommandOptions["stampWorkspace"]>;
+type StampWorkspace = NonNullable<RunNewCommandOptions["stampWorkspace"]>;
 type RenderPipelinesGrid = NonNullable<
-  RunStartCommandOptions["renderPipelinesGrid"]
+  RunNewCommandOptions["renderPipelinesGrid"]
 >;
 
 afterEach(async () => {
@@ -51,23 +51,26 @@ afterEach(async () => {
   );
 });
 
-describe("parseStartOperands", () => {
+describe("parseNewOperands", () => {
   it("parses repository, template, multiple-repository, and current-context sources", () => {
-    expect(parseStartOperands(["redesign-cli", "tomdale/workforest"])).toEqual({
+    expect(parseNewOperands(["redesign-cli", "tomdale/workforest"])).toEqual({
       changeName: "redesign-cli",
       source: { kind: "repositories", tokens: ["tomdale/workforest"] },
     });
-    expect(parseStartOperands(["auth-fix", "@vercel-agent"])).toEqual({
+    expect(parseNewOperands(["auth-fix", "@vercel-agent"])).toEqual({
       changeName: "auth-fix",
       source: { kind: "template", templateName: "vercel-agent" },
     });
-    expect(
-      parseStartOperands(["billing", "vercel/front", "vercel/api"]),
-    ).toEqual({
-      changeName: "billing",
-      source: { kind: "repositories", tokens: ["vercel/front", "vercel/api"] },
-    });
-    expect(parseStartOperands(["follow-up"])).toEqual({
+    expect(parseNewOperands(["billing", "vercel/front", "vercel/api"])).toEqual(
+      {
+        changeName: "billing",
+        source: {
+          kind: "repositories",
+          tokens: ["vercel/front", "vercel/api"],
+        },
+      },
+    );
+    expect(parseNewOperands(["follow-up"])).toEqual({
       changeName: "follow-up",
       source: { kind: "current" },
     });
@@ -75,15 +78,15 @@ describe("parseStartOperands", () => {
 
   it("rejects mixed or empty template sources", () => {
     expect(() =>
-      parseStartOperands(["auth-fix", "@vercel-agent", "vercel/api"]),
+      parseNewOperands(["auth-fix", "@vercel-agent", "vercel/api"]),
     ).toThrow("Template sources cannot be combined with repository sources.");
-    expect(() => parseStartOperands(["auth-fix", "@"])).toThrow(
+    expect(() => parseNewOperands(["auth-fix", "@"])).toThrow(
       "Template source must be @<template>.",
     );
   });
 });
 
-describe("wf start", () => {
+describe("wf new", () => {
   it("routes a single repository source to the repository change layout", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
@@ -120,7 +123,7 @@ describe("wf start", () => {
       },
     );
 
-    await runStartCommand(invocation(["redesign-cli", "front"]), {
+    await runNewCommand(invocation(["redesign-cli", "front"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       createSingleWorktree: created,
@@ -139,7 +142,7 @@ describe("wf start", () => {
     });
     expect(started).toHaveBeenCalledWith({
       scope: {
-        kind: "repository-change",
+        kind: "worktree",
         repoRootDir: path.join(fixture.baseDir, "Repos", "front"),
         changeName: "redesign-cli",
       },
@@ -153,7 +156,7 @@ describe("wf start", () => {
       path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
     ]);
     await expect(
-      readRepositoryChangeMetadata(
+      readWorktreeMetadata(
         path.join(fixture.baseDir, "Repos", "front"),
         "redesign-cli",
       ),
@@ -185,11 +188,11 @@ describe("wf start", () => {
       async () => new Map([["front", { hasLockfile: false }]]),
     );
 
-    await runStartCommand(invocation(["redesign-cli", "front"]), {
+    await runNewCommand(invocation(["redesign-cli", "front"]), {
       interactive: true,
       writeShellCdPath: fixture.writeShellCdPath,
       createSingleWorktree: created,
-      initializeRepositoryChangeSetup: vi.fn(async () => undefined),
+      initializeWorktreeSetup: vi.fn(async () => undefined),
       shouldUseGrid: () => true,
       renderPipelinesGrid,
     });
@@ -218,7 +221,7 @@ describe("wf start", () => {
     );
     const created = fakeCreateSingleWorktree();
 
-    await runStartCommand(
+    await runNewCommand(
       invocation(["fix-auth", "front"], { branch: "tomdale/custom" }),
       {
         interactive: false,
@@ -238,7 +241,7 @@ describe("wf start", () => {
       targetDir: path.join(fixture.baseDir, "Repos", "front", "fix-auth"),
     });
     await expect(
-      readRepositoryChangeMetadata(
+      readWorktreeMetadata(
         path.join(fixture.baseDir, "Repos", "front"),
         "fix-auth",
       ),
@@ -268,7 +271,7 @@ describe("wf start", () => {
     });
     const stamped = fakeStampWorkspace();
 
-    await runStartCommand(invocation(["auth-fix", "@vercel-agent"]), {
+    await runNewCommand(invocation(["auth-fix", "@vercel-agent"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       stampWorkspace: stamped,
@@ -313,7 +316,7 @@ describe("wf start", () => {
     });
     const stamped = fakeStampWorkspace();
 
-    await runStartCommand(invocation(["auth-fix", "@vercel-agent+chat"]), {
+    await runNewCommand(invocation(["auth-fix", "@vercel-agent+chat"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       stampWorkspace: stamped,
@@ -353,7 +356,7 @@ describe("wf start", () => {
     });
     const stamped = fakeStampWorkspace();
 
-    await runStartCommand(
+    await runNewCommand(
       invocation(["auth-fix", "@vercel-agent"], { branch: "tomdale/custom" }),
       {
         interactive: false,
@@ -396,7 +399,7 @@ describe("wf start", () => {
     );
     const stamped = fakeStampWorkspace();
 
-    await runStartCommand(invocation(["billing", "front", "api"]), {
+    await runNewCommand(invocation(["billing", "front", "api"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       stampWorkspace: stamped,
@@ -440,7 +443,7 @@ describe("wf start", () => {
     );
     const stamped = fakeStampWorkspace();
 
-    await runStartCommand(
+    await runNewCommand(
       invocation(["billing", "front", "api"], { branch: "tomdale/custom" }),
       {
         interactive: false,
@@ -491,7 +494,7 @@ describe("wf start", () => {
     process.chdir(currentDir);
     const created = fakeCreateSingleWorktree();
 
-    await runStartCommand(invocation(["follow-up"]), {
+    await runNewCommand(invocation(["follow-up"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       createSingleWorktree: created,
@@ -519,7 +522,7 @@ describe("wf start", () => {
     const created = fakeCreateSingleWorktree();
     const started = fakeStartRepoInitialization();
 
-    await runStartCommand(invocation(["follow-up"]), {
+    await runNewCommand(invocation(["follow-up"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       createSingleWorktree: created,
@@ -537,7 +540,7 @@ describe("wf start", () => {
     });
     expect(started).toHaveBeenCalledWith({
       scope: {
-        kind: "repository-change",
+        kind: "worktree",
         repoRootDir: currentDir,
         changeName: "follow-up",
       },
@@ -570,7 +573,7 @@ describe("wf start", () => {
     process.chdir(apiDir);
     const stamped = fakeStampWorkspace();
 
-    await runStartCommand(invocation(["follow-up"]), {
+    await runNewCommand(invocation(["follow-up"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
       stampWorkspace: stamped,
@@ -606,14 +609,14 @@ describe("wf start", () => {
     process.chdir(outsideDir);
 
     await expect(
-      runStartCommand(invocation(["follow-up"]), {
+      runNewCommand(invocation(["follow-up"]), {
         interactive: false,
         writeShellCdPath: fixture.writeShellCdPath,
       }),
     ).rejects.toThrow(
       [
         "Not in a Workforest-managed repo or workspace.",
-        "Start explicitly: wf start <change> <repo|@template>",
+        "Create explicitly: wf new <name> <repo|@template>",
       ].join("\n"),
     );
   });
@@ -622,7 +625,7 @@ describe("wf start", () => {
     ["   ", 'Flag "--branch" requires a non-empty branch name.'],
     ["bad..name", "Invalid Git branch name: bad..name"],
   ])("rejects invalid explicit branch values %#", async (branch, message) => {
-    const result = runStartCommand(
+    const result = runNewCommand(
       invocation(["fix-auth", "front"], { branch }),
       noOpStartOptions(),
     );
@@ -632,7 +635,7 @@ describe("wf start", () => {
   });
 });
 
-describe("buildCreateChangeInput", () => {
+describe("buildCreateInput", () => {
   it("resolves a single repo token to a repository change input", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
@@ -641,7 +644,7 @@ describe("buildCreateChangeInput", () => {
       "git@github.com:vercel/front.git",
     );
 
-    const input = await buildCreateChangeInput({
+    const input = await buildCreateInput({
       changeName: "redesign-cli",
       sources: [{ kind: "repo", token: "front" }],
     });
@@ -671,7 +674,7 @@ describe("buildCreateChangeInput", () => {
       );
     }
 
-    const input = await buildCreateChangeInput({
+    const input = await buildCreateInput({
       changeName: "billing",
       sources: [
         { kind: "repo", token: "front" },
@@ -695,7 +698,7 @@ describe("buildCreateChangeInput", () => {
       branchPrefix: "agent",
     });
 
-    const input = await buildCreateChangeInput({
+    const input = await buildCreateInput({
       changeName: "auth-fix",
       sources: [{ kind: "template", name: "vercel-agent" }],
     });
@@ -715,7 +718,7 @@ describe("buildCreateChangeInput", () => {
       "git@github.com:vercel/front.git",
     );
 
-    const input = await buildCreateChangeInput({
+    const input = await buildCreateInput({
       changeName: "fix-auth",
       sources: [{ kind: "repo", token: "front" }],
       branchOverride: "tomdale/custom",
@@ -728,7 +731,7 @@ describe("buildCreateChangeInput", () => {
     await createStartFixture();
 
     await expect(
-      buildCreateChangeInput({
+      buildCreateInput({
         changeName: "auth-fix",
         sources: [
           { kind: "template", name: "vercel-agent" },
@@ -744,7 +747,7 @@ describe("buildCreateChangeInput", () => {
     await createStartFixture();
 
     await expect(
-      buildCreateChangeInput({ changeName: "auth-fix", sources: [] }),
+      buildCreateInput({ changeName: "auth-fix", sources: [] }),
     ).rejects.toThrow("No repositories specified.");
   });
 });
@@ -811,7 +814,7 @@ function invocation(
   return { beforeDoubleDash, flags } as ParsedInvocation;
 }
 
-function noOpStartOptions(): RunStartCommandOptions {
+function noOpStartOptions(): RunNewCommandOptions {
   return {
     interactive: false,
     writeShellCdPath: async () => undefined,

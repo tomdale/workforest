@@ -68,7 +68,7 @@ describe("JSON CLI integration", () => {
       error: {
         kind: "operational",
         message:
-          "Not in a Workforest change.\nRun: wf list\nOr start explicitly: wf start <change> <repo|@template>",
+          "Not in a Workforest worktree or workspace.\nRun: wf list\nOr create explicitly: wf new <name> <repo|@template>",
       },
     });
   });
@@ -167,7 +167,7 @@ describe("JSON CLI integration", () => {
       data: expect.objectContaining({
         route: expect.objectContaining({ id: "home" }),
         actions: expect.arrayContaining([
-          expect.objectContaining({ id: "home.start" }),
+          expect.objectContaining({ id: "home.new" }),
         ]),
       }),
     });

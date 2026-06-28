@@ -36,27 +36,27 @@ Use `bash` instead of `zsh` for Bash.
 
 ## Quick Start
 
-In an interactive terminal, run `wf` with no arguments to open the change entry
-surface — a single fullscreen front door that fuzzy-searches your existing
+In an interactive terminal, run `wf` with no arguments to open the entry
+surface — a single fullscreen view that fuzzy-searches your existing
 changes (Enter to jump straight into one) and, for a new name, walks you through
-picking sources before handing off to the live setup grid. `wf start` with no
+picking sources before handing off to the live setup grid. `wf new` with no
 arguments opens the same surface in create-only mode. Both fall back to plain
 output outside a TTY, and the explicit forms below stay fully scriptable.
 
 The surface is aware of where you launch it. Run inside a workspace or
-single-repo change and the change list defaults to that scope's changes; press
-**Tab** to toggle between the current scope and all changes. When naming a new
-change, the source picker is grouped into **Repo**, **Template**, and
+worktree and the list defaults to that scope's entries; press
+**Tab** to toggle between the current scope and everything. When naming a new
+one, the source picker is grouped into **Repo**, **Template**, and
 **Multi-repo** modes — **Tab** cycles between them — and it opens in the mode
 matching the container you started from (with that repo or template under the
 cursor).
 
 ```sh
-# Go to an existing change or create a new one (interactive front door).
+# Go to an existing worktree or workspace, or create a new one (interactive entry surface).
 wf
 
 # Create a multi-repository workspace.
-wf start fix-authentication vercel/front vercel/api
+wf new fix-authentication vercel/front vercel/api
 
 # Monitor background dependency installation and hooks.
 wf status --watch
@@ -64,15 +64,15 @@ wf status --watch
 # Add another repository to the current workspace.
 wf add vercel/docs
 
-# Open an existing change.
+# Open an existing worktree or workspace.
 wf switch _adhoc/fix-authentication
 
 # Clean it up after the work is integrated.
-wf finish _adhoc/fix-authentication
+wf delete _adhoc/fix-authentication
 ```
 
-The main lifecycle is `wf start`, `wf switch`, `wf list`, `wf status`,
-`wf add`, `wf finish`, and `wf delete`.
+The main lifecycle is `wf new`, `wf switch`, `wf list`, `wf status`,
+`wf add`, and `wf delete`.
 
 ## Workspace Workflows
 
@@ -81,17 +81,17 @@ The main lifecycle is `wf start`, `wf switch`, `wf list`, `wf status`,
 Create a workspace from repositories:
 
 ```sh
-wf start account-switching vercel/front vercel/api
+wf new account-switching vercel/front vercel/api
 ```
 
 The command creates a directory such as `add-account-switching/`, adds a
 matching feature branch to each repository, and returns after the worktrees are
 available. Initializers and template hooks continue in background workers.
 
-Run the command with just a change name for the interactive creation flow:
+Run the command with just a name for the interactive creation flow:
 
 ```sh
-wf start account-switching
+wf new account-switching
 ```
 
 ### Create From The Current Workspace
@@ -100,7 +100,7 @@ Start a separate approach with the same repository set:
 
 ```sh
 cd ~/Code/workspaces/fix-authentication
-wf start try-token-refresh
+wf new try-token-refresh
 ```
 
 The new workspace uses fresh branches from each repository's default branch.
@@ -113,7 +113,7 @@ From anywhere inside a workspace:
 wf add vercel/docs
 ```
 
-To add to another change, switch there first:
+To add to another worktree or workspace, switch there first:
 
 ```sh
 wf switch _adhoc/fix-authentication
@@ -132,7 +132,7 @@ wf switch
 ```
 
 With shell integration installed, `wf switch` changes the current shell
-directory. Running it without a selector opens an interactive change picker.
+directory. Running it without a selector opens an interactive picker.
 
 ### Monitor Setup
 
@@ -146,7 +146,7 @@ hook progress. Detailed repository logs live under `.workforest/logs/`.
 ### Delete A Workspace
 
 ```sh
-wf finish _adhoc/fix-authentication
+wf delete _adhoc/fix-authentication
 wf delete _adhoc/fix-authentication --force
 ```
 
@@ -160,7 +160,7 @@ repository in the same workspace:
 
 ```sh
 cd ~/Code/workspaces/account-switching/front
-wf task start fix-tests upgrade-dependencies
+wf task new fix-tests upgrade-dependencies
 ```
 
 Each task starts from the primary repository's committed `HEAD`, receives a
@@ -170,14 +170,14 @@ initializers. Template files and workspace hooks are not reapplied.
 From the workspace root, identify the parent repository explicitly:
 
 ```sh
-wf task start --repo front fix-tests
+wf task new --repo front fix-tests
 ```
 
 Inspect and remove tasks after their branches are integrated:
 
 ```sh
 wf task list
-wf task finish fix-tests
+wf task delete fix-tests
 ```
 
 Deletion refuses dirty or unmerged task worktrees unless `--force` is supplied.
@@ -186,24 +186,24 @@ task to delete from the current directory.
 
 ## Single-Repository Changes
 
-Create a single-repository change without a multi-repo workspace:
+Create a worktree (single repository) without a multi-repo workspace:
 
 ```sh
-wf start fix-auth vercel/front
+wf new fix-auth vercel/front
 ```
 
-The target uses the opinionated `Repos/<repo>/<change>` layout. Inspect or
+The target uses the opinionated `Repos/<repo>/<name>` layout. Inspect or
 remove these changes with the same lifecycle commands:
 
 ```sh
 wf status workforest/fix-auth
-wf finish workforest/fix-auth
+wf delete workforest/fix-auth
 ```
 
 ## Cloud Workspaces
 
-Provision a change as a remote, persistent [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)
-instead of local worktrees by adding `--cloud` to `wf start`. The cloud workspace
+Provision a worktree or workspace as a remote, persistent [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)
+instead of local worktrees by adding `--cloud` to `wf new`. The cloud workspace
 behaves like a local one — one or more repositories, each checked out on a new
 branch, with dependencies installed and `vercel env pull` run — but the
 environment lives in the cloud, so it does not depend on your machine staying
@@ -233,13 +233,13 @@ scope, so provisioning is deterministic regardless of any ambient Vercel state.
 
 ```sh
 # Provision a template's repos as a cloud workspace.
-wf start auth-fix @vercel-agent --cloud
+wf new auth-fix @vercel-agent --cloud
 
 # Single repo, in the cloud.
-wf start try-token-refresh vercel/front --cloud
+wf new try-token-refresh vercel/front --cloud
 ```
 
-The interactive front door (`wf` or `wf start` with no source) ends with a
+The interactive entry surface (`wf` or `wf new` with no source) ends with a
 **Local / Cloud** prompt, so the same flow can target either.
 
 Spin-up is near-instant after the first run: workforest maintains a per-template
@@ -340,7 +340,7 @@ new workspace before initializers and hooks run.
 Create a workspace from a template by passing its name:
 
 ```sh
-wf start user-avatars @full-stack
+wf new user-avatars @full-stack
 ```
 
 ## Repository Cache
@@ -365,11 +365,11 @@ worktree commands. They do not sync a missing mirror or apply Workforest setup,
 metadata, branch, or lifecycle rules; all registered Git worktrees are in scope:
 
 ```sh
-wf worktree add vercel/front ~/Code/front-fix-auth tomdale/fix-auth
-wf worktree add vercel/front ~/Code/front-cleanup
-wf worktree list vercel/front
-wf worktree move vercel/front ~/Code/front-fix-auth ~/Code/front-auth-fix
-wf worktree remove vercel/front ~/Code/front-auth-fix
+wf cache worktree add vercel/front ~/Code/front-fix-auth tomdale/fix-auth
+wf cache worktree add vercel/front ~/Code/front-cleanup
+wf cache worktree list vercel/front
+wf cache worktree move vercel/front ~/Code/front-fix-auth ~/Code/front-auth-fix
+wf cache worktree remove vercel/front ~/Code/front-auth-fix
 ```
 
 These commands accept no native Git flags. `add` creates a new branch from the
@@ -449,7 +449,7 @@ Global settings live in `~/.workforest/config.json` by default:
 }
 ```
 
-The `cloud.vercel` key configures `wf start --cloud` workspaces (it is nested
+The `cloud.vercel` key configures `wf new --cloud` workspaces (it is nested
 under a provider name so other providers can be added later). `team` and
 `project` (Vercel slugs) are **required** for any cloud command; the rest (vCPUs,
 sandbox timeout, base-snapshot TTL, exposed ports, runtime) are optional and fall
@@ -468,20 +468,19 @@ wf config edit
 This is a workflow map rather than an exhaustive flag reference:
 
 ```text
-wf start               Start a repository or workspace change
-wf switch              Open or search for a change
-wf list                List changes
-wf status              Inspect change state or background setup
-wf add                 Add repositories to the current change
-wf finish              Clean up an integrated change
-wf delete              Explicitly delete a change
+wf new                 Create a worktree or workspace
+wf switch              Open or search for a worktree or workspace
+wf list                List worktrees and workspaces
+wf status              Inspect status or background setup
+wf add                 Add repositories to the current worktree or workspace
+wf delete              Delete a worktree or workspace (verified; --force to abandon)
 
-wf task start          Create change-scoped task worktrees
+wf task new            Create nested task worktrees
 wf task list           List task worktrees
-wf task finish         Clean up integrated task worktrees
-wf task delete         Delete explicit task worktrees
+wf task delete         Delete task worktrees (verified; --force to abandon)
 
 wf cache list          Inspect cached mirrors
+wf cache worktree list List raw git worktrees in a cached mirror
 wf cloud list          List cloud workspaces
 wf cloud status        Show one cloud workspace
 wf cloud attach        Resume and open a shell in a cloud workspace
@@ -520,7 +519,7 @@ ssh -T git@github.com
 
 ### Workspace Setup Fails
 
-Run `wf status --watch` inside the change and inspect
+Run `wf status --watch` inside the worktree or workspace and inspect
 `.workforest/logs/<repo>.log`.
 
 ### Cache Health Fails

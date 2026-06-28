@@ -7,7 +7,7 @@ import type { ResolvedCommand } from "./types.ts";
 
 describe("parseInvocation", () => {
   it("parses leaf-local boolean and string flags", () => {
-    const parsed = parse(["task", "start", "-n", "--repo=front", "fix-auth"]);
+    const parsed = parse(["task", "new", "-n", "--repo=front", "fix-auth"]);
 
     expect(parsed.flags).toEqual({
       dryRun: true,
@@ -32,7 +32,7 @@ describe("parseInvocation", () => {
   });
 
   it("rejects missing and duplicate flag values", () => {
-    expect(() => parse(["task", "start", "--repo"])).toThrow(
+    expect(() => parse(["task", "new", "--repo"])).toThrow(
       'Flag "--repo" requires repository.',
     );
     expect(() => parseRaw(["list"], ["--help", "-h"])).toThrow(
@@ -42,15 +42,12 @@ describe("parseInvocation", () => {
 
   it.each([
     [["list", "extra"], "Expected no operands"],
-    [["start"], "Expected 1 or more arguments"],
+    [["new"], "Expected 1 or more arguments"],
     [["status", "one", "two"], "Expected 0-1 selector"],
     [["add"], "Expected 1 or more sources"],
     [["switch", "one", "two"], "Expected 0-1 selector"],
-    [["finish", "one", "two"], "Expected 0-1 selector"],
-    [["delete"], "Expected 1 selector"],
-    [["delete", "one", "two"], "Expected 1 selector"],
-    [["task", "start"], "Expected 1 or more task names"],
-    [["task", "finish"], "Expected 1 or more task names"],
+    [["delete", "one", "two"], "Expected 0-1 selector"],
+    [["task", "new"], "Expected 1 or more task names"],
     [["task", "delete"], "Expected 1 or more task names"],
     [["cache", "show"], "Expected 1 repository"],
     [["cache", "delete"], "Expected 1 or more repositories"],
@@ -67,12 +64,12 @@ describe("parseInvocation", () => {
     expect(() => parse(argv)).toThrow(message);
   });
 
-  it("parses the final change lifecycle command operands", () => {
-    expect(parse(["start", "fix-auth", "vercel/front"])).toMatchObject({
+  it("parses the worktree/workspace lifecycle command operands", () => {
+    expect(parse(["new", "fix-auth", "vercel/front"])).toMatchObject({
       beforeDoubleDash: ["fix-auth", "vercel/front"],
     });
     expect(
-      parse(["start", "--branch", "tomdale/custom", "fix-auth", "front"]),
+      parse(["new", "--branch", "tomdale/custom", "fix-auth", "front"]),
     ).toMatchObject({
       flags: { branch: "tomdale/custom" },
       beforeDoubleDash: ["fix-auth", "front"],
@@ -80,7 +77,7 @@ describe("parseInvocation", () => {
     expect(
       parse(["status", "workforest/cli-redesign"]).beforeDoubleDash,
     ).toEqual(["workforest/cli-redesign"]);
-    expect(parse(["finish"]).beforeDoubleDash).toEqual([]);
+    expect(parse(["delete"]).beforeDoubleDash).toEqual([]);
     expect(parse(["delete", "_adhoc/experiment"]).beforeDoubleDash).toEqual([
       "_adhoc/experiment",
     ]);
@@ -88,14 +85,14 @@ describe("parseInvocation", () => {
 
   it("parses task flags independently", () => {
     expect(
-      parse(["task", "start", "fix", "--repo", "front", "-n", "-f"]).flags,
+      parse(["task", "new", "fix", "--repo", "front", "-n", "-f"]).flags,
     ).toEqual({
       repo: "front",
       dryRun: true,
       force: true,
     });
     expect(
-      parse(["task", "finish", "fix", "--repo", "front", "-n"]).flags,
+      parse(["task", "delete", "fix", "--repo", "front", "-n"]).flags,
     ).toEqual({
       repo: "front",
       dryRun: true,
@@ -103,8 +100,8 @@ describe("parseInvocation", () => {
   });
 
   it("supports interactive operands only on interactive leaves", () => {
-    expect(() => parse(["start"])).toThrow(UsageError);
-    expect(() => parseInteractive(["start"])).not.toThrow();
+    expect(() => parse(["new"])).toThrow(UsageError);
+    expect(() => parseInteractive(["new"])).not.toThrow();
     expect(() => parse(["template", "new"])).toThrow(UsageError);
     expect(() => parseInteractive(["template", "new"])).not.toThrow();
   });

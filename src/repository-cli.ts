@@ -85,7 +85,9 @@ export async function runWorktreeInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   if (flag(invocation, "json")) {
-    throw new UsageError('Flag "--json" is not supported by wf worktree.');
+    throw new UsageError(
+      'Flag "--json" is not supported by wf cache worktree.',
+    );
   }
 
   const [selector, ...operands] = invocation.beforeDoubleDash;
@@ -95,10 +97,10 @@ export async function runWorktreeInvocation(
 
   let args: readonly string[];
   switch (invocation.command.leaf.handler) {
-    case "worktree.list":
+    case "cache.worktree.list":
       args = ["list"];
       break;
-    case "worktree.add": {
+    case "cache.worktree.add": {
       const [worktreePath, branch] = operands;
       if (!worktreePath) {
         throw new Error(
@@ -110,7 +112,7 @@ export async function runWorktreeInvocation(
         : ["add", path.resolve(worktreePath)];
       break;
     }
-    case "worktree.move": {
+    case "cache.worktree.move": {
       const [worktreePath, newPath] = operands;
       if (!worktreePath || !newPath) {
         throw new Error(
@@ -120,7 +122,7 @@ export async function runWorktreeInvocation(
       args = ["move", path.resolve(worktreePath), path.resolve(newPath)];
       break;
     }
-    case "worktree.remove": {
+    case "cache.worktree.remove": {
       const [worktreePath] = operands;
       if (!worktreePath) {
         throw new Error(

@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathExists } from "@wf-plugin/core";
-import type { ChangeScope } from "./change-entry/changes-data.ts";
 import { commandRegistry } from "./cli/commands.ts";
 import {
   isArgumentParserError,
@@ -39,6 +38,7 @@ import {
   formatDashboardCommand,
   getDashboardRoute,
 } from "./dashboard/routes.ts";
+import type { Scope } from "./entry/entries-data.ts";
 import {
   commandHelp,
   conceptsPage,
@@ -108,7 +108,7 @@ import {
 } from "./workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  getRepositoryChangePath,
+  getWorktreePath,
   resolveWorkforestDirectories,
 } from "./workspace/paths.ts";
 import type { TaskFailure, TaskListEntry } from "./workspace/tasks.ts";
@@ -207,7 +207,7 @@ export async function executeCli(
     if (workerResult) return workerResult;
 
     if (argv.length === 0 && (await shouldUseDashboardTui())) {
-      return runChangeEntryCommand("go");
+      return runEntryCommand("go");
     }
 
     const resolution = resolveCommand(commandRegistry, argv);
@@ -260,38 +260,38 @@ async function runInvocation(
     case "review.open":
     case "review.checkout":
       return runReviewInvocation(invocation);
-    case "change.start":
+    case "new":
       if (invocation.beforeDoubleDash.length === 0) {
         if (!(await shouldUseDashboardTui())) {
-          throw new UsageError("wf start requires a change name.");
+          throw new UsageError("wf new requires a name.");
         }
-        return runChangeEntryCommand(
+        return runEntryCommand(
           "create",
           invocation.flags["cloud"] === true ? "cloud" : undefined,
         );
       }
       return runTypedCommand(async () => {
-        const { runStartCommand } = await import("./cli/start.ts");
-        return runStartCommand(invocation, {
+        const { runNewCommand } = await import("./cli/new.ts");
+        return runNewCommand(invocation, {
           interactive: isInteractive(),
           onEvent: humanServiceEventSink,
           writeShellCdPath,
         });
       });
-    case "change.list":
-      return runTypedCommand(() => runChangeListCommand(invocation));
-    case "change.status":
-      return runTypedCommand(() => runChangeStatusCommand(invocation));
-    case "change.add":
+    case "list":
+      return runTypedCommand(() => runListCommand(invocation));
+    case "status":
+      return runTypedCommand(() => runStatusCommand(invocation));
+    case "add":
       return runTypedCommand(async () => {
-        const { runChangeAddCommand } = await import("./cli/add.ts");
-        return runChangeAddCommand(invocation, {
+        const { runAddCommand } = await import("./cli/add.ts");
+        return runAddCommand(invocation, {
           interactive: isInteractive(),
           onEvent: humanServiceEventSink,
           writeShellCdPath,
         });
       });
-    case "change.switch":
+    case "switch":
       return runTypedCommand(async () => {
         const { runSwitchCommand } = await import("./cli/switch.ts");
         return runSwitchCommand(invocation, {
@@ -299,19 +299,10 @@ async function runInvocation(
           writeShellCdPath,
         });
       });
-    case "change.finish":
+    case "delete":
       return runTypedCommand(async () => {
-        const { runFinishCommand } = await import("./cli/finish.ts");
-        return runFinishCommand(invocation, {
-          interactive: isInteractive(),
-          writeShellCdPath,
-          onCleanupState: (state) => renderCleanupState(state, false),
-        });
-      });
-    case "change.delete":
-      return runTypedCommand(async () => {
-        const { runChangeDeleteCommand } = await import("./cli/finish.ts");
-        return runChangeDeleteCommand(invocation, {
+        const { runDeleteCommand } = await import("./cli/delete.ts");
+        return runDeleteCommand(invocation, {
           interactive: isInteractive(),
           writeShellCdPath,
           onCleanupState: (state) => renderCleanupState(state, false),
@@ -402,8 +393,12 @@ async function runInvocation(
   }
 
   if (invocation.command.leaf.handler.startsWith("cache.")) {
-    const { runCacheInvocation } = await import("./repository-cli.ts");
-    return runCacheInvocation(invocation);
+    const { runCacheInvocation, runWorktreeInvocation } = await import(
+      "./repository-cli.ts"
+    );
+    return invocation.command.leaf.handler.startsWith("cache.worktree.")
+      ? runWorktreeInvocation(invocation)
+      : runCacheInvocation(invocation);
   }
 
   if (invocation.command.leaf.handler.startsWith("cloud.")) {
@@ -411,11 +406,6 @@ async function runInvocation(
       const { runCloudInvocation } = await import("./cloud/cli.ts");
       return runCloudInvocation(invocation);
     });
-  }
-
-  if (invocation.command.leaf.handler.startsWith("worktree.")) {
-    const { runWorktreeInvocation } = await import("./repository-cli.ts");
-    return runWorktreeInvocation(invocation);
   }
 
   if (invocation.command.leaf.handler.startsWith("task.")) {
@@ -473,36 +463,34 @@ async function shouldUseDashboardTui(): Promise<boolean> {
 }
 
 /**
- * Open the universal "go to or create a change" surface. Lazy-imported so the
+ * Open the universal "go to or create a worktree or workspace" surface. Lazy-imported so the
  * @unblessed runtime never loads on scriptable/JSON paths. `go` (bare `wf`)
- * searches existing changes and can create; `create` (`wf start`) skips the
+ * searches existing changes and can create; `create` (`wf new`) skips the
  * existing-change search and goes straight to naming a new change.
  */
-async function runChangeEntryCommand(
+async function runEntryCommand(
   mode: "go" | "create",
   target?: "local" | "cloud",
 ): Promise<CommandResult> {
-  const { runChangeEntry } = await import("./change-entry/surface.ts");
-  const { buildCreateChangeInput, createChange } = await import(
-    "./workspace/create-change.ts"
-  );
-  const scope = await resolveCurrentChangeScope();
-  await runChangeEntry(mode, {
+  const { runEntry } = await import("./entry/surface.ts");
+  const { buildCreateInput, create } = await import("./workspace/create.ts");
+  const scope = await resolveCurrentScope();
+  await runEntry(mode, {
     ...(scope ? { scope } : {}),
     ...(target ? { initialTarget: target } : {}),
-    commitChange: async ({ changeName, sources, target }) => {
-      const input = await buildCreateChangeInput({ changeName, sources });
+    commit: async ({ changeName, sources, target }) => {
+      const input = await buildCreateInput({ changeName, sources });
       if (target === "cloud") {
         const { config } = await loadWorkspaceConfig();
-        const { createCloudChange } = await import("./cloud/provisioning.ts");
-        await createCloudChange(input, {
+        const { createCloud } = await import("./cloud/provisioning.ts");
+        await createCloud(input, {
           interactive: true,
           onEvent: humanServiceEventSink,
           config,
         });
         return;
       }
-      await createChange(input, {
+      await create(input, {
         interactive: true,
         onEvent: humanServiceEventSink,
         writeShellCdPath,
@@ -513,28 +501,28 @@ async function runChangeEntryCommand(
 }
 
 /**
- * Map the current working directory onto a change-entry scope so the surface can
+ * Map the current working directory onto a entry scope so the surface can
  * default to the container the user launched from. Returns undefined outside a
  * Workforest change (e.g. a review checkout or an unrelated directory).
  */
-async function resolveCurrentChangeScope(): Promise<ChangeScope | undefined> {
+async function resolveCurrentScope(): Promise<Scope | undefined> {
   try {
     const { config } = await loadWorkspaceConfig();
     const directories = resolveWorkforestDirectories(config);
     const context = resolveWorkforestContext(process.cwd(), directories);
     switch (context.kind) {
-      case "repository-change":
+      case "worktree":
         return { kind: "repo", name: context.repoName };
-      case "template-workspace-change":
+      case "template-workspace":
         return { kind: "template", name: context.groupName };
-      case "adhoc-workspace-change":
+      case "adhoc-workspace":
         return { kind: "adhoc", name: context.groupName };
       case "workspace-repo":
         return context.groupName === ADHOC_WORKSPACE_GROUP
           ? { kind: "adhoc", name: context.groupName }
           : { kind: "template", name: context.groupName };
       case "nested-task":
-        if (context.parentKind === "repository-change") {
+        if (context.parentKind === "worktree") {
           return { kind: "repo", name: context.repoName };
         }
         return context.groupName === undefined
@@ -568,12 +556,10 @@ async function runTaskInvocation(
 ): Promise<CommandResult> {
   try {
     switch (invocation.command.leaf.handler) {
-      case "task.start":
+      case "task.new":
         return await runTaskStartInvocation(invocation);
       case "task.list":
         return await runTaskListInvocation(invocation);
-      case "task.finish":
-        return await runTaskFinishInvocation(invocation);
       case "task.delete":
         return await runTaskDeleteInvocation(invocation);
       default:
@@ -600,7 +586,7 @@ async function runTypedCommand(
 }
 
 function requestsJsonOutput(argv: readonly string[]): boolean {
-  if (argv[0] === "worktree") return false;
+  if (argv[0] === "cache" && argv[1] === "worktree") return false;
   const delimiter = argv.indexOf("--");
   const flags = delimiter === -1 ? argv : argv.slice(0, delimiter);
   return flags.some(
@@ -667,12 +653,12 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
 
   const {
     runRepoInitializationWorker,
-    repositoryChangeInitializationScope,
+    worktreeInitializationScope,
     workspaceInitializationScope,
   } = await import("./workspace/initialization.ts");
   const scope =
-    workerScope === "repository-change"
-      ? repositoryChangeInitializationScope({
+    workerScope === "worktree"
+      ? worktreeInitializationScope({
           repoRootDir: requiredWorkerEnv("WORKFOREST_WORKER_REPO_ROOT"),
           changeName: requiredWorkerEnv("WORKFOREST_WORKER_CHANGE"),
         })
@@ -1028,16 +1014,16 @@ async function runAiStatusCommand(
     : success(reportOutput(renderAiStatus(status)));
 }
 
-async function runChangeListCommand(
+async function runListCommand(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   const { config } = await loadWorkspaceConfig();
-  const { collectChangeInventory, renderChangeList } = await import(
-    "./workspace/change-inventory.ts"
+  const { collectInventory, renderList } = await import(
+    "./workspace/inventory.ts"
   );
   const repoFilter = stringInvocationFlag(invocation, "repo");
   const groupFilter = stringInvocationFlag(invocation, "group");
-  const inventory = await collectChangeInventory(config, {
+  const inventory = await collectInventory(config, {
     ...(repoFilter ? { repo: repoFilter } : {}),
     ...(groupFilter ? { group: groupFilter } : {}),
   });
@@ -1046,14 +1032,14 @@ async function runChangeListCommand(
     ? jsonSuccess(inventory)
     : success(
         reportOutput(
-          renderChangeList(inventory, {
+          renderList(inventory, {
             paths: booleanInvocationFlag(invocation, "paths"),
           }),
         ),
       );
 }
 
-async function runChangeStatusCommand(
+async function runStatusCommand(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   if (
@@ -1065,42 +1051,43 @@ async function runChangeStatusCommand(
 
   const { config } = await loadWorkspaceConfig();
   const selector = invocation.beforeDoubleDash[0];
-  const { resolveChangeSelector } = await import("./workspace/selectors.ts");
-  const resolution = await resolveChangeSelector(config, selector);
+  const { resolveSelector } = await import("./workspace/selectors.ts");
+  const resolution = await resolveSelector(config, selector);
 
   if (resolution.kind === "outside") {
     throw new OperationalError(
       [
-        "Not in a Workforest change.",
+        "Not in a Workforest worktree or workspace.",
         "Run: wf list",
-        "Or start explicitly: wf start <change> <repo|@template>",
+        "Or create explicitly: wf new <name> <repo|@template>",
       ].join("\n"),
     );
   }
   if (resolution.kind === "missing") {
-    throw new UsageError(`Unknown change selector: ${resolution.selector}`);
+    throw new UsageError(`Unknown selector: ${resolution.selector}`);
   }
   if (resolution.kind === "ambiguous") {
     throw new UsageError(
       [
-        `Ambiguous change selector "${resolution.selector}".`,
+        `Ambiguous selector "${resolution.selector}".`,
         "Matches:",
         ...resolution.matches.map((match) => `  ${match}`),
-        resolution.hint ?? "Use <group>/<change>.",
+        resolution.hint ?? "Use <group>/<name>.",
       ].join("\n"),
     );
   }
 
-  const { buildChangeStatus, changeInitializationScope, renderChangeStatus } =
-    await import("./workspace/status.ts");
-  const status = await buildChangeStatus(resolution.entry);
+  const { buildStatus, initializationScope, renderStatus } = await import(
+    "./workspace/status.ts"
+  );
+  const status = await buildStatus(resolution.entry);
 
   if (booleanInvocationFlag(invocation, "watch")) {
     if (!status.initialization || status.initialization.repos.length === 0) {
       return success(
         reportOutput(
-          renderChangeStatus(status, {
-            note: "No initialization is recorded for this change; showing the static report.",
+          renderStatus(status, {
+            note: "No initialization is recorded for this worktree or workspace; showing the static report.",
           }),
         ),
       );
@@ -1109,7 +1096,7 @@ async function runChangeStatusCommand(
     if (!isInteractive()) {
       return success(
         reportOutput(
-          renderChangeStatus(status, {
+          renderStatus(status, {
             note: "Initialization watcher requires an interactive terminal; showing the static report.",
           }),
         ),
@@ -1120,7 +1107,7 @@ async function runChangeStatusCommand(
       "./ui/initialization-status.ts"
     );
     await renderInitializationStatus(
-      changeInitializationScope(resolution.entry),
+      initializationScope(resolution.entry),
       status.initialization.repos.map((state) => state.repo),
     );
     return success();
@@ -1128,7 +1115,7 @@ async function runChangeStatusCommand(
 
   return booleanInvocationFlag(invocation, "json")
     ? jsonSuccess(status)
-    : success(reportOutput(renderChangeStatus(status)));
+    : success(reportOutput(renderStatus(status)));
 }
 
 async function runTaskStartInvocation(
@@ -1162,7 +1149,7 @@ async function runTaskStartInvocation(
   }
 
   throw new OperationalError(
-    "Run wf task start from inside a workspace repo or repository change. A task is a nested worktree inside an existing change, and --repo selects which workspace repository to branch from — it does not name a workspace to create one in.",
+    "Run wf task new from inside a workspace repo or worktree. A task is a nested worktree inside an existing worktree or workspace, and --repo selects which workspace repository to branch from — it does not name a workspace to create one in.",
   );
 }
 
@@ -1172,17 +1159,6 @@ async function runTaskListInvocation(
   const repo = stringFlag(invocation, "repo");
   return runTaskList({
     repo,
-    json: jsonRequested(invocation),
-  });
-}
-
-async function runTaskFinishInvocation(
-  invocation: ParsedInvocation,
-): Promise<CommandResult> {
-  return runTaskFinish({
-    names: [...invocation.beforeDoubleDash],
-    repo: stringFlag(invocation, "repo"),
-    dryRun: booleanFlag(invocation, "dryRun"),
     json: jsonRequested(invocation),
   });
 }
@@ -1378,13 +1354,12 @@ async function resolveRepositoryTaskCommandContext(
     directories,
   );
   const repositoryContext =
-    context.kind === "repository-change"
+    context.kind === "worktree"
       ? {
           repoName: context.repoName,
           changeName: context.changeName,
         }
-      : context.kind === "nested-task" &&
-          context.parentKind === "repository-change"
+      : context.kind === "nested-task" && context.parentKind === "worktree"
         ? {
             repoName: context.repoName,
             changeName: context.changeName,
@@ -1397,7 +1372,7 @@ async function resolveRepositoryTaskCommandContext(
 
   if (repoFlag && repoFlag !== repositoryContext.repoName) {
     throw new UsageError(
-      `Current repository change is ${repositoryContext.repoName}/${repositoryContext.changeName}; omit --repo or use --repo ${repositoryContext.repoName}.`,
+      `Current worktree is ${repositoryContext.repoName}/${repositoryContext.changeName}; omit --repo or use --repo ${repositoryContext.repoName}.`,
     );
   }
 
@@ -1408,7 +1383,7 @@ async function resolveRepositoryTaskCommandContext(
     throw new Error(`Unknown repository "${repositoryContext.repoName}".`);
   }
 
-  const parentRepoDir = getRepositoryChangePath(
+  const parentRepoDir = getWorktreePath(
     directories,
     repositoryContext.repoName,
     repositoryContext.changeName,
@@ -1673,7 +1648,9 @@ async function runTaskList({
   if (!workspaceDir) {
     const context = await resolveRepositoryTaskCommandContext(repo);
     if (!context) {
-      throw new OperationalError("Not inside a Workforest change.");
+      throw new OperationalError(
+        "Not inside a Workforest worktree or workspace.",
+      );
     }
     return runRepositoryTaskList(context, json);
   }
@@ -1737,7 +1714,7 @@ async function runRepositoryTaskList(
 
     if (json) {
       return jsonSuccess({
-        repositoryChange: {
+        worktree: {
           repo: context.repoName,
           changeName: context.changeName,
           path: context.parentRepoDir,
@@ -1826,27 +1803,26 @@ async function runTaskDelete({
   dryRun,
   force,
   json,
-  skipConfirmation = false,
 }: {
   names: string[];
   repo?: string | undefined;
   dryRun: boolean;
   force: boolean;
   json: boolean;
-  skipConfirmation?: boolean;
 }): Promise<CommandResult> {
   const workspaceDir = await detectWorkspaceFromCwd();
   if (!workspaceDir) {
     const context = await resolveRepositoryTaskCommandContext(repo);
     if (!context) {
-      throw new OperationalError("Not inside a Workforest change.");
+      throw new OperationalError(
+        "Not inside a Workforest worktree or workspace.",
+      );
     }
     return runRepositoryTaskDelete({
       names,
       context,
       dryRun,
       force,
-      skipConfirmation,
       json,
     });
   }
@@ -1867,17 +1843,6 @@ async function runTaskDelete({
       });
 
     const { deleteTasks } = await import("./workspace/tasks.ts");
-    if (!skipConfirmation) {
-      const confirmed = await confirmDelete({
-        dryRun,
-        force,
-        description:
-          names.length === 1 ? `task "${names[0]}"` : `${names.length} tasks`,
-        targetPath: workspaceDir,
-      });
-      if (!confirmed) return success();
-    }
-
     const invocationCwd = process.cwd();
     const result = await deleteTasks({
       workspaceDir,
@@ -1935,28 +1900,15 @@ async function runRepositoryTaskDelete({
   dryRun,
   force,
   json,
-  skipConfirmation = false,
 }: {
   names: string[];
   context: RepositoryTaskCommandContext;
   dryRun: boolean;
   force: boolean;
   json: boolean;
-  skipConfirmation?: boolean;
 }): Promise<CommandResult> {
   try {
     const { deleteRepositoryTasks } = await import("./workspace/tasks.ts");
-    if (!skipConfirmation) {
-      const confirmed = await confirmDelete({
-        dryRun,
-        force,
-        description:
-          names.length === 1 ? `task "${names[0]}"` : `${names.length} tasks`,
-        targetPath: context.parentRepoDir,
-      });
-      if (!confirmed) return success();
-    }
-
     const invocationCwd = process.cwd();
     const result = await deleteRepositoryTasks({
       parentRepoDir: context.parentRepoDir,
@@ -2002,163 +1954,6 @@ async function runRepositoryTaskDelete({
     } else {
       for (const entry of result.removed) {
         log.success(`Removed ${entry.slug}`);
-      }
-      await writeTaskRemovalCdTarget(cdTarget);
-    }
-    return success();
-  } catch (error) {
-    throw operationalError(error);
-  }
-}
-
-async function runTaskFinish({
-  names,
-  repo,
-  dryRun,
-  json,
-}: {
-  names: string[];
-  repo?: string | undefined;
-  dryRun: boolean;
-  json: boolean;
-}): Promise<CommandResult> {
-  const workspaceDir = await detectWorkspaceFromCwd();
-  if (!workspaceDir) {
-    const context = await resolveRepositoryTaskCommandContext(repo);
-    if (!context) {
-      throw new OperationalError("Not inside a Workforest change.");
-    }
-    return runRepositoryTaskFinish({
-      names,
-      context,
-      dryRun,
-      json,
-    });
-  }
-
-  try {
-    const metadata = await readWorkspaceMetadata(workspaceDir);
-    if (!metadata) {
-      throw new Error(`Could not read workspace metadata from ${workspaceDir}`);
-    }
-
-    const parentRepoName =
-      repo ??
-      resolveWorkspaceRepoNameFromCwd({
-        workspaceDir,
-        metadata,
-        cwd: process.cwd(),
-        allowTask: true,
-      });
-
-    const { finishTasks } = await import("./workspace/tasks.ts");
-    const invocationCwd = process.cwd();
-    const result = await finishTasks({
-      workspaceDir,
-      slugs: names,
-      dryRun,
-      ...(parentRepoName ? { parentRepoName } : {}),
-    });
-
-    const cdTarget = workspaceTaskRemovalCdTarget(
-      result.removed,
-      workspaceDir,
-      invocationCwd,
-    );
-    if (json) {
-      return jsonSuccess({
-        dryRun,
-        removed: result.removed,
-      });
-    }
-
-    if (dryRun) {
-      showDryRunReport({
-        sections: [
-          {
-            entries: result.removed.map((entry) => ({
-              title: entry.slug,
-              details: [
-                { label: "Repository", value: entry.parent_repo },
-                { label: "Branch", value: entry.branch },
-                {
-                  label: "Path",
-                  value: resolveContainedPath(workspaceDir, entry.path),
-                },
-              ],
-            })),
-          },
-        ],
-      });
-    } else {
-      for (const entry of result.removed) {
-        log.success(`Finished ${entry.slug}`);
-      }
-      await writeTaskRemovalCdTarget(cdTarget);
-    }
-    return success();
-  } catch (error) {
-    throw operationalError(error);
-  }
-}
-
-async function runRepositoryTaskFinish({
-  names,
-  context,
-  dryRun,
-  json,
-}: {
-  names: string[];
-  context: RepositoryTaskCommandContext;
-  dryRun: boolean;
-  json: boolean;
-}): Promise<CommandResult> {
-  try {
-    const { finishRepositoryTasks } = await import("./workspace/tasks.ts");
-    const invocationCwd = process.cwd();
-    const result = await finishRepositoryTasks({
-      parentRepoDir: context.parentRepoDir,
-      repoName: context.repoName,
-      changeName: context.changeName,
-      slugs: names,
-      dryRun,
-    });
-
-    const cdTarget = repositoryTaskRemovalCdTarget(
-      result.removed,
-      context,
-      invocationCwd,
-    );
-    if (json) {
-      return jsonSuccess({
-        dryRun,
-        changeName: context.changeName,
-        removed: result.removed,
-      });
-    }
-
-    if (dryRun) {
-      showDryRunReport({
-        sections: [
-          {
-            entries: result.removed.map((entry) => ({
-              title: entry.slug,
-              details: [
-                { label: "Repository", value: entry.parent_repo },
-                { label: "Change", value: context.changeName },
-                { label: "Branch", value: entry.branch },
-                {
-                  label: "Path",
-                  value: resolveContainedPath(context.repoRootDir, entry.path),
-                },
-              ],
-            })),
-          },
-        ],
-      });
-    } else {
-      for (const entry of result.removed) {
-        log.success(`Finished ${entry.slug}`);
       }
       await writeTaskRemovalCdTarget(cdTarget);
     }
@@ -3303,31 +3098,6 @@ async function runTemplateCopy(
   }
   log.success(`Template "${sourceId}" copied to "${destId}".`);
   return templateSuccess();
-}
-
-async function confirmDelete({
-  dryRun,
-  force,
-  description,
-  targetPath,
-}: {
-  dryRun: boolean;
-  force: boolean;
-  description: string;
-  targetPath?: string;
-}): Promise<boolean> {
-  if (dryRun || force) {
-    return true;
-  }
-
-  if (!isInteractive()) {
-    throw new OperationalError(
-      "Cannot confirm in non-interactive mode. Use --force.",
-    );
-  }
-
-  const suffix = targetPath ? ` at ${targetPath}` : "";
-  return promptConfirm(`Delete ${description}${suffix}?`, false);
 }
 
 function operationalError(error: unknown): UsageError | OperationalError {

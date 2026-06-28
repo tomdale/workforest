@@ -70,14 +70,14 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
       {
         key: "repos",
         type: "string (path)",
-        description: "Directory for single-repository changes.",
+        description: "Directory for single-repository worktrees.",
         defaultBehavior:
           "Repos. Relative values resolve against directory.base.",
       },
       {
         key: "workspaces",
         type: "string (path)",
-        description: "Directory for template and _adhoc workspace changes.",
+        description: "Directory for template and _adhoc workspaces.",
         defaultBehavior:
           "Workspaces. Relative values resolve against directory.base.",
       },
@@ -210,7 +210,7 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
     key: "cloud",
     type: "object",
     description:
-      "Defaults for cloud workspaces provisioned on Vercel Sandbox (wf start --cloud).",
+      "Defaults for cloud workspaces provisioned on Vercel Sandbox (wf new --cloud).",
     defaultBehavior:
       "Unset. cloud.vercel.team and cloud.vercel.project (slugs) are required before any cloud command runs; the rest use provider defaults.",
     example: {

@@ -10,10 +10,10 @@ import { executeCli } from "./cli.ts";
 import { loadWorkspaceConfig } from "./config.ts";
 import {
   appendTasks,
-  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
-import { resolveChangeSelector } from "./workspace/selectors.ts";
+import { resolveSelector } from "./workspace/selectors.ts";
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -41,7 +41,9 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode).toBe(1);
-    expect(rendered.stderr).toContain("Not in a Workforest change.");
+    expect(rendered.stderr).toContain(
+      "Not in a Workforest worktree or workspace.",
+    );
     expect(rendered.stderr).toContain("Run: wf list");
     expect(rendered.stderr).not.toMatch(/\n\s+at /);
   });
@@ -138,7 +140,7 @@ describe("wf status", () => {
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
     expect(rendered.stdout).toContain(
-      "No initialization is recorded for this change; showing the static report.",
+      "No initialization is recorded for this worktree or workspace; showing the static report.",
     );
   });
 
@@ -182,10 +184,10 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode).toBe(2);
-    expect(rendered.stderr).toContain('Ambiguous change selector "auth-fix".');
+    expect(rendered.stderr).toContain('Ambiguous selector "auth-fix".');
     expect(rendered.stderr).toContain("_adhoc/auth-fix");
     expect(rendered.stderr).toContain("vercel-agent/auth-fix");
-    expect(rendered.stderr).toContain("Use <group>/<change>.");
+    expect(rendered.stderr).toContain("Use <group>/<name>.");
   });
 
   it("emits JSON for the current workspace change", async () => {
@@ -196,7 +198,7 @@ describe("wf status", () => {
       path.dirname(path.dirname(path.dirname(workspace))),
     );
     await expect(
-      resolveChangeSelector(loadedConfig.config, undefined),
+      resolveSelector(loadedConfig.config, undefined),
     ).resolves.toMatchObject({
       kind: "resolved",
       entry: { selector: "vercel-agent/auth-fix" },
@@ -361,7 +363,7 @@ async function createStatusFixture(
       },
     ],
   });
-  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+  await writeWorktreeMetadata(path.dirname(repoChange), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [

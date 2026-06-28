@@ -13,8 +13,8 @@ import type { ParsedInvocation } from "./cli/types.ts";
 import { executeCli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import {
-  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -63,10 +63,10 @@ describe("wf switch", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode).toBe(2);
-    expect(rendered.stderr).toContain('Ambiguous change selector "auth-fix".');
+    expect(rendered.stderr).toContain('Ambiguous selector "auth-fix".');
     expect(rendered.stderr).toContain("_adhoc/auth-fix");
     expect(rendered.stderr).toContain("vercel-agent/auth-fix");
-    expect(rendered.stderr).toContain("Use <group>/<change>.");
+    expect(rendered.stderr).toContain("Use <group>/<name>.");
   });
 
   it("reports exact selector collisions with actionable paths", async () => {
@@ -96,16 +96,16 @@ describe("wf switch", () => {
 
     expect(result.exitCode).toBe(2);
     expect(rendered.stderr).toContain(
-      'Ambiguous change selector "workforest/cli-redesign".',
+      'Ambiguous selector "workforest/cli-redesign".',
     );
-    expect(rendered.stderr).toContain("repository-change");
+    expect(rendered.stderr).toContain("worktree");
     expect(rendered.stderr).toContain("template-workspace");
     expect(rendered.stderr).toContain("Repos/workforest/cli-redesign");
     expect(rendered.stderr).toContain("Workspaces/workforest/cli-redesign");
     expect(rendered.stderr).toContain(
       "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.",
     );
-    expect(rendered.stderr).not.toContain("Use <group>/<change>.");
+    expect(rendered.stderr).not.toContain("Use <group>/<name>.");
   });
 
   it("uses all changes as fuzzy candidates when no selector is provided", async () => {
@@ -207,7 +207,7 @@ async function createSwitchFixture(): Promise<{
     mkdir(repoChange, { recursive: true }),
   ]);
   await writeFile(path.join(repoChange, "README.md"), "fixture\n", "utf8");
-  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+  await writeWorktreeMetadata(path.dirname(repoChange), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [

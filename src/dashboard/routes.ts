@@ -1,7 +1,7 @@
 export type DashboardRouteId =
   | "home"
-  | "start"
-  | "changes"
+  | "new"
+  | "list"
   | "tasks"
   | "templates"
   | "cache"
@@ -35,23 +35,25 @@ export const DASHBOARD_ROUTES: readonly DashboardRoute[] = [
   {
     id: "home",
     title: "Dashboard",
-    description: "Creation-first overview for changes and workspace activity.",
-  },
-  {
-    id: "start",
-    title: "Start",
     description:
-      "Create a repository change, template workspace, adhoc workspace, or repeat the current context.",
+      "Creation-first overview of worktrees, workspaces, and activity.",
   },
   {
-    id: "changes",
-    title: "Changes",
-    description: "Inspect known repository changes and workspaces.",
+    id: "new",
+    title: "New",
+    description:
+      "Create a worktree, template workspace, adhoc workspace, or repeat the current context.",
+  },
+  {
+    id: "list",
+    title: "List",
+    description: "Inspect known worktrees and workspaces.",
   },
   {
     id: "tasks",
     title: "Tasks",
-    description: "Inspect nested task worktrees for the current change.",
+    description:
+      "Inspect nested task worktrees for the current worktree or workspace.",
   },
   {
     id: "templates",
@@ -82,23 +84,24 @@ export const DASHBOARD_ROUTES: readonly DashboardRoute[] = [
 
 export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
   {
-    id: "home.start",
-    label: "Start a change",
-    description: "Open the creation workbench.",
+    id: "home.new",
+    label: "New worktree or workspace",
+    description: "Open the creation flow.",
     kind: "navigate",
-    route: "start",
+    route: "new",
   },
   {
-    id: "home.changes",
-    label: "Review changes",
-    description: "Inspect active repository changes and workspaces.",
+    id: "home.list",
+    label: "Review worktrees & workspaces",
+    description: "Inspect active worktrees and workspaces.",
     kind: "navigate",
-    route: "changes",
+    route: "list",
   },
   {
     id: "home.tasks",
     label: "Review tasks",
-    description: "Inspect nested task worktrees for the current change.",
+    description:
+      "Inspect nested task worktrees for the current worktree or workspace.",
     kind: "navigate",
     route: "tasks",
   },
@@ -131,53 +134,53 @@ export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
     route: "config",
   },
   {
-    id: "start.repository",
-    label: "Repository change",
-    description: "Create one change worktree for a single repository.",
+    id: "new.worktree",
+    label: "Worktree",
+    description: "Create one worktree for a single repository.",
     kind: "command",
-    command: ["start", "<change>", "<repo>"],
+    command: ["new", "<name>", "<repo>"],
   },
   {
-    id: "start.template",
+    id: "new.template",
     label: "Template workspace",
     description: "Create a workspace from a saved template.",
     kind: "command",
-    command: ["start", "<change>", "@<template>"],
+    command: ["new", "<name>", "@<template>"],
   },
   {
-    id: "start.adhoc",
+    id: "new.adhoc",
     label: "Adhoc workspace",
     description: "Create a workspace from several repositories.",
     kind: "command",
-    command: ["start", "<change>", "<repo...>"],
+    command: ["new", "<name>", "<repo...>"],
   },
   {
-    id: "changes.list",
-    label: "List changes",
-    description: "Show all known Workforest changes.",
+    id: "list.all",
+    label: "List worktrees & workspaces",
+    description: "Show everything Workforest manages.",
     kind: "command",
     command: ["list"],
   },
   {
     id: "tasks.list",
     label: "List tasks",
-    description: "Show nested task worktrees for this change.",
+    description: "Show nested task worktrees for this worktree or workspace.",
     kind: "command",
     command: ["task", "list"],
   },
   {
-    id: "tasks.start",
-    label: "Start task",
-    description: "Create one nested task worktree from the current change.",
+    id: "tasks.new",
+    label: "New task",
+    description: "Create one nested task worktree.",
     kind: "command",
-    command: ["task", "start", "<task>"],
+    command: ["task", "new", "<task>"],
   },
   {
-    id: "tasks.finish",
-    label: "Finish task",
+    id: "tasks.delete",
+    label: "Delete task",
     description: "Remove a task after its branch is integrated.",
     kind: "command",
-    command: ["task", "finish", "<task>"],
+    command: ["task", "delete", "<task>"],
   },
   {
     id: "templates.screen",
@@ -296,8 +299,8 @@ export function dashboardRouteForInvocation(
 ): DashboardRoute {
   const token = invokedPath[0];
   switch (token) {
-    case "start":
-      return getDashboardRoute("start");
+    case "new":
+      return getDashboardRoute("new");
     case "templates":
       return getDashboardRoute("templates");
     case "tasks":
@@ -317,13 +320,11 @@ export function dashboardActionsForRoute(
   route: DashboardRoute,
 ): readonly DashboardAction[] {
   switch (route.id) {
-    case "start":
+    case "new":
+      return DASHBOARD_ACTIONS.filter((action) => action.id.startsWith("new."));
+    case "list":
       return DASHBOARD_ACTIONS.filter((action) =>
-        action.id.startsWith("start."),
-      );
-    case "changes":
-      return DASHBOARD_ACTIONS.filter((action) =>
-        action.id.startsWith("changes."),
+        action.id.startsWith("list."),
       );
     case "tasks":
       return DASHBOARD_ACTIONS.filter((action) =>

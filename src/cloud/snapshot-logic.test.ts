@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ResolvedStartSource } from "../workspace/create-change.ts";
+import type { ResolvedSource } from "../workspace/create.ts";
 import { baseSnapshotGroup, isSnapshotFresh } from "./snapshot.ts";
 
 const repo = (name: string, remote: string) => ({
@@ -10,7 +10,7 @@ const repo = (name: string, remote: string) => ({
 
 describe("baseSnapshotGroup", () => {
   it("keys templates on their id", () => {
-    const source: ResolvedStartSource = {
+    const source: ResolvedSource = {
       kind: "template",
       groupName: "vercel-agent",
       templateId: "vercel-agent",
@@ -20,14 +20,14 @@ describe("baseSnapshotGroup", () => {
   });
 
   it("hashes a repo set stably and independent of order", () => {
-    const a: ResolvedStartSource = {
+    const a: ResolvedSource = {
       kind: "adhoc",
       repos: [
         repo("web", "git@github.com:vercel/web.git"),
         repo("api", "git@github.com:vercel/api.git"),
       ],
     };
-    const b: ResolvedStartSource = {
+    const b: ResolvedSource = {
       kind: "adhoc",
       repos: [
         repo("api", "git@github.com:vercel/api.git"),

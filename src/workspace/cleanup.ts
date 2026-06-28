@@ -11,7 +11,7 @@ import { ensureCacheDir } from "./index.ts";
 import {
   hasWorkspaceMetadata,
   readWorkspaceMetadata,
-  removeRepositoryChangeMetadata,
+  removeWorktreeMetadata,
 } from "./metadata.ts";
 import { cleanupWorkspaceWorktreesGenerator } from "./repository.ts";
 
@@ -65,9 +65,9 @@ export type CleanupExecutionOptions = CleanupOptions & {
   onState?: CleanupStateSink;
 };
 
-export type RepositoryChangeCleanupOptions = Readonly<{
+export type WorktreeCleanupOptions = Readonly<{
   repoName: string;
-  changePath: string;
+  targetPath: string;
   repo?: RepoConfig;
   dryRun?: boolean;
   onState?: CleanupStateSink;
@@ -535,15 +535,15 @@ export async function cleanupWorkspace(
   return result;
 }
 
-export async function cleanupRepositoryChange({
+export async function cleanupWorktree({
   repoName,
-  changePath,
+  targetPath,
   repo,
   dryRun = false,
   onState,
-}: RepositoryChangeCleanupOptions): Promise<CleanupResult> {
+}: WorktreeCleanupOptions): Promise<CleanupResult> {
   const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
-  const resolvedChangePath = path.resolve(changePath);
+  const resolvedChangePath = path.resolve(targetPath);
   const cacheDir = await ensureCacheDir();
   const mirrorDir = repo
     ? await resolveMirrorDir(repo, cacheDir)
@@ -552,7 +552,7 @@ export async function cleanupRepositoryChange({
 
   await onState?.({
     phase: "init",
-    message: `Cleaning repository change ${safeRepoName}`,
+    message: `Cleaning worktree ${safeRepoName}`,
   });
 
   if (await pathExists(mirrorDir)) {
@@ -616,7 +616,7 @@ export async function cleanupRepositoryChange({
       message: `Removing directory: ${resolvedChangePath}`,
     });
     await fs.rm(resolvedChangePath, { recursive: true, force: true });
-    await removeRepositoryChangeMetadata(
+    await removeWorktreeMetadata(
       path.dirname(resolvedChangePath),
       path.basename(resolvedChangePath),
     );

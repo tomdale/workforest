@@ -146,7 +146,7 @@ function runWorktree(
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [path.resolve("bin/workforest.js"), "task", "start", slug, "--force"],
+      [path.resolve("bin/workforest.js"), "task", "new", slug, "--force"],
       {
         cwd: fixture.repoDir,
         encoding: "utf8",

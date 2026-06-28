@@ -274,7 +274,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
 
     if (candidates.length === 0) {
       // Empty state. "No matches" only makes sense when there were items to
-      // filter against; a create-only list (no items at all, e.g. `wf start`)
+      // filter against; a create-only list (no items at all, e.g. `wf new`)
       // is just a name prompt, so it shows the action row alone with no
       // misleading hint. The action row (the sole selectable entry here) takes
       // the first list row when the hint is suppressed, else sits below it.

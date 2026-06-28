@@ -2,16 +2,15 @@ import { describe, expect, it } from "vitest";
 import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
 
-describe("change CLI conformance", () => {
+describe("worktree/workspace CLI conformance", () => {
   it.each([
-    [["start", "--help"], "Usage: wf start"],
+    [["new", "--help"], "Usage: wf new"],
     [["add", "--help"], "Usage: wf add"],
     [["switch", "--help"], "Usage: wf switch"],
     [["list", "--help"], "Usage: wf list"],
     [["status", "--help"], "Usage: wf status"],
-    [["finish", "--help"], "Usage: wf finish"],
     [["delete", "--help"], "Usage: wf delete"],
-    [["worktree", "--help"], "Usage: wf worktree"],
+    [["cache", "worktree", "--help"], "Usage: wf cache worktree"],
   ])("renders scoped help for %j", async (argv, usage) => {
     const result = await executeCli(argv);
 
@@ -25,11 +24,9 @@ describe("change CLI conformance", () => {
   });
 
   it.each([
-    [["start"], "Invalid operands for wf start"],
+    [["new"], "Invalid operands for wf new"],
     [["add"], "Invalid operands for wf add"],
-    [["delete"], "Invalid operands for wf delete"],
-    [["task", "start"], "Invalid operands for wf task start"],
-    [["task", "finish"], "Invalid operands for wf task finish"],
+    [["task", "new"], "Invalid operands for wf task new"],
     [["task", "delete"], "Invalid operands for wf task delete"],
   ])("returns exit 2 for invalid final invocations %j", async (argv, message) => {
     const result = await executeCli(argv);

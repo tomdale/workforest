@@ -14,39 +14,39 @@ import {
 } from "../terminal/report.ts";
 import type { StatusTone } from "../terminal/status-indicator.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
-import type { ChangeInventoryEntry } from "./change-inventory.ts";
 import {
   finalizeWorkspaceInitialization,
   getRepoInitializationLogPath,
   type RepoInitializationState,
   readRepoInitializationStates,
   readWorkspaceInitializationState,
-  repositoryChangeInitializationScope,
   type WorkspaceInitializationState,
   workspaceInitializationScope,
+  worktreeInitializationScope,
 } from "./initialization.ts";
 import type { InitializationScope } from "./initialization-scope.ts";
+import type { InventoryEntry } from "./inventory.ts";
 import { readWorkspaceMetadata } from "./metadata.ts";
 import { listRepositoryTasks, listTasks, type TaskListEntry } from "./tasks.ts";
 
-export type ChangeStatus = Readonly<{
+export type Status = Readonly<{
   selector: string;
-  type: ChangeInventoryEntry["type"];
+  type: InventoryEntry["type"];
   typeLabel: string;
   groupName: string;
   changeName: string;
   path: string;
   modifiedAt: string;
   modifiedAtMs: number;
-  summary: ChangeStatusSummary;
-  repositories: readonly ChangeRepositoryStatus[];
-  tasks: readonly ChangeTaskStatus[];
-  initialization: ChangeInitializationStatus | null;
+  summary: StatusSummary;
+  repositories: readonly RepositoryStatus[];
+  tasks: readonly TaskStatus[];
+  initialization: InitializationStatus | null;
   guidance?: TemplateAgentsMdState;
   nextSteps: readonly string[];
 }>;
 
-export type ChangeStatusSummary = Readonly<{
+export type StatusSummary = Readonly<{
   change: string;
   type: string;
   path: string;
@@ -58,7 +58,7 @@ export type ChangeStatusSummary = Readonly<{
   branch?: string;
 }>;
 
-export type ChangeRepositoryStatus = Readonly<{
+export type RepositoryStatus = Readonly<{
   name: string;
   path: string;
   branch: string | null;
@@ -97,7 +97,7 @@ export type RepoSetupSummary = Readonly<{
   logPath?: string;
 }>;
 
-export type ChangeTaskStatus = Readonly<{
+export type TaskStatus = Readonly<{
   selector: string;
   parentRepo: string;
   slug: string;
@@ -109,7 +109,7 @@ export type ChangeTaskStatus = Readonly<{
   details: readonly StatusDetail[];
 }>;
 
-export type ChangeInitializationStatus = Readonly<{
+export type InitializationStatus = Readonly<{
   workspace: WorkspaceInitializationState | null;
   repos: readonly RepoInitializationState[];
   failedRepos: readonly string[];
@@ -122,7 +122,7 @@ export type StatusDetail = Readonly<{
   value: string;
 }>;
 
-export type RenderChangeStatusOptions = Readonly<{
+export type RenderStatusOptions = Readonly<{
   note?: string;
 }>;
 
@@ -134,9 +134,7 @@ type RepositoryTarget = Readonly<{
   setupLogPath?: string;
 }>;
 
-export async function buildChangeStatus(
-  entry: ChangeInventoryEntry,
-): Promise<ChangeStatus> {
+export async function buildStatus(entry: InventoryEntry): Promise<Status> {
   const initialization = await readInitializationStatus(entry);
   const repositories = await buildRepositoryStatuses(
     entry,
@@ -169,15 +167,14 @@ export async function buildChangeStatus(
   };
 }
 
-export function renderChangeStatus(
-  status: ChangeStatus,
-  options: RenderChangeStatusOptions = {},
+export function renderStatus(
+  status: Status,
+  options: RenderStatusOptions = {},
 ): string {
   const sections: ReportSection[] = [
     { title: "Summary", fields: compactPaths(summaryFields(status.summary)) },
     {
-      title:
-        status.type === "repository-change" ? "Repository" : "Repositories",
+      title: status.type === "worktree" ? "Repository" : "Repositories",
       entries: status.repositories.map((repo) => ({
         title: repo.name,
         tone: repositoryTone(repo.state),
@@ -227,7 +224,7 @@ export function renderChangeStatus(
 }
 
 /** Maps a repository's working-tree state onto a status tone. */
-function repositoryTone(state: ChangeRepositoryStatus["state"]): StatusTone {
+function repositoryTone(state: RepositoryStatus["state"]): StatusTone {
   switch (state) {
     case "clean":
       return "success";
@@ -239,7 +236,7 @@ function repositoryTone(state: ChangeRepositoryStatus["state"]): StatusTone {
 }
 
 /** Maps a nested task's state onto a status tone. */
-function taskTone(state: ChangeTaskStatus["state"]): StatusTone {
+function taskTone(state: TaskStatus["state"]): StatusTone {
   switch (state) {
     case "ready":
       return "success";
@@ -272,9 +269,9 @@ function compactPaths(fields: readonly StatusDetail[]): ReportField[] {
 }
 
 async function workspaceGuidanceState(
-  entry: ChangeInventoryEntry,
+  entry: InventoryEntry,
 ): Promise<TemplateAgentsMdState | undefined> {
-  if (entry.type === "repository-change") return undefined;
+  if (entry.type === "worktree") return undefined;
   const metadata = await readWorkspaceMetadata(entry.path).catch(() => null);
   const templateId = metadata?.workspace.template_id;
   if (!templateId) return undefined;
@@ -289,25 +286,25 @@ async function workspaceGuidanceState(
 }
 
 async function buildRepositoryStatuses(
-  entry: ChangeInventoryEntry,
+  entry: InventoryEntry,
   setupStates: readonly RepoInitializationState[],
-): Promise<ChangeRepositoryStatus[]> {
+): Promise<RepositoryStatus[]> {
   const targets = await getRepositoryTargets(entry, setupStates);
   const statuses = await Promise.all(targets.map(buildRepositoryStatus));
   return statuses.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function getRepositoryTargets(
-  entry: ChangeInventoryEntry,
+  entry: InventoryEntry,
   setupStates: readonly RepoInitializationState[],
 ): Promise<RepositoryTarget[]> {
   const setupByRepo = new Map(setupStates.map((state) => [state.repo, state]));
-  if (entry.type === "repository-change") {
+  if (entry.type === "worktree") {
     const setup = setupByRepo.get(entry.repository);
     const setupLogPath =
       setup?.status === "failed"
         ? await getRepoInitializationLogPath(
-            changeInitializationScope(entry),
+            initializationScope(entry),
             entry.repository,
           ).catch(() => undefined)
         : undefined;
@@ -340,7 +337,7 @@ async function getRepositoryTargets(
       const setupLogPath =
         setup?.status === "failed"
           ? await getRepoInitializationLogPath(
-              changeInitializationScope(entry),
+              initializationScope(entry),
               repo.name,
             ).catch(() => undefined)
           : undefined;
@@ -357,7 +354,7 @@ async function getRepositoryTargets(
 
 async function buildRepositoryStatus(
   target: RepositoryTarget,
-): Promise<ChangeRepositoryStatus> {
+): Promise<RepositoryStatus> {
   if (!(await pathExists(target.path))) {
     const setup = summarizeSetup(target.setup, target.setupLogPath);
     return {
@@ -593,9 +590,9 @@ function setupDetails(setup: RepoSetupSummary): StatusDetail[] {
 }
 
 async function readInitializationStatus(
-  entry: ChangeInventoryEntry,
-): Promise<ChangeInitializationStatus | null> {
-  const scope = changeInitializationScope(entry);
+  entry: InventoryEntry,
+): Promise<InitializationStatus | null> {
+  const scope = initializationScope(entry);
   await finalizeWorkspaceInitialization(scope).catch(() => undefined);
   const [workspace, repos] = await Promise.all([
     readWorkspaceInitializationState(scope),
@@ -626,10 +623,8 @@ async function readInitializationStatus(
   };
 }
 
-async function buildTaskStatuses(
-  entry: ChangeInventoryEntry,
-): Promise<ChangeTaskStatus[]> {
-  if (entry.type === "repository-change") {
+async function buildTaskStatuses(entry: InventoryEntry): Promise<TaskStatus[]> {
+  if (entry.type === "worktree") {
     const tasks = await listRepositoryTasks({
       parentRepoDir: entry.path,
       repoName: entry.repository,
@@ -654,7 +649,7 @@ async function buildTaskStatuses(
 function formatTaskStatus(
   task: TaskListEntry,
   workspaceDir: string,
-): ChangeTaskStatus {
+): TaskStatus {
   const selector = `${task.parent_repo}/${task.slug}`;
   const mergeState =
     task.merged === true
@@ -689,9 +684,9 @@ function formatTaskStatus(
 }
 
 function buildSummary(
-  entry: ChangeInventoryEntry,
-  repositories: readonly ChangeRepositoryStatus[],
-): ChangeStatusSummary {
+  entry: InventoryEntry,
+  repositories: readonly RepositoryStatus[],
+): StatusSummary {
   const sharedBranch = uniqueValue(
     repositories.map((repo) => repo.branch).filter((branch) => branch !== null),
   );
@@ -699,23 +694,19 @@ function buildSummary(
   return {
     change: entry.selector,
     type: formatTypeLabel(entry.type),
-    ...(entry.type === "repository-change"
-      ? { repository: entry.repository }
-      : {}),
+    ...(entry.type === "worktree" ? { repository: entry.repository } : {}),
     ...(entry.type === "template-workspace"
       ? { template: entry.groupName }
       : {}),
     ...(entry.type === "adhoc-workspace" ? { group: entry.groupName } : {}),
-    ...(entry.type !== "repository-change"
-      ? { repos: entry.repos.length }
-      : {}),
+    ...(entry.type !== "worktree" ? { repos: entry.repos.length } : {}),
     ...(sharedBranch ? { branch: sharedBranch } : {}),
     path: entry.path,
     updated: formatRelativeAge(entry.modifiedAtMs),
   };
 }
 
-function summaryFields(summary: ChangeStatusSummary): StatusDetail[] {
+function summaryFields(summary: StatusSummary): StatusDetail[] {
   return [
     { label: "Change", value: summary.change },
     { label: "Type", value: summary.type },
@@ -736,14 +727,14 @@ function summaryFields(summary: ChangeStatusSummary): StatusDetail[] {
 }
 
 function initializationFields(
-  initialization: ChangeInitializationStatus,
-  type: ChangeInventoryEntry["type"],
+  initialization: InitializationStatus,
+  type: InventoryEntry["type"],
 ): StatusDetail[] {
   return [
     ...(initialization.workspace
       ? [
           {
-            label: type === "repository-change" ? "Change" : "Workspace",
+            label: type === "worktree" ? "Change" : "Workspace",
             value: initialization.workspace.status,
           },
         ]
@@ -779,11 +770,11 @@ function initializationFields(
   ];
 }
 
-export function changeInitializationScope(
-  entry: ChangeInventoryEntry,
+export function initializationScope(
+  entry: InventoryEntry,
 ): InitializationScope {
-  return entry.type === "repository-change"
-    ? repositoryChangeInitializationScope({
+  return entry.type === "worktree"
+    ? worktreeInitializationScope({
         repoRootDir: path.dirname(entry.path),
         changeName: entry.changeName,
       })
@@ -792,9 +783,9 @@ export function changeInitializationScope(
 
 function deriveNextSteps(
   selector: string,
-  repositories: readonly ChangeRepositoryStatus[],
-  tasks: readonly ChangeTaskStatus[],
-  initialization: ChangeInitializationStatus | null,
+  repositories: readonly RepositoryStatus[],
+  tasks: readonly TaskStatus[],
+  initialization: InitializationStatus | null,
 ): string[] {
   const steps: string[] = [];
   if (
@@ -819,13 +810,13 @@ function deriveNextSteps(
     steps.length === 0 &&
     repositories.some((repo) => repo.integrated === false)
   ) {
-    steps.push("Open or merge the change branch before finishing.");
+    steps.push("Open or merge the branch before deleting it.");
   }
   if (
     steps.length === 0 &&
     repositories.every((repo) => repo.integrated === true)
   ) {
-    steps.push(`Run: wf finish ${selector}`);
+    steps.push(`Run: wf delete ${selector}`);
   }
   if (steps.length === 0) {
     steps.push("No immediate blockers.");
@@ -833,10 +824,10 @@ function deriveNextSteps(
   return steps;
 }
 
-function formatTypeLabel(type: ChangeInventoryEntry["type"]): string {
+function formatTypeLabel(type: InventoryEntry["type"]): string {
   switch (type) {
-    case "repository-change":
-      return "repository change";
+    case "worktree":
+      return "worktree";
     case "template-workspace":
       return "template workspace";
     case "adhoc-workspace":

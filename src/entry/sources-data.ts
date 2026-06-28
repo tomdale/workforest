@@ -10,8 +10,8 @@ import {
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  getRepositoryChangePath,
-  getWorkspaceChangePath,
+  getWorkspacePath,
+  getWorktreePath,
   resolveWorkforestDirectories,
 } from "../workspace/paths.ts";
 
@@ -36,16 +36,16 @@ export type ChosenSource =
 
 /**
  * The inferred shape of the change the user is about to create, derived from
- * the chosen sources using the same rules as `wf start`.
+ * the chosen sources using the same rules as `wf new`.
  */
-export type InferredChange = {
+export type InferredEntry = {
   type: "repository" | "template" | "adhoc";
   relativePath: string;
   branch: string;
   repoPreview: string[];
 };
 
-export type InferChangeOptions = {
+export type InferEntryOptions = {
   changeName: string;
   sources: ChosenSource[];
 };
@@ -109,18 +109,18 @@ export function filterSourceCandidates(
 
 /**
  * Infer the target change layout, path, branch, and repo set from the chosen
- * sources, mirroring `wf start`:
+ * sources, mirroring `wf new`:
  * - exactly one template -> template workspace
- * - exactly one repo      -> repository change
+ * - exactly one repo      -> worktree
  * - two or more repos     -> ad-hoc workspace
  *
  * Throws if a template is combined with any other source, or if no usable
  * sources are provided.
  */
-export async function inferChange(
-  options: InferChangeOptions,
-): Promise<InferredChange> {
-  const changeName = validateResourceName(options.changeName, "Change name");
+export async function inferEntry(
+  options: InferEntryOptions,
+): Promise<InferredEntry> {
+  const changeName = validateResourceName(options.changeName, "Name");
   const templates = options.sources.filter(
     (source): source is Extract<ChosenSource, { kind: "template" }> =>
       source.kind === "template",
@@ -152,7 +152,7 @@ export async function inferChange(
       changeName,
       resolveBranchPrefix(config.branchPrefix, loaded.config.branchPrefix),
     );
-    const absolute = getWorkspaceChangePath(directories, loaded.id, changeName);
+    const absolute = getWorkspacePath(directories, loaded.id, changeName);
     return {
       type: "template",
       relativePath: path.relative(directories.base, absolute),
@@ -173,11 +173,7 @@ export async function inferChange(
     if (!repo) {
       throw new Error("No repositories specified.");
     }
-    const absolute = getRepositoryChangePath(
-      directories,
-      repo.name,
-      changeName,
-    );
+    const absolute = getWorktreePath(directories, repo.name, changeName);
     return {
       type: "repository",
       relativePath: path.relative(directories.base, absolute),
@@ -186,7 +182,7 @@ export async function inferChange(
     };
   }
 
-  const absolute = getWorkspaceChangePath(
+  const absolute = getWorkspacePath(
     directories,
     ADHOC_WORKSPACE_GROUP,
     changeName,

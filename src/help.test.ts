@@ -42,7 +42,7 @@ describe("registry-derived help", () => {
   it("renders scoped subcommands, operands, and flags from the registry", () => {
     const task = stripAnsi(commandPathHelp(commandRegistry, ["task"]) ?? "");
     const start = stripAnsi(
-      commandPathHelp(commandRegistry, ["task", "start"]) ?? "",
+      commandPathHelp(commandRegistry, ["task", "new"]) ?? "",
     );
 
     for (const child of findGroup(commandRegistry.root, "task").children) {
@@ -51,7 +51,7 @@ describe("registry-derived help", () => {
         expect(task).toContain(child.summary);
       }
     }
-    expect(start).toContain("Usage: wf task start [options] <task names...>");
+    expect(start).toContain("Usage: wf task new [options] <task names...>");
     expect(start).toContain("--repo <repository>");
     expect(start).toContain("--dry-run");
     expect(start).toContain("--json");
@@ -60,7 +60,7 @@ describe("registry-derived help", () => {
   it("hides hidden commands and aliases while showing visible aliases", () => {
     const registry = structuredClone(commandRegistry) as MutableCommandRegistry;
     const task = findMutableNode(registry.root, ["task"]);
-    const start = findMutableNode(registry.root, ["task", "start"]);
+    const start = findMutableNode(registry.root, ["task", "new"]);
     if (task.kind !== "group") throw new Error("Expected task group");
 
     start.aliases = [
@@ -76,7 +76,7 @@ describe("registry-derived help", () => {
     });
 
     const output = stripAnsi(commandPathHelp(registry, ["task"]) ?? "");
-    expect(output).toContain("start|make");
+    expect(output).toContain("new|make");
     expect(output).not.toContain("internal-create");
     expect(output).not.toContain("internal");
   });
@@ -95,7 +95,7 @@ describe("registry-derived help", () => {
       commandPathHelp(commandRegistry, ["template", "copy"]) ?? "",
     );
     const unbounded = stripAnsi(
-      commandPathHelp(commandRegistry, ["task", "start"]) ?? "",
+      commandPathHelp(commandRegistry, ["task", "new"]) ?? "",
     );
 
     expect(fixed).toContain("<source template> <destination template>");

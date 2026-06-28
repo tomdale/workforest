@@ -258,7 +258,7 @@ describe("template suggestion debug logs", () => {
     );
   });
 
-  it("writes repository-change logs under the repository metadata directory", async () => {
+  it("writes worktree logs under the repository metadata directory", async () => {
     const root = await createTempDir("workforest-template-suggest-repo-");
     const cwd = path.join(root, "Repos", "workforest", "ai-features");
     await mkdir(cwd, { recursive: true });

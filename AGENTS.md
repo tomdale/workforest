@@ -68,8 +68,8 @@ instead of ad hoc branches or shared directories.
 2. Keep the coordinator checkout clean before creating task worktrees. Commit
    or stash unrelated local edits because task branches start from committed
    `HEAD`.
-3. Create one task worktree per independent subtask with `wf task start` from
-   inside the workspace repository, or `wf task start --repo <repo>` from the
+3. Create one task worktree per independent subtask with `wf task new` from
+   inside the workspace repository, or `wf task new --repo <repo>` from the
    workspace root.
 4. Namespace task names with the coordinator task so task directories and
    branches are unique across concurrent coordinators. Include the `tomdale/`

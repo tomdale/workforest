@@ -776,10 +776,7 @@ export function getCompletionModalContent({
       ? [
           "",
           paneMessage("Initialization continues in the background.", "muted"),
-          paneMessage(
-            "Run wf status --watch from the change to check progress.",
-            "muted",
-          ),
+          paneMessage("Run wf status --watch to check progress.", "muted"),
         ]
       : []),
     ...(setupWarnings.length > 0
@@ -819,7 +816,7 @@ function getCompletionModalMaxTextWidth({
     ...(backgroundInitialization
       ? [
           "Initialization continues in the background.",
-          "Run wf status --watch from the change to check progress.",
+          "Run wf status --watch to check progress.",
         ]
       : []),
     "press any key",

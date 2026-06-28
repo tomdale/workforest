@@ -14,15 +14,15 @@ export type WorkspaceInitializationScope = Readonly<{
   workspaceDir: string;
 }>;
 
-export type RepositoryChangeInitializationScope = Readonly<{
-  kind: "repository-change";
+export type WorktreeInitializationScope = Readonly<{
+  kind: "worktree";
   repoRootDir: string;
   changeName: string;
 }>;
 
 export type InitializationScope =
   | WorkspaceInitializationScope
-  | RepositoryChangeInitializationScope;
+  | WorktreeInitializationScope;
 
 export type InitializationTarget = string | InitializationScope;
 
@@ -35,17 +35,17 @@ export function workspaceInitializationScope(
   };
 }
 
-export function repositoryChangeInitializationScope({
+export function worktreeInitializationScope({
   repoRootDir,
   changeName,
 }: {
   repoRootDir: string;
   changeName: string;
-}): RepositoryChangeInitializationScope {
+}): WorktreeInitializationScope {
   return {
-    kind: "repository-change",
+    kind: "worktree",
     repoRootDir: path.resolve(repoRootDir),
-    changeName: validateResourceName(changeName, "Change name"),
+    changeName: validateResourceName(changeName, "Name"),
   };
 }
 

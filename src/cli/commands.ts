@@ -228,24 +228,24 @@ const dashboardOpen = leaf({
   ],
 });
 
-const changeStart = leaf({
-  name: "start",
-  path: ["start"],
-  summary: "Start a change",
+const newCommand = leaf({
+  name: "new",
+  path: ["new"],
+  summary: "Create a worktree or workspace",
   description:
-    "Creates a new Workforest change. A single repository source creates `Repos/<repo>/<change>`, an `@template` source creates `Workspaces/<template>/<change>`, and multiple repository sources create `Workspaces/_adhoc/<change>`. With only a change name, repeats the current Workforest-managed context. With no operands in an interactive terminal, opens the new change dashboard flow; outside an interactive terminal a change name is required.",
-  handler: "change.start",
-  help: { kind: "command", command: "start" },
+    "Creates a new worktree or workspace. A single repository source creates a worktree at `Repos/<repo>/<name>`, an `@template` source creates a workspace at `Workspaces/<template>/<name>`, and multiple repository sources create an _adhoc workspace at `Workspaces/_adhoc/<name>`. With only a name, repeats the current Workforest-managed context. With no operands in an interactive terminal, opens the new-work dashboard flow; outside an interactive terminal a name is required.",
+  handler: "new",
+  help: { kind: "command", command: "new" },
   flags: [
     stringFlag("branch", "--branch", "branch", {
       description:
-        "Use this exact Git branch name instead of deriving one from `branchPrefix` and <change>.",
+        "Use this exact Git branch name instead of deriving one from `branchPrefix` and <name>.",
     }),
     booleanFlag(
       "cloud",
       "--cloud",
       undefined,
-      "Provision the change as a cloud workspace on Vercel Sandbox instead of locally.",
+      "Provision the workspace on Vercel Sandbox instead of locally.",
     ),
   ],
   operands: {
@@ -260,8 +260,8 @@ const changeStart = leaf({
           1,
           null,
           "arguments",
-          "<change> [source...]",
-          "A change name, optionally followed by one repository, multiple repositories, or one @template source.",
+          "<name> [source...]",
+          "A name, optionally followed by one repository, multiple repositories, or one @template source.",
         ),
         delimiter: "forbidden",
       },
@@ -269,20 +269,20 @@ const changeStart = leaf({
   },
   examples: [
     {
-      command: "wf start redesign-cli tomdale/workforest",
-      description: "Start a repository change.",
+      command: "wf new redesign-cli tomdale/workforest",
+      description: "Create a worktree (single repository).",
     },
     {
-      command: "wf start auth-fix @vercel-agent",
-      description: "Start a workspace change from a template.",
+      command: "wf new auth-fix @vercel-agent",
+      description: "Create a workspace from a template.",
     },
     {
-      command: "wf start billing vercel/front vercel/api",
-      description: "Start an _adhoc workspace from several repositories.",
+      command: "wf new billing vercel/front vercel/api",
+      description: "Create an _adhoc workspace from several repositories.",
     },
     {
-      command: "wf start follow-up",
-      description: "Start another change from the current Workforest context.",
+      command: "wf new follow-up",
+      description: "Create another from the current Workforest context.",
     },
   ],
   outputModes: ["human"],
@@ -300,17 +300,17 @@ const cacheDefault = leaf({
   tty: optionalTerminal,
 });
 
-const changeList = leaf({
+const listCommand = leaf({
   name: "list",
   path: ["list"],
-  summary: "List Workforest changes",
+  summary: "List worktrees and workspaces",
   description:
-    "Shows a compact inventory of Workforest-managed workspace and repository changes, grouped by their human-facing directory layout.",
-  handler: "change.list",
+    "Shows a compact inventory of Workforest-managed worktrees and workspaces, grouped by their human-facing directory layout.",
+  handler: "list",
   help: { kind: "command", command: "list" },
   flags: [
     stringFlag("repo", "--repo", "repo", {
-      description: "Show only changes containing this repository.",
+      description: "Show only entries containing this repository.",
     }),
     stringFlag("group", "--group", "group", {
       description:
@@ -320,222 +320,185 @@ const changeList = leaf({
       "paths",
       "--paths",
       undefined,
-      "Include the absolute path for each change.",
+      "Include the absolute path for each entry.",
     ),
     booleanFlag(
       "json",
       "--json",
       undefined,
-      "Emit the change inventory as a JSON envelope instead of the report.",
+      "Emit the inventory as a JSON envelope instead of the report.",
     ),
   ],
   examples: [
     {
       command: "wf list",
-      description: "Show all workspace and repository changes.",
+      description: "Show all worktrees and workspaces.",
     },
     {
       command: "wf list --repo workforest",
-      description: "Show changes containing the workforest repository.",
+      description: "Show entries containing the workforest repository.",
     },
     {
       command: "wf list --group _adhoc --paths",
-      description: "Show _adhoc workspace changes with paths.",
+      description: "Show _adhoc workspaces with paths.",
     },
   ],
   outputModes: ["report", "json"],
 });
 
-const changeStatus = leaf({
+const statusCommand = leaf({
   name: "status",
   path: ["status"],
-  summary: "Show change status",
+  summary: "Show worktree or workspace status",
   description:
-    "Shows a static report for one Workforest change, resolving the current change from the working directory when no selector is provided.",
-  handler: "change.status",
+    "Shows a static report for one worktree or workspace, resolving the current one from the working directory when no selector is provided.",
+  handler: "status",
   help: { kind: "command", command: "status" },
   operands: operands(
     0,
     1,
     "selector",
     undefined,
-    "Change selector as <group>/<change>, or a bare change name when unique.",
+    "Selector as <group>/<name>, or a bare name when unique.",
   ),
   flags: [
     booleanFlag(
       "json",
       "--json",
       undefined,
-      "Emit the change status model as a JSON envelope instead of the report.",
+      "Emit the status model as a JSON envelope instead of the report.",
     ),
     booleanFlag(
       "watch",
       "--watch",
       undefined,
-      "Open the initialization watcher for the selected change when setup state exists.",
+      "Open the initialization watcher for the selected entry when setup state exists.",
     ),
   ],
   examples: [
     {
       command: "wf status",
-      description: "Show status for the current Workforest change.",
+      description: "Show status for the current worktree or workspace.",
     },
     {
       command: "wf status workforest/cli-redesign",
-      description: "Show a repository change by selector.",
+      description: "Show a worktree by selector.",
     },
     {
       command: "wf status vercel-agent/auth-fix --json",
-      description: "Print a workspace change status as JSON.",
+      description: "Print a workspace status as JSON.",
     },
   ],
   outputModes: ["report", "json"],
 });
 
-const changeAdd = leaf({
+const addCommand = leaf({
   name: "add",
   path: ["add"],
-  summary: "Add repositories to the current change",
+  summary: "Add repositories to the current worktree or workspace",
   description:
-    "Adds repositories to the current Workforest change. From a workspace change, missing repositories are added to that workspace. From a repository change, the change is promoted into a workspace and the existing worktree is moved there; pass @template to use the template's repository set.",
-  handler: "change.add",
+    "Adds repositories to the current worktree or workspace. From a workspace, missing repositories are added to it. From a worktree, the worktree is promoted into a workspace and its existing checkout is moved there; pass @template to use the template's repository set.",
+  handler: "add",
   help: { kind: "command", command: "add" },
   operands: operands(
     1,
     null,
     "sources",
     "<repo...|@template>",
-    "One or more repositories, or one @template when promoting a repository change.",
+    "One or more repositories, or one @template when promoting a worktree.",
   ),
   flags: [
     booleanFlag(
       "yes",
       "--yes",
       undefined,
-      "Confirm repository-change promotion without prompting.",
+      "Confirm worktree promotion without prompting.",
     ),
   ],
   examples: [
     {
       command: "wf add vercel/api",
-      description: "Add one repository to the current workspace change.",
+      description: "Add one repository to the current workspace.",
     },
     {
       command: "wf add vercel/api vercel/dashboard",
-      description: "Add several repositories to the current workspace change.",
+      description: "Add several repositories to the current workspace.",
     },
     {
       command: "wf add @vercel-agent --yes",
-      description:
-        "Promote the current repository change into a template workspace.",
+      description: "Promote the current worktree into a template workspace.",
     },
   ],
   tty: optionalStdin,
 });
 
-const changeSwitch = leaf({
+const switchCommand = leaf({
   name: "switch",
   path: ["switch"],
-  summary: "Switch to a Workforest change",
+  summary: "Switch to a worktree or workspace",
   description:
-    "Changes your shell to a Workforest change. Use <group>/<change> to select exactly, a bare change name when unique, or no selector in an interactive terminal to fuzzy-pick from all known changes.",
-  handler: "change.switch",
+    "Changes your shell to a worktree or workspace. Use <group>/<name> to select exactly, a bare name when unique, or no selector in an interactive terminal to fuzzy-pick from everything known.",
+  handler: "switch",
   help: { kind: "command", command: "switch" },
   operands: operands(
     0,
     1,
     "selector",
     "[selector]",
-    "Change selector as <group>/<change>, or a bare change name when unique.",
+    "Selector as <group>/<name>, or a bare name when unique.",
   ),
   examples: [
     {
       command: "wf switch workforest/cli-redesign",
-      description: "Switch to a repository change.",
+      description: "Switch to a worktree.",
     },
     {
       command: "wf switch vercel-agent/auth-fix",
-      description: "Switch to a workspace change.",
+      description: "Switch to a workspace.",
     },
     {
       command: "wf switch",
-      description: "Fuzzy-pick from known changes interactively.",
+      description: "Fuzzy-pick interactively.",
     },
   ],
   tty: optionalStdin,
 });
 
-const changeFinish = leaf({
-  name: "finish",
-  path: ["finish"],
-  summary: "Finish an integrated change",
+const deleteCommand = leaf({
+  name: "delete",
+  path: ["delete"],
+  summary: "Delete a worktree or workspace",
   description:
-    "Removes a Workforest change after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks. With no selector, resolves the current change from the working directory. Pass --force only for squash merges, cherry-picks, abandoned work, or proof Workforest cannot detect.",
-  handler: "change.finish",
-  help: { kind: "command", command: "finish" },
+    "Removes a worktree or workspace after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks; it refuses with a blocker report otherwise. With no selector, resolves the current one from the working directory. Pass --force to skip verification and remove unclean, unintegrated, or abandoned work (squash merges, cherry-picks, or proof Workforest cannot detect). Cached mirrors are preserved.",
+  handler: "delete",
+  help: { kind: "command", command: "delete" },
   operands: operands(
     0,
     1,
     "selector",
     "[selector]",
-    "Change selector as <group>/<change>, or a bare change name when unique. Omit to finish the current change.",
+    "Selector as <group>/<name>, or a bare name when unique. Omit to delete the current worktree or workspace.",
   ),
   flags: [
     booleanFlag(
       "force",
       "--force",
       "-f",
-      "Skip finish safety blockers for intentional squash merges, cherry-picks, or abandoned work.",
+      "Skip safety verification and remove even unclean, unintegrated, or abandoned work.",
     ),
   ],
   examples: [
     {
-      command: "wf finish workforest/cli-redesign",
-      description: "Finish a repository change after integration.",
+      command: "wf delete workforest/cli-redesign",
+      description: "Delete a worktree after it has been integrated.",
     },
     {
-      command: "wf finish vercel-agent/auth-fix",
-      description: "Finish a workspace change after integration.",
-    },
-    {
-      command: "wf finish workforest/squashed-change --force",
-      description:
-        "Finish a change integrated in a way Workforest cannot prove.",
-    },
-  ],
-});
-
-const changeDelete = leaf({
-  name: "delete",
-  path: ["delete"],
-  summary: "Delete a Workforest change",
-  description:
-    "Explicitly deletes a Workforest change without integration proof. Requires a selector and confirmation in an interactive terminal; scripts must pass --force. Cached mirrors are preserved.",
-  handler: "change.delete",
-  help: { kind: "command", command: "delete" },
-  operands: operands(
-    1,
-    1,
-    "selector",
-    "<selector>",
-    "Change selector as <group>/<change>, or a bare change name when unique.",
-  ),
-  flags: [
-    booleanFlag(
-      "force",
-      "--force",
-      "-f",
-      "Skip the confirmation prompt; required to proceed without a terminal.",
-    ),
-  ],
-  examples: [
-    {
-      command: "wf delete _adhoc/experiment",
-      description: "Delete a change after confirming.",
+      command: "wf delete vercel-agent/auth-fix",
+      description: "Delete a workspace after integration.",
     },
     {
       command: "wf delete _adhoc/experiment --force",
-      description: "Delete without prompting.",
+      description: "Abandon and delete unintegrated work.",
     },
   ],
   tty: optionalStdin,
@@ -546,7 +509,7 @@ const migrateWorkspaces = leaf({
   path: ["migrate", "workspaces"],
   summary: "Migrate workspace layouts and repository metadata",
   description:
-    "Moves metadata-bearing direct workspace directories into the grouped workspace layout, moves legacy repo-only directories from <repo>/<change> into Repos/<repo>/<change>, and backfills repository-change metadata under Repos/<repo>/.workforest/changes/<change>.json. Without --apply it prints the migration plan and makes no changes.",
+    "Moves metadata-bearing direct workspace directories into the grouped workspace layout, moves legacy repo-only directories from <repo>/<name> into Repos/<repo>/<name>, and backfills worktree metadata under Repos/<repo>/.workforest/changes/<name>.json. Without --apply it prints the migration plan and makes no changes.",
   handler: "migrate.workspaces",
   help: nestedHelp("migrate", "workspaces"),
   flags: [
@@ -638,13 +601,12 @@ export const commandRegistry: CommandRegistry = {
     help: { kind: "root" },
     children: [
       dashboardOpen,
-      changeStart,
-      changeList,
-      changeStatus,
-      changeAdd,
-      changeSwitch,
-      changeFinish,
-      changeDelete,
+      newCommand,
+      listCommand,
+      statusCommand,
+      addCommand,
+      switchCommand,
+      deleteCommand,
       group({
         name: "ai",
         path: ["ai"],
@@ -668,17 +630,17 @@ export const commandRegistry: CommandRegistry = {
         path: ["task"],
         summary: "Manage temporary task worktrees",
         description:
-          "Create, finish, list, and abandon short-lived task worktrees inside an existing Workforest change, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, repository change, or existing task.",
+          "Create, list, and remove short-lived task worktrees inside an existing worktree or workspace, each on its own branch off a parent repository's current HEAD. Run these from inside a workspace repo, worktree, or existing task.",
         help: { kind: "command", command: "task" },
         children: [
           leaf({
-            name: "start",
-            path: ["task", "start"],
-            summary: "Start nested task lanes",
+            name: "new",
+            path: ["task", "new"],
+            summary: "Create nested task lanes",
             description:
-              "Adds one or more nested task worktrees under the current change's reserved _tasks directory, each on a new branch off the parent repository's committed HEAD, then runs setup initializers. Run from inside a workspace repo, repository change, or existing task; in workspaces, the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is started, changes your shell's directory to it under shell integration. See also `wf task finish` and `wf task delete`.",
-            handler: "task.start",
-            help: nestedHelp("task", "start"),
+              "Adds one or more nested task worktrees under the current worktree or workspace's reserved _tasks directory, each on a new branch off the parent repository's committed HEAD, then runs setup initializers. Run from inside a workspace repo, worktree, or existing task; in workspaces, the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is created, changes your shell's directory to it under shell integration. See also `wf task delete`.",
+            handler: "task.new",
+            help: nestedHelp("task", "new"),
             operands: operands(
               1,
               null,
@@ -706,14 +668,14 @@ export const commandRegistry: CommandRegistry = {
             ],
             examples: [
               {
-                command: "wf task start fix-login",
+                command: "wf task new fix-login",
                 description:
-                  "Start one task lane off the inferred parent repo and cd into it.",
+                  "Create one task lane off the inferred parent repo and cd into it.",
               },
               {
-                command: "wf task start fix-login add-tests --repo web",
+                command: "wf task new fix-login add-tests --repo web",
                 description:
-                  "Start two task lanes branched from the `web` repository.",
+                  "Create two task lanes branched from the `web` repository.",
               },
             ],
             outputModes: ["human", "report"],
@@ -724,7 +686,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["task", "list"],
             summary: "List temporary worktrees",
             description:
-              "Lists task worktrees for the current managed change, grouped by parent repository. Shows each task's branch, setup status, merge state, and path. In workspaces, the parent repository is inferred from the current directory unless `--repo` scopes the list. Exits 0 with a message when no tasks match.",
+              "Lists task worktrees for the current worktree or workspace, grouped by parent repository. Shows each task's branch, setup status, merge state, and path. In workspaces, the parent repository is inferred from the current directory unless `--repo` scopes the list. Exits 0 with a message when no tasks match.",
             handler: "task.list",
             help: nestedHelp("task", "list"),
             flags: [
@@ -737,7 +699,7 @@ export const commandRegistry: CommandRegistry = {
               {
                 command: "wf task list",
                 description:
-                  "List every task tracked in the current managed change.",
+                  "List every task tracked in the current worktree or workspace.",
               },
               {
                 command: "wf task list --repo web",
@@ -748,51 +710,11 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["report"],
           }),
           leaf({
-            name: "finish",
-            path: ["task", "finish"],
-            summary: "Finish integrated task lanes",
-            description:
-              "Removes one or more clean task worktrees after verifying their branches are reachable from the parent repository. Run from inside a managed change. Use `wf task delete --force` for abandoned, dirty, or intentionally unmerged task lanes.",
-            handler: "task.finish",
-            help: nestedHelp("task", "finish"),
-            operands: operands(
-              1,
-              null,
-              "task names",
-              undefined,
-              "One or more task names (slugs) to finish, as shown by `wf task list`.",
-            ),
-            flags: [
-              stringFlag("repo", "--repo", "repository", {
-                description:
-                  "Parent workspace repository to disambiguate the named tasks; required when a name matches tasks in more than one workspace repository.",
-              }),
-              booleanFlag(
-                "dryRun",
-                "--dry-run",
-                "-n",
-                "Show which task worktrees and branches would be removed without deleting anything.",
-              ),
-            ],
-            examples: [
-              {
-                command: "wf task finish fix-login",
-                description: "Finish one integrated task lane.",
-              },
-              {
-                command: "wf task finish fix-login add-tests --repo web",
-                description:
-                  "Finish two integrated task lanes branched from the `web` repository.",
-              },
-            ],
-            outputModes: ["human", "report"],
-          }),
-          leaf({
             name: "delete",
             path: ["task", "delete"],
             summary: "Delete temporary worktrees",
             description:
-              "Explicitly abandons one or more task worktrees and deletes their branches; this cannot be undone. Run from inside a managed change. Refuses a task with uncommitted changes or an unmerged branch unless you pass `--force`. Prompts for confirmation in a terminal; without a TTY it exits 1 unless `--force` or `--dry-run` is given. See also `wf task finish`.",
+              "Removes one or more task worktrees and deletes their branches; this cannot be undone. Run from inside a worktree or workspace. Refuses a task with uncommitted changes or an unmerged branch unless you pass `--force`. Prompts for confirmation in a terminal; without a TTY it exits 1 unless `--force` or `--dry-run` is given.",
             handler: "task.delete",
             help: nestedHelp("task", "delete"),
             operands: operands(
@@ -842,7 +764,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cloud"],
         summary: "Manage cloud workspaces",
         description:
-          "Inspect and tear down cloud workspaces provisioned with `wf start --cloud` on Vercel Sandbox. State is read from the sandboxes' tags, so these commands work from any machine.",
+          "Inspect and tear down cloud workspaces provisioned with `wf new --cloud` on Vercel Sandbox. State is read from the sandboxes' tags, so these commands work from any machine.",
         help: { kind: "command", command: "cloud" },
         children: [
           leaf({
@@ -868,15 +790,15 @@ export const commandRegistry: CommandRegistry = {
             path: ["cloud", "status"],
             summary: "Show one cloud workspace",
             description:
-              "Shows a single cloud workspace in detail: status, branch, repositories, and creation time. Errors if no workspace matches the change name.",
+              "Shows a single cloud workspace in detail: status, branch, repositories, and creation time. Errors if no workspace matches the name.",
             handler: "cloud.status",
             help: nestedHelp("cloud", "status"),
             operands: operands(
               1,
               1,
-              "change",
-              "<change>",
-              "The change name of the cloud workspace.",
+              "name",
+              "<name>",
+              "The name of the cloud workspace.",
             ),
             flags: [
               booleanFlag(
@@ -899,9 +821,9 @@ export const commandRegistry: CommandRegistry = {
             operands: operands(
               1,
               1,
-              "change",
-              "<change>",
-              "The change name of the cloud workspace to attach to.",
+              "name",
+              "<name>",
+              "The name of the cloud workspace to attach to.",
             ),
             outputModes: ["human"],
             supportsJson: false,
@@ -912,15 +834,15 @@ export const commandRegistry: CommandRegistry = {
             path: ["cloud", "stop"],
             summary: "Stop a cloud workspace",
             description:
-              "Stops a cloud workspace's sandbox, snapshotting its filesystem so it can be resumed later. Errors if no workspace matches the change name.",
+              "Stops a cloud workspace's sandbox, snapshotting its filesystem so it can be resumed later. Errors if no workspace matches the name.",
             handler: "cloud.stop",
             help: nestedHelp("cloud", "stop"),
             operands: operands(
               1,
               1,
-              "change",
-              "<change>",
-              "The change name of the cloud workspace to stop.",
+              "name",
+              "<name>",
+              "The name of the cloud workspace to stop.",
             ),
             flags: [
               booleanFlag(
@@ -937,15 +859,15 @@ export const commandRegistry: CommandRegistry = {
             path: ["cloud", "delete"],
             summary: "Delete a cloud workspace",
             description:
-              "Stops and removes a cloud workspace's sandbox. Errors if no workspace matches the change name.",
+              "Stops and removes a cloud workspace's sandbox. Errors if no workspace matches the name.",
             handler: "cloud.delete",
             help: nestedHelp("cloud", "delete"),
             operands: operands(
               1,
               1,
-              "change",
-              "<change>",
-              "The change name of the cloud workspace to delete.",
+              "name",
+              "<name>",
+              "The name of the cloud workspace to delete.",
             ),
             flags: [
               booleanFlag(
@@ -971,7 +893,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cache"],
         summary: "Manage cached repositories",
         description:
-          "The cached bare mirrors that workforest clones from to create changes and task worktrees live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
+          "The cached bare mirrors that workforest clones from to create worktrees, workspaces, and tasks live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
         default: cacheDefault,
         children: [
@@ -1247,113 +1169,114 @@ export const commandRegistry: CommandRegistry = {
             outputModes: ["report", "json"],
             tty: optionalStdin,
           }),
-        ],
-      }),
-      group({
-        name: "worktree",
-        path: ["worktree"],
-        summary: "Manage worktrees in cached repositories",
-        description:
-          "Runs a small fixed set of Git worktree operations against existing cached bare mirrors. These commands do not create or sync mirrors, write Workforest metadata, run setup or hooks, or filter Workforest-managed worktrees.",
-        help: { kind: "command", command: "worktree" },
-        children: [
-          leaf({
-            name: "list",
-            path: ["worktree", "list"],
-            summary: "List registered worktrees",
+          group({
+            name: "worktree",
+            path: ["cache", "worktree"],
+            summary: "Manage worktrees in cached repositories",
             description:
-              "Lists every Git-registered worktree for an existing cached mirror, including Workforest-managed worktrees.",
-            handler: "worktree.list",
-            help: nestedHelp("worktree", "list"),
-            operands: operands(
-              1,
-              1,
-              "cached repository",
-              undefined,
-              "A cached repo name, `org/repo` shorthand, full Git URL, or cache directory name.",
-            ),
-            examples: [{ command: "wf worktree list vercel/front" }],
-            outputModes: ["human"],
-            supportsJson: false,
-          }),
-          leaf({
-            name: "add",
-            path: ["worktree", "add"],
-            summary: "Add a worktree on a new branch",
-            description:
-              "Creates a worktree at the requested path on a new branch from the cached mirror's current HEAD. When branch is omitted, Git derives it from the destination directory name.",
-            handler: "worktree.add",
-            help: nestedHelp("worktree", "add"),
-            operands: operands(
-              2,
-              3,
-              "arguments",
-              "<cached repository> <path> [branch]",
-              "An existing cached repository, destination path, and optional new branch name.",
-            ),
-            examples: [
-              {
-                command: "wf worktree add vercel/front ~/Code/front-fix-auth",
+              "Runs a small fixed set of Git worktree operations against existing cached bare mirrors. These commands do not create or sync mirrors, write Workforest metadata, run setup or hooks, or filter Workforest-managed worktrees.",
+            help: nestedHelp("cache", "worktree"),
+            children: [
+              leaf({
+                name: "list",
+                path: ["cache", "worktree", "list"],
+                summary: "List registered worktrees",
                 description:
-                  "Let Git derive the new branch name from front-fix-auth.",
-              },
-              {
-                command:
-                  "wf worktree add vercel/front ~/Code/front-fix-auth tomdale/fix-auth",
+                  "Lists every Git-registered worktree for an existing cached mirror, including Workforest-managed worktrees.",
+                handler: "cache.worktree.list",
+                help: nestedHelp("cache", "worktree"),
+                operands: operands(
+                  1,
+                  1,
+                  "cached repository",
+                  undefined,
+                  "A cached repo name, `org/repo` shorthand, full Git URL, or cache directory name.",
+                ),
+                examples: [{ command: "wf cache worktree list vercel/front" }],
+                outputModes: ["human"],
+                supportsJson: false,
+              }),
+              leaf({
+                name: "add",
+                path: ["cache", "worktree", "add"],
+                summary: "Add a worktree on a new branch",
                 description:
-                  "Create the worktree on an explicitly named branch.",
-              },
+                  "Creates a worktree at the requested path on a new branch from the cached mirror's current HEAD. When branch is omitted, Git derives it from the destination directory name.",
+                handler: "cache.worktree.add",
+                help: nestedHelp("cache", "worktree"),
+                operands: operands(
+                  2,
+                  3,
+                  "arguments",
+                  "<cached repository> <path> [branch]",
+                  "An existing cached repository, destination path, and optional new branch name.",
+                ),
+                examples: [
+                  {
+                    command:
+                      "wf cache worktree add vercel/front ~/Code/front-fix-auth",
+                    description:
+                      "Let Git derive the new branch name from front-fix-auth.",
+                  },
+                  {
+                    command:
+                      "wf cache worktree add vercel/front ~/Code/front-fix-auth tomdale/fix-auth",
+                    description:
+                      "Create the worktree on an explicitly named branch.",
+                  },
+                ],
+                outputModes: ["human"],
+                supportsJson: false,
+              }),
+              leaf({
+                name: "move",
+                path: ["cache", "worktree", "move"],
+                summary: "Move a registered worktree",
+                description:
+                  "Moves a registered worktree to a new path using Git's standard safety checks.",
+                handler: "cache.worktree.move",
+                help: nestedHelp("cache", "worktree"),
+                operands: operands(
+                  3,
+                  3,
+                  "arguments",
+                  "<cached repository> <path> <new path>",
+                  "An existing cached repository, registered worktree path, and destination path.",
+                ),
+                examples: [
+                  {
+                    command:
+                      "wf cache worktree move vercel/front ~/Code/front-fix-auth ~/Code/front-auth-fix",
+                  },
+                ],
+                outputModes: ["human"],
+                supportsJson: false,
+              }),
+              leaf({
+                name: "remove",
+                path: ["cache", "worktree", "remove"],
+                summary: "Remove a registered worktree",
+                description:
+                  "Removes a clean registered worktree using Git's standard safety checks. The branch is left intact.",
+                handler: "cache.worktree.remove",
+                help: nestedHelp("cache", "worktree"),
+                operands: operands(
+                  2,
+                  2,
+                  "arguments",
+                  "<cached repository> <path>",
+                  "An existing cached repository and registered worktree path.",
+                ),
+                examples: [
+                  {
+                    command:
+                      "wf cache worktree remove vercel/front ~/Code/front-fix-auth",
+                  },
+                ],
+                outputModes: ["human"],
+                supportsJson: false,
+              }),
             ],
-            outputModes: ["human"],
-            supportsJson: false,
-          }),
-          leaf({
-            name: "move",
-            path: ["worktree", "move"],
-            summary: "Move a registered worktree",
-            description:
-              "Moves a registered worktree to a new path using Git's standard safety checks.",
-            handler: "worktree.move",
-            help: nestedHelp("worktree", "move"),
-            operands: operands(
-              3,
-              3,
-              "arguments",
-              "<cached repository> <path> <new path>",
-              "An existing cached repository, registered worktree path, and destination path.",
-            ),
-            examples: [
-              {
-                command:
-                  "wf worktree move vercel/front ~/Code/front-fix-auth ~/Code/front-auth-fix",
-              },
-            ],
-            outputModes: ["human"],
-            supportsJson: false,
-          }),
-          leaf({
-            name: "remove",
-            path: ["worktree", "remove"],
-            summary: "Remove a registered worktree",
-            description:
-              "Removes a clean registered worktree using Git's standard safety checks. The branch is left intact.",
-            handler: "worktree.remove",
-            help: nestedHelp("worktree", "remove"),
-            operands: operands(
-              2,
-              2,
-              "arguments",
-              "<cached repository> <path>",
-              "An existing cached repository and registered worktree path.",
-            ),
-            examples: [
-              {
-                command:
-                  "wf worktree remove vercel/front ~/Code/front-fix-auth",
-              },
-            ],
-            outputModes: ["human"],
-            supportsJson: false,
           }),
         ],
       }),
@@ -1431,7 +1354,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["template"],
         summary: "Manage templates",
         description:
-          "Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf start <change> @<template>` to build a workspace from one.",
+          "Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf new <name> @<template>` to build a workspace from one.",
         help: { kind: "command", command: "template" },
         children: [
           leaf({
@@ -1522,7 +1445,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["template", "new"],
             summary: "Create a template",
             description:
-              "Creates a new template directory and `template.jsonc` from a name and a repository set. In a terminal, prompts for anything missing; without a TTY the name and at least one repository are required, and omitting them is a usage error. Errors if a template with that name already exists. See also `wf template edit` and `wf start <change> @<template>`.",
+              "Creates a new template directory and `template.jsonc` from a name and a repository set. In a terminal, prompts for anything missing; without a TTY the name and at least one repository are required, and omitting them is a usage error. Errors if a template with that name already exists. See also `wf template edit` and `wf new <name> @<template>`.",
             handler: "template.new",
             help: nestedHelp("template", "new"),
             operands: {
@@ -1785,7 +1708,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["shell"],
         summary: "Manage shell integration",
         description:
-          "Set up shell integration so directory-changing commands (`wf start`, `wf switch`, `wf finish`, `wf delete`, `wf task`, `wf review`, and `wf template open`) change your shell's working directory instead of just printing a path.",
+          "Set up shell integration so directory-changing commands (`wf new`, `wf switch`, `wf delete`, `wf task`, `wf review`, and `wf template open`) change your shell's working directory instead of just printing a path.",
         help: { kind: "command", command: "shell" },
         children: [
           leaf({

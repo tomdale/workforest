@@ -22,7 +22,7 @@ const BASE_SANDBOX_NAME_PREFIX = "wfbase-";
 
 const REPOS_SEPARATOR = ",";
 
-/** The Vercel Sandbox name for a workspace change. */
+/** The Vercel Sandbox name for a worktree or workspace. */
 export function cloudSandboxName(changeName: string): string {
   return `${SANDBOX_NAME_PREFIX}${changeName}`;
 }

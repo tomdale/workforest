@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
 import {
-  writeRepositoryChangeMetadata,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 
 const execFileAsync = promisify(execFile);
@@ -38,8 +38,8 @@ describe("wf list", () => {
     expect(result.exitCode).toBe(0);
     expect(rendered.stdout).toBe(
       [
-        "No Workforest changes found.",
-        "Start one: wf start <change> <repo|@template>",
+        "No worktrees or workspaces found.",
+        "Start one: wf new <name> <repo|@template>",
         "",
       ].join("\n"),
     );
@@ -254,7 +254,7 @@ async function createInventoryFixture(): Promise<{ baseDir: string }> {
       },
     ],
   });
-  await writeRepositoryChangeMetadata(path.dirname(repoChange), {
+  await writeWorktreeMetadata(path.dirname(repoChange), {
     featureName: "cli-redesign",
     branchName: "tomdale/cli-redesign",
     repos: [

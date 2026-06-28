@@ -15,14 +15,14 @@ import {
 import { validateResourceName } from "../utils/path-safety.ts";
 import { resolveWorkforestContext } from "../workspace/context.ts";
 import {
-  type CreateChangeOptions,
-  createChange,
-  type ResolvedStartSource,
-} from "../workspace/create-change.ts";
+  type CreateOptions,
+  create,
+  type ResolvedSource,
+} from "../workspace/create.ts";
 import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  getWorkspaceChangePath,
+  getWorkspacePath,
   resolveWorkforestDirectories,
   type WorkforestDirectories,
 } from "../workspace/paths.ts";
@@ -30,7 +30,7 @@ import { OperationalError, UsageError } from "./errors.ts";
 import { success } from "./output.ts";
 import type { CommandResult, ParsedInvocation } from "./types.ts";
 
-export type ParsedStartOperands = Readonly<{
+export type ParsedNewOperands = Readonly<{
   changeName: string;
   source:
     | Readonly<{ kind: "current" }>
@@ -38,20 +38,20 @@ export type ParsedStartOperands = Readonly<{
     | Readonly<{ kind: "template"; templateName: string }>;
 }>;
 
-type StartSource = ResolvedStartSource;
+type SourceSpec = ResolvedSource;
 
-export type RunStartCommandOptions = CreateChangeOptions;
+export type RunNewCommandOptions = CreateOptions;
 
-const START_CONTEXT_ERROR = [
+const NEW_CONTEXT_ERROR = [
   "Not in a Workforest-managed repo or workspace.",
-  "Start explicitly: wf start <change> <repo|@template>",
+  "Create explicitly: wf new <name> <repo|@template>",
 ].join("\n");
 
-export async function runStartCommand(
+export async function runNewCommand(
   invocation: ParsedInvocation,
-  options: RunStartCommandOptions,
+  options: RunNewCommandOptions,
 ): Promise<CommandResult> {
-  const parsed = parseStartOperands(invocation.beforeDoubleDash);
+  const parsed = parseNewOperands(invocation.beforeDoubleDash);
   const explicitBranchName = await parseExplicitBranchFlag(
     invocation.flags["branch"],
   );
@@ -59,10 +59,10 @@ export async function runStartCommand(
   const directories = resolveWorkforestDirectories(config);
   const source =
     parsed.source.kind === "current"
-      ? await resolveCurrentStartSource(directories)
-      : await resolveExplicitStartSource(parsed.source);
+      ? await resolveCurrentSource(directories)
+      : await resolveExplicitSource(parsed.source);
 
-  const changeName = validateResourceName(parsed.changeName, "Change name");
+  const changeName = validateResourceName(parsed.changeName, "Name");
   const branchName =
     explicitBranchName ??
     buildBranchName(
@@ -73,8 +73,8 @@ export async function runStartCommand(
     );
 
   if (invocation.flags["cloud"] === true) {
-    const { createCloudChange } = await import("../cloud/provisioning.ts");
-    await createCloudChange(
+    const { createCloud } = await import("../cloud/provisioning.ts");
+    await createCloud(
       { changeName, source, branchName, directories },
       {
         interactive: options.interactive,
@@ -85,19 +85,19 @@ export async function runStartCommand(
     return success();
   }
 
-  await createChange({ changeName, source, branchName, directories }, options);
+  await create({ changeName, source, branchName, directories }, options);
   return success();
 }
 
-export function parseStartOperands(
+export function parseNewOperands(
   operands: readonly string[],
-): ParsedStartOperands {
+): ParsedNewOperands {
   const [changeName, ...sourceTokens] = operands;
   if (!changeName) {
-    throw new UsageError("wf start requires a change name.");
+    throw new UsageError("wf new requires a name.");
   }
 
-  validateResourceName(changeName, "Change name");
+  validateResourceName(changeName, "Name");
   if (sourceTokens.length === 0) {
     return { changeName, source: { kind: "current" } };
   }
@@ -145,9 +145,9 @@ async function parseExplicitBranchFlag(
   return branchName;
 }
 
-async function resolveExplicitStartSource(
-  source: Exclude<ParsedStartOperands["source"], { kind: "current" }>,
-): Promise<StartSource> {
+async function resolveExplicitSource(
+  source: Exclude<ParsedNewOperands["source"], { kind: "current" }>,
+): Promise<SourceSpec> {
   if (source.kind === "template") {
     return resolveTemplateStartSource(source.templateName);
   }
@@ -166,7 +166,7 @@ async function resolveExplicitStartSource(
 
 async function resolveTemplateStartSource(
   templateName: string,
-): Promise<StartSource> {
+): Promise<SourceSpec> {
   const template = await loadTemplate(templateName);
   if (!template) {
     throw new UsageError(`Unknown template: @${templateName}`);
@@ -184,28 +184,22 @@ async function resolveTemplateStartSource(
   };
 }
 
-async function resolveCurrentStartSource(
+async function resolveCurrentSource(
   directories: WorkforestDirectories,
-): Promise<StartSource> {
+): Promise<SourceSpec> {
   const context = resolveWorkforestContext(
     await comparablePath(process.cwd()),
     await comparableDirectories(directories),
   );
 
-  if (
-    context.kind === "repository-root" ||
-    context.kind === "repository-change"
-  ) {
+  if (context.kind === "repository-root" || context.kind === "worktree") {
     return resolveRepositoryStartSource(context.repoName);
   }
-  if (
-    context.kind === "nested-task" &&
-    context.parentKind === "repository-change"
-  ) {
+  if (context.kind === "nested-task" && context.parentKind === "worktree") {
     return resolveRepositoryStartSource(context.repoName);
   }
 
-  if (context.kind === "template-workspace-change") {
+  if (context.kind === "template-workspace") {
     return resolveTemplateStartSource(context.groupName);
   }
   if (context.kind === "workspace-repo") {
@@ -214,20 +208,13 @@ async function resolveCurrentStartSource(
     }
     return resolveTemplateStartSource(context.groupName);
   }
-  if (context.kind === "adhoc-workspace-change") {
+  if (context.kind === "adhoc-workspace") {
     return resolveAdhocStartSource(context.path);
   }
-  if (
-    context.kind === "nested-task" &&
-    context.parentKind === "workspace-change"
-  ) {
+  if (context.kind === "nested-task" && context.parentKind === "workspace") {
     if (context.groupName === ADHOC_WORKSPACE_GROUP) {
       return resolveAdhocStartSource(
-        getWorkspaceChangePath(
-          directories,
-          context.groupName,
-          context.changeName,
-        ),
+        getWorkspacePath(directories, context.groupName, context.changeName),
       );
     }
     if (context.groupName) {
@@ -235,12 +222,12 @@ async function resolveCurrentStartSource(
     }
   }
 
-  throw new OperationalError(START_CONTEXT_ERROR);
+  throw new OperationalError(NEW_CONTEXT_ERROR);
 }
 
 async function resolveRepositoryStartSource(
   repoName: string,
-): Promise<StartSource> {
+): Promise<SourceSpec> {
   const [repo] = await resolveRepositorySpecifiers([repoName]);
   if (!repo) {
     throw new OperationalError(`Cached repository not found: ${repoName}`);
@@ -250,7 +237,7 @@ async function resolveRepositoryStartSource(
 
 async function resolveAdhocStartSource(
   workspaceDir: string,
-): Promise<StartSource> {
+): Promise<SourceSpec> {
   const metadata = await readWorkspaceMetadata(workspaceDir);
   if (!metadata) {
     throw new OperationalError(

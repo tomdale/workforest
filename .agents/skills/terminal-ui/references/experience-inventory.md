@@ -24,9 +24,9 @@ Status values:
 
 | Experience | Entry point | Implementation | Status |
 | --- | --- | --- | --- |
-| Change entry surface (go to or create a change) | bare `wf` (go-or-create), `wf start` (create-only) | `src/change-entry/surface.ts` (Phase 1 name/existing-change omni-prompt → Phase 2 source accumulation), `src/terminal/fuzzy-list.ts`, `src/change-entry/{changes-data,sources-data}.ts`, hands off to the setup grid via `src/workspace/create-change.ts` | Audit needed |
-| Change start flow | `wf start <change> <source…>` setup output | `src/cli/start.ts` → `src/workspace/create-change.ts` | Canonical |
-| Parallel repository setup grid | `wf start`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
+| Change entry surface (go to or create a change) | bare `wf` (go-or-create), `wf new` (create-only) | `src/change-entry/surface.ts` (Phase 1 name/existing-change omni-prompt → Phase 2 source accumulation), `src/terminal/fuzzy-list.ts`, `src/change-entry/{changes-data,sources-data}.ts`, hands off to the setup grid via `src/workspace/create-change.ts` | Audit needed |
+| Change start flow | `wf new <name> <source…>` setup output | `src/cli/start.ts` → `src/workspace/create-change.ts` | Canonical |
+| Parallel repository setup grid | `wf new`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
 | Template browser and manager | `wf templates` | Templates route in `src/dashboard/index.ts` | Canonical |
@@ -37,7 +37,7 @@ Status values:
 | Config initialization | `wf config init` | Prompt timeline with preview and confirmation in `src/cli.ts` | Canonical |
 | Reviews directory first-run prompt | `wf review open` without a configured directory | Text prompt in `src/cli.ts` | Canonical |
 | Delete confirmations | Explicit change, task, template, and cache delete commands | Select and confirm prompts in `src/cli.ts` | Canonical |
-| Cleanup preview | `wf finish <selector>`, `wf delete <selector>` | Prompt note in `src/cli.ts` | Canonical |
+| Cleanup preview | `wf delete <selector>`, `wf delete <selector>` | Prompt note in `src/cli.ts` | Canonical |
 | External editor handoff | `wf config edit` | Status line, inherited editor session, completion status | Canonical |
 | Template directory jump | `wf template open` | Shell auto-cd handoff or explicit `cd` status line | Canonical |
 | Spinner fallback for setup | Small terminal, CI, too many repos, or `WORKFOREST_NO_TUI` | Prompt spinner and generator consumers | Canonical |

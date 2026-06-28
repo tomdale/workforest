@@ -8,7 +8,7 @@ import { saveWorkspaceConfig } from "../config.ts";
 import { createTemplate } from "../templates/index.ts";
 import {
   filterSourceCandidates,
-  inferChange,
+  inferEntry,
   listSourceCandidates,
   type SourceCandidate,
 } from "./sources-data.ts";
@@ -87,11 +87,11 @@ describe("filterSourceCandidates", () => {
   });
 });
 
-describe("inferChange", () => {
+describe("inferEntry", () => {
   it("infers a single-repository change", async () => {
     await createSourcesFixture();
 
-    const result = await inferChange({
+    const result = await inferEntry({
       changeName: "redesign-cli",
       sources: [{ kind: "repo", token: "vercel/front" }],
     });
@@ -107,7 +107,7 @@ describe("inferChange", () => {
   it("infers an ad-hoc workspace for multiple repositories", async () => {
     await createSourcesFixture();
 
-    const result = await inferChange({
+    const result = await inferEntry({
       changeName: "billing",
       sources: [
         { kind: "repo", token: "vercel/front" },
@@ -130,7 +130,7 @@ describe("inferChange", () => {
       branchPrefix: "agent",
     });
 
-    const result = await inferChange({
+    const result = await inferEntry({
       changeName: "auth-fix",
       sources: [{ kind: "template", name: "vercel-agent" }],
     });
@@ -147,7 +147,7 @@ describe("inferChange", () => {
     await createSourcesFixture();
     await createTemplate("plain", { repos: ["vercel/front"] });
 
-    const result = await inferChange({
+    const result = await inferEntry({
       changeName: "auth-fix",
       sources: [{ kind: "template", name: "plain" }],
     });
@@ -160,7 +160,7 @@ describe("inferChange", () => {
     await createTemplate("vercel-agent", { repos: ["vercel/front"] });
 
     await expect(
-      inferChange({
+      inferEntry({
         changeName: "auth-fix",
         sources: [
           { kind: "template", name: "vercel-agent" },
@@ -176,18 +176,18 @@ describe("inferChange", () => {
     await createSourcesFixture();
 
     await expect(
-      inferChange({
+      inferEntry({
         changeName: "../escape",
         sources: [{ kind: "repo", token: "vercel/front" }],
       }),
-    ).rejects.toThrow("Change name");
+    ).rejects.toThrow("Name");
   });
 
   it("throws when no sources are provided", async () => {
     await createSourcesFixture();
 
     await expect(
-      inferChange({ changeName: "lonely", sources: [] }),
+      inferEntry({ changeName: "lonely", sources: [] }),
     ).rejects.toThrow("No repositories specified.");
   });
 });

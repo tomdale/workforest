@@ -995,7 +995,7 @@ function resolveTemplateSuggestionDebugRoot(
   switch (context.kind) {
     case "repository-root":
       return path.join(context.path, ".workforest");
-    case "repository-change":
+    case "worktree":
       return path.join(
         path.dirname(context.path),
         ".workforest",
@@ -1003,12 +1003,12 @@ function resolveTemplateSuggestionDebugRoot(
       );
     case "workspace-repo":
       return path.join(context.workspacePath, ".workforest");
-    case "template-workspace-change":
-    case "adhoc-workspace-change":
+    case "template-workspace":
+    case "adhoc-workspace":
     case "review-checkout":
       return path.join(context.path, ".workforest");
     case "nested-task":
-      return context.parentKind === "repository-change"
+      return context.parentKind === "worktree"
         ? path.join(
             directories.repos,
             context.repoName,

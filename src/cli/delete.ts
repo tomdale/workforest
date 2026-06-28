@@ -3,142 +3,106 @@ import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { isShellAutoCdEnabled, resolveCleanupCdTarget } from "../shell.ts";
-import { promptConfirm } from "../ui/prompts/index.ts";
-import type { ChangeInventoryEntry } from "../workspace/change-inventory.ts";
 import {
   type CleanupStateSink,
-  cleanupRepositoryChange,
   cleanupWorkspace,
+  cleanupWorktree,
 } from "../workspace/cleanup.ts";
+import type { InventoryEntry } from "../workspace/inventory.ts";
 import { isPathInsideOrEqual } from "../workspace/paths.ts";
-import { resolveChangeSelector } from "../workspace/selectors.ts";
+import { resolveSelector } from "../workspace/selectors.ts";
 import {
-  buildChangeStatus,
-  type ChangeRepositoryStatus,
-  type ChangeStatus,
-  type ChangeTaskStatus,
+  buildStatus,
+  type RepositoryStatus,
+  type Status,
+  type TaskStatus,
 } from "../workspace/status.ts";
 import { OperationalError, UsageError } from "./errors.ts";
 import { success } from "./output.ts";
 import type { CommandResult, ParsedInvocation } from "./types.ts";
 
-export type RunChangeCleanupOptions = Readonly<{
+export type RunCleanupOptions = Readonly<{
   interactive: boolean;
   writeShellCdPath: (targetDir: string) => Promise<void>;
-  confirm?: typeof promptConfirm;
-  buildChangeStatus?: typeof buildChangeStatus;
+  buildStatus?: typeof buildStatus;
   cleanupWorkspace?: typeof cleanupWorkspace;
-  cleanupRepositoryChange?: typeof cleanupRepositoryChange;
+  cleanupWorktree?: typeof cleanupWorktree;
   resolveRepositorySpecifiers?: typeof resolveRepositorySpecifiers;
   onCleanupState?: CleanupStateSink;
   cwd?: string;
 }>;
 
-type FinishBlocker = Readonly<{
+type DeleteBlocker = Readonly<{
   message: string;
   suggestion: string;
 }>;
 
-export async function runFinishCommand(
+/**
+ * Removes a worktree or workspace. Without --force, it refuses unless every
+ * managed repository is clean, integrated into its remote default branch, and
+ * free of unmerged nested tasks — the verification the former `finish` verb
+ * enforced. --force skips the checks and removes regardless: the deliberate
+ * "abandon" path for squash merges, cherry-picks, or thrown-away work.
+ */
+export async function runDeleteCommand(
   invocation: ParsedInvocation,
-  options: RunChangeCleanupOptions,
+  options: RunCleanupOptions,
 ): Promise<CommandResult> {
   const force = invocation.flags["force"] === true;
-  const entry = await resolveCleanupSelector(invocation.beforeDoubleDash[0], {
-    requireExplicit: false,
-  });
-  const status = await (options.buildChangeStatus ?? buildChangeStatus)(entry);
-  const blockers = force ? [] : finishBlockers(status);
-
-  if (blockers.length > 0) {
-    throw new OperationalError(renderFinishBlockers(status, blockers));
-  }
-
-  await cleanupChange(entry, options);
-  log.success(`Finished change: ${status.selector}`);
-  return success();
-}
-
-export async function runChangeDeleteCommand(
-  invocation: ParsedInvocation,
-  options: RunChangeCleanupOptions,
-): Promise<CommandResult> {
-  const selector = invocation.beforeDoubleDash[0];
-  if (!selector) {
-    throw new UsageError("wf delete requires a change selector.");
-  }
-
-  const force = invocation.flags["force"] === true;
-  const entry = await resolveCleanupSelector(selector, {
-    requireExplicit: true,
-  });
+  const entry = await resolveDeleteSelector(invocation.beforeDoubleDash[0]);
 
   if (!force) {
-    if (!options.interactive) {
-      throw new UsageError(
-        "Deleting a change requires --force without an interactive terminal.",
-      );
-    }
-    const confirmed = await (options.confirm ?? promptConfirm)(
-      `Delete change ${entry.selector}?`,
-      false,
-    );
-    if (!confirmed) {
-      return success();
+    const status = await (options.buildStatus ?? buildStatus)(entry);
+    const blockers = deleteBlockers(status);
+    if (blockers.length > 0) {
+      throw new OperationalError(renderDeleteBlockers(status, blockers));
     }
   }
 
-  await cleanupChange(entry, options);
-  log.success(`Deleted change: ${entry.selector}`);
+  await cleanupTarget(entry, options);
+  log.success(`Deleted: ${entry.selector}`);
   return success();
 }
 
-async function resolveCleanupSelector(
+async function resolveDeleteSelector(
   selector: string | undefined,
-  { requireExplicit }: { requireExplicit: boolean },
-): Promise<ChangeInventoryEntry> {
-  if (requireExplicit && !selector) {
-    throw new UsageError("wf delete requires a change selector.");
-  }
-
+): Promise<InventoryEntry> {
   const { config } = await loadWorkspaceConfig();
-  const resolution = await resolveChangeSelector(config, selector);
+  const resolution = await resolveSelector(config, selector);
   if (resolution.kind === "resolved") {
     return resolution.entry;
   }
   if (resolution.kind === "outside") {
     throw new OperationalError(
       [
-        "Not in a Workforest change.",
+        "Not in a Workforest worktree or workspace.",
         "Run: wf list",
-        "Or pass a change selector explicitly.",
+        "Or pass a selector explicitly.",
       ].join("\n"),
     );
   }
   if (resolution.kind === "missing") {
-    throw new UsageError(`Unknown change selector: ${resolution.selector}`);
+    throw new UsageError(`Unknown selector: ${resolution.selector}`);
   }
   throw new UsageError(
     [
-      `Ambiguous change selector "${resolution.selector}".`,
+      `Ambiguous selector "${resolution.selector}".`,
       "Matches:",
       ...resolution.matches.map((match) => `  ${match}`),
-      resolution.hint ?? "Use <group>/<change>.",
+      resolution.hint ?? "Use <group>/<name>.",
     ].join("\n"),
   );
 }
 
-function finishBlockers(status: ChangeStatus): FinishBlocker[] {
+function deleteBlockers(status: Status): DeleteBlocker[] {
   return [
     ...status.repositories.flatMap(repositoryBlockers),
     ...status.tasks.flatMap(taskBlockers),
   ];
 }
 
-function repositoryBlockers(
-  repo: ChangeRepositoryStatus,
-): readonly FinishBlocker[] {
-  const blockers: FinishBlocker[] = [];
+function repositoryBlockers(repo: RepositoryStatus): readonly DeleteBlocker[] {
+  const blockers: DeleteBlocker[] = [];
 
   if (repo.state === "dirty") {
     blockers.push({
@@ -159,14 +123,14 @@ function repositoryBlockers(
           ? `${repo.name}: ${repo.branch ?? "HEAD"} is not reachable from ${repo.base ?? "the remote default branch"}.`
           : `${repo.name}: integration status could not be verified.`,
       suggestion:
-        "Merge the change branch first, or pass --force if it was integrated another way.",
+        "Merge the branch first, or pass --force if it was integrated another way.",
     });
   }
 
   return blockers;
 }
 
-function taskBlockers(task: ChangeTaskStatus): readonly FinishBlocker[] {
+function taskBlockers(task: TaskStatus): readonly DeleteBlocker[] {
   if (task.merged === true && task.state === "ready") {
     return [];
   }
@@ -179,12 +143,12 @@ function taskBlockers(task: ChangeTaskStatus): readonly FinishBlocker[] {
   ];
 }
 
-function renderFinishBlockers(
-  status: ChangeStatus,
-  blockers: readonly FinishBlocker[],
+function renderDeleteBlockers(
+  status: Status,
+  blockers: readonly DeleteBlocker[],
 ): string {
   return [
-    `Cannot finish ${status.selector}.`,
+    `Cannot delete ${status.selector}.`,
     "Blockers:",
     ...blockers.flatMap((blocker) => [
       `  - ${blocker.message}`,
@@ -194,23 +158,23 @@ function renderFinishBlockers(
   ].join("\n");
 }
 
-async function cleanupChange(
-  entry: ChangeInventoryEntry,
-  options: RunChangeCleanupOptions,
+async function cleanupTarget(
+  entry: InventoryEntry,
+  options: RunCleanupOptions,
 ): Promise<void> {
   const initialCwd = options.cwd ?? process.cwd();
   const cleanupRoot = entry.path;
-  const isInsideChange = isPathInsideOrEqual(cleanupRoot, initialCwd);
+  const isInsideTarget = isPathInsideOrEqual(cleanupRoot, initialCwd);
 
-  if (entry.type === "repository-change") {
+  if (entry.type === "worktree") {
     const resolveRepositories =
       options.resolveRepositorySpecifiers ?? resolveRepositorySpecifiers;
     const repo = await resolveRepositories([entry.repository])
       .then((repos) => repos[0])
       .catch(() => undefined);
-    await (options.cleanupRepositoryChange ?? cleanupRepositoryChange)({
+    await (options.cleanupWorktree ?? cleanupWorktree)({
       repoName: entry.repository,
-      changePath: entry.path,
+      targetPath: entry.path,
       ...(repo ? { repo } : {}),
       ...(options.onCleanupState ? { onState: options.onCleanupState } : {}),
     });
@@ -221,7 +185,7 @@ async function cleanupChange(
     });
   }
 
-  if (isInsideChange) {
+  if (isInsideTarget) {
     const target =
       resolveCleanupCdTarget(initialCwd, cleanupRoot) ??
       path.dirname(path.resolve(cleanupRoot));

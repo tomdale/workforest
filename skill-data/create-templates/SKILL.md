@@ -28,4 +28,4 @@ Use `wf template --help` for the exact subcommands and flags.
 
 - Put repeatable setup in the template, not in local shell workarounds.
 - Add files only when they are meant to ship with every new workspace.
-- Use `wf start <change> @<template>` after you have a template you trust.
+- Use `wf new <name> @<template>` after you have a template you trust.

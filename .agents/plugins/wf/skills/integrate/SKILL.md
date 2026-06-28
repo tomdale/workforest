@@ -26,7 +26,7 @@ Use this skill when processing queued branches into local `main`.
 9. Push `origin main:main` after a successful local integration.
 10. After a successful push, update the original integrated branch worktree to
     the corresponding commit on `main` with the queue helper. This preserves
-    the ancestry proof used by `wf finish`. The helper must skip dirty or
+    the ancestry proof used by `wf delete`. The helper must skip dirty or
     missing source worktrees.
 11. Do not run an extra queue-empty `pnpm check`. If the queue is empty at the
     start of the integration run, report that there is nothing to integrate and
@@ -56,7 +56,7 @@ Use this skill when processing queued branches into local `main`.
 12. Run `.agents/plugins/wf/scripts/integration.mjs sync-worktree <branch|id>`.
     If it reports `updated`, the source worktree now points at the integrated
     commit reachable from `main`. If it reports `skipped`, keep going but report
-    the reason before offering `wf finish`.
+    the reason before offering `wf delete`.
 13. Dequeue the integrated queue entry.
 14. Remove the temporary integration worktree and delete its merged helper branch.
 15. Repeat steps 2-14 until no ready queue entries remain. The lock-held
@@ -64,7 +64,7 @@ Use this skill when processing queued branches into local `main`.
     branch; do not rerun it solely because the queue is now empty.
 16. If there were no ready queue entries when the run started, stop after
     reporting the empty queue. Do not run `pnpm check` for an empty queue.
-17. After all queued integrations are complete, offer to run `wf finish` for
+17. After all queued integrations are complete, offer to run `wf delete` for
     every worktree integrated during this run. Run it only after the user
     confirms, and only for worktrees whose integration is verified in Git
     history.
@@ -80,7 +80,7 @@ repository="$(git remote get-url origin)"
 integration_path="/tmp/workforest-integrate-<queue-id>-<branch-slug>"
 integration_branch="tomdale/integrate-<queue-id>-<branch-slug>"
 
-wf worktree add "$repository" "$integration_path" "$integration_branch"
+wf cache worktree add "$repository" "$integration_path" "$integration_branch"
 cd "$integration_path"
 git merge --ff-only main
 git cherry-pick <merge-base>..<queued-sha>
@@ -88,7 +88,7 @@ pnpm check
 ```
 
 Before creating it, verify that the path and helper branch do not already
-exist. `wf worktree add` creates a new branch from the cached repository's
+exist. `wf cache worktree add` creates a new branch from the cached repository's
 current `HEAD`; `git merge --ff-only main` verifies that the helper branch is
 based on the current integration base before queued commits are applied. If the
 queue entry contains commits already integrated under different SHAs,
@@ -103,12 +103,12 @@ After the push succeeds and the queue entry is dequeued, clean up the ephemeral
 worktree with Workforest, then delete the merged helper branch:
 
 ```sh
-wf worktree remove "$repository" "$integration_path"
+wf cache worktree remove "$repository" "$integration_path"
 git branch -d "$integration_branch"
 ```
 
-Do not use `wf finish` for these ephemeral integration worktrees; they have no
-Workforest workspace metadata. Reserve `wf finish` for the original integrated
+Do not use `wf delete` for these ephemeral integration worktrees; they have no
+Workforest workspace metadata. Reserve `wf delete` for the original integrated
 worktrees, and only run it after user confirmation.
 
 ## Notes

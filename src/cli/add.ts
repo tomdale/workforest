@@ -25,12 +25,12 @@ import {
 } from "../workspace/index.ts";
 import {
   readWorkspaceMetadata,
-  removeRepositoryChangeMetadata,
+  removeWorktreeMetadata,
   writeWorkspaceMetadata,
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  getWorkspaceChangePath,
+  getWorkspacePath,
   getWorkspaceRepoPath,
   resolveWorkforestDirectories,
   type WorkforestDirectories,
@@ -64,7 +64,7 @@ type RepositoryPromotionTarget = Readonly<{
   sourcePath: string;
 }>;
 
-export async function runChangeAddCommand(
+export async function runAddCommand(
   invocation: ParsedInvocation,
   options: RunAddCommandOptions,
 ): Promise<CommandResult> {
@@ -78,23 +78,21 @@ export async function runChangeAddCommand(
   );
 
   if (
-    context.kind === "template-workspace-change" ||
-    context.kind === "adhoc-workspace-change" ||
+    context.kind === "template-workspace" ||
+    context.kind === "adhoc-workspace" ||
     context.kind === "workspace-repo" ||
-    (context.kind === "nested-task" &&
-      context.parentKind === "workspace-change")
+    (context.kind === "nested-task" && context.parentKind === "workspace")
   ) {
     const target = await resolveWorkspaceAddTarget(context, directories);
-    return addToWorkspaceChange(parsed, target, options);
+    return addToWorkspace(parsed, target, options);
   }
 
   if (
-    context.kind === "repository-change" ||
-    (context.kind === "nested-task" &&
-      context.parentKind === "repository-change")
+    context.kind === "worktree" ||
+    (context.kind === "nested-task" && context.parentKind === "worktree")
   ) {
     const target =
-      context.kind === "repository-change"
+      context.kind === "worktree"
         ? {
             repoName: context.repoName,
             changeName: context.changeName,
@@ -109,14 +107,14 @@ export async function runChangeAddCommand(
               context.changeName,
             ),
           };
-    return promoteRepositoryChange(parsed, target, directories, {
+    return promoteWorktree(parsed, target, directories, {
       ...options,
       yes,
     });
   }
 
   throw new OperationalError(
-    "Not in a Workforest-managed repo or workspace.\nStart explicitly: wf start <change> <repo|@template>",
+    "Not in a Workforest-managed repo or workspace.\nCreate explicitly: wf new <name> <repo|@template>",
   );
 }
 
@@ -146,15 +144,13 @@ export function parseAddOperands(
   return { kind: "repositories", tokens: operands };
 }
 
-async function addToWorkspaceChange(
+async function addToWorkspace(
   parsed: ParsedAddOperands,
   target: WorkspaceAddTarget,
   options: RunAddCommandOptions,
 ): Promise<CommandResult> {
   if (parsed.kind === "template") {
-    throw new UsageError(
-      "Template sources can only promote a repository change.",
-    );
+    throw new UsageError("Template sources can only promote a worktree.");
   }
 
   const repos = await resolveRepositorySpecifiers(parsed.tokens);
@@ -203,7 +199,7 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function promoteRepositoryChange(
+async function promoteWorktree(
   parsed: ParsedAddOperands,
   target: RepositoryPromotionTarget,
   directories: WorkforestDirectories,
@@ -217,7 +213,7 @@ async function promoteRepositoryChange(
     sourceRepos.kind === "template"
       ? sourceRepos.groupName
       : ADHOC_WORKSPACE_GROUP;
-  const workspaceDir = getWorkspaceChangePath(
+  const workspaceDir = getWorkspacePath(
     directories,
     groupName,
     target.changeName,
@@ -275,7 +271,7 @@ async function promoteRepositoryChange(
   await writeVSCodeWorkspaceFile(workspaceDir, [currentRepo], {
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
-  await removeRepositoryChangeMetadata(
+  await removeWorktreeMetadata(
     path.dirname(target.sourcePath),
     target.changeName,
   );
@@ -311,7 +307,7 @@ async function resolveWorkspaceAddTarget(
     context.kind === "workspace-repo"
       ? context.workspacePath
       : context.kind === "nested-task"
-        ? getWorkspaceChangePath(
+        ? getWorkspacePath(
             directories,
             context.groupName ?? ADHOC_WORKSPACE_GROUP,
             context.changeName,
@@ -400,11 +396,11 @@ async function confirmPromotion({
   if (yes) return true;
   if (!options.interactive) {
     throw new UsageError(
-      "Promoting a repository change requires --yes without an interactive terminal.",
+      "Promoting a worktree requires --yes without an interactive terminal.",
     );
   }
   return (options.confirm ?? promptConfirm)(
-    "Promote repository change into a workspace?",
+    "Promote worktree into a workspace?",
     false,
   );
 }
