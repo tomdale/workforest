@@ -748,6 +748,9 @@ function renderFooter(_theme: Theme, tabHint?: string): string {
 }
 
 function blessedLine(input: TerminalLineInput | TerminalSpan): string {
+  if (typeof input === "string") {
+    return renderTerminalLineBlessed(terminalLine(input));
+  }
   return renderTerminalLineBlessed(
     terminalLine("text" in input ? [input] : input),
   );

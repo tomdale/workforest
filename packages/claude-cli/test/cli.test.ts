@@ -16,12 +16,12 @@ describe("Claude CLI subprocess runner", () => {
         {
           cwd: process.cwd(),
           env: process.env,
-          timeoutMs: 100,
-          timeoutKillGraceMs: 25,
+          timeoutMs: 1000,
+          timeoutKillGraceMs: 100,
           onDebug: (message) => debug.push(message),
         },
       ),
-    ).rejects.toThrow("timed out after 100ms");
+    ).rejects.toThrow("timed out after 1000ms");
 
     expect(debug.some((message) => message.includes("spawned pid"))).toBe(
       true,

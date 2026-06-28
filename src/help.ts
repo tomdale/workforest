@@ -1,4 +1,3 @@
-import chalk from "chalk";
 import { commandRegistry } from "./cli/commands.ts";
 import { commandFlags } from "./cli/effective-flags.ts";
 import type {
@@ -14,8 +13,7 @@ import type {
 import { loadWorkspaceConfig } from "./config.ts";
 import { getTemplatesDir, listTemplates } from "./templates/index.ts";
 import {
-  renderTerminalDocAnsi,
-  renderTerminalDocPlain,
+  renderTerminalDocInline,
   type TerminalDoc,
   type TerminalLineInput,
   type TerminalSpan,
@@ -756,7 +754,5 @@ function tokenize(
 }
 
 function renderInlineDoc(doc: TerminalDoc): string {
-  return chalk.level > 0
-    ? renderTerminalDocAnsi(doc)
-    : renderTerminalDocPlain(doc);
+  return renderTerminalDocInline(doc);
 }

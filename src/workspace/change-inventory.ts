@@ -2,15 +2,13 @@ import { type Dirent, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
-import chalk from "chalk";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import {
   formatTemplateIdentifier,
   validateTemplateIdentifier,
 } from "../templates/index.ts";
 import {
-  renderTerminalDocAnsi,
-  renderTerminalDocPlain,
+  renderTerminalDocInline,
   type TerminalDoc,
   type TerminalLineInput,
   type TerminalSpan,
@@ -641,7 +639,5 @@ function normalizeLine(line: TerminalLineInput): TerminalDoc["lines"][number] {
 }
 
 function renderInlineDoc(doc: TerminalDoc): string {
-  return chalk.level > 0
-    ? renderTerminalDocAnsi(doc)
-    : renderTerminalDocPlain(doc);
+  return renderTerminalDocInline(doc);
 }

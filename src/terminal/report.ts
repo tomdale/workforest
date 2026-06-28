@@ -1,8 +1,6 @@
-import chalk from "chalk";
 import {
   literalSpan,
-  renderTerminalDocAnsi,
-  renderTerminalDocPlain,
+  renderTerminalDocInline,
   type TerminalDoc,
   type TerminalLineInput,
   type TerminalSpan,
@@ -163,7 +161,5 @@ function normalizeLine(line: TerminalLineInput): TerminalDoc["lines"][number] {
 }
 
 function renderInlineDoc(doc: TerminalDoc): string {
-  return chalk.level > 0
-    ? renderTerminalDocAnsi(doc)
-    : renderTerminalDocPlain(doc);
+  return renderTerminalDocInline(doc);
 }

@@ -523,11 +523,11 @@ function previewBaseLines(
     });
     lines.push([terminalSpan("sources", { role: "muted" }), "  ", ...chips]);
   } else {
-    lines.push(terminalSpan(modeGuidance(mode), { role: "muted" }));
+    lines.push([terminalSpan(modeGuidance(mode), { role: "muted" })]);
   }
 
   if (notice) {
-    lines.push(terminalSpan(notice, { role: "warning" }));
+    lines.push([terminalSpan(notice, { role: "warning" })]);
   }
 
   return lines;
@@ -573,6 +573,6 @@ async function describeInferred(
     ];
   } catch (error) {
     const message = error instanceof Error ? error.message : "cannot resolve";
-    return terminalSpan(message, { role: "error" });
+    return [terminalSpan(message, { role: "error" })];
   }
 }

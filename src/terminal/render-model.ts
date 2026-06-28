@@ -1,4 +1,4 @@
-import { Chalk } from "chalk";
+import chalk, { Chalk } from "chalk";
 import {
   activeTheme,
   inlinePalette,
@@ -72,6 +72,12 @@ export function renderTerminalLinePlain(line: TerminalLine): string {
 export function renderTerminalDocAnsi(doc: TerminalDoc): string {
   const chalk = new Chalk({ level: 1 });
   return doc.lines.map((line) => renderAnsiLine(line, chalk)).join("\n");
+}
+
+export function renderTerminalDocInline(doc: TerminalDoc): string {
+  return chalk.level > 0
+    ? renderTerminalDocAnsi(doc)
+    : renderTerminalDocPlain(doc);
 }
 
 export function renderTerminalLineAnsi(line: TerminalLine): string {
