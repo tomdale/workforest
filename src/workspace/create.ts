@@ -206,7 +206,7 @@ async function createWorktreeWithGrid(
     repoDir: targetDir,
     branchName,
     isNewWorkspace: true,
-    monitorBackground: false,
+    monitorBackground: true,
   });
 
   const setupFailures = new Map<string, RepoSetupFailureSummary>();
@@ -265,11 +265,18 @@ async function createWorkspace(
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   };
 
+  const useGrid =
+    options.interactive &&
+    (options.shouldUseGrid ?? shouldUseGrid)(source.repos.length);
+
   let setupFailures: readonly RepoSetupFailureSummary[] = [];
-  if (options.interactive) {
+  if (useGrid) {
     const result = await (
       options.stampWorkspaceInteractive ?? stampWorkspaceInteractive
-    )(stampOptions);
+    )({
+      ...stampOptions,
+      renderPipelinesGrid: options.renderPipelinesGrid ?? renderPipelinesGrid,
+    });
     setupFailures = result.setupFailures;
     printRepoSetupFailures(result.setupFailures);
   } else {

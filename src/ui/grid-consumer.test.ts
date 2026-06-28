@@ -476,8 +476,14 @@ describe("renderPipelinesGrid", () => {
       new Map([["repo", { hasLockfile: true }]]),
     );
 
-    acknowledge();
     await vi.advanceTimersByTimeAsync(100);
+    expect(
+      pane.setLabel.mock.calls.some(([label]) =>
+        String(label).includes("pnpm install"),
+      ),
+    ).toBe(true);
+
+    acknowledge();
     await expect(promise).resolves.toEqual(
       new Map([["repo", { hasLockfile: true }]]),
     );

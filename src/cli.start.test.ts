@@ -212,6 +212,48 @@ describe("wf new", () => {
     ]);
   });
 
+  it("drives an interactive workspace start through the grid pipeline", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    await createCachedMirror(
+      fixture.cacheDir,
+      "api.git",
+      "git@github.com:vercel/api.git",
+    );
+    const renderPipelinesGrid = vi.fn<RenderPipelinesGrid>(
+      async () =>
+        new Map([
+          ["front", { hasLockfile: false }],
+          ["api", { hasLockfile: false }],
+        ]),
+    );
+
+    await runNewCommand(invocation(["billing", "front", "api"]), {
+      interactive: true,
+      writeShellCdPath: fixture.writeShellCdPath,
+      shouldUseGrid: () => true,
+      renderPipelinesGrid,
+    });
+
+    expect(renderPipelinesGrid).toHaveBeenCalledTimes(1);
+    const gridOptions = renderPipelinesGrid.mock.calls[0]?.[0];
+    expect(gridOptions?.repoNames).toEqual(["front", "api"]);
+    expect(gridOptions?.pipelines.size).toBe(2);
+    expect(gridOptions?.workspacePath).toBe(
+      path.join(fixture.baseDir, "Workspaces", "_adhoc", "billing"),
+    );
+    expect(gridOptions?.completeOnWorktreesReady).toBe(true);
+    expect(gridOptions?.backgroundInitialization).toBe(true);
+    expect(typeof gridOptions?.onBeforeCompletionPrompt).toBe("function");
+    expect(fixture.cdTargets).toEqual([
+      path.join(fixture.baseDir, "Workspaces", "_adhoc", "billing"),
+    ]);
+  });
+
   it("uses an explicit branch for a single repository without renaming the change", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(

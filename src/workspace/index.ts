@@ -18,6 +18,7 @@ import {
 } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { RepoConfig } from "../types.ts";
+import { renderPipelinesGrid } from "../ui/grid-consumer.ts";
 import { ensureDir } from "../utils/fs.ts";
 import {
   resolveContainedPath,
@@ -71,6 +72,7 @@ export type StampWorkspaceOptions = {
   templateId?: string;
   templateVariant?: string;
   onEvent?: ServiceEventSink;
+  renderPipelinesGrid?: typeof renderPipelinesGrid;
 };
 
 export type PreparedRepo = {
@@ -533,7 +535,136 @@ export async function stampWorkspace(
 export async function stampWorkspaceInteractive(
   options: StampWorkspaceOptions,
 ): Promise<StampWorkspaceResult> {
-  return stampWorkspace(options);
+  const {
+    featureName,
+    description,
+    branchName,
+    workspaceDir,
+    repos,
+    templateId,
+    templateVariant,
+  } = options;
+  if (repos.length === 0) {
+    throw new Error(
+      "stampWorkspaceInteractive requires at least one repository.",
+    );
+  }
+  if (await pathExists(workspaceDir)) {
+    const contents = await fs.readdir(workspaceDir);
+    if (contents.length > 0) {
+      throw new Error(
+        `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
+      );
+    }
+  }
+
+  await ensureCacheDir();
+  const isNewWorkspace = !(await pathExists(workspaceDir));
+  await ensureDir(workspaceDir);
+  const effectiveBranchName = branchName ?? featureName;
+  const template = templateId
+    ? await loadTemplate(
+        formatTemplateIdentifier({
+          parent: templateId,
+          variant: templateVariant,
+        }),
+      )
+    : null;
+
+  await writeInitialWorkspaceMetadata({
+    workspaceDir,
+    featureName,
+    branchName: effectiveBranchName,
+    repos,
+    ...(description !== undefined ? { description } : {}),
+    ...(templateId !== undefined ? { templateId } : {}),
+    ...(templateVariant !== undefined ? { templateVariant } : {}),
+  });
+  await initializeWorkspaceInitialization({ workspaceDir, repos });
+
+  const prepared = new Map<
+    string,
+    { repo: RepoConfig; hasLockfile: boolean }
+  >();
+  const setupFailures = new Map<string, RepoSetupFailureSummary>();
+  const templateBarrier =
+    template !== null
+      ? createTemplateCopyBarrier({
+          repoCount: repos.length,
+          copyTemplateFiles: async () => {
+            await copyTemplateFiles(template, workspaceDir);
+            await materializeTemplateAgentsMd(template, workspaceDir);
+          },
+        })
+      : null;
+  const beforeInitializers = async ({
+    repo,
+    repoDir,
+  }: {
+    repo: RepoConfig;
+    repoDir: string;
+  }): Promise<void> => {
+    const hasLockfile = await hasAny(repoDir, [
+      "pnpm-lock.yaml",
+      "pnpm-lock.yml",
+    ]);
+    await updatePreparedWorkspaceRepoMetadata({
+      workspaceDir,
+      branchName: effectiveBranchName,
+      repo,
+      hasLockfile,
+    });
+    prepared.set(repo.name, { repo, hasLockfile });
+    await templateBarrier?.waitForTemplateFiles();
+  };
+  const pipelines = new Map(
+    repos.map((repo) => [
+      repo.name,
+      createBackgroundRepoSetupPipeline({
+        repo,
+        workspaceDir,
+        branchName: effectiveBranchName,
+        isNewWorkspace,
+        beforeInitializers,
+        monitorBackground: true,
+        templateBarrier,
+      }),
+    ]),
+  );
+
+  await (options.renderPipelinesGrid ?? renderPipelinesGrid)({
+    pipelines,
+    repoNames: repos.map((repo) => repo.name),
+    workspacePath: workspaceDir,
+    getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
+    onFailure: async (repoName, state) => {
+      setupFailures.set(
+        repoName,
+        await createRepoSetupFailureSummary({
+          workspaceDir,
+          repoName,
+          error: state.error,
+          ...(state.step ? { step: state.step } : {}),
+        }),
+      );
+    },
+    onBeforeCompletionPrompt: async () => {
+      await writeVSCodeWorkspaceFile(
+        workspaceDir,
+        repos.filter((repo) => prepared.has(repo.name)),
+      );
+      await markWorkspaceInitializing(workspaceDir);
+      await finalizeWorkspaceInitialization(workspaceDir);
+    },
+    completeOnWorktreesReady: true,
+    backgroundInitialization: true,
+  });
+
+  return {
+    setupFailures: [...setupFailures.values()],
+    workspaceDir,
+    nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
+  };
 }
 
 async function* createBackgroundRepoSetupPipeline({
