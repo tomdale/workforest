@@ -39,10 +39,8 @@ Use this skill when a feature branch is done and should be queued for the local 
    - branch name
    - queued SHA
    - queue ref path
-   - stale-entry guidance if the branch is updated after enqueueing
 
 ## Notes
 
 - The queue stores the exact commit that was validated.
-- If the branch advances after enqueueing, refresh or re-enqueue before integration.
 - Do not enqueue `main`.
