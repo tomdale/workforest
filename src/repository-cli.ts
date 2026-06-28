@@ -24,22 +24,21 @@ import {
   updateCachedRepository,
 } from "./repositories.ts";
 import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
+import {
+  renderTerminalLineAnsi,
+  type TerminalStyleRole,
+  terminalLine,
+  terminalSpan,
+} from "./terminal/render-model.ts";
 import { renderReport } from "./terminal/report.ts";
 import { type StatusTone, statusLabel } from "./terminal/status-indicator.ts";
-import { terminalColor } from "./terminal/theme.ts";
+import { terminalSymbol } from "./terminal/theme.ts";
 import {
   isInteractive,
   promptConfirm,
   withSpinner,
 } from "./ui/prompts/index.ts";
-import {
-  barColor,
-  S_BAR,
-  S_ERROR,
-  S_INFO,
-  S_SUCCESS,
-  S_WARNING,
-} from "./ui/prompts/symbols.ts";
+import { S_BAR } from "./ui/prompts/symbols.ts";
 
 export async function runCacheInvocation(
   invocation: ParsedInvocation,
@@ -734,17 +733,38 @@ function formatMessage(
   kind: "error" | "info" | "success" | "warning",
   message: string,
 ): string {
-  const glyph = {
-    error: S_ERROR,
-    info: S_INFO,
-    success: S_SUCCESS,
-    warning: S_WARNING,
+  const messageRole = statusMessageRole(kind);
+  return renderTerminalLineAnsi(
+    terminalLine([
+      "  ",
+      terminalSpan(S_BAR, { role: "muted" }),
+      "  ",
+      terminalSpan(statusGlyph(kind), { role: statusGlyphRole(kind) }),
+      " ",
+      messageRole === undefined
+        ? message
+        : terminalSpan(message, { role: messageRole }),
+    ]),
+  );
+}
+
+function statusGlyph(kind: "error" | "info" | "success" | "warning"): string {
+  return {
+    error: terminalSymbol.error,
+    info: terminalSymbol.info,
+    success: terminalSymbol.success,
+    warning: terminalSymbol.warning,
   }[kind];
-  const tint = {
-    error: terminalColor.error,
-    info: (value: string) => value,
-    success: terminalColor.success,
-    warning: terminalColor.warning,
-  }[kind];
-  return `  ${barColor(S_BAR)}  ${glyph} ${tint(message)}`;
+}
+
+function statusGlyphRole(
+  kind: "error" | "info" | "success" | "warning",
+): TerminalStyleRole {
+  return kind === "info" ? "accent" : kind;
+}
+
+function statusMessageRole(
+  kind: "error" | "info" | "success" | "warning",
+): TerminalStyleRole | undefined {
+  return kind === "info" ? undefined : kind;
 }

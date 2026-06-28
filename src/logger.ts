@@ -1,12 +1,11 @@
-import { terminalColor } from "./terminal/theme.ts";
 import {
-  barColor,
-  S_BAR,
-  S_ERROR,
-  S_INFO,
-  S_SUCCESS,
-  S_WARNING,
-} from "./ui/prompts/symbols.ts";
+  renderTerminalLineAnsi,
+  type TerminalStyleRole,
+  terminalLine,
+  terminalSpan,
+} from "./terminal/render-model.ts";
+import { terminalSymbol } from "./terminal/theme.ts";
+import { S_BAR } from "./ui/prompts/symbols.ts";
 
 /**
  * Simple logger for console output. Lines share the inline prompt grammar — a
@@ -17,21 +16,51 @@ import {
  */
 function emit(
   stream: (line: string) => void,
-  glyph: string,
-  tint: ((value: string) => string) | undefined,
+  kind: "error" | "info" | "success" | "warning",
   messages: readonly unknown[],
 ): void {
   const text = messages.map((message) => String(message)).join(" ");
-  stream(`  ${barColor(S_BAR)}  ${glyph} ${tint ? tint(text) : text}`);
+  const messageRole = logMessageRole(kind);
+  stream(
+    renderTerminalLineAnsi(
+      terminalLine([
+        "  ",
+        terminalSpan(S_BAR, { role: "muted" }),
+        "  ",
+        terminalSpan(logGlyph(kind), { role: logGlyphRole(kind) }),
+        " ",
+        messageRole === undefined
+          ? text
+          : terminalSpan(text, { role: messageRole }),
+      ]),
+    ),
+  );
 }
 
 export const log = {
-  info: (...messages: unknown[]) =>
-    emit(console.log, S_INFO, undefined, messages),
-  warn: (...messages: unknown[]) =>
-    emit(console.warn, S_WARNING, terminalColor.warning, messages),
-  error: (...messages: unknown[]) =>
-    emit(console.error, S_ERROR, terminalColor.error, messages),
-  success: (...messages: unknown[]) =>
-    emit(console.log, S_SUCCESS, terminalColor.success, messages),
+  info: (...messages: unknown[]) => emit(console.log, "info", messages),
+  warn: (...messages: unknown[]) => emit(console.warn, "warning", messages),
+  error: (...messages: unknown[]) => emit(console.error, "error", messages),
+  success: (...messages: unknown[]) => emit(console.log, "success", messages),
 };
+
+function logGlyph(kind: "error" | "info" | "success" | "warning"): string {
+  return {
+    error: terminalSymbol.error,
+    info: terminalSymbol.info,
+    success: terminalSymbol.success,
+    warning: terminalSymbol.warning,
+  }[kind];
+}
+
+function logGlyphRole(
+  kind: "error" | "info" | "success" | "warning",
+): TerminalStyleRole {
+  return kind === "info" ? "accent" : kind;
+}
+
+function logMessageRole(
+  kind: "error" | "info" | "success" | "warning",
+): TerminalStyleRole | undefined {
+  return kind === "info" ? undefined : kind;
+}

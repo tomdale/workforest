@@ -1,10 +1,15 @@
-import chalk from "chalk";
 import { InlineSurface } from "./inline-surface.ts";
 import { InputDecoder, type KeyInput } from "./input-decoder.ts";
+import {
+  renderTerminalLineAnsi,
+  type TerminalLine,
+  type TerminalSpanInput,
+  terminalLine,
+  terminalSpan,
+} from "./render-model.ts";
 import type { PromptResult } from "./result.ts";
 import { TerminalSession } from "./session.ts";
 import { truncate, visibleWidth } from "./text.ts";
-import { terminalColor } from "./theme.ts";
 
 export type LineEditorOptions = {
   message: string;
@@ -14,11 +19,11 @@ export type LineEditorOptions = {
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
   prefix: {
-    active: string;
-    done: string;
-    bar: string;
-    barEnd: string;
-    cancel: string;
+    active: TerminalSpanInput;
+    done: TerminalSpanInput;
+    bar: TerminalSpanInput;
+    barEnd: TerminalSpanInput;
+    cancel: TerminalSpanInput;
   };
 };
 
@@ -39,16 +44,23 @@ export async function lineEditor({
 
   const render = (): void => {
     const value = chars.join("");
-    const display = value || terminalColor.muted(placeholder ?? "");
-    const cursorDisplay = renderCursor(display, cursor, value.length === 0);
-    const lines = [`  ${prefix.active}  ${message}`];
+    const cursorDisplay = renderCursor(
+      value || (placeholder ?? ""),
+      cursor,
+      value.length === 0,
+    );
+    const lines = [promptLine(prefix.active, message)];
 
     if (errorMessage) {
-      lines.push(`  ${prefix.bar}  ${terminalColor.warning(errorMessage)}`);
+      lines.push(
+        prefixedLine(prefix.bar, [
+          terminalSpan(errorMessage, { role: "warning" }),
+        ]),
+      );
     }
-    lines.push(`  ${prefix.bar}  ${cursorDisplay}`);
-    lines.push(`  ${prefix.barEnd}`);
-    surface.render(lines);
+    lines.push(prefixedLine(prefix.bar, cursorDisplay));
+    lines.push(promptLine(prefix.barEnd));
+    surface.render(lines.map(renderLine));
   };
 
   return TerminalSession.run(
@@ -68,8 +80,10 @@ export async function lineEditor({
             return;
           }
 
+          const committedValue =
+            value || terminalSpan(defaultValue ?? "", { role: "muted" });
           surface.commit([
-            `  ${prefix.done}  ${message} ${terminalColor.muted("·")} ${value || terminalColor.muted(defaultValue ?? "")}`,
+            renderLine(doneLine(prefix.done, message, committedValue)),
           ]);
           cleanup();
           resolve({ type: "submitted", value });
@@ -145,15 +159,72 @@ function renderCursor(
   displayValue: string,
   cursorIndex: number,
   isPlaceholder: boolean,
-): string {
-  if (isPlaceholder) return `${chalk.inverse(" ")}${displayValue}`;
+): TerminalSpanInput[] {
+  if (isPlaceholder) {
+    return [
+      terminalSpan(" ", { emphasis: "inverse" }),
+      terminalSpan(displayValue, { role: "muted" }),
+    ];
+  }
 
   const chars = Array.from(displayValue);
   const before = chars.slice(0, cursorIndex).join("");
   const current = chars[cursorIndex] ?? " ";
   const after = chars.slice(cursorIndex + 1).join("");
   const maxWidth = Math.max((process.stdout.columns ?? 80) - 8, 20);
-  const line = `${before}${chalk.inverse(current)}${after}`;
+  const line = `${before}${current}${after}`;
 
-  return visibleWidth(line) > maxWidth ? truncate(line, maxWidth) : line;
+  if (visibleWidth(line) > maxWidth) {
+    const truncated = truncate(line, maxWidth);
+    const truncatedChars = Array.from(truncated);
+    if (
+      cursorIndex < truncatedChars.length &&
+      truncatedChars[cursorIndex] !== "…"
+    ) {
+      return [
+        truncatedChars.slice(0, cursorIndex).join(""),
+        terminalSpan(truncatedChars[cursorIndex] ?? " ", {
+          emphasis: "inverse",
+        }),
+        truncatedChars.slice(cursorIndex + 1).join(""),
+      ];
+    }
+    return [truncated];
+  }
+
+  return [before, terminalSpan(current, { emphasis: "inverse" }), after];
+}
+
+function promptLine(symbol: TerminalSpanInput, text = ""): TerminalLine {
+  return text
+    ? terminalLine(["  ", symbol, "  ", text])
+    : terminalLine(["  ", symbol]);
+}
+
+function prefixedLine(
+  symbol: TerminalSpanInput,
+  spans: readonly TerminalSpanInput[],
+): TerminalLine {
+  return terminalLine(["  ", symbol, "  ", ...spans]);
+}
+
+function doneLine(
+  symbol: TerminalSpanInput,
+  message: string,
+  value: TerminalSpanInput,
+): TerminalLine {
+  return terminalLine([
+    "  ",
+    symbol,
+    "  ",
+    message,
+    " ",
+    terminalSpan("·", { role: "muted" }),
+    " ",
+    value,
+  ]);
+}
+
+function renderLine(line: TerminalLine): string {
+  return renderTerminalLineAnsi(line);
 }

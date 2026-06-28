@@ -1,13 +1,12 @@
 import { InlineSurface } from "../../terminal/inline-surface.ts";
-import { TerminalSession } from "../../terminal/session.ts";
-import { terminalColor } from "../../terminal/theme.ts";
 import {
-  barColor,
-  S_BAR,
-  S_SUCCESS,
-  SPINNER_FRAMES,
-  SPINNER_INTERVAL,
-} from "./symbols.ts";
+  renderTerminalLineAnsi,
+  terminalLine,
+  terminalSpan,
+} from "../../terminal/render-model.ts";
+import { TerminalSession } from "../../terminal/session.ts";
+import { terminalSymbol } from "../../terminal/theme.ts";
+import { S_BAR, SPINNER_FRAMES, SPINNER_INTERVAL } from "./symbols.ts";
 
 export type Spinner = {
   start(message?: string): void;
@@ -45,8 +44,18 @@ export function spinner(): Spinner {
   const surface = new InlineSurface(process.stdout);
 
   function draw(): void {
-    const frame = terminalColor.accent(SPINNER_FRAMES[frameIndex] ?? "");
-    surface.render([`  ${barColor(S_BAR)}  ${frame} ${currentMessage}`]);
+    surface.render([
+      renderTerminalLineAnsi(
+        terminalLine([
+          "  ",
+          terminalSpan(S_BAR, { role: "muted" }),
+          "  ",
+          terminalSpan(SPINNER_FRAMES[frameIndex] ?? "", { role: "accent" }),
+          " ",
+          currentMessage,
+        ]),
+      ),
+    ]);
     frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
   }
 
@@ -76,7 +85,18 @@ export function spinner(): Spinner {
         }
         surface.clear();
         if (msg) {
-          process.stdout.write(`  ${barColor(S_BAR)}  ${S_SUCCESS} ${msg}\n`);
+          process.stdout.write(
+            `${renderTerminalLineAnsi(
+              terminalLine([
+                "  ",
+                terminalSpan(S_BAR, { role: "muted" }),
+                "  ",
+                terminalSpan(terminalSymbol.success, { role: "success" }),
+                " ",
+                msg,
+              ]),
+            )}\n`,
+          );
         }
       } finally {
         teardown();

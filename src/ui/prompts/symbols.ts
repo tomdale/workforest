@@ -1,3 +1,8 @@
+import {
+  renderTerminalLineAnsi,
+  terminalLine,
+  terminalSpan,
+} from "../../terminal/render-model.ts";
 import { terminalColor, terminalSymbol } from "../../terminal/theme.ts";
 
 // Box drawing
@@ -33,5 +38,14 @@ export const S_ERROR = terminalColor.error(terminalSymbol.error);
 export const barColor = terminalColor.muted;
 
 export function printCancelled(message = "Cancelled"): void {
-  process.stdout.write(`  ${S_STEP_CANCEL}  ${terminalColor.error(message)}\n`);
+  process.stdout.write(
+    `${renderTerminalLineAnsi(
+      terminalLine([
+        "  ",
+        terminalSpan(terminalSymbol.cancel, { role: "error" }),
+        "  ",
+        terminalSpan(message, { role: "error" }),
+      ]),
+    )}\n`,
+  );
 }

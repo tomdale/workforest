@@ -4,7 +4,13 @@ import {
   note as terminalNote,
   outro as terminalOutro,
 } from "../../terminal/inline-widgets.ts";
-import { terminalColor } from "../../terminal/theme.ts";
+import {
+  renderTerminalLineAnsi,
+  type TerminalStyleRole,
+  terminalLine,
+  terminalSpan,
+} from "../../terminal/render-model.ts";
+import { terminalSymbol } from "../../terminal/theme.ts";
 import { confirm as rawConfirm } from "./confirm.ts";
 import { fuzzySelect as rawFuzzySelect } from "./fuzzy-select.ts";
 import { multiSelect as rawMultiSelect } from "./multi-select.ts";
@@ -13,14 +19,7 @@ import {
   spinner as rawSpinner,
   withSpinner as rawWithSpinner,
 } from "./spinner.ts";
-import {
-  barColor,
-  S_BAR,
-  S_ERROR,
-  S_INFO,
-  S_SUCCESS,
-  S_WARNING,
-} from "./symbols.ts";
+import { S_BAR } from "./symbols.ts";
 import { terminalSymbols } from "./terminal-symbols.ts";
 import { text as rawText } from "./text.ts";
 
@@ -178,22 +177,16 @@ export function note(content: string, title?: string): void {
 
 export const promptLog = {
   info(message: string): void {
-    process.stdout.write(`  ${barColor(S_BAR)}  ${S_INFO} ${message}\n`);
+    writePromptLog("info", message);
   },
   warn(message: string): void {
-    process.stdout.write(
-      `  ${barColor(S_BAR)}  ${S_WARNING} ${terminalColor.warning(message)}\n`,
-    );
+    writePromptLog("warning", message);
   },
   error(message: string): void {
-    process.stdout.write(
-      `  ${barColor(S_BAR)}  ${S_ERROR} ${terminalColor.error(message)}\n`,
-    );
+    writePromptLog("error", message);
   },
   success(message: string): void {
-    process.stdout.write(
-      `  ${barColor(S_BAR)}  ${S_SUCCESS} ${terminalColor.success(message)}\n`,
-    );
+    writePromptLog("success", message);
   },
 };
 
@@ -203,3 +196,51 @@ export const spinner = rawSpinner;
 export const withSpinner = rawWithSpinner;
 
 // ── Helpers ──
+
+function writePromptLog(
+  kind: "error" | "info" | "success" | "warning",
+  message: string,
+): void {
+  process.stdout.write(
+    `${renderTerminalLineAnsi(promptLogLine(kind, message))}\n`,
+  );
+}
+
+function promptLogLine(
+  kind: "error" | "info" | "success" | "warning",
+  message = "",
+): ReturnType<typeof terminalLine> {
+  const glyphRole = logGlyphRole(kind);
+  const messageRole = logMessageRole(kind);
+  return terminalLine([
+    "  ",
+    terminalSpan(S_BAR, { role: "muted" }),
+    "  ",
+    terminalSpan(logGlyph(kind), { role: glyphRole }),
+    " ",
+    messageRole === undefined
+      ? message
+      : terminalSpan(message, { role: messageRole }),
+  ]);
+}
+
+function logGlyph(kind: "error" | "info" | "success" | "warning"): string {
+  return {
+    error: terminalSymbol.error,
+    info: terminalSymbol.info,
+    success: terminalSymbol.success,
+    warning: terminalSymbol.warning,
+  }[kind];
+}
+
+function logGlyphRole(
+  kind: "error" | "info" | "success" | "warning",
+): TerminalStyleRole {
+  return kind === "info" ? "accent" : kind;
+}
+
+function logMessageRole(
+  kind: "error" | "info" | "success" | "warning",
+): TerminalStyleRole | undefined {
+  return kind === "info" ? undefined : kind;
+}

@@ -1,28 +1,33 @@
-import chalk from "chalk";
 import { InlineSurface } from "./inline-surface.ts";
 import { InputDecoder, type KeyInput } from "./input-decoder.ts";
 import { lineEditor } from "./line-editor.ts";
+import {
+  renderTerminalLineAnsi,
+  type TerminalLine,
+  type TerminalSpanInput,
+  terminalLine,
+  terminalSpan,
+} from "./render-model.ts";
 import type { PromptResult } from "./result.ts";
 import { TerminalSession } from "./session.ts";
 import { truncate, visibleWidth, wrap } from "./text.ts";
-import { terminalColor } from "./theme.ts";
 
 export type TerminalSymbols = {
-  active: string;
-  done: string;
-  cancel: string;
-  bar: string;
-  barEnd: string;
-  barStart: string;
-  barHorizontal: string;
-  radioOn: string;
-  radioOff: string;
-  checkOn: string;
-  checkOff: string;
-  info: string;
-  warning: string;
-  error: string;
-  success: string;
+  active: TerminalSpanInput;
+  done: TerminalSpanInput;
+  cancel: TerminalSpanInput;
+  bar: TerminalSpanInput;
+  barEnd: TerminalSpanInput;
+  barStart: TerminalSpanInput;
+  barHorizontal: TerminalSpanInput;
+  radioOn: TerminalSpanInput;
+  radioOff: TerminalSpanInput;
+  checkOn: TerminalSpanInput;
+  checkOff: TerminalSpanInput;
+  info: TerminalSpanInput;
+  warning: TerminalSpanInput;
+  error: TerminalSpanInput;
+  success: TerminalSpanInput;
 };
 
 export type Choice<T> = {
@@ -73,16 +78,21 @@ export async function confirmPrompt(
   let value = defaultValue;
   return interactivePrompt({
     render: () => {
-      const yes = value ? chalk.underline("Yes") : terminalColor.muted("Yes");
-      const no = value ? terminalColor.muted("No") : chalk.underline("No");
+      const yes = terminalSpan(
+        "Yes",
+        value ? { emphasis: "underline" } : { role: "muted" },
+      );
+      const no = terminalSpan(
+        "No",
+        value ? { role: "muted" } : { emphasis: "underline" },
+      );
       return [
-        `  ${symbols.active}  ${message}`,
-        `  ${symbols.bar}  ${yes} / ${no}`,
-        `  ${symbols.barEnd}`,
+        promptLine(symbols.active, message),
+        prefixedLine(symbols.bar, [yes, " / ", no]),
+        promptLine(symbols.barEnd),
       ];
     },
-    done: () =>
-      `  ${symbols.done}  ${message} ${terminalColor.muted("·")} ${value ? "Yes" : "No"}`,
+    done: () => doneLine(symbols.done, message, value ? "Yes" : "No"),
     onKey: (event) => {
       if (event.type === "submit") return { submit: true, value };
       if (event.type === "text") {
@@ -113,29 +123,35 @@ export async function selectPrompt<T>(
 
   return interactivePrompt({
     render: () => {
-      const lines = [`  ${symbols.active}  ${message}`];
+      const lines = [promptLine(symbols.active, message)];
       for (const [i, item] of items.entries()) {
         const selected = i === index;
-        const label = selected ? item.label : terminalColor.muted(item.label);
-        const hint = item.hint ? terminalColor.muted(` ${item.hint}`) : "";
         lines.push(
-          `  ${symbols.bar}  ${selected ? symbols.radioOn : symbols.radioOff} ${truncate(`${label}${hint}`, contentWidth())}`,
+          prefixedLine(symbols.bar, [
+            selected ? symbols.radioOn : symbols.radioOff,
+            " ",
+            ...choiceText(item, selected),
+          ]),
         );
       }
       if (hotkeys?.length) {
-        lines.push(`  ${symbols.bar}`);
+        lines.push(promptLine(symbols.bar));
         for (const hotkey of hotkeys) {
           lines.push(
-            `  ${symbols.bar}  ${terminalColor.muted(`${hotkey.key} to ${hotkey.hint}`)}`,
+            prefixedLine(symbols.bar, [
+              terminalSpan(`${hotkey.key} to ${hotkey.hint}`, {
+                role: "muted",
+              }),
+            ]),
           );
         }
       }
-      lines.push(`  ${symbols.barEnd}`);
+      lines.push(promptLine(symbols.barEnd));
       return lines;
     },
     done: (value) => {
       const selected = items.find((item) => Object.is(item.value, value));
-      return `  ${symbols.done}  ${message} ${terminalColor.muted("·")} ${selected?.label ?? ""}`;
+      return doneLine(symbols.done, message, selected?.label ?? "");
     },
     onKey: (event) => {
       if (event.type === "submit") {
@@ -185,23 +201,29 @@ export async function multiSelectPrompt<T>(
 
   return interactivePrompt({
     render: () => {
-      const lines = [`  ${options.symbols.active}  ${message}`];
+      const lines = [promptLine(options.symbols.active, message)];
       for (const [i, item] of items.entries()) {
         const selected = i === index;
-        const label = selected ? item.label : terminalColor.muted(item.label);
-        const hint = item.hint ? terminalColor.muted(` ${item.hint}`) : "";
         lines.push(
-          `  ${options.symbols.bar}  ${checked.has(i) ? options.symbols.checkOn : options.symbols.checkOff} ${truncate(`${label}${hint}`, contentWidth())}`,
+          prefixedLine(options.symbols.bar, [
+            checked.has(i) ? options.symbols.checkOn : options.symbols.checkOff,
+            " ",
+            ...choiceText(item, selected),
+          ]),
         );
       }
-      lines.push(`  ${options.symbols.barEnd}`);
+      lines.push(promptLine(options.symbols.barEnd));
       return lines;
     },
     done: () => {
       const selected = items
         .filter((_, i) => checked.has(i))
         .map((item) => item.label);
-      return `  ${options.symbols.done}  ${message} ${terminalColor.muted("·")} ${selected.length > 0 ? selected.join(", ") : "none"}`;
+      return doneLine(
+        options.symbols.done,
+        message,
+        selected.length > 0 ? selected.join(", ") : "none",
+      );
     },
     onKey: (event) => {
       if (event.type === "submit") {
@@ -273,29 +295,37 @@ export async function fuzzySelectPrompt<T>(
       const choices = filtered();
       if (index >= choices.length) index = Math.max(0, choices.length - 1);
       const lines = [
-        `  ${symbols.active}  ${message}`,
-        `  ${symbols.bar}  ${query || terminalColor.muted("Type to filter")}`,
+        promptLine(symbols.active, message),
+        prefixedLine(symbols.bar, [
+          query || terminalSpan("Type to filter", { role: "muted" }),
+        ]),
       ];
 
       if (choices.length === 0) {
-        lines.push(`  ${symbols.bar}  ${terminalColor.muted("No matches")}`);
+        lines.push(
+          prefixedLine(symbols.bar, [
+            terminalSpan("No matches", { role: "muted" }),
+          ]),
+        );
       } else {
         for (const [i, item] of choices.entries()) {
           const selected = i === index;
-          const label = selected ? item.label : terminalColor.muted(item.label);
-          const hint = item.hint ? terminalColor.muted(` ${item.hint}`) : "";
           lines.push(
-            `  ${symbols.bar}  ${selected ? symbols.radioOn : symbols.radioOff} ${truncate(`${label}${hint}`, contentWidth())}`,
+            prefixedLine(symbols.bar, [
+              selected ? symbols.radioOn : symbols.radioOff,
+              " ",
+              ...choiceText(item, selected),
+            ]),
           );
         }
       }
 
-      lines.push(`  ${symbols.barEnd}`);
+      lines.push(promptLine(symbols.barEnd));
       return lines;
     },
     done: (value) => {
       const selected = items.find((item) => Object.is(item.value, value));
-      return `  ${symbols.done}  ${message} ${terminalColor.muted("·")} ${selected?.label ?? ""}`;
+      return doneLine(symbols.done, message, selected?.label ?? "");
     },
     onKey: (event) => {
       const choices = filtered();
@@ -331,16 +361,16 @@ export async function fuzzySelectPrompt<T>(
 }
 
 export function intro(title: string, symbols: TerminalSymbols): void {
-  process.stdout.write(`  ${symbols.barStart}  ${title}\n`);
+  writeLine(promptLine(symbols.barStart, title));
 }
 
 export function outro(message: string, symbols: TerminalSymbols): void {
-  process.stdout.write(`  ${symbols.barEnd}  ${message}\n`);
+  writeLine(promptLine(symbols.barEnd, message));
 }
 
 export function cancel(message: string, symbols: TerminalSymbols): void {
-  process.stdout.write(
-    `  ${symbols.cancel}  ${terminalColor.error(message)}\n`,
+  writeLine(
+    prefixedLine(symbols.cancel, [terminalSpan(message, { role: "error" })]),
   );
 }
 
@@ -359,28 +389,40 @@ export function note(
 
   if (title) {
     const ruleWidth = Math.max(0, pad - visibleWidth(title) - 1);
-    process.stdout.write(
-      `  ${symbols.barStart}  ${title} ${symbols.barHorizontal.repeat(ruleWidth)}\n`,
+    writeLine(
+      prefixedLine(symbols.barStart, [
+        title,
+        " ",
+        repeatSymbol(symbols.barHorizontal, ruleWidth),
+      ]),
     );
   } else {
-    process.stdout.write(
-      `  ${symbols.barStart}${symbols.barHorizontal.repeat(pad + 1)}\n`,
+    writeLine(
+      terminalLine([
+        "  ",
+        symbols.barStart,
+        repeatSymbol(symbols.barHorizontal, pad + 1),
+      ]),
     );
   }
 
-  process.stdout.write(`  ${symbols.bar}\n`);
+  writeLine(promptLine(symbols.bar));
   for (const line of contentLines) {
-    process.stdout.write(`  ${symbols.bar}  ${line}\n`);
+    writeLine(promptLine(symbols.bar, line));
   }
-  process.stdout.write(`  ${symbols.bar}\n`);
-  process.stdout.write(
-    `  ${symbols.barEnd}${symbols.barHorizontal.repeat(pad + 1)}\n`,
+  writeLine(promptLine(symbols.bar));
+  writeLine(
+    terminalLine([
+      "  ",
+      symbols.barEnd,
+      repeatSymbol(symbols.barHorizontal, pad + 1),
+    ]),
   );
 }
 
 type InteractivePromptOptions<T> = {
-  render: () => string[];
-  done: (value: T) => string;
+  render: () => TerminalLine[];
+  done: (value: T) => TerminalLine;
   onKey: (event: KeyInput) => { submit?: boolean; value?: T };
 };
 
@@ -401,7 +443,7 @@ async function interactivePrompt<T>(
         };
 
         function submit(value: T): void {
-          surface.commit([options.done(value)]);
+          surface.commit([renderLine(options.done(value))]);
           cleanup();
           resolve({ type: "submitted", value });
         }
@@ -425,11 +467,11 @@ async function interactivePrompt<T>(
               return;
             }
           }
-          surface.render(options.render());
+          surface.render(options.render().map(renderLine));
         }
 
         stdin.on("data", onData);
-        surface.render(options.render());
+        surface.render(options.render().map(renderLine));
       }),
   );
 }
@@ -441,4 +483,72 @@ function toggle(set: Set<number>, value: number): void {
 
 function contentWidth(): number {
   return Math.max(10, (process.stdout.columns ?? 80) - 8);
+}
+
+function promptLine(symbol: TerminalSpanInput, text = ""): TerminalLine {
+  return text
+    ? terminalLine(["  ", symbol, "  ", text])
+    : terminalLine(["  ", symbol]);
+}
+
+function prefixedLine(
+  symbol: TerminalSpanInput,
+  spans: readonly TerminalSpanInput[],
+): TerminalLine {
+  return terminalLine(["  ", symbol, "  ", ...spans]);
+}
+
+function doneLine(
+  symbol: TerminalSpanInput,
+  message: string,
+  value: string,
+): TerminalLine {
+  return terminalLine([
+    "  ",
+    symbol,
+    "  ",
+    message,
+    " ",
+    terminalSpan("·", { role: "muted" }),
+    " ",
+    value,
+  ]);
+}
+
+function choiceText<T>(
+  item: Choice<T>,
+  selected: boolean,
+): TerminalSpanInput[] {
+  const hint = item.hint ? ` ${item.hint}` : "";
+  const rendered = truncate(`${item.label}${hint}`, contentWidth());
+  const labelLength = Math.min(item.label.length, rendered.length);
+  const label = rendered.slice(0, labelLength);
+  const remaining = rendered.slice(labelLength);
+  const labelSpan = selected
+    ? terminalSpan(label)
+    : terminalSpan(label, { role: "muted" });
+  return remaining
+    ? [labelSpan, terminalSpan(remaining, { role: "muted" })]
+    : [labelSpan];
+}
+
+function repeatSymbol(
+  symbol: TerminalSpanInput,
+  count: number,
+): TerminalSpanInput {
+  if (typeof symbol === "string") return symbol.repeat(count);
+  return terminalSpan(symbol.text.repeat(count), {
+    ...(symbol.role ? { role: symbol.role } : {}),
+    ...(symbol.background ? { background: symbol.background } : {}),
+    ...(symbol.emphasis ? { emphasis: symbol.emphasis } : {}),
+    ...(symbol.literal ? { literal: symbol.literal } : {}),
+  });
+}
+
+function renderLine(line: TerminalLine): string {
+  return renderTerminalLineAnsi(line);
+}
+
+function writeLine(line: TerminalLine): void {
+  process.stdout.write(`${renderLine(line)}\n`);
 }
