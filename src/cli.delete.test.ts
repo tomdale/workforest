@@ -303,6 +303,7 @@ function repositoryStatus(
     name,
     path: repoPath,
     branch: overrides.branch ?? "tomdale/cli-redesign",
+    defaultBranch: overrides.defaultBranch ?? "main",
     state: overrides.state ?? "clean",
     dirty: overrides.dirty ?? dirtySummary(overrides.state === "dirty" ? 1 : 0),
     base: overrides.base ?? "origin/main",

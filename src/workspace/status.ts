@@ -8,11 +8,16 @@ import {
 } from "../templates/agents-md.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import {
-  type ReportField,
-  type ReportSection,
-  renderReport,
-} from "../terminal/report.ts";
-import type { StatusTone } from "../terminal/status-indicator.ts";
+  literalSpan,
+  renderTerminalDocInline,
+  type TerminalLine,
+  type TerminalSpan,
+  type TerminalSpanInput,
+  type TerminalStyleRole,
+  terminalSpan,
+} from "../terminal/render-model.ts";
+import { truncate, visibleWidth } from "../terminal/text.ts";
+import { terminalSymbol } from "../terminal/theme.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
 import {
   finalizeWorkspaceInitialization,
@@ -42,8 +47,17 @@ export type Status = Readonly<{
   repositories: readonly RepositoryStatus[];
   tasks: readonly TaskStatus[];
   initialization: InitializationStatus | null;
-  guidance?: TemplateAgentsMdState;
+  guidance?: GuidanceStatus;
   nextSteps: readonly string[];
+}>;
+
+/**
+ * AGENTS.md guidance state plus the manifest expiry, so the report can render
+ * how long an `expired` guidance file has been stale ("out of date by 3h").
+ */
+export type GuidanceStatus = Readonly<{
+  state: TemplateAgentsMdState;
+  expiresAt: string | null;
 }>;
 
 export type StatusSummary = Readonly<{
@@ -62,6 +76,7 @@ export type RepositoryStatus = Readonly<{
   name: string;
   path: string;
   branch: string | null;
+  defaultBranch: string | null;
   state: "clean" | "dirty" | "stale";
   dirty: DirtySummary;
   base: string | null;
@@ -167,110 +182,426 @@ export async function buildStatus(entry: InventoryEntry): Promise<Status> {
   };
 }
 
+const REPO_INDENT = "  ";
+const TASK_INDENT = "      ";
+const TASK_LOG_INDENT = "          ";
+const COLUMN_GAP = "  ";
+const EMPTY_LINE: TerminalLine = { spans: [literalSpan("")] };
+
+/**
+ * A single aligned table cell: its styled spans plus the visible width used to
+ * pad it to the column width. Widths are precomputed because a span's color
+ * codes must not count toward layout.
+ */
+type Cell = Readonly<{ spans: readonly TerminalSpan[]; width: number }>;
+
+/**
+ * Renders status as a compact dashboard: an identity header, a dim path line,
+ * an optional guidance/setup line, then a column-aligned table of repositories
+ * with their nested tasks indented beneath each parent. The verbose
+ * one-liners and `--json`-only fields (`line`, `details`, `nextSteps`) are left
+ * on the model untouched; only this presentation layer changed.
+ */
 export function renderStatus(
   status: Status,
   options: RenderStatusOptions = {},
 ): string {
-  const sections: ReportSection[] = [
-    { title: "Summary", fields: compactPaths(summaryFields(status.summary)) },
-    {
-      title: status.type === "worktree" ? "Repository" : "Repositories",
-      entries: status.repositories.map((repo) => ({
-        title: repo.name,
-        tone: repositoryTone(repo.state),
-        description: statusTail(repo.line, repo.name),
-        details: compactPaths(repo.details),
-      })),
-    },
-    status.tasks.length === 0
-      ? { title: "Tasks", note: "No nested tasks." }
-      : {
-          title: "Tasks",
-          entries: status.tasks.map((task) => ({
-            title: task.selector,
-            tone: taskTone(task.state),
-            description: statusTail(task.line, task.selector),
-            details: compactPaths(task.details),
-          })),
-        },
+  const lines: TerminalLine[] = [
+    headerLine(status),
+    { spans: [terminalSpan(compactHome(status.path), { role: "dim" })] },
   ];
 
-  if (status.initialization) {
-    sections.push({
-      title: "Initialization",
-      fields: compactPaths(
-        initializationFields(status.initialization, status.type),
+  const guidance = guidanceLine(status.guidance);
+  if (guidance) lines.push(guidance);
+  lines.push(...workspaceSetupLines(status.initialization));
+
+  const repos = status.repositories.map((repo) => ({
+    repo,
+    cells: [
+      cell(terminalSpan(repo.name, { emphasis: "bold" })),
+      branchCell(repo.branch, repo.defaultBranch),
+      syncCell(repo),
+    ],
+  }));
+  const repoWidths = maxWidths(repos.map((entry) => entry.cells));
+  const taskWidths = maxWidths(status.tasks.map(taskCells));
+  const tasksByRepo = groupTasksByRepo(status.tasks);
+  const available = Math.max(24, (process.stdout.columns ?? 80) - 4);
+
+  if (repos.length > 0) lines.push(EMPTY_LINE);
+  for (const { repo, cells } of repos) {
+    lines.push(
+      columnsLine(
+        REPO_INDENT,
+        repoGlyph(repo),
+        cells,
+        repoWidths,
+        worktreeSpans(repo, available),
       ),
-    });
+    );
+    if (repo.setup.status === "failed" && repo.setup.logPath) {
+      lines.push(dimLine(`${TASK_INDENT}${compactHome(repo.setup.logPath)}`));
+    }
+    for (const task of tasksByRepo.get(repo.name) ?? []) {
+      pushTaskLines(lines, task, taskWidths);
+    }
   }
-
-  if (status.guidance) {
-    sections.push({
-      title: "Guidance",
-      fields: [{ label: "AGENTS.md", value: status.guidance }],
-    });
+  for (const task of orphanTasks(status.tasks, status.repositories)) {
+    pushTaskLines(lines, task, taskWidths);
   }
-
-  sections.push({
-    title: "Next steps",
-    entries: status.nextSteps.map((step) => ({ title: step, tone: "info" })),
-  });
 
   if (options.note) {
-    sections.push({ title: "Note", note: options.note });
+    lines.push(EMPTY_LINE, {
+      spans: [terminalSpan(options.note, { role: "muted" })],
+    });
   }
 
-  return renderReport({ title: "Change status", sections });
+  // Frame the dashboard with a blank line above and below so it stands clear
+  // of the shell prompt and any preceding command output.
+  return `\n\n${renderTerminalDocInline({ lines })}\n\n\n`;
 }
 
-/** Maps a repository's working-tree state onto a status tone. */
-function repositoryTone(state: RepositoryStatus["state"]): StatusTone {
-  switch (state) {
-    case "clean":
-      return "success";
-    case "dirty":
-      return "warning";
-    case "stale":
-      return "cancelled";
+function headerLine(status: Status): TerminalLine {
+  const identity =
+    status.type === "worktree" ? status.selector : status.changeName;
+  return {
+    spans: [
+      terminalSpan(identity, { role: "primary", emphasis: "bold" }),
+      literalSpan("   "),
+      terminalSpan(headerMeta(status).join(" · "), { role: "muted" }),
+    ],
+  };
+}
+
+function headerMeta(status: Status): string[] {
+  const age = formatRelativeAge(status.modifiedAtMs);
+  const count = status.repositories.length;
+  const repos = `${count} ${count === 1 ? "repo" : "repos"}`;
+  switch (status.type) {
+    case "worktree":
+      return ["worktree", age];
+    case "template-workspace":
+      return [status.groupName, repos, age];
+    case "adhoc-workspace":
+      return ["adhoc", repos, age];
   }
 }
 
-/** Maps a nested task's state onto a status tone. */
-function taskTone(state: TaskStatus["state"]): StatusTone {
-  switch (state) {
-    case "ready":
-      return "success";
-    case "failed":
-      return "error";
-    case "stale":
-      return "cancelled";
+/** Guidance is shown only when it is not current; `fresh`/`disabled` are silent. */
+function guidanceLine(guidance: Status["guidance"]): TerminalLine | null {
+  if (!guidance) return null;
+  const reason = guidanceReason(guidance);
+  return reason
+    ? { spans: [terminalSpan(`!  AGENTS.md ${reason}`, { role: "warning" })] }
+    : null;
+}
+
+function guidanceReason(guidance: GuidanceStatus): string | null {
+  switch (guidance.state) {
+    case "fresh":
+    case "disabled":
+      return null;
+    case "expired":
+      return guidance.expiresAt
+        ? `out of date by ${formatDuration(Date.now() - Date.parse(guidance.expiresAt))}`
+        : "out of date";
+    case "missing":
+      return "missing";
+    case "modified":
+      return "modified";
+    case "scope-changed":
+      return "scope changed";
+    case "conflict":
+      return "conflict";
   }
 }
 
 /**
- * A repository/task one-liner is `"{name} - {summary}"`. The report renders the
- * name as the entry title and re-adds the " - " separator before the
- * description, so we hand back just the summary tail.
+ * A single workspace-level setup line for in-flight or failed orchestration.
+ * Per-repo phases fold into their own rows; this covers workspace-scoped work
+ * (hooks run after repos are ready) and any orchestration warnings.
  */
-function statusTail(line: string, name: string): string {
-  const prefix = `${name} - `;
-  return line.startsWith(prefix) ? line.slice(prefix.length) : line;
+function workspaceSetupLines(
+  initialization: InitializationStatus | null,
+): TerminalLine[] {
+  const workspace = initialization?.workspace;
+  if (!workspace || workspace.status === "ready") return [];
+
+  const lines: TerminalLine[] = [];
+  switch (workspace.status) {
+    case "creating":
+      lines.push(
+        setupLine(terminalSymbol.statusRunning, "accent", "creating…"),
+      );
+      break;
+    case "initializing":
+      lines.push(
+        setupLine(terminalSymbol.statusRunning, "accent", "setting up…"),
+      );
+      break;
+    case "hooks":
+      lines.push(
+        setupLine(
+          terminalSymbol.statusRunning,
+          "accent",
+          workspace.current_hook
+            ? `hook: ${workspace.current_hook}`
+            : "running hooks…",
+        ),
+      );
+      break;
+    case "failed": {
+      const message = firstLine(workspace.error);
+      lines.push(
+        setupLine(
+          terminalSymbol.statusFailed,
+          "error",
+          message ? `setup failed: ${message}` : "setup failed",
+        ),
+      );
+      break;
+    }
+    case "cancelled":
+      lines.push(
+        setupLine(terminalSymbol.statusCancelled, "muted", "cancelled"),
+      );
+      break;
+  }
+  for (const warning of workspace.warnings ?? []) {
+    lines.push({ spans: [terminalSpan(`!  ${warning}`, { role: "warning" })] });
+  }
+  return lines;
 }
 
-/** Path/Log values are absolute on disk; compact `$HOME` to `~` for display. */
-function compactPaths(fields: readonly StatusDetail[]): ReportField[] {
-  return fields.map((field) => ({
-    label: field.label,
-    value:
-      field.label === "Path" || field.label === "Log"
-        ? compactHome(field.value)
-        : field.value,
-  }));
+function setupLine(
+  symbol: string,
+  role: TerminalStyleRole,
+  text: string,
+): TerminalLine {
+  return {
+    spans: [terminalSpan(`${symbol} `, { role }), terminalSpan(text, { role })],
+  };
+}
+
+/** The leading health glyph: setup state takes priority over working-tree state. */
+function repoGlyph(repo: RepositoryStatus): TerminalSpan {
+  switch (repo.setup.status) {
+    case "failed":
+      return glyphSpan(terminalSymbol.statusFailed, "error");
+    case "cancelled":
+      return glyphSpan(terminalSymbol.statusCancelled, "muted");
+    case "running":
+      return glyphSpan(terminalSymbol.statusRunning, "accent");
+    case "pending":
+    case "git":
+    case "queued":
+      return glyphSpan(terminalSymbol.statusPending, "muted");
+    default:
+      if (repo.state === "stale")
+        return glyphSpan(terminalSymbol.statusCancelled, "muted");
+      if (repo.state === "dirty")
+        return glyphSpan(terminalSymbol.radioOn, "warning");
+      return glyphSpan(terminalSymbol.statusComplete, "success");
+  }
+}
+
+/** The trailing (last, unpadded) column: phase-aware setup label or worktree state. */
+function worktreeSpans(
+  repo: RepositoryStatus,
+  available: number,
+): TerminalSpan[] {
+  switch (repo.setup.status) {
+    case "failed": {
+      const message = firstLine(repo.setup.error);
+      const text = message ? `setup failed: ${message}` : "setup failed";
+      return [terminalSpan(truncate(text, available), { role: "error" })];
+    }
+    case "pending":
+    case "queued":
+      return [terminalSpan("queued", { role: "muted" })];
+    case "git":
+      return [terminalSpan("cloning…", { role: "muted" })];
+    case "running":
+      return [terminalSpan("installing…", { role: "accent" })];
+    case "cancelled":
+      return [terminalSpan("cancelled", { role: "muted" })];
+    default:
+      if (repo.state === "stale")
+        return [terminalSpan("missing", { role: "muted" })];
+      if (repo.state === "clean")
+        return [terminalSpan("clean", { role: "muted" })];
+      return [
+        terminalSpan(formatDirtyDisplay(repo.dirty), { role: "warning" }),
+      ];
+  }
+}
+
+function branchCell(branch: string | null, defaultBranch: string | null): Cell {
+  if (!branch) return cell(terminalSpan("—", { role: "muted" }));
+  const isFeature = defaultBranch !== null && branch !== defaultBranch;
+  return cell(terminalSpan(branch, { role: isFeature ? "accent" : "dim" }));
+}
+
+function syncCell(repo: RepositoryStatus): Cell {
+  if (repo.base === null || repo.ahead === null || repo.behind === null) {
+    return cell(terminalSpan("—", { role: "muted" }));
+  }
+  if (repo.ahead === 0 && repo.behind === 0) {
+    return cell(terminalSpan("synced", { role: "muted" }));
+  }
+  const parts: TerminalSpanInput[] = [];
+  if (repo.ahead > 0)
+    parts.push(terminalSpan(`↑${repo.ahead}`, { role: "success" }));
+  if (repo.behind > 0) {
+    if (parts.length > 0) parts.push(literalSpan(" "));
+    parts.push(terminalSpan(`↓${repo.behind}`, { role: "warning" }));
+  }
+  return cell(...parts);
+}
+
+function pushTaskLines(
+  lines: TerminalLine[],
+  task: TaskStatus,
+  widths: readonly number[],
+): void {
+  lines.push(
+    columnsLine(
+      TASK_INDENT,
+      taskGlyph(task),
+      taskCells(task),
+      widths,
+      taskSetupSpans(task),
+    ),
+  );
+  if (task.state === "failed") {
+    const log = task.details.find((detail) => detail.label === "Log");
+    if (log) lines.push(dimLine(`${TASK_LOG_INDENT}${compactHome(log.value)}`));
+  }
+}
+
+function taskCells(task: TaskStatus): readonly Cell[] {
+  return [
+    cell(terminalSpan(task.slug, { emphasis: "bold" })),
+    branchCell(task.branch, null),
+    mergedCell(task.merged),
+  ];
+}
+
+function taskGlyph(task: TaskStatus): TerminalSpan {
+  if (task.state === "failed")
+    return glyphSpan(terminalSymbol.statusFailed, "error");
+  if (task.state === "stale")
+    return glyphSpan(terminalSymbol.statusCancelled, "muted");
+  if (task.merged === true)
+    return glyphSpan(terminalSymbol.statusComplete, "success");
+  if (task.merged === false)
+    return glyphSpan(terminalSymbol.radioOn, "warning");
+  return glyphSpan(terminalSymbol.statusPending, "muted");
+}
+
+function taskSetupSpans(task: TaskStatus): TerminalSpan[] {
+  switch (task.state) {
+    case "failed":
+      return [terminalSpan("setup failed", { role: "error" })];
+    case "stale":
+      return [terminalSpan("stale", { role: "muted" })];
+    default:
+      return [terminalSpan("ready", { role: "muted" })];
+  }
+}
+
+function mergedCell(merged: boolean | null): Cell {
+  if (merged === true) return cell(terminalSpan("merged", { role: "muted" }));
+  if (merged === false)
+    return cell(terminalSpan("unmerged", { role: "warning" }));
+  return cell(terminalSpan("merge?", { role: "muted" }));
+}
+
+function groupTasksByRepo(
+  tasks: readonly TaskStatus[],
+): Map<string, TaskStatus[]> {
+  const map = new Map<string, TaskStatus[]>();
+  for (const task of tasks) {
+    const list = map.get(task.parentRepo) ?? [];
+    list.push(task);
+    map.set(task.parentRepo, list);
+  }
+  return map;
+}
+
+function orphanTasks(
+  tasks: readonly TaskStatus[],
+  repositories: readonly RepositoryStatus[],
+): TaskStatus[] {
+  const names = new Set(repositories.map((repo) => repo.name));
+  return tasks.filter((task) => !names.has(task.parentRepo));
+}
+
+/** Builds an aligned row: indent, glyph, padded cells, then the unpadded tail. */
+function columnsLine(
+  indent: string,
+  glyph: TerminalSpan,
+  cells: readonly Cell[],
+  widths: readonly number[],
+  trailing: readonly TerminalSpan[],
+): TerminalLine {
+  const spans: TerminalSpan[] = [literalSpan(indent), glyph, literalSpan(" ")];
+  cells.forEach((current, index) => {
+    spans.push(...current.spans);
+    const pad = (widths[index] ?? current.width) - current.width;
+    if (pad > 0) spans.push(literalSpan(" ".repeat(pad)));
+    spans.push(literalSpan(COLUMN_GAP));
+  });
+  spans.push(...trailing);
+  return { spans };
+}
+
+function maxWidths(rows: readonly (readonly Cell[])[]): number[] {
+  const widths: number[] = [];
+  for (const row of rows) {
+    row.forEach((current, index) => {
+      widths[index] = Math.max(widths[index] ?? 0, current.width);
+    });
+  }
+  return widths;
+}
+
+function cell(...inputs: TerminalSpanInput[]): Cell {
+  const spans = inputs.map((input) =>
+    typeof input === "string" ? literalSpan(input) : input,
+  );
+  const width = spans.reduce((sum, span) => sum + visibleWidth(span.text), 0);
+  return { spans, width };
+}
+
+function glyphSpan(symbol: string, role: TerminalStyleRole): TerminalSpan {
+  return terminalSpan(symbol, { role });
+}
+
+function dimLine(text: string): TerminalLine {
+  return { spans: [terminalSpan(text, { role: "dim" })] };
+}
+
+function firstLine(value: string | undefined): string {
+  return value?.split("\n")[0]?.trim() ?? "";
+}
+
+/** Words with bullet separators: "3 modified · 2 untracked"; "clean" handled by caller. */
+function formatDirtyDisplay(summary: DirtySummary): string {
+  const parts = [
+    countLabel(summary.modified, "modified"),
+    countLabel(summary.added, "added"),
+    countLabel(summary.deleted, "deleted"),
+    countLabel(summary.renamed, "renamed"),
+    countLabel(summary.untracked, "untracked"),
+    countLabel(summary.other, "changed"),
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : `${summary.total} changed`;
 }
 
 async function workspaceGuidanceState(
   entry: InventoryEntry,
-): Promise<TemplateAgentsMdState | undefined> {
+): Promise<GuidanceStatus | undefined> {
   if (entry.type === "worktree") return undefined;
   const metadata = await readWorkspaceMetadata(entry.path).catch(() => null);
   const templateId = metadata?.workspace.template_id;
@@ -281,8 +612,9 @@ async function workspaceGuidanceState(
       variant: metadata.workspace.template_variant,
     }),
   );
-  if (!template) return "missing";
-  return (await getWorkspaceAgentsMdStatus(template, entry.path)).state;
+  if (!template) return { state: "missing", expiresAt: null };
+  const status = await getWorkspaceAgentsMdStatus(template, entry.path);
+  return { state: status.state, expiresAt: status.manifest?.expiresAt ?? null };
 }
 
 async function buildRepositoryStatuses(
@@ -361,6 +693,7 @@ async function buildRepositoryStatus(
       name: target.name,
       path: target.path,
       branch: null,
+      defaultBranch: target.defaultBranch ?? null,
       state: "stale",
       dirty: emptyDirtySummary(),
       base: null,
@@ -399,6 +732,7 @@ async function buildRepositoryStatus(
     name: target.name,
     path: target.path,
     branch: branch || null,
+    defaultBranch: target.defaultBranch ?? null,
     state: dirty.total > 0 ? "dirty" : "clean",
     dirty,
     base,
@@ -706,70 +1040,6 @@ function buildSummary(
   };
 }
 
-function summaryFields(summary: StatusSummary): StatusDetail[] {
-  return [
-    { label: "Change", value: summary.change },
-    { label: "Type", value: summary.type },
-    ...(summary.repository
-      ? [{ label: "Repository", value: summary.repository }]
-      : []),
-    ...(summary.template
-      ? [{ label: "Template", value: summary.template }]
-      : []),
-    ...(summary.group ? [{ label: "Group", value: summary.group }] : []),
-    ...(summary.repos !== undefined
-      ? [{ label: "Repos", value: String(summary.repos) }]
-      : []),
-    ...(summary.branch ? [{ label: "Branch", value: summary.branch }] : []),
-    { label: "Path", value: summary.path },
-    { label: "Updated", value: summary.updated },
-  ];
-}
-
-function initializationFields(
-  initialization: InitializationStatus,
-  type: InventoryEntry["type"],
-): StatusDetail[] {
-  return [
-    ...(initialization.workspace
-      ? [
-          {
-            label: type === "worktree" ? "Change" : "Workspace",
-            value: initialization.workspace.status,
-          },
-        ]
-      : []),
-    ...(initialization.workspace?.error
-      ? [{ label: "Error", value: initialization.workspace.error }]
-      : []),
-    ...(initialization.workspace?.current_hook
-      ? [{ label: "Hook", value: initialization.workspace.current_hook }]
-      : []),
-    ...(initialization.workspace?.warnings?.length
-      ? [
-          {
-            label: "Warnings",
-            value: initialization.workspace.warnings.join(", "),
-          },
-        ]
-      : []),
-    ...(initialization.failedRepos.length > 0
-      ? [{ label: "Failed", value: initialization.failedRepos.join(", ") }]
-      : []),
-    ...(initialization.runningRepos.length > 0
-      ? [{ label: "Running", value: initialization.runningRepos.join(", ") }]
-      : []),
-    ...(initialization.cancelledRepos.length > 0
-      ? [
-          {
-            label: "Cancelled",
-            value: initialization.cancelledRepos.join(", "),
-          },
-        ]
-      : []),
-  ];
-}
-
 export function initializationScope(
   entry: InventoryEntry,
 ): InitializationScope {
@@ -836,13 +1106,18 @@ function formatTypeLabel(type: InventoryEntry["type"]): string {
 }
 
 function formatRelativeAge(modifiedAtMs: number, now = Date.now()): string {
-  const seconds = Math.max(0, Math.floor((now - modifiedAtMs) / 1000));
-  if (seconds < 60) return "0m ago";
+  return `${formatDuration(now - modifiedAtMs)} ago`;
+}
+
+/** A coarse, suffix-free duration ("0m", "5m", "3h", "2d") for header age and guidance drift. */
+function formatDuration(deltaMs: number): string {
+  const seconds = Math.max(0, Math.floor(deltaMs / 1000));
+  if (seconds < 60) return "0m";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function compactHome(value: string): string {

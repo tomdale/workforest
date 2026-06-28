@@ -14,6 +14,13 @@ import {
   writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 import { resolveSelector } from "./workspace/selectors.ts";
+import {
+  type DirtySummary,
+  type RepositoryStatus,
+  renderStatus,
+  type Status,
+  type TaskStatus,
+} from "./workspace/status.ts";
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -56,11 +63,19 @@ describe("wf status", () => {
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
     expect(rendered.stderr).toBe("");
+    // Header identity + dim path line.
     expect(rendered.stdout).toContain("workforest/cli-redesign");
+    expect(rendered.stdout).toContain("worktree");
     expect(rendered.stdout).toContain(repoChange);
-    expect(rendered.stdout).toContain("workforest - dirty: 1 untracked");
-    expect(rendered.stdout).toContain("origin/main");
-    expect(rendered.stdout).toContain("not integrated");
+    // Repo row: name, feature branch, ahead sync, one-line worktree summary.
+    expect(rendered.stdout).toContain("workforest");
+    expect(rendered.stdout).toContain("tomdale/cli-redesign");
+    expect(rendered.stdout).toContain("↑1");
+    expect(rendered.stdout).toContain("1 untracked");
+    // The old verbose one-liner, integration column, and Next steps are gone.
+    expect(rendered.stdout).not.toContain("dirty: 1 untracked");
+    expect(rendered.stdout).not.toContain("not integrated");
+    expect(rendered.stdout).not.toContain("Next steps");
   });
 
   it("renders repository change initialization state and failed setup logs", async () => {
@@ -92,9 +107,8 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("workforest - dirty: 1 untracked");
-    expect(rendered.stdout).toContain("setup failed");
-    expect(rendered.stdout).toContain("Error: pnpm install failed");
+    // Failed setup: short error on the row, log path on its own dim line.
+    expect(rendered.stdout).toContain("setup failed: pnpm install failed");
     expect(rendered.stdout).toContain(
       path.join(
         path.dirname(repoChange),
@@ -105,7 +119,9 @@ describe("wf status", () => {
         "workforest.log",
       ),
     );
-    expect(rendered.stdout).toContain("Failed: workforest");
+    // No repeated Initialization roll-up / Error: detail block.
+    expect(rendered.stdout).not.toContain("Failed: workforest");
+    expect(rendered.stdout).not.toContain("Error: pnpm install failed");
   });
 
   it("surfaces workspace initialization failures as blockers", async () => {
@@ -124,8 +140,9 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("Error:     pnpm install failed");
-    expect(rendered.stdout).toContain("Hook:      install");
+    // Workspace-level failure shows as a single setup line, not a field block.
+    expect(rendered.stdout).toContain("setup failed: pnpm install failed");
+    expect(rendered.stdout).not.toContain("Hook:");
   });
 
   it("shows a static report when watch has no initialization state", async () => {
@@ -171,7 +188,8 @@ describe("wf status", () => {
     const rendered = renderResult(result);
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("Failed:    api");
+    expect(rendered.stdout).toContain("api");
+    expect(rendered.stdout).toContain("setup failed");
     expect(rendered.stdout).toContain(
       "Initialization watcher requires an interactive terminal; showing the static report.",
     );
@@ -238,6 +256,208 @@ describe("wf status", () => {
     });
   });
 });
+
+describe("renderStatus dashboard", () => {
+  it("renders header, dim path, and a clean synced repo row", () => {
+    const output = render(
+      buildStatus({
+        repositories: [repositoryStatus({ name: "web" })],
+      }),
+    );
+    expect(output).toContain("myspace");
+    expect(output).toContain("next-forge");
+    expect(output).toContain("1 repo");
+    expect(output).toContain("~/code/myspace");
+    expect(output).toContain("web");
+    expect(output).toContain("main");
+    expect(output).toContain("synced");
+    expect(output).toContain("clean");
+  });
+
+  it("renders ahead/behind sync and bullet-separated changes", () => {
+    const output = render(
+      buildStatus({
+        repositories: [
+          repositoryStatus({
+            name: "api",
+            branch: "feature",
+            ahead: 2,
+            behind: 1,
+            state: "dirty",
+            dirty: dirtySummary({ modified: 3, untracked: 2 }),
+          }),
+        ],
+      }),
+    );
+    expect(output).toContain("↑2 ↓1");
+    expect(output).toContain("3 modified · 2 untracked");
+  });
+
+  it("puts the short error on the failed row and the log path beneath", () => {
+    const output = render(
+      buildStatus({
+        repositories: [
+          repositoryStatus({
+            name: "infra",
+            branch: null,
+            base: null,
+            ahead: null,
+            behind: null,
+            state: "stale",
+            setup: {
+              status: "failed",
+              error: "pnpm install failed",
+              logPath: "/home/dev/code/myspace/.workforest/infra.log",
+            },
+          }),
+        ],
+      }),
+    );
+    expect(output).toContain("setup failed: pnpm install failed");
+    expect(output).toContain(".workforest/infra.log");
+    expect(output).not.toContain("Error:");
+  });
+
+  it("renders phase-aware in-progress labels", () => {
+    const output = render(
+      buildStatus({
+        repositories: [
+          repositoryStatus({ name: "a", setup: { status: "queued" } }),
+          repositoryStatus({ name: "b", setup: { status: "git" } }),
+          repositoryStatus({ name: "c", setup: { status: "running" } }),
+        ],
+      }),
+    );
+    expect(output).toContain("queued");
+    expect(output).toContain("cloning…");
+    expect(output).toContain("installing…");
+  });
+
+  it("shows expired guidance as 'out of date by' a duration, hides fresh", () => {
+    const expired = render(
+      buildStatus({
+        guidance: {
+          state: "expired",
+          expiresAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+        },
+      }),
+    );
+    expect(expired).toContain("AGENTS.md out of date by 3h");
+
+    const fresh = render(
+      buildStatus({ guidance: { state: "fresh", expiresAt: null } }),
+    );
+    expect(fresh).not.toContain("AGENTS.md");
+  });
+
+  it("indents nested tasks under their parent repo", () => {
+    const output = render(
+      buildStatus({
+        repositories: [repositoryStatus({ name: "api" })],
+        tasks: [
+          taskStatus({
+            parentRepo: "api",
+            slug: "rate-limit",
+            merged: false,
+          }),
+        ],
+      }),
+    );
+    const taskLine = output
+      .split("\n")
+      .find((line) => line.includes("rate-limit"));
+    expect(taskLine).toBeDefined();
+    expect(taskLine).toMatch(/^\s{6}/);
+    expect(taskLine).toContain("unmerged");
+  });
+
+  it("drops the title, summary labels, tasks placeholder, and next steps", () => {
+    const output = render(
+      buildStatus({ repositories: [repositoryStatus({})], nextSteps: ["x"] }),
+    );
+    expect(output).not.toContain("Change status");
+    expect(output).not.toContain("Summary");
+    expect(output).not.toContain("No nested tasks");
+    expect(output).not.toContain("Next steps");
+  });
+});
+
+function render(status: Status): string {
+  return stripAnsi(renderStatus(status));
+}
+
+function buildStatus(overrides: Partial<Status> = {}): Status {
+  return {
+    selector: "myspace",
+    type: "template-workspace",
+    typeLabel: "template workspace",
+    groupName: "next-forge",
+    changeName: "myspace",
+    path: "~/code/myspace",
+    modifiedAt: new Date().toISOString(),
+    modifiedAtMs: Date.now(),
+    summary: {
+      change: "myspace",
+      type: "template workspace",
+      path: "~/code/myspace",
+      updated: "0m ago",
+    },
+    repositories: [],
+    tasks: [],
+    initialization: null,
+    nextSteps: [],
+    ...overrides,
+  };
+}
+
+function repositoryStatus(
+  overrides: Partial<RepositoryStatus> = {},
+): RepositoryStatus {
+  return {
+    name: "web",
+    path: "~/code/myspace/web",
+    branch: "main",
+    defaultBranch: "main",
+    state: "clean",
+    dirty: dirtySummary(),
+    base: "origin/main",
+    ahead: 0,
+    behind: 0,
+    integrated: true,
+    setup: { status: "ready" },
+    line: "",
+    details: [],
+    ...overrides,
+  };
+}
+
+function taskStatus(overrides: Partial<TaskStatus> = {}): TaskStatus {
+  return {
+    selector: "api/rate-limit",
+    parentRepo: "api",
+    slug: "rate-limit",
+    branch: "feat/rate-limit",
+    path: "~/code/myspace/_tasks/api/rate-limit",
+    state: "ready",
+    merged: false,
+    line: "",
+    details: [],
+    ...overrides,
+  };
+}
+
+function dirtySummary(overrides: Partial<DirtySummary> = {}): DirtySummary {
+  return {
+    total: 0,
+    modified: 0,
+    added: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    other: 0,
+    ...overrides,
+  };
+}
 
 async function createConfigFixture(): Promise<{ baseDir: string }> {
   const configDir = await createTempDir("workforest-status-config-");

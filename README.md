@@ -138,14 +138,44 @@ wf switch
 With shell integration installed, `wf switch` changes the current shell
 directory. Running it without a selector opens an interactive picker.
 
+### Inspect Status
+
+```sh
+wf status
+wf status workforest/cli-redesign
+```
+
+Run from anywhere inside a worktree or workspace (or pass a selector) to print a
+compact dashboard: an identity header (`name`, type/template, repo count, age), a
+dim path line, then one aligned row per repository:
+
+```
+myspace   next-forge · 4 repos · 3h ago
+~/Code/workforest/myspace
+!  AGENTS.md out of date by 3h
+
+  ✔︎ web    main          synced  clean
+  ● api    cli-redesign  ↑2 ↓1   3 modified · 2 untracked
+      ● rate-limit  rate-limit  unmerged  ready
+  ↻ docs   main          ↑1      installing…
+  ✗ infra  —             —       setup failed: pnpm install failed
+      ~/Code/workforest/myspace/.workforest/init/infra.log
+```
+
+Each row shows the working-tree state (leading glyph), current branch, sync vs.
+the default branch (`↑ahead ↓behind`), and a one-line summary. Nested tasks are
+indented beneath their parent repository. A failed setup stays terse — the error
+heads the row and the log path follows on a dim line; open it for the full
+output. Add `--json` for the complete machine-readable status.
+
 ### Monitor Setup
 
 ```sh
 wf status --watch
 ```
 
-Run status from anywhere inside the workspace to inspect repository setup and
-hook progress. Detailed repository logs live under `.workforest/logs/`.
+Watch live repository setup and hook progress as a workspace initializes.
+Detailed repository logs live under `.workforest/logs/`.
 
 ### Delete A Workspace
 
