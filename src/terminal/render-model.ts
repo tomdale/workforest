@@ -133,7 +133,7 @@ function renderBlessedSpan(span: TerminalSpan): string {
   const open: string[] = [];
   const close: string[] = [];
   if (span.role) {
-    const token = toBlessed(resolvePaletteColor(span.role));
+    const token = toBlessed(resolveFullscreenPaletteColor(span.role));
     open.push(`{${token}-fg}`);
     close.unshift(`{/${token}-fg}`);
   }
@@ -158,6 +158,10 @@ function normalizedEmphasis(
 
 function resolvePaletteColor(role: TerminalStyleRole): ThemeColor {
   return inlinePalette()[role];
+}
+
+function resolveFullscreenPaletteColor(role: TerminalStyleRole): ThemeColor {
+  return activeTheme().palette[role];
 }
 
 function resolveBackgroundColor(role: TerminalBackgroundRole): ThemeColor {

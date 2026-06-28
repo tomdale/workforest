@@ -51,8 +51,8 @@ describe("terminal render model", () => {
       ],
     ]);
 
-    expect(renderTerminalDocBlessed(doc)).toMatch(
-      /^\{yellow-fg\}\{#[0-9a-f]{6}-bg\}\{bold\}\{inverse\}Queued\{\/inverse\}\{\/bold\}\{\/#[0-9a-f]{6}-bg\}\{\/yellow-fg\}$/u,
+    expect(renderTerminalDocBlessed(doc)).toBe(
+      "{#ffc400-fg}{#121416-bg}{bold}{inverse}Queued{/inverse}{/bold}{/#121416-bg}{/#ffc400-fg}",
     );
   });
 
