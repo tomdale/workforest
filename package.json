@@ -33,6 +33,7 @@
     "bench:tui": "tsx benchmarks/tui-grid.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "format": "biome format --write .",
+    "integrate": "codex integrate",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "prepack": "pnpm build:plugins && tsdown",
