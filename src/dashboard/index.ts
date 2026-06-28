@@ -4,8 +4,14 @@ import {
   STANDARD_ENVIRONMENT_VARIABLES,
   WORKFOREST_ENVIRONMENT_VARIABLES,
 } from "../environment.ts";
-import { escapeBlessedTags } from "../terminal/command-stream-adapter.ts";
 import { createFullscreenScreen } from "../terminal/fullscreen-surface.ts";
+import {
+  renderTerminalDocBlessed,
+  type TerminalDoc,
+  type TerminalLineInput,
+  terminalDoc,
+  terminalSpan,
+} from "../terminal/render-model.ts";
 import { renderReport } from "../terminal/report.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 
@@ -485,159 +491,195 @@ function renderDashboardScreen(
     : actions[state.actionIndex];
 
   if (boxes.layout === "wide") {
-    boxes.sidebar.setContent(renderSidebar(state));
+    boxes.sidebar.setContent(renderDashboardDoc(renderSidebarDoc(state)));
     boxes.workbench.setLabel(` ${route.title} `);
     boxes.workbench.setContent(
-      renderWorkbench(route, actions, state.actionIndex),
+      renderDashboardDoc(renderWorkbenchDoc(route, actions, state.actionIndex)),
     );
-    boxes.inspector.setContent(renderInspector(route, selected));
+    boxes.inspector.setContent(
+      renderDashboardDoc(renderInspectorDoc(route, selected)),
+    );
   } else {
     boxes.workbench.setContent(
-      renderCompactWorkbench(state, route, actions, selected),
+      renderDashboardDoc(
+        renderCompactWorkbenchDoc(state, route, actions, selected),
+      ),
     );
   }
 
-  boxes.operations.setContent(renderOperations(state, selected));
+  boxes.operations.setContent(
+    renderDashboardDoc(renderOperationsDoc(state, selected)),
+  );
   boxes.footer.setContent(
-    "↑/k ↓/j action  ←/h →/l route  / palette  Enter select  Esc close/quit  q/C-c quit",
+    renderDashboardDoc(
+      terminalDoc([
+        [
+          terminalSpan(
+            "↑/k ↓/j action  ←/h →/l route  / palette  Enter select  Esc close/quit  q/C-c quit",
+            { role: "muted" },
+          ),
+        ],
+      ]),
+    ),
   );
   if (state.paletteOpen) {
     boxes.palette.show();
-    boxes.palette.setContent(renderPalette(state));
+    boxes.palette.setContent(renderDashboardDoc(renderPaletteDoc(state)));
   } else {
     boxes.palette.hide();
   }
 }
 
-function renderSidebar(state: DashboardState): string {
-  return DASHBOARD_ROUTES.map((candidate, index) => {
-    const marker = index === state.routeIndex ? "{cyan-fg}> {/cyan-fg}" : "  ";
-    const label =
-      index === state.routeIndex
-        ? `{bold}${escapeBlessedTags(candidate.title)}{/bold}`
-        : escapeBlessedTags(candidate.title);
-    return `${marker}${label}`;
-  }).join("\n");
+function renderDashboardDoc(doc: TerminalDoc): string {
+  return renderTerminalDocBlessed(doc);
 }
 
-function renderWorkbench(
+function renderSidebarDoc(state: DashboardState): TerminalDoc {
+  return terminalDoc(
+    DASHBOARD_ROUTES.map((candidate, index) => {
+      const selected = index === state.routeIndex;
+      return [
+        terminalSpan(selected ? "> " : "  ", selected ? { role: "focus" } : {}),
+        terminalSpan(
+          candidate.title,
+          selected ? { role: "primary", emphasis: "bold" } : {},
+        ),
+      ];
+    }),
+  );
+}
+
+function renderWorkbenchDoc(
   route: DashboardRoute,
   actions: readonly DashboardAction[],
   actionIndex: number,
-): string {
-  const lines = [
-    `{bold}${escapeBlessedTags(route.title)}{/bold}`,
+): TerminalDoc {
+  const lines: TerminalLineInput[] = [
+    [terminalSpan(route.title, { role: "primary", emphasis: "bold" })],
     "",
-    escapeBlessedTags(route.description),
+    route.description,
     "",
-    "{gray-fg}Actions{/gray-fg}",
+    [terminalSpan("Actions", { role: "muted" })],
   ];
 
   for (const [index, action] of actions.entries()) {
-    const prefix = index === actionIndex ? "{cyan-fg}> {/cyan-fg}" : "  ";
+    const selected = index === actionIndex;
     lines.push(
-      `${prefix}{bold}${escapeBlessedTags(action.label)}{/bold}`,
-      `   ${escapeBlessedTags(action.description)}`,
+      [
+        terminalSpan(selected ? "> " : "  ", selected ? { role: "focus" } : {}),
+        terminalSpan(action.label, { role: "primary", emphasis: "bold" }),
+      ],
+      `   ${action.description}`,
     );
   }
-  return lines.join("\n");
+  return terminalDoc(lines);
 }
 
-function renderCompactWorkbench(
+function renderCompactWorkbenchDoc(
   state: DashboardState,
   route: DashboardRoute,
   actions: readonly DashboardAction[],
   selected: DashboardAction | undefined,
-): string {
-  return [
-    "{bold}Routes{/bold}",
-    DASHBOARD_ROUTES.map((candidate, index) =>
-      index === state.routeIndex
-        ? `{cyan-fg}${escapeBlessedTags(candidate.title)}{/cyan-fg}`
-        : escapeBlessedTags(candidate.title),
-    ).join("  "),
-    "",
-    renderWorkbench(route, actions, state.actionIndex),
-    "",
-    "{gray-fg}Inspector{/gray-fg}",
-    ...renderInspectorLines(route, selected),
-  ].join("\n");
+): TerminalDoc {
+  return mergeDashboardDocs(
+    terminalDoc([
+      [terminalSpan("Routes", { role: "primary", emphasis: "bold" })],
+      DASHBOARD_ROUTES.flatMap((candidate, index) => {
+        const selectedRoute = index === state.routeIndex;
+        const spans = [
+          terminalSpan(
+            candidate.title,
+            selectedRoute ? { role: "focus", emphasis: "bold" } : {},
+          ),
+        ];
+        if (index < DASHBOARD_ROUTES.length - 1) {
+          spans.push(terminalSpan("  "));
+        }
+        return spans;
+      }),
+      "",
+    ]),
+    renderWorkbenchDoc(route, actions, state.actionIndex),
+    terminalDoc(["", [terminalSpan("Inspector", { role: "muted" })]]),
+    renderInspectorDoc(route, selected),
+  );
 }
 
-function renderInspector(
+function renderInspectorDoc(
   route: DashboardRoute,
   action: DashboardAction | undefined,
-): string {
-  return renderInspectorLines(route, action).join("\n");
-}
-
-function renderInspectorLines(
-  route: DashboardRoute,
-  action: DashboardAction | undefined,
-): string[] {
-  const lines = [
-    "{bold}Route metadata{/bold}",
+): TerminalDoc {
+  const lines: TerminalLineInput[] = [
+    [terminalSpan("Route metadata", { role: "primary", emphasis: "bold" })],
     "",
-    `{gray-fg}Screen{/gray-fg} ${escapeBlessedTags(route.id)}`,
-    `{gray-fg}Title{/gray-fg}  ${escapeBlessedTags(route.title)}`,
+    [terminalSpan("Screen", { role: "muted" }), ` ${route.id}`],
+    [terminalSpan("Title", { role: "muted" }), `  ${route.title}`],
     "",
-    "{bold}Selected action{/bold}",
+    [terminalSpan("Selected action", { role: "primary", emphasis: "bold" })],
     "",
   ];
 
   if (!action) {
-    return [...lines, "No action selected."];
+    return terminalDoc([...lines, "No action selected."]);
   }
 
-  lines.push(
-    escapeBlessedTags(action.label),
-    escapeBlessedTags(action.description),
-  );
+  lines.push(action.label, action.description);
   if (action.kind === "command") {
-    lines.push(
-      "",
-      `{gray-fg}Command{/gray-fg} ${escapeBlessedTags(
-        formatDashboardCommand(action.command),
-      )}`,
-    );
+    lines.push("", [
+      terminalSpan("Command", { role: "muted" }),
+      ` ${formatDashboardCommand(action.command)}`,
+    ]);
   } else {
-    lines.push(
-      "",
-      `{gray-fg}Route{/gray-fg} ${escapeBlessedTags(action.route)}`,
-    );
+    lines.push("", [
+      terminalSpan("Route", { role: "muted" }),
+      ` ${action.route}`,
+    ]);
   }
 
-  return lines;
+  return terminalDoc(lines);
 }
 
-function renderOperations(
+function renderOperationsDoc(
   state: DashboardState,
   action: DashboardAction | undefined,
-): string {
+): TerminalDoc {
   const actionLabel = action?.label ?? "None";
-  return [
-    escapeBlessedTags(state.operationMessage),
-    `{gray-fg}Selected{/gray-fg} ${escapeBlessedTags(actionLabel)}`,
-  ].join("\n");
+  return terminalDoc([
+    state.operationMessage,
+    [terminalSpan("Selected", { role: "muted" }), ` ${actionLabel}`],
+  ]);
 }
 
-function renderPalette(state: DashboardState): string {
-  const lines = ["Type / to open, Esc to close, Enter to select.", ""];
+function renderPaletteDoc(state: DashboardState): TerminalDoc {
+  const lines: TerminalLineInput[] = [
+    [
+      terminalSpan("Type / to open, Esc to close, Enter to select.", {
+        role: "muted",
+      }),
+    ],
+    "",
+  ];
   for (const [index, action] of DASHBOARD_ACTIONS.entries()) {
-    const prefix =
-      index === state.paletteIndex ? "{cyan-fg}> {/cyan-fg}" : "  ";
+    const selected = index === state.paletteIndex;
     const suffix =
       action.kind === "command"
-        ? `{gray-fg}${escapeBlessedTags(
-            formatDashboardCommand(action.command),
-          )}{/gray-fg}`
-        : `{gray-fg}${escapeBlessedTags(action.route)}{/gray-fg}`;
+        ? formatDashboardCommand(action.command)
+        : action.route;
     lines.push(
-      `${prefix}{bold}${escapeBlessedTags(action.label)}{/bold} ${suffix}`,
-      `   ${escapeBlessedTags(action.description)}`,
+      [
+        terminalSpan(selected ? "> " : "  ", selected ? { role: "focus" } : {}),
+        terminalSpan(action.label, { role: "primary", emphasis: "bold" }),
+        " ",
+        terminalSpan(suffix, { role: "muted" }),
+      ],
+      `   ${action.description}`,
     );
   }
-  return lines.join("\n");
+  return terminalDoc(lines);
+}
+
+function mergeDashboardDocs(...docs: readonly TerminalDoc[]): TerminalDoc {
+  return { lines: docs.flatMap((doc) => doc.lines) };
 }
 
 function currentRoute(state: DashboardState): DashboardRoute {
