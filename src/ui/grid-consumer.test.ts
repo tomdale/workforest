@@ -47,15 +47,12 @@ import {
   type FullscreenKeypress,
   type FullscreenScreen,
 } from "../terminal/fullscreen-surface.ts";
-import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import {
   getCompletionModalContent,
   renderPipelinesGrid,
   shouldUseGrid,
 } from "./grid-consumer.ts";
-
-const FOCUS = toBlessed(activeTheme().palette.focus);
 
 function createManualKeypress(
   setReceive: (receive: () => void) => void,
@@ -508,14 +505,13 @@ describe("renderPipelinesGrid", () => {
 
     expect(modalCall?.[0]).toEqual(
       expect.objectContaining({
-        content: expect.stringContaining(
-          `{${FOCUS}-fg}•{/${FOCUS}-fg} {bold}repo{/bold}`,
-        ),
+        content: expect.stringContaining("•{"),
         width: 50,
       }),
     );
+    expect(String(modalCall?.[0]?.content)).toContain("{bold}repo{/bold}");
     expect(String(modalCall?.[0]?.content)).toContain(
-      `{bold}{${FOCUS}-fg}press any key{/${FOCUS}-fg}{/bold}`,
+      "{bold}press any key{/bold}",
     );
   });
 

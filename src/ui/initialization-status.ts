@@ -1,14 +1,17 @@
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
-import {
-  CommandStreamAdapter,
-  escapeBlessedTags,
-} from "../terminal/command-stream-adapter.ts";
+import { CommandStreamAdapter } from "../terminal/command-stream-adapter.ts";
 import {
   createFullscreenKeypress,
   createFullscreenScreen,
   createFullscreenStatusLine,
   FULLSCREEN_QUIT_KEYS,
 } from "../terminal/fullscreen-surface.ts";
+import {
+  renderTerminalLineBlessed,
+  type TerminalLineInput,
+  terminalLine,
+  terminalSpan,
+} from "../terminal/render-model.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import {
@@ -61,6 +64,33 @@ function colors(): {
   };
 }
 
+function renderBlessedLine(input: TerminalLineInput): string {
+  return renderTerminalLineBlessed(terminalLine(input));
+}
+
+function repoLabel(repoName: string, status: string): string {
+  return renderBlessedLine([repoName, " ", status]);
+}
+
+function repoStepLabel(repoName: string, step: string, status: string): string {
+  return renderBlessedLine([repoName, ": ", step, " ", status]);
+}
+
+function styledRepoLabel(
+  repoName: string,
+  status: string,
+  role: "success" | "warning" | "error",
+): string {
+  return renderBlessedLine([terminalSpan(`${repoName} ${status}`, { role })]);
+}
+
+function paneMessage(
+  message: string,
+  role: "muted" | "warning" | "error",
+): string {
+  return renderBlessedLine([terminalSpan(message, { role })]);
+}
+
 export async function renderInitializationStatus(
   target: InitializationTarget,
   repoNames: readonly string[],
@@ -87,9 +117,7 @@ export async function renderInitializationStatus(
 
   paneNames.forEach((paneName, index) => {
     paneMap.set(paneName, index);
-    grid
-      .getPane(index)
-      ?.setLabel(`${escapeBlessedTags(paneName)} ${statusIcons().pending}`);
+    grid.getPane(index)?.setLabel(repoLabel(paneName, statusIcons().pending));
   });
   const quit = createFullscreenKeypress(screen, FULLSCREEN_QUIT_KEYS);
 
@@ -120,7 +148,7 @@ export async function renderInitializationStatus(
         ? `  |  ${warningCount} warning${warningCount === 1 ? "" : "s"}`
         : "";
     statusLine.setContent(
-      `{${colors().muted}-fg}${escapeBlessedTags(message)}${warningSuffix}  |  q quit{/${colors().muted}-fg}`,
+      paneMessage(`${message}${warningSuffix}  |  q quit`, "muted"),
     );
   };
 
@@ -261,63 +289,49 @@ function renderRepoState({
 
   switch (state.phase) {
     case "git":
-      pane.setLabel(
-        `${escapeBlessedTags(repoName)}: ${state.step} ${statusIcons().running}`,
-      );
+      pane.setLabel(repoStepLabel(repoName, state.step, statusIcons().running));
       if (state.message) {
-        pane.appendLine(
-          `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
-        );
+        pane.appendLine(paneMessage(state.message, "muted"));
       }
       break;
     case "initializer":
-      pane.setLabel(
-        `${escapeBlessedTags(repoName)}: ${escapeBlessedTags(state.name)} ${statusIcons().running}`,
-      );
+      pane.setLabel(repoStepLabel(repoName, state.name, statusIcons().running));
       if (state.output) {
         const adapter = getAdapter(adapters, repoName);
         for (const line of adapter.push("stdout", state.output)) {
           pane.appendLine(line.line);
         }
       } else if (state.message) {
-        pane.appendLine(
-          `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
-        );
+        pane.appendLine(paneMessage(state.message, "muted"));
       }
       break;
     case "worktree-ready":
       pane.setLabel(
-        `${escapeBlessedTags(repoName)}: initializing ${statusIcons().running}`,
+        repoStepLabel(repoName, "initializing", statusIcons().running),
       );
       break;
     case "complete":
       flushAdapter(pane, repoName, adapters);
       pane.setLabel(
-        `{${colors().success}-fg}${escapeBlessedTags(repoName)} ${statusIcons().complete}{/${colors().success}-fg}`,
+        styledRepoLabel(repoName, statusIcons().complete, "success"),
       );
       break;
     case "cancelled":
       flushAdapter(pane, repoName, adapters);
       pane.setLabel(
-        `{${colors().warning}-fg}${escapeBlessedTags(repoName)} ${statusIcons().cancelled}{/${colors().warning}-fg}`,
+        styledRepoLabel(repoName, statusIcons().cancelled, "warning"),
       );
       pane.appendLine(
-        `{${colors().warning}-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/${colors().warning}-fg}`,
+        paneMessage(state.message ?? "Initialization cancelled", "warning"),
       );
       break;
     case "failed":
       flushAdapter(pane, repoName, adapters);
-      pane.setLabel(
-        `{${colors().error}-fg}${escapeBlessedTags(repoName)} ${statusIcons().failed}{/${colors().error}-fg}`,
-      );
+      pane.setLabel(styledRepoLabel(repoName, statusIcons().failed, "error"));
       if (state.step) {
-        pane.appendLine(
-          `{${colors().error}-fg}Step: ${escapeBlessedTags(state.step)}{/${colors().error}-fg}`,
-        );
+        pane.appendLine(paneMessage(`Step: ${state.step}`, "error"));
       }
-      pane.appendLine(
-        `{${colors().error}-fg}Error: ${escapeBlessedTags(state.error.message)}{/${colors().error}-fg}`,
-      );
+      pane.appendLine(paneMessage(`Error: ${state.error.message}`, "error"));
       break;
   }
 }

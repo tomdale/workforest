@@ -1,4 +1,9 @@
 import stripAnsi from "strip-ansi";
+import {
+  literalSpan,
+  renderTerminalLineBlessed,
+  terminalLine,
+} from "./render-model.ts";
 
 export type CommandOutputSource = "stdout" | "stderr";
 
@@ -8,7 +13,7 @@ export type CommandOutputLine = {
 };
 
 export function escapeBlessedTags(value: string): string {
-  return value.replace(/[{}]/g, (char) => (char === "{" ? "\\{" : "\\}"));
+  return renderTerminalLineBlessed(terminalLine([literalSpan(value)]));
 }
 
 export class CommandStreamAdapter {

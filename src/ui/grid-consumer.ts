@@ -9,10 +9,7 @@ import {
   STANDARD_ENVIRONMENT_VARIABLES,
   WORKFOREST_ENVIRONMENT_VARIABLES,
 } from "../environment.ts";
-import {
-  CommandStreamAdapter,
-  escapeBlessedTags,
-} from "../terminal/command-stream-adapter.ts";
+import { CommandStreamAdapter } from "../terminal/command-stream-adapter.ts";
 import {
   createFullscreenKeypress,
   createFullscreenScreen,
@@ -22,6 +19,12 @@ import {
   type FullscreenScreen,
   type FullscreenStatusLine,
 } from "../terminal/fullscreen-surface.ts";
+import {
+  renderTerminalLineBlessed,
+  type TerminalLineInput,
+  terminalLine,
+  terminalSpan,
+} from "../terminal/render-model.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import { runParallel } from "../utils/task-generator.ts";
 
@@ -72,6 +75,33 @@ function colors(): {
     primary: toBlessed(palette.primary),
     border: toBlessed(theme.chrome.border),
   };
+}
+
+function renderBlessedLine(input: TerminalLineInput): string {
+  return renderTerminalLineBlessed(terminalLine(input));
+}
+
+function repoLabel(repoName: string, status: string): string {
+  return renderBlessedLine([repoName, " ", status]);
+}
+
+function repoStepLabel(repoName: string, step: string, status: string): string {
+  return renderBlessedLine([repoName, ": ", step, " ", status]);
+}
+
+function styledRepoLabel(
+  repoName: string,
+  status: string,
+  role: "success" | "warning" | "error",
+): string {
+  return renderBlessedLine([terminalSpan(`${repoName} ${status}`, { role })]);
+}
+
+function paneMessage(
+  message: string,
+  role: "muted" | "warning" | "error",
+): string {
+  return renderBlessedLine([terminalSpan(message, { role })]);
 }
 
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
@@ -260,7 +290,7 @@ export async function renderPipelinesGrid({
     paneMap.set(name, i);
     const pane = grid.getPane(i);
     if (pane) {
-      pane.setLabel(`${escapeBlessedTags(name)} ${statusIcons().pending}`);
+      pane.setLabel(repoLabel(name, statusIcons().pending));
     }
   });
 
@@ -353,9 +383,7 @@ export async function renderPipelinesGrid({
       }
 
       if (onBeforeCompletionPrompt) {
-        statusLine?.setContent(
-          `{${colors().muted}-fg}Finalizing workspace...{/${colors().muted}-fg}`,
-        );
+        statusLine?.setContent(paneMessage("Finalizing workspace...", "muted"));
         grid.render();
         await onBeforeCompletionPrompt(
           completeOnWorktreesReady ? worktreeResults : repoResults,
@@ -364,7 +392,7 @@ export async function renderPipelinesGrid({
 
       statusLine?.setContent(
         backgroundInitialization
-          ? `{${colors().muted}-fg}Initialization continues in the background{/${colors().muted}-fg}`
+          ? paneMessage("Initialization continues in the background", "muted")
           : "",
       );
       renderCompletion();
@@ -409,33 +437,25 @@ export async function renderPipelinesGrid({
 
       switch (state.phase) {
         case "git": {
-          pane.setLabel(
-            `${escapeBlessedTags(id)}: ${state.step} ${statusIcons().running}`,
-          );
+          pane.setLabel(repoStepLabel(id, state.step, statusIcons().running));
 
           if (state.output) {
             appendOutput(pane, id, state.output, outputAdapters);
           } else if (state.message) {
             flushOutputBuffer(pane, id, outputAdapters);
-            pane.appendLine(
-              `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
-            );
+            pane.appendLine(paneMessage(state.message, "muted"));
           }
           break;
         }
 
         case "initializer": {
-          pane.setLabel(
-            `${escapeBlessedTags(id)}: ${escapeBlessedTags(state.name)} ${statusIcons().running}`,
-          );
+          pane.setLabel(repoStepLabel(id, state.name, statusIcons().running));
 
           if (state.output) {
             appendOutput(pane, id, state.output, outputAdapters);
           } else if (state.message) {
             flushOutputBuffer(pane, id, outputAdapters);
-            pane.appendLine(
-              `{${colors().muted}-fg}${escapeBlessedTags(state.message)}{/${colors().muted}-fg}`,
-            );
+            pane.appendLine(paneMessage(state.message, "muted"));
           }
           break;
         }
@@ -443,10 +463,13 @@ export async function renderPipelinesGrid({
         case "worktree-ready": {
           flushOutputBuffer(pane, id, outputAdapters);
           pane.setLabel(
-            `${escapeBlessedTags(id)}: initializing ${statusIcons().running}`,
+            repoStepLabel(id, "initializing", statusIcons().running),
           );
           pane.appendLine(
-            `{${colors().muted}-fg}Worktree ready; initialization moved to background{/${colors().muted}-fg}`,
+            paneMessage(
+              "Worktree ready; initialization moved to background",
+              "muted",
+            ),
           );
           worktreeResults.set(id, { hasLockfile: state.hasLockfile });
           worktreeSettled.add(id);
@@ -455,20 +478,16 @@ export async function renderPipelinesGrid({
 
         case "complete": {
           flushOutputBuffer(pane, id, outputAdapters);
-          pane.setLabel(
-            `{${colors().success}-fg}${escapeBlessedTags(id)} ${statusIcons().complete}{/${colors().success}-fg}`,
-          );
+          pane.setLabel(styledRepoLabel(id, statusIcons().complete, "success"));
           repoResults.set(id, { hasLockfile: state.hasLockfile });
           break;
         }
 
         case "cancelled": {
           flushOutputBuffer(pane, id, outputAdapters);
-          pane.setLabel(
-            `{${colors().warning}-fg}${escapeBlessedTags(id)} cancelled{/${colors().warning}-fg}`,
-          );
+          pane.setLabel(styledRepoLabel(id, "cancelled", "warning"));
           pane.appendLine(
-            `{${colors().warning}-fg}${escapeBlessedTags(state.message ?? "Initialization cancelled")}{/${colors().warning}-fg}`,
+            paneMessage(state.message ?? "Initialization cancelled", "warning"),
           );
           setupWarnings.push({
             repoName: id,
@@ -481,22 +500,16 @@ export async function renderPipelinesGrid({
 
         case "failed": {
           flushOutputBuffer(pane, id, outputAdapters);
-          pane.setLabel(
-            `{${colors().error}-fg}${escapeBlessedTags(id)} ${statusIcons().failed}{/${colors().error}-fg}`,
-          );
+          pane.setLabel(styledRepoLabel(id, statusIcons().failed, "error"));
           if (state.step) {
-            pane.appendLine(
-              `{${colors().error}-fg}Step: ${escapeBlessedTags(state.step)}{/${colors().error}-fg}`,
-            );
+            pane.appendLine(paneMessage(`Step: ${state.step}`, "error"));
           }
           pane.appendLine(
-            `{${colors().error}-fg}Error: ${escapeBlessedTags(state.error.message)}{/${colors().error}-fg}`,
+            paneMessage(`Error: ${state.error.message}`, "error"),
           );
           if (getLogPath) {
             const logPath = await getLogPath(id);
-            pane.appendLine(
-              `{${colors().error}-fg}Log: ${escapeBlessedTags(logPath)}{/${colors().error}-fg}`,
-            );
+            pane.appendLine(paneMessage(`Log: ${logPath}`, "error"));
           }
           recordCompletionFailure(id, state, {
             setupWarnings,
@@ -735,14 +748,19 @@ export function getCompletionModalContent({
 }): string[] {
   if (repoErrors.length > 0) {
     return [
-      `{${colors().error}-fg}{bold}Repository setup needs attention{/bold}{/${colors().error}-fg}`,
+      renderBlessedLine([
+        terminalSpan("Repository setup needs attention", {
+          role: "error",
+          emphasis: "bold",
+        }),
+      ]),
       "",
       `${completedCount}/${totalCount} repositories completed. ${repoErrors.length} failed during git/worktree setup.`,
       "",
       ...formatCompletionFailures(repoErrors, "Repo errors"),
       ...formatCompletionFailures(setupWarnings, "Setup warnings"),
       "",
-      `{${colors().muted}-fg}Press any key for next steps{/${colors().muted}-fg}`,
+      paneMessage("Press any key for next steps", "muted"),
     ];
   }
 
@@ -757,8 +775,11 @@ export function getCompletionModalContent({
     ...(backgroundInitialization
       ? [
           "",
-          `{${colors().muted}-fg}Initialization continues in the background.{/${colors().muted}-fg}`,
-          `{${colors().muted}-fg}Run wf status --watch from the change to check progress.{/${colors().muted}-fg}`,
+          paneMessage("Initialization continues in the background.", "muted"),
+          paneMessage(
+            "Run wf status --watch from the change to check progress.",
+            "muted",
+          ),
         ]
       : []),
     ...(setupWarnings.length > 0
@@ -818,7 +839,9 @@ function createCompletionTextLines(infoLines: string[]): ModalTextLine[] {
 
   const callToActionRow = Math.max(contentHeight - 2, 0);
   lines[callToActionRow] = {
-    text: `{bold}{${colors().focus}-fg}press any key{/${colors().focus}-fg}{/bold}`,
+    text: renderBlessedLine([
+      terminalSpan("press any key", { role: "focus", emphasis: "bold" }),
+    ]),
     align: "center",
   };
 
@@ -1210,22 +1233,38 @@ function formatWorkspaceSummary({
   const lines: string[] = [];
   if (workspacePath) {
     lines.push(
-      `{bold}{${colors().primary}-fg}${escapeBlessedTags(
-        truncatePlainText(workspacePath, Math.max(contentWidth, 8)),
-      )}{/${colors().primary}-fg}{/bold}`,
+      renderBlessedLine([
+        terminalSpan(
+          truncatePlainText(workspacePath, Math.max(contentWidth, 8)),
+          {
+            role: "primary",
+            emphasis: "bold",
+          },
+        ),
+      ]),
     );
   }
 
   for (const worktreeName of worktreeNames.slice(0, 6)) {
     lines.push(
-      `{${colors().focus}-fg}•{/${colors().focus}-fg} {bold}${escapeBlessedTags(
-        truncatePlainText(worktreeName, Math.max(contentWidth - 2, 8)),
-      )}{/bold}`,
+      renderBlessedLine([
+        terminalSpan("•", { role: "focus" }),
+        " ",
+        terminalSpan(
+          truncatePlainText(worktreeName, Math.max(contentWidth - 2, 8)),
+          {
+            emphasis: "bold",
+          },
+        ),
+      ]),
     );
   }
   if (worktreeNames.length > 6) {
     lines.push(
-      `  {${colors().muted}-fg}+${worktreeNames.length - 6} more{/${colors().muted}-fg}`,
+      renderBlessedLine([
+        "  ",
+        terminalSpan(`+${worktreeNames.length - 6} more`, { role: "muted" }),
+      ]),
     );
   }
   return lines;
@@ -1247,16 +1286,16 @@ function formatCompletionFailures(
   if (failures.length === 0) return [];
 
   const visibleFailures = failures.slice(0, 3);
-  const lines = [`{${colors().warning}-fg}${label}{/${colors().warning}-fg}`];
+  const lines = [paneMessage(label, "warning")];
   for (const failure of visibleFailures) {
     const step = failure.step ? ` (${failure.step})` : "";
-    lines.push(
-      `• ${escapeBlessedTags(failure.repoName)}${escapeBlessedTags(step)}`,
-    );
-    lines.push(`  ${escapeBlessedTags(failure.message)}`);
+    lines.push(renderBlessedLine(["• ", failure.repoName, step]));
+    lines.push(renderBlessedLine(["  ", failure.message]));
   }
   if (failures.length > visibleFailures.length) {
-    lines.push(`  +${failures.length - visibleFailures.length} more`);
+    lines.push(
+      renderBlessedLine(`  +${failures.length - visibleFailures.length} more`),
+    );
   }
   return lines;
 }
