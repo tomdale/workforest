@@ -4,7 +4,12 @@ export {
 } from "./command-stream-adapter.ts";
 export {
   createFullscreenScreen,
+  createFullscreenStage,
+  FULLSCREEN_MAX_HEIGHT,
+  FULLSCREEN_MAX_WIDTH,
   type FullscreenScreen,
+  type FullscreenViewport,
+  fullscreenViewport,
 } from "./fullscreen-surface.ts";
 export { InlineSurface } from "./inline-surface.ts";
 export {

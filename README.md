@@ -43,6 +43,10 @@ picking sources before handing off to the live setup grid. `wf new` with no
 arguments opens the same surface in create-only mode. Both fall back to plain
 output outside a TTY, and the explicit forms below stay fully scriptable.
 
+On very large terminals the interactive chrome (the change entry front door and
+the `wf` dashboard) renders centered at a capped size instead of stretching
+edge-to-edge; the output-heavy split-pane setup grid keeps using the full width.
+
 The surface is aware of where you launch it. Run inside a workspace or
 worktree and the list defaults to that scope's entries; press
 **Tab** to toggle between the current scope and everything. When naming a new

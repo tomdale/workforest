@@ -4,7 +4,11 @@ import {
   STANDARD_ENVIRONMENT_VARIABLES,
   WORKFOREST_ENVIRONMENT_VARIABLES,
 } from "../environment.ts";
-import { createFullscreenScreen } from "../terminal/fullscreen-surface.ts";
+import {
+  createFullscreenScreen,
+  createFullscreenStage,
+  fullscreenViewport,
+} from "../terminal/fullscreen-surface.ts";
 import {
   renderTerminalDocBlessed,
   type TerminalDoc,
@@ -304,11 +308,12 @@ export async function runDashboardTui(
 ): Promise<readonly string[] | null> {
   return new Promise((resolve) => {
     const screen = createFullscreenScreen();
-    const layout = dashboardLayoutForSize(
-      process.stdout.columns ?? 80,
-      process.stdout.rows ?? 24,
-    );
-    const boxes = createDashboardBoxes(layout, screen);
+    // Capped, centered region the dashboard renders into; the wide/compact
+    // choice tracks the visible stage, not the (possibly oversized) terminal.
+    const viewport = fullscreenViewport(screen);
+    const stage = createFullscreenStage(screen, viewport);
+    const layout = dashboardLayoutForSize(viewport.width, viewport.height);
+    const boxes = createDashboardBoxes(layout, stage);
     let state = createDashboardState(route);
     let done = false;
 
@@ -369,10 +374,10 @@ export async function runDashboardTui(
 
 function createDashboardBoxes(
   layout: DashboardLayout,
-  screen: ReturnType<typeof createFullscreenScreen>,
+  parent: Box,
 ): DashboardBoxes {
   const operations = new Box({
-    parent: screen,
+    parent,
     bottom: 1,
     left: 0,
     width: "100%",
@@ -386,7 +391,7 @@ function createDashboardBoxes(
     },
   });
   const footer = new Box({
-    parent: screen,
+    parent,
     bottom: 0,
     left: 0,
     width: "100%",
@@ -397,7 +402,7 @@ function createDashboardBoxes(
   });
   if (layout === "compact") {
     const workbench = new Box({
-      parent: screen,
+      parent,
       top: 0,
       left: 0,
       width: "100%",
@@ -410,12 +415,12 @@ function createDashboardBoxes(
         border: { fg: chromeTokens().accent },
       },
     });
-    const palette = createDashboardPalette(screen);
+    const palette = createDashboardPalette(parent);
     return { layout, workbench, operations, footer, palette };
   }
 
   const sidebar = new Box({
-    parent: screen,
+    parent,
     top: 0,
     left: 0,
     width: 24,
@@ -429,7 +434,7 @@ function createDashboardBoxes(
     },
   });
   const workbench = new Box({
-    parent: screen,
+    parent,
     top: 0,
     left: 24,
     width: "55%-24",
@@ -442,7 +447,7 @@ function createDashboardBoxes(
     },
   });
   const inspector = new Box({
-    parent: screen,
+    parent,
     top: 0,
     right: 0,
     width: "45%",
@@ -456,15 +461,13 @@ function createDashboardBoxes(
     },
   });
 
-  const palette = createDashboardPalette(screen);
+  const palette = createDashboardPalette(parent);
   return { layout, sidebar, workbench, inspector, operations, footer, palette };
 }
 
-function createDashboardPalette(
-  screen: ReturnType<typeof createFullscreenScreen>,
-): Box {
+function createDashboardPalette(parent: Box): Box {
   return new Box({
-    parent: screen,
+    parent,
     top: "center",
     left: "center",
     width: "70%",

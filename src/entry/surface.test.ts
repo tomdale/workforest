@@ -26,6 +26,7 @@ vi.mock("../terminal/fullscreen-surface.ts", () => ({
     destroy: screenDestroyMock,
     render: vi.fn(),
   }),
+  createFullscreenStage: () => ({ destroy: vi.fn() }),
 }));
 
 vi.mock("../terminal/fuzzy-list.ts", () => ({

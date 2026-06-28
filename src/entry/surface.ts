@@ -1,6 +1,7 @@
 import { Box } from "@unblessed/node";
 import {
   createFullscreenScreen,
+  createFullscreenStage,
   type FullscreenScreen,
 } from "../terminal/fullscreen-surface.ts";
 import {
@@ -84,6 +85,9 @@ export async function runEntry(
   deps: EntryDeps,
 ): Promise<void> {
   const screen = createFullscreenScreen();
+  // Capped, centered region every phase renders into; on a large terminal the
+  // surrounding margin stays at the terminal default. Destroyed with the screen.
+  const stage = createFullscreenStage(screen);
   let torn = false;
   const teardown = (): void => {
     if (torn) return;
@@ -92,17 +96,22 @@ export async function runEntry(
   };
 
   try {
-    const phase1 = await runPhase1(screen, mode, deps.scope);
+    const phase1 = await runPhase1(screen, stage, mode, deps.scope);
     if (phase1.kind === "cancel") return;
     if (phase1.kind === "cd") {
       await cdToEntry(phase1.candidate);
       return;
     }
 
-    const sources = await runPhase2(screen, phase1.changeName, deps.scope);
+    const sources = await runPhase2(
+      screen,
+      stage,
+      phase1.changeName,
+      deps.scope,
+    );
     if (!sources) return;
 
-    const target = await runTargetStep(screen, deps.initialTarget);
+    const target = await runTargetStep(screen, stage, deps.initialTarget);
     if (!target) return;
 
     // Hand off to the setup grid + confetti, which owns its own screen.
@@ -123,6 +132,7 @@ function toEntryItems(candidates: Candidate[]): FuzzyItem<Candidate>[] {
 
 async function runPhase1(
   screen: FullscreenScreen,
+  stage: Box,
   mode: EntryMode,
   scope: Scope | undefined,
 ): Promise<Phase1Result> {
@@ -157,6 +167,7 @@ async function runPhase1(
   while (true) {
     const list = createFuzzyList<Candidate>({
       screen,
+      parent: stage,
       items: itemsNow(),
       placeholder,
       ...(canScope
@@ -263,6 +274,7 @@ function preselectFor(
 
 async function runPhase2(
   screen: FullscreenScreen,
+  stage: Box,
   changeName: string,
   scope: Scope | undefined,
 ): Promise<ChosenSource[] | null> {
@@ -296,7 +308,7 @@ async function runPhase2(
 
   const theme = activeTheme();
   const preview = new Box({
-    parent: screen,
+    parent: stage,
     top: 0,
     left: 0,
     width: "100%",
@@ -306,7 +318,7 @@ async function runPhase2(
     style: { bg: toBlessed(theme.chrome.background) },
   });
   const host = new Box({
-    parent: screen,
+    parent: stage,
     top: PREVIEW_HEIGHT,
     left: 0,
     width: "100%",
@@ -384,10 +396,12 @@ async function runPhase2(
  */
 async function runTargetStep(
   screen: FullscreenScreen,
+  stage: Box,
   initialTarget: EntryTarget = "local",
 ): Promise<EntryTarget | null> {
   const list = createFuzzyList<EntryTarget>({
     screen,
+    parent: stage,
     prompt: "Where should this run?",
     items: [
       { value: "local", label: "Local", hint: "worktrees on this machine" },
