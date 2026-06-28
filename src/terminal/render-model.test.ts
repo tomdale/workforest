@@ -64,9 +64,7 @@ describe("terminal render model", () => {
       ],
     ]);
 
-    expect(renderTerminalDocPlain(doc)).toBe(
-      "stderr: {red-fg}child{/red-fg}",
-    );
+    expect(renderTerminalDocPlain(doc)).toBe("stderr: {red-fg}child{/red-fg}");
     expect(stripAnsi(renderTerminalDocAnsi(doc))).toBe(
       "stderr: {red-fg}child{/red-fg}",
     );

@@ -2,13 +2,17 @@ import { Chalk } from "chalk";
 import {
   activeTheme,
   inlinePalette,
-  toBlessed,
+  type NamedColor,
   type ThemeColor,
   type ThemePalette,
+  toBlessed,
 } from "./theme-system.ts";
 
 export type TerminalStyleRole = keyof ThemePalette;
-export type TerminalBackgroundRole = TerminalStyleRole | "background" | "border";
+export type TerminalBackgroundRole =
+  | TerminalStyleRole
+  | "background"
+  | "border";
 export type TerminalEmphasis = "bold" | "underline" | "inverse";
 
 export type TerminalSpan = Readonly<{
@@ -29,6 +33,7 @@ export type TerminalDoc = Readonly<{
 
 export type TerminalSpanInput = string | TerminalSpan;
 export type TerminalLineInput = string | readonly TerminalSpanInput[];
+type ChalkInstance = InstanceType<typeof Chalk>;
 
 export function terminalDoc(lines: readonly TerminalLineInput[]): TerminalDoc {
   return { lines: lines.map(terminalLine) };
@@ -85,16 +90,19 @@ function renderPlainLine(line: TerminalLine): string {
   return line.spans.map((span) => span.text).join("");
 }
 
-function renderAnsiLine(line: TerminalLine, chalk: Chalk): string {
+function renderAnsiLine(line: TerminalLine, chalk: ChalkInstance): string {
   return line.spans.map((span) => renderAnsiSpan(span, chalk)).join("");
 }
 
-function renderAnsiSpan(span: TerminalSpan, chalk: Chalk): string {
+function renderAnsiSpan(span: TerminalSpan, chalk: ChalkInstance): string {
   if (span.literal) return span.text;
 
   let style = (value: string) => value;
   if (span.role) {
-    style = compose(style, foregroundStyler(resolvePaletteColor(span.role), chalk));
+    style = compose(
+      style,
+      foregroundStyler(resolvePaletteColor(span.role), chalk),
+    );
   }
   if (span.background) {
     style = compose(
@@ -139,7 +147,7 @@ function normalizedEmphasis(
   emphasis: TerminalSpan["emphasis"],
 ): readonly TerminalEmphasis[] {
   if (!emphasis) return [];
-  return Array.isArray(emphasis) ? emphasis : [emphasis];
+  return typeof emphasis === "string" ? [emphasis] : emphasis;
 }
 
 function resolvePaletteColor(role: TerminalStyleRole): ThemeColor {
@@ -162,7 +170,7 @@ function compose(
 
 function foregroundStyler(
   color: ThemeColor,
-  chalk: Chalk,
+  chalk: ChalkInstance,
 ): (value: string) => string {
   if (color.kind === "rgb") {
     const [r, g, b] = color.rgb;
@@ -173,7 +181,7 @@ function foregroundStyler(
 
 function backgroundStyler(
   color: ThemeColor,
-  chalk: Chalk,
+  chalk: ChalkInstance,
 ): (value: string) => string {
   if (color.kind === "rgb") {
     const [r, g, b] = color.rgb;
@@ -184,18 +192,14 @@ function backgroundStyler(
 
 function emphasisStyler(
   emphasis: TerminalEmphasis,
-  chalk: Chalk,
+  chalk: ChalkInstance,
 ): (value: string) => string {
   return (value) => chalk[emphasis](value);
 }
 
 function backgroundNamedStyler(
-  name: ThemeColor & { kind: "named" } extends infer Named
-    ? Named extends { name: infer Name }
-      ? Name
-      : never
-    : never,
-  chalk: Chalk,
+  name: NamedColor,
+  chalk: ChalkInstance,
 ): (value: string) => string {
   switch (name) {
     case "black":
