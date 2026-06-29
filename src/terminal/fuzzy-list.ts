@@ -73,6 +73,8 @@ export type FuzzyFilter<T> = (
   query: string,
 ) => FuzzyItem<T>[];
 
+export type FuzzyTabDirection = "forward" | "backward";
+
 /**
  * The new state to apply when the user presses Tab, returned by
  * {@link FuzzyListOptions.onTab}. Returning `null` leaves the list unchanged.
@@ -116,10 +118,10 @@ export type FuzzyListOptions<T> = {
    */
   tabHint?: string;
   /**
-   * Called when Tab is pressed. Return the new state to apply in place, or
-   * `null` to ignore the keystroke. Enables the Tab footer hint.
+   * Called when Tab or Shift-Tab is pressed. Return the new state to apply in
+   * place, or `null` to ignore the keystroke. Enables the Tab footer hint.
    */
-  onTab?: () => FuzzyTabUpdate<T> | null;
+  onTab?: (direction: FuzzyTabDirection) => FuzzyTabUpdate<T> | null;
   /**
    * Selects the initially-highlighted candidate. The first item satisfying the
    * predicate starts highlighted; defaults to the first row.
@@ -350,9 +352,9 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     render();
   };
 
-  const switchScope = (): void => {
+  const switchScope = (direction: FuzzyTabDirection): void => {
     if (!onTab) return;
-    const update = onTab();
+    const update = onTab(direction);
     if (!update) return;
     items = update.items;
     if (update.resetQuery) query = "";
@@ -369,7 +371,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
 
   const onKeypress = (
     ch: string | undefined,
-    key: { name?: string; ctrl?: boolean; meta?: boolean },
+    key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean },
   ): void => {
     if (key.ctrl && key.name === "c") {
       finish({ kind: "cancel" });
@@ -380,7 +382,10 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
         finish({ kind: "cancel" });
         return;
       case "tab":
-        switchScope();
+        switchScope(key.shift ? "backward" : "forward");
+        return;
+      case "backtab":
+        switchScope("backward");
         return;
       case "enter":
       case "return":
@@ -420,15 +425,19 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
 
   // The screen swallows Tab for focus traversal, so it never reaches the
   // screen-level "keypress" listener; the program-level stream still carries it.
-  // We bind there (forward Tab only) so scope switching works in a real
-  // terminal, while the screen "keypress" handler above keeps Tab working under
-  // test harnesses that deliver it directly.
+  // We bind there so scope switching works in a real terminal, while the screen
+  // "keypress" handler above keeps Tab working under test harnesses that
+  // deliver it directly.
   const program = onTab ? screenProgram(screen) : undefined;
   const onProgramKeypress = (
     _ch: string | undefined,
     key: { name?: string; shift?: boolean },
   ): void => {
-    if (key?.name === "tab" && !key.shift) switchScope();
+    if (key?.name === "tab") {
+      switchScope(key.shift ? "backward" : "forward");
+      return;
+    }
+    if (key?.name === "backtab") switchScope("backward");
   };
 
   const cleanup = (): void => {
@@ -683,7 +692,7 @@ function renderAction(label: string, selected: boolean, inner: number): string {
  * option's name is painted as a badge — a contrasting foreground on a
  * {@link ThemePalette.focus} background — with its connector (e.g. the "in " of
  * "in workforest") muted; unselected options render plain muted. An explicit,
- * accented Tab cue trails the options.
+ * accented Tab/Shift-Tab cue trails the options.
  */
 function renderScopeBar(theme: Theme, toggle: FuzzyScopeToggle): string {
   const segments = toggle.options.map((option, i) =>
@@ -692,7 +701,7 @@ function renderScopeBar(theme: Theme, toggle: FuzzyScopeToggle): string {
   const cue = blessedLine([
     terminalSpan("·", { role: "muted" }),
     " ",
-    terminalSpan("tab", { role: "focus", emphasis: "bold" }),
+    terminalSpan("tab/shift-tab", { role: "focus", emphasis: "bold" }),
     " ",
     terminalSpan("switches scope", { role: "muted" }),
   ]);

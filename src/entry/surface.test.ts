@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { FuzzyResult } from "../terminal/fuzzy-list.ts";
+import type { FuzzyListOptions, FuzzyResult } from "../terminal/fuzzy-list.ts";
 
 const fuzzyResults = vi.hoisted(() => [] as FuzzyResult<unknown>[]);
 const createFuzzyListMock = vi.hoisted(() =>
-  vi.fn(() => ({
+  vi.fn((_options: unknown) => ({
     run: vi.fn(async () => {
       const result = fuzzyResults.shift();
       if (!result) throw new Error("Missing fuzzy result");
@@ -92,5 +92,23 @@ describe("runEntry", () => {
       sources: [{ kind: "repo", token: "tomdale/workforest" }],
       target: "cloud",
     });
+  });
+
+  it("cycles source modes backward on Shift-Tab", async () => {
+    const commit = vi.fn(async () => {});
+    fuzzyResults.push(
+      { kind: "action", query: "cloud-fix" },
+      { kind: "cancel" },
+    );
+
+    await runEntry("create", { commit });
+
+    const sourceOptions = createFuzzyListMock.mock.calls[1]?.[0] as
+      | FuzzyListOptions<unknown>
+      | undefined;
+    expect(sourceOptions?.scopeToggle?.active).toBe(0);
+
+    const update = sourceOptions?.onTab?.("backward");
+    expect(update?.scopeActive).toBe(2);
   });
 });

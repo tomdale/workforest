@@ -230,6 +230,13 @@ function nextMode(mode: SourceMode): SourceMode {
   return MODE_ORDER[(index + 1) % MODE_ORDER.length] ?? "repo";
 }
 
+function previousMode(mode: SourceMode): SourceMode {
+  const index = MODE_ORDER.indexOf(mode);
+  return (
+    MODE_ORDER[(index - 1 + MODE_ORDER.length) % MODE_ORDER.length] ?? "repo"
+  );
+}
+
 /** The mode switcher as a fuzzy-list scope bar (rendered between input and list). */
 function modeScopeToggle(mode: SourceMode): FuzzyScopeToggle {
   return {
@@ -347,8 +354,8 @@ async function runPhase2(
           ? { initialSelected: (item) => preselect(item.value) }
           : {}),
         actionRow: { label: (query) => actionLabel(query, mode, chosen) },
-        onTab: () => {
-          mode = nextMode(mode);
+        onTab: (direction) => {
+          mode = direction === "backward" ? previousMode(mode) : nextMode(mode);
           // Re-render the preview synchronously so the guidance tracks the
           // switch (inference is deferred to the next render cycle).
           preview.setContent(

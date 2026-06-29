@@ -51,9 +51,9 @@ The surface is aware of where you launch it. Run inside a workspace or
 worktree and the list defaults to that scope's entries; press
 **Tab** to toggle between the current scope and everything. When naming a new
 one, the source picker is grouped into **Repo**, **Template**, and
-**Multi-repo** modes — **Tab** cycles between them — and it opens in the mode
-matching the container you started from (with that repo or template under the
-cursor).
+**Multi-repo** modes — **Tab** cycles forward and **Shift-Tab** cycles backward
+between them — and it opens in the mode matching the container you started from
+(with that repo or template under the cursor).
 
 ```sh
 # Go to an existing worktree or workspace, or create a new one (interactive entry surface).

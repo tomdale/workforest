@@ -286,7 +286,10 @@ describe("createFuzzyList layout", () => {
 });
 
 describe("createFuzzyList scope switching", () => {
-  type KeypressFn = (ch: string | undefined, key: { name?: string }) => void;
+  type KeypressFn = (
+    ch: string | undefined,
+    key: { name?: string; shift?: boolean },
+  ) => void;
   type MockScreen = { on: ReturnType<typeof vi.fn> };
 
   function keypressHandler(screen: MockScreen): KeypressFn {
@@ -375,6 +378,37 @@ describe("createFuzzyList scope switching", () => {
     expect(after.indexOf("front")).toBeLessThan(after.indexOf("all changes"));
     expect(badgedName(after)).toBe("all changes");
     expect(captured.content).toContain("global-one");
+
+    list.destroy();
+  });
+
+  it("passes backward direction for Shift-Tab and BackTab", () => {
+    const screen = new Screen();
+    const onTab = vi
+      .fn()
+      .mockReturnValue({ items: items("next"), scopeActive: 0 });
+    const list = createFuzzyList<string>({
+      screen,
+      prompt: "go to a change",
+      items: items("one"),
+      scopeToggle: {
+        options: [{ label: "one" }, { label: "two" }],
+        active: 0,
+      },
+      onTab,
+    });
+    void list.run();
+
+    keypressHandler(screen as unknown as MockScreen)(undefined, {
+      name: "tab",
+      shift: true,
+    });
+    keypressHandler(screen as unknown as MockScreen)(undefined, {
+      name: "backtab",
+    });
+
+    expect(onTab).toHaveBeenNthCalledWith(1, "backward");
+    expect(onTab).toHaveBeenNthCalledWith(2, "backward");
 
     list.destroy();
   });

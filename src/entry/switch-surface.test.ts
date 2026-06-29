@@ -50,7 +50,7 @@ describe("runSwitchSurface", () => {
       active: 0,
     });
 
-    const all = options.onTab?.();
+    const all = options.onTab?.("forward");
     expect(all?.scopeActive).toBe(1);
     expect(selectors(all?.items ?? [])).toEqual([
       "agent/auth",
@@ -58,7 +58,7 @@ describe("runSwitchSurface", () => {
       "front/login",
     ]);
 
-    const scoped = options.onTab?.();
+    const scoped = options.onTab?.("forward");
     expect(scoped?.scopeActive).toBe(0);
     expect(selectors(scoped?.items ?? [])).toEqual(["front/login"]);
   });
