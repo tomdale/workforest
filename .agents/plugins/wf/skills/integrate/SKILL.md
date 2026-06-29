@@ -37,6 +37,12 @@ Use this skill when processing queued branches into local `main`.
     stop without running validation. After the final queued entry integrates, the
     lock-held check that immediately preceded the `main` fast-forward is the
     final verification for that run.
+12. Final cleanup offer is mandatory whenever at least one original source
+    worktree was integrated or synced during the run. Before the final response,
+    explicitly list each eligible original worktree and ask whether to run
+    `wf delete` for them. Do not treat syncing source worktrees, removing
+    temporary integration worktrees, deleting helper branches, or reporting an
+    empty queue as completion of the workflow until this offer has been made.
 
 ## Workflow
 
@@ -70,10 +76,76 @@ Use this skill when processing queued branches into local `main`.
     branch; do not rerun it solely because the queue is now empty.
 16. If there were no ready queue entries when the run started, stop after
     reporting the empty queue. Do not run `pnpm check` for an empty queue.
-17. After all queued integrations are complete, offer to run `wf delete` for
-    every worktree integrated during this run. Run it only after the user
-    confirms, and only for worktrees whose integration is verified in Git
-    history.
+17. Closeout gate: after all queued integrations are complete and temporary
+    integration worktrees/helper branches are cleaned up, but before the final
+    answer, offer to run `wf delete` for every original worktree integrated or
+    synced during this run. The offer must name the exact worktrees. Run
+    `wf delete` only after the user confirms, and only for worktrees whose
+    integration is verified in Git history. If no original worktrees are
+    eligible, say that explicitly.
+
+## Agent Output Format
+
+Report progress and results like a concise CLI status report, not a narrative
+postmortem. Use one short heading, two-space indentation, stable labels, and the
+same symbols as Workforest terminal output:
+
+- `◆` active integration step
+- `✓` completed step
+- `▲` warning, skipped item, stale entry, or non-blocking auditor issue
+- `✗` failed step or blocker
+- `●` informational detail
+
+Keep command output summaries separate from human commentary. Prefer this shape
+for user-facing updates:
+
+```text
+Integration
+  ◆ Inspecting tomdale/example
+  ● Queue: refs/workforest/integration-ready/...
+  ● Base: 34d5f66
+  ● Head: 123abcd
+```
+
+For each queued entry, report these fields when known:
+
+- Queue ref
+- Branch
+- Head SHA
+- Merge base
+- Status: `integrating`, `already integrated`, `stale`, `skipped`, `failed`,
+  or `integrated`
+- Verification command and result
+- Push result
+- Source worktree sync result
+
+Final responses must use this shape:
+
+```text
+Integration complete
+  ✓ Queue: empty
+  ✓ main: <sha>
+  ✓ origin/main: <sha>
+  ✓ Verification: pnpm check
+  ✓ Pushed: origin main:main
+
+Integrated worktrees
+  ● <name-or-path>
+  ● <name-or-path>
+
+Cleanup
+  ◆ Run wf delete for these integrated worktrees?
+```
+
+If there are no eligible original worktrees, replace the cleanup prompt with:
+
+```text
+Cleanup
+  ● No eligible original worktrees.
+```
+
+Do not bury warnings, skipped sync reasons, failed pushes, or dirty source
+worktrees in prose. Put them under a `Warnings` section with `▲` lines.
 
 ## Integration Worktrees
 
@@ -125,5 +197,11 @@ worktrees, and only run it after user confirmation.
 - Keep a failed integration worktree intact for diagnosis; clean it up only after
   the entry integrates successfully or is deliberately abandoned.
 - Do not offer worktree cleanup while queued integrations remain.
+- After the queue is empty, do not send the final response until you have either
+  made the mandatory `wf delete` offer for the original integrated worktrees or
+  explicitly reported that there are no eligible original worktrees.
+- The mandatory `wf delete` offer is for the original source worktrees only.
+  Removing ephemeral integration worktrees with `wf cache worktree remove` does
+  not satisfy this requirement.
 - Do not treat pre-lock integration-worktree checks as a substitute for the
   lock-held `pnpm check` that immediately precedes each fast-forward of `main`.
