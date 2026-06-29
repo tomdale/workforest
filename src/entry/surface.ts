@@ -194,6 +194,7 @@ async function runPhase1(
     const result = await list.run();
     if (result.kind === "cancel") return { kind: "cancel" };
     if (result.kind === "item") return { kind: "cd", candidate: result.value };
+    if (result.kind === "items") continue;
 
     const changeName = result.query.trim();
     if (changeName.length === 0) continue;
@@ -300,18 +301,16 @@ async function runPhase2(
   let mode = initialMode(scope);
   const chosen: ChosenSource[] = [];
 
-  const remainingForMode = (m: SourceMode): SourceCandidate[] => {
-    const base = candidatesForMode(m);
-    return m === "multi"
-      ? base.filter((candidate) => !isChosen(candidate, chosen))
-      : base;
-  };
   const itemsForMode = (m: SourceMode): FuzzyItem<SourceCandidate>[] =>
-    remainingForMode(m).map((candidate) => ({
+    candidatesForMode(m).map((candidate) => ({
       value: candidate,
       label: candidate.label,
       hint: candidate.hint,
     }));
+  const selectedCandidatesForMode = (m: SourceMode): SourceCandidate[] =>
+    m === "multi"
+      ? candidatesForMode(m).filter((candidate) => isChosen(candidate, chosen))
+      : [];
 
   const theme = activeTheme();
   const preview = new Box({
@@ -337,6 +336,12 @@ async function runPhase2(
 
   try {
     while (true) {
+      const updatePreview = (nextNotice: string | null = notice): void => {
+        preview.setContent(
+          renderPreviewSync(theme, changeName, mode, chosen, nextNotice),
+        );
+        screen.render();
+      };
       preview.setContent(
         await renderPreview(theme, changeName, mode, chosen, notice),
       );
@@ -344,6 +349,33 @@ async function runPhase2(
       notice = null;
 
       const preselect = preselectFor(scope, mode);
+      const freeEntryCount = chosen.filter(
+        (source) =>
+          source.kind === "repo" &&
+          !repoCandidates.some((candidate) => candidate.id === source.token),
+      ).length;
+      const multiSelectForMode = (
+        m: SourceMode,
+      ):
+        | {
+            selected: SourceCandidate[];
+            minSelected: number;
+            isEqual: (left: SourceCandidate, right: SourceCandidate) => boolean;
+            onSelectionChange: (selected: readonly SourceCandidate[]) => void;
+          }
+        | undefined =>
+        m === "multi"
+          ? {
+              selected: selectedCandidatesForMode(m),
+              minSelected: Math.max(0, 2 - freeEntryCount),
+              isEqual: (left, right) => left.id === right.id,
+              onSelectionChange: (selected) => {
+                replaceCandidateSources(chosen, repoCandidates, selected);
+                updatePreview();
+              },
+            }
+          : undefined;
+      const multiSelect = multiSelectForMode(mode);
       const list = createFuzzyList<SourceCandidate>({
         screen,
         parent: host,
@@ -353,6 +385,7 @@ async function runPhase2(
         ...(preselect
           ? { initialSelected: (item) => preselect(item.value) }
           : {}),
+        ...(multiSelect ? { multiSelect } : {}),
         actionRow: { label: (query) => actionLabel(query, mode, chosen) },
         onTab: (direction) => {
           mode = direction === "backward" ? previousMode(mode) : nextMode(mode);
@@ -361,9 +394,11 @@ async function runPhase2(
           preview.setContent(
             renderPreviewSync(theme, changeName, mode, chosen, null),
           );
+          const nextMultiSelect = multiSelectForMode(mode);
           return {
             items: itemsForMode(mode),
             scopeActive: MODE_ORDER.indexOf(mode),
+            ...(nextMultiSelect ? { multiSelect: nextMultiSelect } : {}),
           };
         },
       });
@@ -373,11 +408,14 @@ async function runPhase2(
 
       if (result.kind === "item") {
         const source = sourceFromCandidate(result.value);
-        if (mode === "multi") {
-          notice = addSource(chosen, source);
-          continue;
-        }
         return [source];
+      }
+
+      if (result.kind === "items") {
+        replaceCandidateSources(chosen, repoCandidates, result.values);
+        if (chosen.length >= 2) return chosen;
+        notice = "Select at least two repositories";
+        continue;
       }
 
       const query = result.query.trim();
@@ -389,7 +427,6 @@ async function runPhase2(
         }
         return [source];
       }
-      if (mode === "multi" && chosen.length > 0) return chosen;
     }
   } finally {
     preview.destroy();
@@ -434,9 +471,9 @@ function actionLabel(
       : `✛ add "${typed}"`;
   }
   if (mode === "multi") {
-    return chosen.length > 0
-      ? "⏎ create (or add more)"
-      : "· add one or more repositories";
+    return chosen.length >= 2
+      ? "⏎ create"
+      : "· select at least two repositories";
   }
   return mode === "template"
     ? "· select a template to create it"
@@ -471,6 +508,23 @@ function addSource(chosen: ChosenSource[], next: ChosenSource): string | null {
   if (isChosen2(chosen, next)) return "Already added";
   chosen.push(next);
   return null;
+}
+
+function replaceCandidateSources(
+  chosen: ChosenSource[],
+  candidates: SourceCandidate[],
+  selected: readonly SourceCandidate[],
+): void {
+  const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+  const preserved = chosen.filter(
+    (source) => source.kind !== "repo" || !candidateIds.has(source.token),
+  );
+  chosen.splice(
+    0,
+    chosen.length,
+    ...preserved,
+    ...selected.map((candidate) => sourceFromCandidate(candidate)),
+  );
 }
 
 function isChosen(candidate: SourceCandidate, chosen: ChosenSource[]): boolean {
@@ -508,7 +562,7 @@ async function renderPreview(
   notice: string | null,
 ): Promise<string> {
   const lines = previewBaseLines(changeName, mode, chosen, notice);
-  if (mode === "multi" && chosen.length > 0) {
+  if (mode === "multi" && chosen.length >= 2) {
     lines.push("", await describeInferred(theme, changeName, chosen));
   }
   return renderTerminalDocBlessed(terminalDoc(lines));
@@ -541,6 +595,14 @@ function previewBaseLines(
     lines.push([terminalSpan("sources", { role: "muted" }), "  ", ...chips]);
   } else {
     lines.push([terminalSpan(modeGuidance(mode), { role: "muted" })]);
+  }
+
+  if (mode === "multi" && chosen.length < 2) {
+    lines.push([
+      terminalSpan("▲ select at least two repositories", {
+        role: "warning",
+      }),
+    ]);
   }
 
   if (notice) {

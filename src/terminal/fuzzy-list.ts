@@ -40,6 +40,7 @@ export type FuzzyActionRow = {
 
 export type FuzzyResult<T> =
   | { kind: "item"; value: T }
+  | { kind: "items"; values: T[] }
   | { kind: "action"; query: string }
   | { kind: "cancel" };
 
@@ -93,6 +94,15 @@ export type FuzzyTabUpdate<T> = {
   tabHint?: string;
   /** Clear the typed query on switch. Defaults to false (query is preserved). */
   resetQuery?: boolean;
+  /** Update checkbox multi-select behavior for the new scope/mode. */
+  multiSelect?: FuzzyMultiSelectOptions<T>;
+};
+
+export type FuzzyMultiSelectOptions<T> = {
+  selected?: readonly T[];
+  minSelected?: number;
+  isEqual?: (left: T, right: T) => boolean;
+  onSelectionChange?: (selected: readonly T[]) => void;
 };
 
 export type FuzzyListOptions<T> = {
@@ -136,6 +146,11 @@ export type FuzzyListOptions<T> = {
    * multi-mode preview pane).
    */
   scopeToggle?: FuzzyScopeToggle;
+  /**
+   * Opt into checkbox-style multi-select. Space toggles the highlighted item;
+   * Enter submits the selected values only when `minSelected` is satisfied.
+   */
+  multiSelect?: FuzzyMultiSelectOptions<T>;
 };
 
 export type FuzzyList<T> = {
@@ -151,6 +166,14 @@ const NO_MATCHES = "No matches";
 const FOOTER_HINTS: ReadonlyArray<readonly [string, string]> = [
   ["↑↓", "MOVE"],
   ["⏎", "SELECT"],
+  ["esc", "CANCEL"],
+  ["⌫", "DELETE"],
+];
+const MULTI_FOOTER_HINTS: ReadonlyArray<readonly [string, string]> = [
+  ["↑↓", "MOVE"],
+  ["Space", "TOGGLE"],
+  ["⏎", "CREATE"],
+  ["Tab", "MODE"],
   ["esc", "CANCEL"],
   ["⌫", "DELETE"],
 ];
@@ -202,6 +225,11 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
   const placeholder = options.placeholder ?? PLACEHOLDER;
   const hasAction = actionRow !== undefined;
   const onTab = options.onTab;
+  let multiSelect = options.multiSelect;
+  let isMulti = multiSelect !== undefined;
+  let minSelected = multiSelect?.minSelected ?? 1;
+  let isEqual =
+    multiSelect?.isEqual ?? ((left: T, right: T) => Object.is(left, right));
 
   const theme = activeTheme();
   const container = new Box({
@@ -228,6 +256,18 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
   let scrollTop = 0;
   let destroyed = false;
   let resolveRun: ((result: FuzzyResult<T>) => void) | null = null;
+  let selectedValues = multiSelect?.selected ? [...multiSelect.selected] : [];
+
+  const setMultiSelect = (
+    next: FuzzyMultiSelectOptions<T> | undefined,
+  ): void => {
+    multiSelect = next;
+    isMulti = multiSelect !== undefined;
+    minSelected = multiSelect?.minSelected ?? 1;
+    isEqual =
+      multiSelect?.isEqual ?? ((left: T, right: T) => Object.is(left, right));
+    selectedValues = multiSelect?.selected ? [...multiSelect.selected] : [];
+  };
 
   // The action row is an affordance for "use what I typed", so it stays hidden
   // until the query has a non-whitespace character — an empty picker shows only
@@ -305,17 +345,24 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
         if (i < candidates.length) {
           const item = candidates[i];
           if (!item) continue;
-          lines[row] = renderItem(item, i === index, inner, theme, columns);
+          lines[row] = renderItem(
+            item,
+            i === index,
+            inner,
+            theme,
+            columns,
+            isMulti ? isSelectedValue(item.value) : undefined,
+          );
         } else if (actionRow) {
           lines[row] = renderAction(actionRow.label(query), i === index, inner);
         }
       }
     }
 
-    lines[footerRow] = renderFooter(
-      theme,
-      onTab && !showScopeBar ? tabHint : undefined,
-    );
+    lines[footerRow] = renderFooter(theme, {
+      tabHint: onTab && !showScopeBar ? tabHint : undefined,
+      multi: isMulti,
+    });
     container.setContent(lines.join("\n"));
     screen.render();
   };
@@ -335,7 +382,33 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     resolve(result);
   };
 
+  const isSelectedValue = (value: T): boolean =>
+    selectedValues.some((selected) => isEqual(selected, value));
+
+  const toggleSelected = (): void => {
+    if (!isMulti || onActionRow()) return;
+    const selected = candidates[index];
+    if (!selected) return;
+    const existing = selectedValues.findIndex((value) =>
+      isEqual(value, selected.value),
+    );
+    selectedValues =
+      existing === -1
+        ? [...selectedValues, selected.value]
+        : selectedValues.filter((_, i) => i !== existing);
+    multiSelect?.onSelectionChange?.(selectedValues);
+    render();
+  };
+
   const submit = (): void => {
+    if (isMulti && !onActionRow()) {
+      if (selectedValues.length >= minSelected) {
+        finish({ kind: "items", values: selectedValues });
+      } else {
+        render();
+      }
+      return;
+    }
     if (onActionRow()) {
       finish({ kind: "action", query });
       return;
@@ -363,6 +436,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       scopeToggle = { ...scopeToggle, active: update.scopeActive };
     }
     if (update.tabHint !== undefined) tabHint = update.tabHint;
+    setMultiSelect(update.multiSelect);
     candidates = filter(items, query);
     index = 0;
     scrollTop = 0;
@@ -390,6 +464,9 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       case "enter":
       case "return":
         submit();
+        return;
+      case "space":
+        toggleSelected();
         return;
       case "backspace":
         if (query.length > 0)
@@ -419,6 +496,10 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       !key.ctrl &&
       !key.meta
     ) {
+      if (ch === " " && isMulti) {
+        toggleSelected();
+        return;
+      }
       editQuery(query + ch);
     }
   };
@@ -633,16 +714,21 @@ function renderItem<T>(
   inner: number,
   _theme: Theme,
   columns: Columns,
+  checked?: boolean,
 ): string {
   const { time, meta } = splitHint(item.hint);
 
   const nameCell = padColumn(item.label, columns.name);
   const timeCell = padColumn(time, columns.time);
+  const marker = checked === undefined ? "" : checked ? "◼ " : "◻ ";
+  const markerWidth = visibleWidth(marker);
   // Three columns for the indent/rule lead, two-space gutters, and one trailing
   // column left free so a full-width line never wraps in blessed.
-  const used = 3 + visibleWidth(nameCell) + 2 + visibleWidth(timeCell) + 2;
+  const used =
+    3 + markerWidth + visibleWidth(nameCell) + 2 + visibleWidth(timeCell) + 2;
   const metaCell = fitMetaList(meta, Math.max(0, inner - used - 1));
   const plain =
+    markerWidth +
     visibleWidth(nameCell) +
     2 +
     visibleWidth(timeCell) +
@@ -652,6 +738,9 @@ function renderItem<T>(
   if (selected) {
     // Selected: name bold white, timestamp and metadata both cyan.
     const content = blessedLine([
+      ...(marker
+        ? [terminalSpan(marker, { role: "focus", emphasis: "bold" })]
+        : []),
       terminalSpan(nameCell, { role: "focus", emphasis: "bold" }),
       "  ",
       terminalSpan(timeCell, { role: "accent" }),
@@ -666,6 +755,7 @@ function renderItem<T>(
   // marker would imply radio-button semantics that don't exist.
   return blessedLine([
     "   ",
+    ...(marker ? [terminalSpan(marker, { role: "muted" })] : []),
     terminalSpan(nameCell, { role: "primary" }),
     "  ",
     terminalSpan(timeCell, { role: "dim" }),
@@ -741,10 +831,14 @@ function renderScopeOption(
   ]);
 }
 
-function renderFooter(_theme: Theme, tabHint?: string): string {
-  const hints: ReadonlyArray<readonly [string, string]> = tabHint
-    ? [...FOOTER_HINTS, ["tab", tabHint.toUpperCase()]]
-    : FOOTER_HINTS;
+function renderFooter(
+  _theme: Theme,
+  options: { tabHint?: string | undefined; multi?: boolean },
+): string {
+  const { tabHint, multi = false } = options;
+  const base = multi ? MULTI_FOOTER_HINTS : FOOTER_HINTS;
+  const hints: ReadonlyArray<readonly [string, string]> =
+    tabHint && !multi ? [...base, ["tab", tabHint.toUpperCase()]] : base;
   return hints
     .map(([key, action]) =>
       blessedLine([

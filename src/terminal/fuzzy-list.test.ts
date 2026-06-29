@@ -42,6 +42,20 @@ function lineContaining(content: string, needle: string): number {
   return content.split("\n").findIndex((line) => line.includes(needle));
 }
 
+type KeypressFn = (
+  ch: string | undefined,
+  key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean },
+) => void;
+type MockScreen = { on: ReturnType<typeof vi.fn> };
+
+function keypressHandler(screen: MockScreen): KeypressFn {
+  const call = screen.on.mock.calls.find(
+    (args: unknown[]) => args[0] === "keypress",
+  );
+  if (!call) throw new Error("no keypress handler registered");
+  return call[1] as KeypressFn;
+}
+
 describe("fuzzyFilter", () => {
   it.each([
     {
@@ -286,20 +300,6 @@ describe("createFuzzyList layout", () => {
 });
 
 describe("createFuzzyList scope switching", () => {
-  type KeypressFn = (
-    ch: string | undefined,
-    key: { name?: string; shift?: boolean },
-  ) => void;
-  type MockScreen = { on: ReturnType<typeof vi.fn> };
-
-  function keypressHandler(screen: MockScreen): KeypressFn {
-    const call = screen.on.mock.calls.find(
-      (args: unknown[]) => args[0] === "keypress",
-    );
-    if (!call) throw new Error("no keypress handler registered");
-    return call[1] as KeypressFn;
-  }
-
   it("swaps items and scope label on Tab", () => {
     const screen = new Screen();
     const list = createFuzzyList<string>({
@@ -428,6 +428,95 @@ describe("createFuzzyList scope switching", () => {
     });
     expect(captured.content).toBe(before);
 
+    list.destroy();
+  });
+});
+
+describe("createFuzzyList multi-select", () => {
+  it("renders checked and unchecked checkbox markers", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      items: items("alpha", "beta"),
+      multiSelect: { selected: ["beta"] },
+    });
+    void list.run();
+
+    const alpha = captured.content
+      .split("\n")
+      .find((line) => line.includes("alpha"));
+    const beta = captured.content
+      .split("\n")
+      .find((line) => line.includes("beta"));
+    expect(alpha).toContain("◻");
+    expect(beta).toContain("◼");
+
+    list.destroy();
+  });
+
+  it("toggles the highlighted row on and off with Space", () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      items: items("alpha", "beta"),
+      multiSelect: {},
+    });
+    void list.run();
+    const handler = keypressHandler(screen as unknown as MockScreen);
+
+    handler(" ", { name: "space" });
+    expect(
+      captured.content.split("\n").find((line) => line.includes("alpha")),
+    ).toContain("◼");
+
+    handler(" ", { name: "space" });
+    expect(
+      captured.content.split("\n").find((line) => line.includes("alpha")),
+    ).toContain("◻");
+
+    list.destroy();
+  });
+
+  it("submits selected values when the minimum count is met", async () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      items: items("alpha", "beta", "gamma"),
+      multiSelect: { minSelected: 2 },
+    });
+    const result = list.run();
+    const handler = keypressHandler(screen as unknown as MockScreen);
+
+    handler(" ", { name: "space" });
+    handler(undefined, { name: "down" });
+    handler(" ", { name: "space" });
+    handler(undefined, { name: "enter" });
+
+    await expect(result).resolves.toEqual({
+      kind: "items",
+      values: ["alpha", "beta"],
+    });
+  });
+
+  it("does not submit when fewer than the required selections exist", async () => {
+    const screen = new Screen();
+    const list = createFuzzyList<string>({
+      screen,
+      items: items("alpha", "beta"),
+      multiSelect: { minSelected: 2 },
+    });
+    const result = list.run();
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+    const handler = keypressHandler(screen as unknown as MockScreen);
+
+    handler(" ", { name: "space" });
+    handler(undefined, { name: "enter" });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
     list.destroy();
   });
 });

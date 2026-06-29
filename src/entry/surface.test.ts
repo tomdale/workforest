@@ -1,16 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FuzzyListOptions, FuzzyResult } from "../terminal/fuzzy-list.ts";
 
-const fuzzyResults = vi.hoisted(() => [] as FuzzyResult<unknown>[]);
+type ScriptedFuzzyResult =
+  | FuzzyResult<unknown>
+  | { kind: "tab"; times?: number };
+
+const fuzzyResults = vi.hoisted(() => [] as ScriptedFuzzyResult[]);
 const createFuzzyListMock = vi.hoisted(() =>
-  vi.fn((_options: unknown) => ({
-    run: vi.fn(async () => {
-      const result = fuzzyResults.shift();
-      if (!result) throw new Error("Missing fuzzy result");
-      return result;
+  vi.fn(
+    (options: { onTab?: (direction: "forward" | "backward") => unknown }) => ({
+      run: vi.fn(async () => {
+        let result = fuzzyResults.shift();
+        while (result?.kind === "tab") {
+          const times = result.times ?? 1;
+          for (let i = 0; i < times; i += 1) options.onTab?.("forward");
+          result = fuzzyResults.shift();
+        }
+        if (!result) throw new Error("Missing fuzzy result");
+        return result;
+      }),
+      destroy: vi.fn(),
     }),
-    destroy: vi.fn(),
-  })),
+  ),
 );
 const screenDestroyMock = vi.hoisted(() => vi.fn());
 
@@ -48,15 +59,29 @@ vi.mock("./sources-data.ts", async () => {
         label: "tomdale/workforest",
         hint: "Cached repository",
       },
+      {
+        kind: "repo",
+        id: "tomdale/cli",
+        label: "tomdale/cli",
+        hint: "Cached repository",
+      },
+      {
+        kind: "repo",
+        id: "tomdale/docs",
+        label: "tomdale/docs",
+        hint: "Cached repository",
+      },
     ]),
   };
 });
 
-import { runEntry } from "./surface.ts";
+import { type EntryDeps, runEntry } from "./surface.ts";
+
+type CommitIntent = Parameters<EntryDeps["commit"]>[0];
 
 describe("runEntry", () => {
   it("preselects an explicit target while showing the target picker", async () => {
-    const commit = vi.fn(async () => {});
+    const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
     fuzzyResults.push(
       { kind: "action", query: "cloud-fix" },
       { kind: "item", value: { kind: "repo", id: "tomdale/workforest" } },
@@ -110,5 +135,66 @@ describe("runEntry", () => {
 
     const update = sourceOptions?.onTab?.("backward");
     expect(update?.scopeActive).toBe(2);
+  });
+
+  it("creates a local multi-repo change from two selected repos", async () => {
+    const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
+    fuzzyResults.push(
+      { kind: "action", query: "multi-fix" },
+      { kind: "tab", times: 2 },
+      {
+        kind: "items",
+        values: [
+          { kind: "repo", id: "tomdale/workforest" },
+          { kind: "repo", id: "tomdale/cli" },
+        ],
+      },
+      { kind: "item", value: "local" },
+    );
+
+    await runEntry("create", { commit });
+
+    expect(commit).toHaveBeenCalledWith({
+      changeName: "multi-fix",
+      sources: [
+        { kind: "repo", token: "tomdale/workforest" },
+        { kind: "repo", token: "tomdale/cli" },
+      ],
+      target: "local",
+    });
+  });
+
+  it("omits a repo that was toggled off before submitting multi-repo", async () => {
+    const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
+    fuzzyResults.push(
+      { kind: "action", query: "toggle-fix" },
+      { kind: "tab", times: 2 },
+      {
+        kind: "items",
+        values: [
+          { kind: "repo", id: "tomdale/cli" },
+          { kind: "repo", id: "tomdale/docs" },
+        ],
+      },
+      { kind: "item", value: "local" },
+    );
+
+    await runEntry("create", { commit });
+
+    expect(commit).toHaveBeenCalledWith({
+      changeName: "toggle-fix",
+      sources: [
+        { kind: "repo", token: "tomdale/cli" },
+        { kind: "repo", token: "tomdale/docs" },
+      ],
+      target: "local",
+    });
+    const intent = commit.mock.calls[0]?.[0] as
+      | { sources: unknown[] }
+      | undefined;
+    expect(intent?.sources).not.toContainEqual({
+      kind: "repo",
+      token: "tomdale/workforest",
+    });
   });
 });
