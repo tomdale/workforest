@@ -10,7 +10,6 @@ import type {
 describe("commandRegistry", () => {
   it("defines the exact visible command tree", () => {
     expect(visibleTree(commandRegistry.root)).toEqual({
-      dashboard: null,
       new: null,
       list: null,
       status: null,
@@ -45,26 +44,25 @@ describe("commandRegistry", () => {
   });
 
   it("defines only the published root shortcuts", () => {
-    expect(commandRegistry.shortcuts.map((shortcut) => shortcut.name)).toEqual([
-      "templates",
-      "tasks",
-      "reviews",
-    ]);
-    expect(
-      commandRegistry.shortcuts.map((shortcut) => shortcut.target),
-    ).toEqual([["dashboard"], ["dashboard"], ["dashboard"]]);
+    expect(commandRegistry.shortcuts.map((shortcut) => shortcut.name)).toEqual(
+      [],
+    );
     expect(
       collectNodes(commandRegistry.root).flatMap((node) => node.aliases),
     ).toEqual([]);
   });
 
   it("uses explicit resource leaves without contextual defaults", () => {
-    for (const name of ["migrate", "task", "review", "template", "shell"]) {
+    for (const name of [
+      "migrate",
+      "task",
+      "review",
+      "template",
+      "shell",
+      "cache",
+    ]) {
       expect(findGroup(commandRegistry.root, name).default).toBeUndefined();
     }
-    expect(findGroup(commandRegistry.root, "cache").default?.handler).toBe(
-      "dashboard.open",
-    );
     expect(findGroup(commandRegistry.root, "config").default?.handler).toBe(
       "config.show",
     );

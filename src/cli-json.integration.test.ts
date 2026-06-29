@@ -158,19 +158,9 @@ describe("JSON CLI integration", () => {
     });
   });
 
-  it("emits JSON for dashboard and help routes", async () => {
-    const dashboard = await runJson(["dashboard", "--json"]);
+  it("emits JSON for help routes", async () => {
     const workflowHelp = await runJson(["help", "workflow", "--json"]);
 
-    expectJsonResult(dashboard, 0, {
-      ok: true,
-      data: expect.objectContaining({
-        route: expect.objectContaining({ id: "home" }),
-        actions: expect.arrayContaining([
-          expect.objectContaining({ id: "home.new" }),
-        ]),
-      }),
-    });
     expectJsonResult(workflowHelp, 0, {
       ok: true,
       data: {

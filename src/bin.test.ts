@@ -94,7 +94,7 @@ describe("bin/workforest.js", () => {
     );
   });
 
-  it("keeps JSON output as a single envelope before dashboard preload", async () => {
+  it("keeps JSON output as a single envelope", async () => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       NO_COLOR: "1",

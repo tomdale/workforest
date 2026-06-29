@@ -4,17 +4,12 @@ import { resolveCommand } from "./resolve-command.ts";
 
 describe("resolveCommand", () => {
   it.each([
-    [["dashboard"], ["dashboard"], "dashboard.open"],
-    [["templates"], ["dashboard"], "dashboard.open"],
-    [["tasks"], ["dashboard"], "dashboard.open"],
-    [["reviews"], ["dashboard"], "dashboard.open"],
     [["new", "fix-auth", "vercel/front"], ["new"], "new"],
     [["add", "vercel/api"], ["add"], "add"],
     [["switch", "vercel-agent/auth-fix"], ["switch"], "switch"],
     [["delete", "_adhoc/experiment"], ["delete"], "delete"],
     [["task", "new", "fix-auth"], ["task", "new"], "task.new"],
     [["task", "delete", "fix-auth"], ["task", "delete"], "task.delete"],
-    [["cache"], ["cache"], "dashboard.open"],
     [["cache", "doctor", "front"], ["cache", "doctor"], "cache.doctor"],
     [
       ["cache", "worktree", "list", "front"],
@@ -38,8 +33,6 @@ describe("resolveCommand", () => {
   it.each([
     [[], { kind: "root" }],
     [["--help"], { kind: "root" }],
-    [["dashboard", "--help"], { kind: "command", command: "dashboard" }],
-    [["templates", "--help"], { kind: "command", command: "templates" }],
     [["cache", "--help"], { kind: "command", command: "cache" }],
     [["new", "--help"], { kind: "command", command: "new" }],
     [
@@ -54,6 +47,7 @@ describe("resolveCommand", () => {
   });
 
   it.each([
+    "cache",
     "task",
     "review",
     "template",

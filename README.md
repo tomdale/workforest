@@ -43,9 +43,9 @@ picking sources before handing off to the live setup grid. `wf new` with no
 arguments opens the same surface in create-only mode. Both fall back to plain
 output outside a TTY, and the explicit forms below stay fully scriptable.
 
-On very large terminals the interactive chrome (the change entry front door and
-the `wf` dashboard) renders centered at a capped size instead of stretching
-edge-to-edge; the output-heavy split-pane setup grid keeps using the full width.
+On very large terminals the interactive chrome renders centered at a capped
+size instead of stretching edge-to-edge; the output-heavy split-pane setup grid
+keeps using the full width.
 
 The surface is aware of where you launch it. Run inside a workspace or
 worktree and the list defaults to that scope's entries; press
@@ -146,7 +146,7 @@ wf status workforest/cli-redesign
 ```
 
 Run from anywhere inside a worktree or workspace (or pass a selector) to print a
-compact dashboard: an identity header (`name`, type/template, repo count, age), a
+compact report: an identity header (`name`, type/template, repo count, age), a
 dim path line, then one aligned row per repository:
 
 ```
@@ -332,10 +332,12 @@ Review worktrees are stored below `directory.reviews`, which defaults to
 Templates capture repeated repository sets, branch prefixes, setup hooks, and
 default files.
 
-Open the templates dashboard to create, edit, copy, or delete templates:
+Use the template subcommands to create, edit, copy, or delete templates:
 
 ```sh
-wf templates
+wf template list
+wf template new full-stack vercel/front vercel/api
+wf template edit full-stack
 ```
 
 Inspect a template non-interactively:
@@ -522,7 +524,7 @@ wf cloud stop          Stop a cloud workspace (snapshot + halt)
 wf cloud delete        Delete a cloud workspace
 wf review open         Open a review workspace
 wf review checkout     Check out a pull request
-wf templates           Open the templates dashboard
+wf template list       List templates
 wf template show       Show template details
 wf template open       Open a template directory
 wf shell init          Print shell integration
@@ -568,5 +570,5 @@ wf cache doctor <repo> --fix
 
 ### A Template Is Missing
 
-Use `wf templates` to inspect saved templates or
+Use `wf template list` to inspect saved templates or
 `wf template show <name>` for a non-interactive lookup.

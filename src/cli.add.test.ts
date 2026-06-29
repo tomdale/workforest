@@ -57,9 +57,9 @@ describe("parseAddOperands", () => {
       kind: "repositories",
       tokens: ["vercel/api"],
     });
-    expect(parseAddOperands(["vercel/api", "vercel/dashboard"])).toEqual({
+    expect(parseAddOperands(["vercel/api", "vercel/web"])).toEqual({
       kind: "repositories",
-      tokens: ["vercel/api", "vercel/dashboard"],
+      tokens: ["vercel/api", "vercel/web"],
     });
     expect(parseAddOperands(["@vercel-agent"])).toEqual({
       kind: "template",

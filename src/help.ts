@@ -130,7 +130,7 @@ Examples:
   wf cache doctor
   wf review open vercel/omniagent
   wf review checkout vercel/omniagent#123
-  wf templates
+  wf template list
   eval "$(wf shell init zsh)"
 
 Concepts:
@@ -167,8 +167,7 @@ Nouns:
   template             A saved workspace recipe: a list of repositories plus optional hooks, extra
                        files, and a branch prefix. Stored under
                        \`~/.config/workforest/templates/<name>/template.jsonc\`.
-                       Create and edit with \`wf templates\`, or use explicit
-                       \`wf template\` subcommands for scripts.
+                       Create and edit with \`wf template\` subcommands.
 
   cached mirror        A bare local clone of a remote repository kept under \`~/.cache/workforest/\`.
                        All worktrees are built from these mirrors, so creation works offline after
@@ -252,7 +251,7 @@ Interactive user workflows:
     wf task delete fix-auth             # after it merges
 
   Create a workspace from a saved template:
-    wf templates                         # browse and edit templates
+    wf template list                      # browse templates
     wf new feature-description @my-template
 
 Agent workflows:

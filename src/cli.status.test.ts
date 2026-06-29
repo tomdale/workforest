@@ -257,7 +257,7 @@ describe("wf status", () => {
   });
 });
 
-describe("renderStatus dashboard", () => {
+describe("renderStatus report", () => {
   it("renders header, dim path, and a clean synced repo row", () => {
     const output = render(
       buildStatus({

@@ -196,7 +196,7 @@ const EMPTY_LINE: TerminalLine = { spans: [literalSpan("")] };
 type Cell = Readonly<{ spans: readonly TerminalSpan[]; width: number }>;
 
 /**
- * Renders status as a compact dashboard: an identity header, a dim path line,
+ * Renders status as a compact report: an identity header, a dim path line,
  * an optional guidance/setup line, then a column-aligned table of repositories
  * with their nested tasks indented beneath each parent. The verbose
  * one-liners and `--json`-only fields (`line`, `details`, `nextSteps`) are left
@@ -256,7 +256,7 @@ export function renderStatus(
     });
   }
 
-  // Frame the dashboard with a blank line above and below so it stands clear
+  // Frame the report with a blank line above and below so it stands clear
   // of the shell prompt and any preceding command output.
   return `\n\n${renderTerminalDocInline({ lines })}\n\n\n`;
 }

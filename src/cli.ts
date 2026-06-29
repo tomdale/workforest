@@ -31,13 +31,6 @@ import {
   loadWorkspaceConfig,
   saveWorkspaceConfig,
 } from "./config.ts";
-import {
-  type DashboardRoute,
-  dashboardActionsForRoute,
-  dashboardRouteForInvocation,
-  formatDashboardCommand,
-  getDashboardRoute,
-} from "./dashboard/routes.ts";
 import type { Scope } from "./entry/entries-data.ts";
 import {
   commandHelp,
@@ -77,6 +70,7 @@ import {
   validateTemplateName,
 } from "./templates/index.ts";
 import { createAgentOutputStream } from "./terminal/agent-output.ts";
+import { shouldUseFullscreenTui } from "./terminal/capabilities.ts";
 import {
   printReport,
   type ReportField,
@@ -206,7 +200,7 @@ export async function executeCli(
     const workerResult = await runPrivateWorkerIfRequested();
     if (workerResult) return workerResult;
 
-    if (argv.length === 0 && (await shouldUseDashboardTui())) {
+    if (argv.length === 0 && shouldUseFullscreenTui()) {
       return runEntryCommand("go");
     }
 
@@ -255,14 +249,12 @@ async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
-    case "dashboard.open":
-      return runDashboardInvocation(invocation);
     case "review.open":
     case "review.checkout":
       return runReviewInvocation(invocation);
     case "new":
       if (invocation.beforeDoubleDash.length === 0) {
-        if (!(await shouldUseDashboardTui())) {
+        if (!shouldUseFullscreenTui()) {
           throw new UsageError("wf new requires a name.");
         }
         return runEntryCommand(
@@ -297,7 +289,7 @@ async function runInvocation(
         const scope = await resolveCurrentScope();
         return runSwitchCommand(invocation, {
           interactive: isInteractive(),
-          fullscreen: await shouldUseDashboardTui(),
+          fullscreen: shouldUseFullscreenTui(),
           ...(scope ? { scope } : {}),
           writeShellCdPath,
         });
@@ -326,13 +318,6 @@ async function runInvocation(
         jsonRequested(invocation),
       );
     case "config.show":
-      if (
-        !jsonRequested(invocation) &&
-        isDefaultInvocation(invocation, "config") &&
-        (await shouldUseDashboardTui())
-      ) {
-        return runDashboardCommand(getDashboardRoute("config"));
-      }
       return runConfigShow(jsonRequested(invocation));
     case "config.init":
       if (jsonRequested(invocation)) return unsupportedJson(invocation);
@@ -420,51 +405,6 @@ async function runInvocation(
   );
 }
 
-async function runDashboardInvocation(
-  invocation: ParsedInvocation,
-): Promise<CommandResult> {
-  const route = dashboardRouteForInvocation(invocation.command.invokedPath);
-  if (jsonRequested(invocation)) {
-    return jsonSuccess(dashboardRouteJson(route));
-  }
-
-  if (
-    isDefaultInvocation(invocation, "cache") &&
-    !(await shouldUseDashboardTui())
-  ) {
-    return success({
-      kind: "text",
-      value: await renderHelpReference({ kind: "command", command: "cache" }, [
-        "cache",
-      ]),
-      stream: "stdout",
-    });
-  }
-
-  return runDashboardCommand(route);
-}
-
-async function runDashboardCommand(
-  route: DashboardRoute,
-): Promise<CommandResult> {
-  const { renderDashboardReport, runDashboardTui } = await import(
-    "./dashboard/index.ts"
-  );
-  if (await shouldUseDashboardTui()) {
-    const selectedCommand = await runDashboardTui(route);
-    return selectedCommand ? executeCli(selectedCommand) : success();
-  }
-
-  return success(reportOutput(renderDashboardReport(route)));
-}
-
-async function shouldUseDashboardTui(): Promise<boolean> {
-  const { shouldUseDashboardTui: dashboardShouldUseTui } = await import(
-    "./dashboard/index.ts"
-  );
-  return dashboardShouldUseTui();
-}
-
 /**
  * Open the universal "go to or create a worktree or workspace" surface. Lazy-imported so the
  * @unblessed runtime never loads on scriptable/JSON paths. `go` (bare `wf`)
@@ -542,18 +482,6 @@ async function resolveCurrentScope(): Promise<Scope | undefined> {
   }
 }
 
-function isDefaultInvocation(
-  invocation: ParsedInvocation,
-  command: string,
-): boolean {
-  return (
-    invocation.command.canonicalPath.length === 1 &&
-    invocation.command.canonicalPath[0] === command &&
-    invocation.command.invokedPath.length === 1 &&
-    invocation.command.invokedPath[0] === command
-  );
-}
-
 async function runTaskInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
@@ -624,18 +552,6 @@ function unsupportedJson(invocation: ParsedInvocation): CommandResult {
 
 function formatInvocationCommand(invocation: ParsedInvocation): string {
   return `wf ${invocation.command.canonicalPath.join(" ")}`;
-}
-
-function dashboardRouteJson(route: DashboardRoute): Record<string, unknown> {
-  return {
-    route,
-    actions: dashboardActionsForRoute(route).map((action) => ({
-      ...action,
-      ...(action.kind === "command"
-        ? { displayCommand: formatDashboardCommand(action.command) }
-        : {}),
-    })),
-  };
 }
 
 async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {

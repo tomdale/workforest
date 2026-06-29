@@ -49,7 +49,7 @@ describe("template suggestion evidence", () => {
             url: "https://github.com/vercel/front/pull/10",
             labels: ["feature"],
             updatedAt: "2026-06-20T00:00:00.000Z",
-            touchedPaths: ["apps/dashboard/page.tsx"],
+            touchedPaths: ["apps/web/page.tsx"],
           },
           {
             role: "reviewed",

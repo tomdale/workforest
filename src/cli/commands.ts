@@ -206,34 +206,12 @@ const skillsDefault = leaf({
   outputModes: ["report", "json"],
 });
 
-const dashboardOpen = leaf({
-  name: "dashboard",
-  path: ["dashboard"],
-  summary: "Open the Workforest dashboard",
-  description:
-    "Opens the creation-first dashboard in an interactive terminal, or prints a compact dashboard report when a fullscreen terminal is unavailable.",
-  handler: "dashboard.open",
-  help: { kind: "command", command: "dashboard" },
-  outputModes: ["interactive", "report"],
-  tty: optionalTerminal,
-  examples: [
-    {
-      command: "wf dashboard",
-      description: "Open the dashboard home.",
-    },
-    {
-      command: "wf templates",
-      description: "Open the Templates dashboard screen.",
-    },
-  ],
-});
-
 const newCommand = leaf({
   name: "new",
   path: ["new"],
   summary: "Create a worktree or workspace",
   description:
-    "Creates a new worktree or workspace. A single repository source creates a worktree at `Repos/<repo>/<name>`, an `@template` source creates a workspace at `Workspaces/<template>/<name>`, and multiple repository sources create an _adhoc workspace at `Workspaces/_adhoc/<name>`. With only a name, repeats the current Workforest-managed context. With no operands in an interactive terminal, opens the new-work dashboard flow; outside an interactive terminal a name is required.",
+    "Creates a new worktree or workspace. A single repository source creates a worktree at `Repos/<repo>/<name>`, an `@template` source creates a workspace at `Workspaces/<template>/<name>`, and multiple repository sources create an _adhoc workspace at `Workspaces/_adhoc/<name>`. With only a name, repeats the current Workforest-managed context. With no operands in an interactive terminal, opens the new-work flow; outside an interactive terminal a name is required.",
   handler: "new",
   help: { kind: "command", command: "new" },
   flags: [
@@ -286,18 +264,6 @@ const newCommand = leaf({
     },
   ],
   outputModes: ["human"],
-});
-
-const cacheDefault = leaf({
-  name: "",
-  path: ["cache"],
-  summary: "Open the cache dashboard",
-  description:
-    "Opens the Cache dashboard screen in an interactive terminal. Scriptable cache operations remain available as explicit subcommands.",
-  handler: "dashboard.open",
-  help: { kind: "command", command: "cache" },
-  outputModes: ["interactive", "report"],
-  tty: optionalTerminal,
 });
 
 const listCommand = leaf({
@@ -421,7 +387,7 @@ const addCommand = leaf({
       description: "Add one repository to the current workspace.",
     },
     {
-      command: "wf add vercel/api vercel/dashboard",
+      command: "wf add vercel/api vercel/web",
       description: "Add several repositories to the current workspace.",
     },
     {
@@ -571,36 +537,13 @@ const aiStatus = leaf({
 });
 
 export const commandRegistry: CommandRegistry = {
-  shortcuts: [
-    {
-      name: "templates",
-      target: ["dashboard"],
-      visibility: visible,
-      summary: "Open the Templates dashboard screen",
-      help: { kind: "command", command: "templates" },
-    },
-    {
-      name: "tasks",
-      target: ["dashboard"],
-      visibility: visible,
-      summary: "Open the Tasks dashboard screen",
-      help: { kind: "command", command: "tasks" },
-    },
-    {
-      name: "reviews",
-      target: ["dashboard"],
-      visibility: visible,
-      summary: "Open the Reviews dashboard screen",
-      help: { kind: "command", command: "reviews" },
-    },
-  ],
+  shortcuts: [],
   root: group({
     name: "",
     path: [],
     summary: "Workforest command line interface",
     help: { kind: "root" },
     children: [
-      dashboardOpen,
       newCommand,
       listCommand,
       statusCommand,
@@ -895,7 +838,6 @@ export const commandRegistry: CommandRegistry = {
         description:
           "The cached bare mirrors that workforest clones from to create worktrees, workspaces, and tasks live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
-        default: cacheDefault,
         children: [
           leaf({
             name: "list",
