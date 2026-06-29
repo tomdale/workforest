@@ -24,8 +24,7 @@ export const FULLSCREEN_QUIT_KEYS = ["escape", "q", "C-c"] as const;
 /**
  * Upper bounds on a centered full-screen surface. Beyond these the terminal is
  * letterboxed: the TUI renders at the cap, centered, and the surrounding margin
- * falls back to the terminal default. Output-heavy split-pane grids opt out and
- * keep using the full terminal.
+ * falls back to the terminal default.
  */
 export const FULLSCREEN_MAX_WIDTH = 112;
 export const FULLSCREEN_MAX_HEIGHT = 34;
@@ -37,6 +36,11 @@ export type FullscreenViewport = {
   width: number;
   height: number;
 };
+
+export type FullscreenViewportResolver = (screen: {
+  width: number | string;
+  height: number | string;
+}) => FullscreenViewport;
 
 export function createFullscreenScreen(): FullscreenScreen {
   return new Screen({
@@ -64,6 +68,23 @@ export function fullscreenViewport(screen: {
   return { top, left, width, height };
 }
 
+/**
+ * The full terminal region. Split-pane command output uses this with the
+ * standard fullscreen stage/backdrop implementation because it needs all
+ * available space rather than the centered, capped picker/wizard surface.
+ */
+export function fullTerminalViewport(screen: {
+  width: number | string;
+  height: number | string;
+}): FullscreenViewport {
+  return {
+    top: 0,
+    left: 0,
+    width: axisSize(Number(screen.width), FULLSCREEN_MAX_WIDTH),
+    height: axisSize(Number(screen.height), FULLSCREEN_MAX_HEIGHT),
+  };
+}
+
 /** Returns `[offset, size]` for one centered, capped axis. */
 function centerAxis(available: number, max: number): [number, number] {
   // A non-finite dimension (e.g. an unsized fake screen in tests) leaves the
@@ -86,8 +107,13 @@ function centerAxis(available: number, max: number): [number, number] {
  */
 export function createFullscreenStage(
   screen: FullscreenScreen,
-  viewport: FullscreenViewport = fullscreenViewport(screen),
+  viewport:
+    | FullscreenViewport
+    | FullscreenViewportResolver = fullscreenViewport,
 ): Box {
+  const resolveViewport =
+    typeof viewport === "function" ? viewport : () => viewport;
+  const initialViewport = resolveViewport(screen);
   const background = toBlessed(activeTheme().chrome.background);
   const backdrop = new Box({
     parent: screen,
@@ -107,14 +133,14 @@ export function createFullscreenStage(
   backdrop.setContent(backdropFill(screen));
   const stage = new Box({
     parent: backdrop,
-    top: viewport.top,
-    left: viewport.left,
-    width: viewport.width,
-    height: viewport.height,
+    top: initialViewport.top,
+    left: initialViewport.left,
+    width: initialViewport.width,
+    height: initialViewport.height,
   });
 
   const reflow = (): void => {
-    const next = fullscreenViewport(screen);
+    const next = resolveViewport(screen);
     backdrop.setContent(backdropFill(screen));
     stage.top = next.top;
     stage.left = next.left;
@@ -151,16 +177,45 @@ function axisSize(value: number, fallback: number): number {
 export function createFullscreenStatusLine(
   screen: FullscreenScreen,
 ): FullscreenStatusLine {
-  return new Box({
+  const theme = activeTheme();
+  const background = toBlessed(theme.chrome.background);
+  const box = new Box({
     parent: screen,
     bottom: 0,
     left: 0,
     width: "100%",
     height: 1,
     tags: true,
-    padding: { left: 1 },
-    style: { fg: toBlessed(activeTheme().palette.muted) },
+    style: {
+      fg: toBlessed(theme.palette.muted),
+      bg: background,
+    },
   });
+  return {
+    setContent(content: string): void {
+      box.setContent(paintFullStatusLine(screen, content, background));
+    },
+    destroy(): void {
+      box.destroy();
+    },
+  };
+}
+
+function paintFullStatusLine(
+  screen: { width: number | string },
+  content: string,
+  background: string,
+): string {
+  const width = axisSize(Number(screen.width), FULLSCREEN_MAX_WIDTH);
+  const text = ` ${content}`;
+  const visibleWidth = stripBlessedTags(text).length;
+  const fillWidth = Math.max(width - visibleWidth, 0);
+  if (fillWidth === 0) return text;
+  return `${text}{${background}-fg}{${background}-bg}${".".repeat(fillWidth)}{/${background}-bg}{/${background}-fg}`;
+}
+
+function stripBlessedTags(value: string): string {
+  return value.replace(/\{[^}]*\}/g, "");
 }
 
 export function createFullscreenKeypress(

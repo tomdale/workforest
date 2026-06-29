@@ -17,6 +17,20 @@ const testState = vi.hoisted(() => ({
   },
   template: null as null | { config: Record<string, unknown> },
   loadedTemplates: [] as string[],
+  watchStates: [
+    {
+      phase: "initializer",
+      name: "install",
+      status: "output",
+      output: "first\n",
+    },
+    {
+      phase: "initializer",
+      name: "install",
+      status: "output",
+      output: "second\n",
+    },
+  ] as Array<import("../workspace/pipeline.ts").RepoPipelineState>,
 }));
 
 vi.mock("../terminal/fullscreen-surface.ts", async (importOriginal) => {
@@ -30,6 +44,9 @@ vi.mock("../terminal/fullscreen-surface.ts", async (importOriginal) => {
         testState.keyHandler = handler;
       },
       destroy: testState.destroyScreen,
+    }),
+    createFullscreenStage: () => ({
+      destroy: vi.fn(),
     }),
     createFullscreenStatusLine: () => ({
       setContent: vi.fn(),
@@ -83,18 +100,7 @@ vi.mock("../workspace/initialization.ts", () => ({
   }),
   watchRepoInitialization: () =>
     (async function* () {
-      yield {
-        phase: "initializer",
-        name: "install",
-        status: "output",
-        output: "first\n",
-      };
-      yield {
-        phase: "initializer",
-        name: "install",
-        status: "output",
-        output: "second\n",
-      };
+      yield* testState.watchStates;
     })(),
 }));
 
@@ -112,6 +118,20 @@ describe("renderInitializationStatus", () => {
     testState.loadedTemplates = [];
     testState.metadata = null;
     testState.template = null;
+    testState.watchStates = [
+      {
+        phase: "initializer",
+        name: "install",
+        status: "output",
+        output: "first\n",
+      },
+      {
+        phase: "initializer",
+        name: "install",
+        status: "output",
+        output: "second\n",
+      },
+    ];
     testState.appendLine.mockReset();
     testState.destroyScreen.mockClear();
   });
@@ -158,6 +178,45 @@ describe("renderInitializationStatus", () => {
     expect(testState.loadedTemplates).toContain("agents-template+focused");
     expect(testState.labels.some((label) => label.includes("AGENTS.md"))).toBe(
       true,
+    );
+  });
+
+  it("renders an initializer command once while streaming every output chunk", async () => {
+    testState.watchStates = [
+      {
+        phase: "initializer",
+        name: "pnpm install",
+        status: "running",
+        message: "pnpm install --frozen-lockfile",
+      },
+      {
+        phase: "initializer",
+        name: "pnpm install",
+        status: "output",
+        output: "installing dependencies\n",
+      },
+      {
+        phase: "initializer",
+        name: "pnpm install",
+        status: "output",
+        output: "done\n",
+      },
+      { phase: "complete", hasLockfile: true },
+    ];
+    testState.appendLine.mockImplementation((line: string) => {
+      if (line === "done") {
+        queueMicrotask(() => testState.keyHandler?.());
+      }
+    });
+
+    await renderInitializationStatus("/tmp/workspace", ["front"]);
+
+    const lines = testState.appendLine.mock.calls.map(([line]) => line);
+    expect(
+      lines.filter((line) => line.includes("pnpm install --frozen-lockfile")),
+    ).toHaveLength(1);
+    expect(lines).toEqual(
+      expect.arrayContaining(["installing dependencies", "done"]),
     );
   });
 });

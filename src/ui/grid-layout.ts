@@ -1,7 +1,10 @@
 import { Box, type Screen, ScrollableBox } from "@unblessed/node";
 
+type GridParent = Screen | Box;
+
 export interface GridLayoutOptions {
   screen: Screen;
+  parent?: GridParent;
   top?: number | string;
   left?: number | string;
   width?: number | string;
@@ -9,6 +12,7 @@ export interface GridLayoutOptions {
   rows: number;
   cols: number;
   borderColor?: string;
+  backgroundColor?: string;
   maxLinesPerPane?: number;
 }
 
@@ -22,17 +26,16 @@ export interface GridPane {
 }
 
 /**
- * A grid layout with collapsed/shared borders.
- * Renders a single frame with proper box-drawing connectors and
- * positions content panes inside each cell.
+ * A grid layout of independently framed panes.
  */
 export class GridLayout {
   private screen: Screen;
-  private frame: Box;
+  private parent: GridParent;
   private panes: GridPaneImpl[] = [];
   private rows: number;
   private cols: number;
   private borderColor: string;
+  private backgroundColor: string | undefined;
   private maxLinesPerPane: number;
 
   // Computed dimensions
@@ -40,33 +43,24 @@ export class GridLayout {
   private frameLeft: number;
   private frameWidth: number;
   private frameHeight: number;
-  private cellWidth: number;
-  private cellHeight: number;
 
   constructor(options: GridLayoutOptions) {
     this.screen = options.screen;
+    this.parent = options.parent ?? options.screen;
     this.rows = options.rows;
     this.cols = options.cols;
     this.borderColor = options.borderColor ?? "yellow";
+    this.backgroundColor = options.backgroundColor;
     this.maxLinesPerPane = options.maxLinesPerPane ?? 200;
 
     // Resolve percentage-based dimensions to actual values
-    const screenWidth = this.screen.width as number;
-    const screenHeight = this.screen.height as number;
+    const screenWidth = this.parent.width as number;
+    const screenHeight = this.parent.height as number;
 
     this.frameTop = this.resolvePosition(options.top ?? 0, screenHeight);
     this.frameLeft = this.resolvePosition(options.left ?? 0, screenWidth);
-    // Subtract 1 from width/height to ensure borders fit on screen
-    this.frameWidth =
-      this.resolveSize(options.width ?? "100%", screenWidth) - 1;
-    this.frameHeight =
-      this.resolveSize(options.height ?? "100%", screenHeight) - 1;
-
-    this.cellWidth = Math.floor(this.frameWidth / this.cols);
-    this.cellHeight = Math.floor(this.frameHeight / this.rows);
-
-    this.frame = this.createFrame();
-    this.screen.append(this.frame);
+    this.frameWidth = this.resolveSize(options.width ?? "100%", screenWidth);
+    this.frameHeight = this.resolveSize(options.height ?? "100%", screenHeight);
 
     this.createPanes();
   }
@@ -97,77 +91,48 @@ export class GridLayout {
     return Number.parseInt(value, 10);
   }
 
-  private buildFrame(): string {
-    const lines: string[] = [];
-    const w = this.frameWidth;
-    const h = this.frameHeight;
-
-    for (let y = 0; y < h; y++) {
-      let line = "";
-      for (let x = 0; x < w; x++) {
-        const isTop = y === 0;
-        const isBottom = y === h - 1;
-        const isLeft = x === 0;
-        const isRight = x === w - 1;
-        const isHDiv = y > 0 && y < h - 1 && y % this.cellHeight === 0;
-        const isVDiv = x > 0 && x < w - 1 && x % this.cellWidth === 0;
-
-        if (isTop && isLeft) line += "\u250c";
-        else if (isTop && isRight) line += "\u2510";
-        else if (isBottom && isLeft) line += "\u2514";
-        else if (isBottom && isRight) line += "\u2518";
-        else if (isTop && isVDiv) line += "\u252c";
-        else if (isBottom && isVDiv) line += "\u2534";
-        else if (isLeft && isHDiv) line += "\u251c";
-        else if (isRight && isHDiv) line += "\u2524";
-        else if (isHDiv && isVDiv) line += "\u253c";
-        else if (isTop || isBottom || isHDiv) line += "\u2500";
-        else if (isLeft || isRight || isVDiv) line += "\u2502";
-        else line += " ";
-      }
-      lines.push(line);
-    }
-    return lines.join("\n");
-  }
-
-  private createFrame(): Box {
-    return new Box({
-      top: this.frameTop,
-      left: this.frameLeft,
-      width: this.frameWidth,
-      height: this.frameHeight,
-      content: this.buildFrame(),
-      style: { fg: this.borderColor },
-    });
-  }
-
   private createPanes(): void {
     for (let i = 0; i < this.rows * this.cols; i++) {
       const row = Math.floor(i / this.cols);
       const col = i % this.cols;
 
-      // Position pane inside the cell (accounting for borders)
-      const paneTop = this.frameTop + row * this.cellHeight + 1;
-      const paneLeft = this.frameLeft + col * this.cellWidth + 1;
-      // Last row/col need extra space for borders (not shared like internal dividers)
-      const isLastRow = row === this.rows - 1;
-      const isLastCol = col === this.cols - 1;
-      const paneWidth = this.cellWidth - (isLastCol ? 2 : 1);
-      const paneHeight = this.cellHeight - (isLastRow ? 2 : 1);
+      const { top, left, width, height } = this.getCellBounds(row, col);
+      const frame = new Box({
+        parent: this.parent,
+        top,
+        left,
+        width,
+        height,
+        tags: true,
+        wrap: false,
+        border: { type: "line", style: "round" },
+        style: {
+          fg: this.borderColor,
+          ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
+          border: {
+            fg: this.borderColor,
+            ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
+          },
+        },
+      });
 
       const box = new ScrollableBox({
-        top: paneTop,
-        left: paneLeft,
-        width: paneWidth,
-        height: paneHeight,
+        parent: this.parent,
+        top: top + 1,
+        left: left + 1,
+        width: Math.max(width - 2, 1),
+        height: Math.max(height - 2, 1),
         tags: true,
         keys: true,
         vi: true,
         mouse: true,
         alwaysScroll: true,
+        style: {
+          ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
+        },
         scrollbar: {
           ch: " ",
-          track: { bg: "black" },
+          track: { bg: this.backgroundColor ?? "black" },
           style: { inverse: true },
         },
       });
@@ -184,22 +149,40 @@ export class GridLayout {
         },
       );
 
-      this.screen.append(box);
-
       const pane = new GridPaneImpl(
+        frame,
         box,
         row,
         col,
         this.maxLinesPerPane,
-        this.screen,
-        this.frameTop,
-        this.frameLeft,
-        this.cellWidth,
-        this.cellHeight,
+        this.parent,
+        this.borderColor,
+        this.backgroundColor,
+        top,
+        left,
+        width,
+        height,
       );
 
       this.panes.push(pane);
     }
+  }
+
+  private getCellBounds(
+    row: number,
+    col: number,
+  ): { top: number; left: number; width: number; height: number } {
+    const leftOffset = Math.floor((col * this.frameWidth) / this.cols);
+    const rightOffset = Math.floor(((col + 1) * this.frameWidth) / this.cols);
+    const topOffset = Math.floor((row * this.frameHeight) / this.rows);
+    const bottomOffset = Math.floor(((row + 1) * this.frameHeight) / this.rows);
+
+    return {
+      top: this.frameTop + topOffset,
+      left: this.frameLeft + leftOffset,
+      width: Math.max(rightOffset - leftOffset, 3),
+      height: Math.max(bottomOffset - topOffset, 3),
+    };
   }
 
   getPane(index: number): GridPane | undefined {
@@ -223,7 +206,6 @@ export class GridLayout {
   }
 
   destroy(): void {
-    this.frame.destroy();
     for (const pane of this.panes) {
       pane.destroy();
     }
@@ -234,47 +216,50 @@ export class GridLayout {
  * Internal implementation of GridPane with line buffering.
  */
 class GridPaneImpl implements GridPane {
+  private frame: Box;
   private box: ScrollableBox;
   private lines: string[] = [];
   private content = "";
   private maxLines: number;
-  private screen: Screen;
+  private labelParent: GridParent;
+  private borderColor: string;
+  private backgroundColor: string | undefined;
   private labelBox: Box | null = null;
   private currentLabel: string | null = null;
   private readonly visibleLineBudget: number;
   private readonly labelWidth: number;
-
-  // Position info for label rendering
-  private frameTop: number;
-  private frameLeft: number;
-  private cellWidth: number;
-  private cellHeight: number;
+  private readonly labelTop: number;
+  private readonly labelLeft: number;
 
   row: number;
   col: number;
 
   constructor(
+    frame: Box,
     box: ScrollableBox,
     row: number,
     col: number,
     maxLines: number,
-    screen: Screen,
+    labelParent: GridParent,
+    borderColor: string,
+    backgroundColor: string | undefined,
     frameTop: number,
     frameLeft: number,
-    cellWidth: number,
-    cellHeight: number,
+    frameWidth: number,
+    frameHeight: number,
   ) {
+    this.frame = frame;
     this.box = box;
     this.row = row;
     this.col = col;
     this.maxLines = maxLines;
-    this.screen = screen;
-    this.frameTop = frameTop;
-    this.frameLeft = frameLeft;
-    this.cellWidth = cellWidth;
-    this.cellHeight = cellHeight;
-    this.visibleLineBudget = Math.max(this.cellHeight - 2, 1);
-    this.labelWidth = Math.max(this.cellWidth - 2, 1);
+    this.labelParent = labelParent;
+    this.borderColor = borderColor;
+    this.backgroundColor = backgroundColor;
+    this.visibleLineBudget = Math.max(frameHeight - 2, 1);
+    this.labelWidth = Math.max(frameWidth - 2, 1);
+    this.labelTop = frameTop;
+    this.labelLeft = frameLeft + 1;
   }
 
   setLabel(label: string): void {
@@ -284,16 +269,18 @@ class GridPaneImpl implements GridPane {
     this.currentLabel = label;
 
     if (!this.labelBox) {
-      const labelTop = this.frameTop + this.row * this.cellHeight;
-      const labelLeft = this.frameLeft + this.col * this.cellWidth + 1;
       this.labelBox = new Box({
-        top: labelTop,
-        left: labelLeft,
+        parent: this.labelParent,
+        top: this.labelTop,
+        left: this.labelLeft,
         width: this.labelWidth,
         height: 1,
         tags: true,
+        style: {
+          fg: this.borderColor,
+          ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
+        },
       });
-      this.screen.append(this.labelBox);
     }
 
     this.labelBox.setContent(this.formatLabelContent(label));
@@ -339,10 +326,11 @@ class GridPaneImpl implements GridPane {
   }
 
   destroy(): void {
-    this.box.destroy();
     if (this.labelBox) {
       this.labelBox.destroy();
     }
+    this.box.destroy();
+    this.frame.destroy();
   }
 
   private getVisualLength(str: string): number {

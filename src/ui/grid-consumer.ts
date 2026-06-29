@@ -13,11 +13,13 @@ import { CommandStreamAdapter } from "../terminal/command-stream-adapter.ts";
 import {
   createFullscreenKeypress,
   createFullscreenScreen,
+  createFullscreenStage,
   createFullscreenStatusLine,
   FULLSCREEN_QUIT_KEYS,
   type FullscreenKeypress,
   type FullscreenScreen,
   type FullscreenStatusLine,
+  fullTerminalViewport,
 } from "../terminal/fullscreen-surface.ts";
 import {
   renderTerminalLineBlessed,
@@ -63,6 +65,7 @@ function colors(): {
   muted: string;
   primary: string;
   border: string;
+  background: string;
 } {
   const theme = activeTheme();
   const { palette } = theme;
@@ -74,6 +77,7 @@ function colors(): {
     muted: toBlessed(palette.muted),
     primary: toBlessed(palette.primary),
     border: toBlessed(theme.chrome.border),
+    background: toBlessed(theme.chrome.background),
   };
 }
 
@@ -205,17 +209,31 @@ export interface GridRenderEnvironment {
 function createDefaultEnvironment(): GridRenderEnvironment {
   return {
     createScreen: () => createFullscreenScreen(),
-    createGrid: ({ screen, rows, cols }) =>
-      new GridLayout({
-        screen: screen as FullscreenScreen,
+    createGrid: ({ screen, rows, cols }) => {
+      const fullscreenScreen = screen as FullscreenScreen;
+      const stage = createFullscreenStage(
+        fullscreenScreen,
+        fullTerminalViewport,
+      );
+      const grid = new GridLayout({
+        screen: fullscreenScreen,
+        parent: stage,
         rows,
         cols,
         top: 0,
         left: 0,
         width: "100%",
         height: "100%-1",
-        borderColor: colors().border,
-      }),
+        borderColor: colors().primary,
+        backgroundColor: colors().background,
+      });
+      const destroyGrid = grid.destroy.bind(grid);
+      grid.destroy = (): void => {
+        destroyGrid();
+        stage.destroy();
+      };
+      return grid;
+    },
     createStatusLine: ({ screen }) =>
       createFullscreenStatusLine(
         screen as FullscreenScreen,
@@ -276,13 +294,12 @@ export async function renderPipelinesGrid({
   }
 
   const screen = environment.createScreen();
-  const statusLine = environment.createStatusLine?.({ screen });
-
   const grid = environment.createGrid({
     screen,
     rows,
     cols,
   });
+  const statusLine = environment.createStatusLine?.({ screen });
 
   // Map repo names to pane indices
   const paneMap = new Map<string, number>();
@@ -652,11 +669,11 @@ export function createDefaultCompletionModal({
     ? colors().error
     : hasSetupWarnings
       ? colors().warning
-      : colors().border;
+      : colors().primary;
   const style: BoxOptions["style"] = {
     fg: colors().primary,
     bg: surfaceBackground,
-    border: { fg: borderColor },
+    border: { fg: borderColor, bg: surfaceBackground },
   };
 
   const box = new Box({
@@ -670,7 +687,7 @@ export function createDefaultCompletionModal({
     // wrap guarantees a stray wide row can never spill onto a second line and
     // shove the text up and down between animation frames.
     wrap: false,
-    border: { type: "line" },
+    border: { type: "line", style: "round" },
     padding: { top: 0, bottom: 0, left: 1, right: 2 },
     content: contentLines.join("\n"),
     style,
@@ -681,6 +698,8 @@ export function createDefaultCompletionModal({
     top,
     width,
     title: "Workspace Created",
+    backgroundColor: surfaceBackground,
+    borderColor,
   });
 
   if (hasRepoErrors) {
@@ -713,22 +732,27 @@ function createCompletionModalTitle({
   top,
   width,
   title,
+  backgroundColor,
+  borderColor,
 }: {
   screen: GridScreenLike;
   left: number;
   top: number;
   width: number;
   title: string;
+  backgroundColor: string;
+  borderColor: string;
 }): GridCompletionModalLike {
+  const content = `\u2500 ${title} \u2500`;
   return new Box({
     parent: screen as UnblessedScreen,
     top,
-    left: left + Math.max(Math.floor((width - stringWidth(title)) / 2), 0),
-    width: stringWidth(title),
+    left: left + Math.max(Math.floor((width - stringWidth(content)) / 2), 0),
+    width: stringWidth(content),
     height: 1,
-    content: title,
+    content,
     tags: true,
-    style: { fg: colors().muted },
+    style: { fg: borderColor, bg: backgroundColor },
   }) as GridCompletionModalLike;
 }
 

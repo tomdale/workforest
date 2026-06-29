@@ -3,8 +3,10 @@ import { CommandStreamAdapter } from "../terminal/command-stream-adapter.ts";
 import {
   createFullscreenKeypress,
   createFullscreenScreen,
+  createFullscreenStage,
   createFullscreenStatusLine,
   FULLSCREEN_QUIT_KEYS,
+  fullTerminalViewport,
 } from "../terminal/fullscreen-surface.ts";
 import {
   renderTerminalLineBlessed,
@@ -52,8 +54,11 @@ function colors(): {
   error: string;
   muted: string;
   primary: string;
+  border: string;
+  background: string;
 } {
-  const { palette } = activeTheme();
+  const theme = activeTheme();
+  const { palette } = theme;
   return {
     focus: toBlessed(palette.focus),
     success: toBlessed(palette.success),
@@ -61,6 +66,8 @@ function colors(): {
     error: toBlessed(palette.error),
     muted: toBlessed(palette.muted),
     primary: toBlessed(palette.primary),
+    border: toBlessed(theme.chrome.border),
+    background: toBlessed(theme.chrome.background),
   };
 }
 
@@ -96,6 +103,7 @@ export async function renderInitializationStatus(
   repoNames: readonly string[],
 ): Promise<void> {
   const screen = createFullscreenScreen();
+  const stage = createFullscreenStage(screen, fullTerminalViewport);
   const statusLine = createFullscreenStatusLine(screen);
   const includeAgentsMdPane = await shouldShowAgentsMdPane(target);
   const paneNames = includeAgentsMdPane
@@ -104,13 +112,15 @@ export async function renderInitializationStatus(
   const { rows, cols } = calculateGridDimensions(paneNames.length);
   const grid = new GridLayout({
     screen,
+    parent: stage,
     rows,
     cols,
     top: 0,
     left: 0,
     width: "100%",
     height: "100%-1",
-    borderColor: colors().focus,
+    borderColor: colors().border,
+    backgroundColor: colors().background,
   });
   const paneMap = new Map<string, number>();
   const adapters = new Map<string, CommandStreamAdapter>();
@@ -207,6 +217,7 @@ export async function renderInitializationStatus(
     }
     statusLine.destroy();
     grid.destroy();
+    stage.destroy();
     screen.destroy();
   }
 }

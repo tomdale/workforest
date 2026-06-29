@@ -44,11 +44,13 @@ vi.mock("@unblessed/node", () => ({
 import {
   createFullscreenKeypress,
   createFullscreenStage,
+  createFullscreenStatusLine,
   FULLSCREEN_MAX_HEIGHT,
   FULLSCREEN_MAX_WIDTH,
   FULLSCREEN_QUIT_KEYS,
   type FullscreenScreen,
   fullscreenViewport,
+  fullTerminalViewport,
 } from "./fullscreen-surface.ts";
 
 function createMockScreen(
@@ -91,6 +93,10 @@ function createMockScreen(
 
 function lineLengths(content: string): number[] {
   return content.split("\n").map((line) => line.length);
+}
+
+function stripBlessedTags(value: string): string {
+  return value.replace(/\{[^}]*\}/g, "");
 }
 
 describe("fullscreenViewport", () => {
@@ -153,6 +159,26 @@ describe("fullscreenViewport", () => {
   });
 });
 
+describe("fullTerminalViewport", () => {
+  it("uses the whole terminal without applying the centered cap", () => {
+    expect(fullTerminalViewport({ width: 220, height: 60 })).toEqual({
+      top: 0,
+      left: 0,
+      width: 220,
+      height: 60,
+    });
+  });
+
+  it("falls back to the fullscreen cap when dimensions are unavailable", () => {
+    expect(fullTerminalViewport({ width: Number.NaN, height: 0 })).toEqual({
+      top: 0,
+      left: 0,
+      width: FULLSCREEN_MAX_WIDTH,
+      height: FULLSCREEN_MAX_HEIGHT,
+    });
+  });
+});
+
 describe("createFullscreenStage", () => {
   it("reflows the capped stage and backdrop when the screen resizes", () => {
     boxes.length = 0;
@@ -181,6 +207,28 @@ describe("createFullscreenStage", () => {
     expect(screen.render).toHaveBeenCalledTimes(1);
   });
 
+  it("reflows with a custom viewport resolver", () => {
+    boxes.length = 0;
+    const screen = createMockScreen(220, 60);
+
+    const stage = createFullscreenStage(screen, fullTerminalViewport);
+
+    expect(stage.left).toBe(0);
+    expect(stage.top).toBe(0);
+    expect(stage.width).toBe(220);
+    expect(stage.height).toBe(60);
+
+    screen.width = 120;
+    screen.height = 40;
+    screen.emitResize();
+
+    expect(stage.left).toBe(0);
+    expect(stage.top).toBe(0);
+    expect(stage.width).toBe(120);
+    expect(stage.height).toBe(40);
+    expect(screen.render).toHaveBeenCalledTimes(1);
+  });
+
   it("removes the resize listener when the stage is destroyed", () => {
     boxes.length = 0;
     const screen = createMockScreen(220, 60);
@@ -191,6 +239,23 @@ describe("createFullscreenStage", () => {
     stage.destroy();
 
     expect(screen.listenerCount("resize")).toBe(0);
+  });
+});
+
+describe("createFullscreenStatusLine", () => {
+  it("paints a full-width row for short content", () => {
+    boxes.length = 0;
+    const screen = createMockScreen(12, 4);
+
+    const statusLine = createFullscreenStatusLine(screen);
+    statusLine.setContent("q quit");
+
+    const statusBox = boxes.at(-1);
+    expect(statusBox?.content).toBe(
+      " q quit{#121416-fg}{#121416-bg}.....{/#121416-bg}{/#121416-fg}",
+    );
+    expect(stripBlessedTags(statusBox?.content ?? "")).toBe(" q quit.....");
+    expect(stripBlessedTags(statusBox?.content ?? "")).toHaveLength(12);
   });
 });
 

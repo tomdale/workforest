@@ -17,6 +17,8 @@ vi.mock("@unblessed/node", () => {
       this["once"] = vi.fn((_event: string, handler: () => void) => {
         handler();
       });
+      this["on"] = vi.fn();
+      this["off"] = vi.fn();
       this["render"] = vi.fn();
       this["destroy"] = vi.fn();
       this["append"] = vi.fn();
@@ -26,6 +28,9 @@ vi.mock("@unblessed/node", () => {
     Box: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
       this["setContent"] = vi.fn();
       this["destroy"] = vi.fn();
+      this["append"] = vi.fn();
+      this["width"] = 220;
+      this["height"] = 50;
     }),
     ScrollableBox: vi.fn().mockImplementation(function (
       this: Record<string, unknown>,
@@ -511,8 +516,40 @@ describe("renderPipelinesGrid", () => {
 
     expect(modalCall?.[0]).toEqual(
       expect.objectContaining({
+        border: { type: "line", style: "round" },
         content: expect.stringContaining("•{"),
+        style: expect.objectContaining({
+          border: expect.objectContaining({ fg: "red" }),
+        }),
         width: 50,
+      }),
+    );
+    expect(modalCall?.[0]).not.toHaveProperty("label");
+
+    const modalTitleCall = vi
+      .mocked(Box)
+      .mock.calls.find((call) => call[0]?.content === "─ Workspace Created ─");
+    expect(modalTitleCall?.[0]).toEqual(
+      expect.objectContaining({
+        style: { fg: "red", bg: "#121416" },
+      }),
+    );
+
+    const gridFrameCall = vi
+      .mocked(Box)
+      .mock.calls.find(
+        (call) =>
+          call[0]?.top === 0 &&
+          call[0]?.left === 0 &&
+          call[0]?.width === 220 &&
+          call[0]?.height === 49,
+      );
+    expect(gridFrameCall?.[0]).toEqual(
+      expect.objectContaining({
+        border: { type: "line", style: "round" },
+        style: expect.objectContaining({
+          border: expect.objectContaining({ fg: "red", bg: "#121416" }),
+        }),
       }),
     );
     expect(String(modalCall?.[0]?.content)).toContain("{bold}repo{/bold}");
@@ -529,6 +566,8 @@ describe("renderPipelinesGrid", () => {
       screen["once"] = vi.fn((_event: string, handler: () => void) => {
         acknowledge = handler;
       });
+      screen["on"] = vi.fn();
+      screen["off"] = vi.fn();
       screen["render"] = vi.fn();
       screen["destroy"] = vi.fn();
       screen["append"] = vi.fn();
