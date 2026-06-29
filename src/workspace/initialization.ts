@@ -892,6 +892,10 @@ async function recordWorkerPipelineState(
   state: RepoPipelineState,
 ): Promise<void> {
   if (state.phase === "initializer") {
+    if (state.status === "output") {
+      return;
+    }
+
     await updateRepoInitializationState(scope, repo.name, (current) => {
       if (
         current.run_id !== runId ||
@@ -901,12 +905,13 @@ async function recordWorkerPipelineState(
         return current;
       }
 
+      const { message: _message, ...currentWithoutMessage } = current;
       return {
-        ...current,
+        ...currentWithoutMessage,
         status: "running",
         phase: "initializer",
         step: `initializer:${state.name}`,
-        ...(state.message ? { message: state.message } : {}),
+        ...(state.message !== undefined ? { message: state.message } : {}),
         updated_at: new Date().toISOString(),
       };
     });
