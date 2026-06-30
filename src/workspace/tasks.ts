@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
@@ -33,6 +34,11 @@ import {
   removeRepoSetupLog,
   startRepoSetupLog,
 } from "./setup-logs.ts";
+
+const GIT_WORKTREE_LOCK_FILENAME = "workforest-worktree.lock";
+const GIT_WORKTREE_LOCK_RETRY_MS = 20;
+const GIT_WORKTREE_LOCK_TIMEOUT_MS = 10_000;
+const GIT_WORKTREE_LOCK_STALE_MS = 30_000;
 
 export type TaskCreateResult = {
   slug: string;
@@ -473,8 +479,10 @@ async function removeWorkspaceTasks({
     const exists = await pathExists(absolutePath);
 
     if (!exists) {
-      await pruneStaleWorktree(parentRepoDir);
-      await deleteBranchIfPossible(parentRepoDir, entry.branch, false);
+      await withGitWorktreeLock(parentRepoDir, async () => {
+        await pruneStaleWorktree(parentRepoDir);
+        await deleteBranchIfPossible(parentRepoDir, entry.branch, false);
+      });
       removed.push(entry);
       continue;
     }
@@ -497,8 +505,10 @@ async function removeWorkspaceTasks({
     const removeArgs = ["worktree", "remove"];
     if (force) removeArgs.push("--force");
     removeArgs.push(absolutePath);
-    await runGit(removeArgs, { cwd: parentRepoDir, timeout: 30_000 });
-    await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
+    await withGitWorktreeLock(parentRepoDir, async () => {
+      await runGit(removeArgs, { cwd: parentRepoDir, timeout: 30_000 });
+      await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
+    });
 
     if (entry.setup_log) {
       await fs.rm(
@@ -552,8 +562,14 @@ async function removeRepositoryTasks({
     const exists = await pathExists(absolutePath);
 
     if (!exists) {
-      await pruneStaleWorktree(resolvedParentRepoDir);
-      await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, false);
+      await withGitWorktreeLock(resolvedParentRepoDir, async () => {
+        await pruneStaleWorktree(resolvedParentRepoDir);
+        await deleteBranchIfPossible(
+          resolvedParentRepoDir,
+          entry.branch,
+          false,
+        );
+      });
       removed.push(entry);
       continue;
     }
@@ -576,8 +592,10 @@ async function removeRepositoryTasks({
     const removeArgs = ["worktree", "remove"];
     if (force) removeArgs.push("--force");
     removeArgs.push(absolutePath);
-    await runGit(removeArgs, { cwd: resolvedParentRepoDir, timeout: 30_000 });
-    await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, force);
+    await withGitWorktreeLock(resolvedParentRepoDir, async () => {
+      await runGit(removeArgs, { cwd: resolvedParentRepoDir, timeout: 30_000 });
+      await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, force);
+    });
 
     if (entry.setup_log) {
       await removeRepoSetupLog(
@@ -615,9 +633,11 @@ async function* createAndSetupTask({
       level: "info",
       message: `${entry.slug}: creating ${path.basename(targetDir)} on ${entry.branch}`,
     });
-    await runGit(["worktree", "add", "-b", entry.branch, targetDir, "HEAD"], {
-      cwd: parentRepoDir,
-    });
+    await withGitWorktreeLock(parentRepoDir, () =>
+      runGit(["worktree", "add", "-b", entry.branch, targetDir, "HEAD"], {
+        cwd: parentRepoDir,
+      }),
+    );
 
     const result = await runTaskInitializers({
       workspaceDir,
@@ -1028,6 +1048,63 @@ async function getCurrentSha(repoDir: string): Promise<string> {
 async function isGitDirty(repoDir: string): Promise<boolean> {
   const { stdout } = await runGit(["status", "--porcelain"], { cwd: repoDir });
   return stdout.trim().length > 0;
+}
+
+async function withGitWorktreeLock<T>(
+  repoDir: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const { stdout } = await runGit(
+    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    { cwd: repoDir },
+  );
+  const gitCommonDir = stdout.trim() || path.join(repoDir, ".git");
+
+  const lockPath = path.join(gitCommonDir, GIT_WORKTREE_LOCK_FILENAME);
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  const deadline = Date.now() + GIT_WORKTREE_LOCK_TIMEOUT_MS;
+  let lockHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+
+  while (!lockHandle) {
+    try {
+      lockHandle = await fs.open(lockPath, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+
+      if (await removeStaleGitWorktreeLock(lockPath)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting for git worktree lock at ${lockPath}`,
+        );
+      }
+      await delay(GIT_WORKTREE_LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await lockHandle.close();
+    await fs.rm(lockPath, { force: true });
+  }
+}
+
+async function removeStaleGitWorktreeLock(lockPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(lockPath);
+    if (Date.now() - stat.mtimeMs <= GIT_WORKTREE_LOCK_STALE_MS) {
+      return false;
+    }
+    await fs.rm(lockPath, { force: true });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
 }
 
 async function branchExists(repoDir: string, branch: string): Promise<boolean> {
