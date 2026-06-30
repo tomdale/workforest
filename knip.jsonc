@@ -1,0 +1,50 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  "ignoreBinaries": ["codex", "sandbox"],
+  "rules": {
+    "exports": "off",
+    "types": "off"
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/cli.ts",
+        "src/index.ts",
+        "src/**/*.test.ts",
+        "src/**/*.integration.test.ts",
+        "benchmarks/*.ts",
+        "benchmarks/scenarios/*.ts",
+        ".agents/plugins/wf/scripts/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "benchmarks/**/*.ts",
+        ".agents/plugins/wf/scripts/*.mjs"
+      ]
+    },
+    "packages/claude-cli": {
+      "entry": ["src/index.ts", "src/ai-providers/*.ts", "test/**/*.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
+    },
+    "packages/codex-cli": {
+      "entry": ["src/index.ts", "src/ai-providers/*.ts", "test/**/*.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
+    },
+    "packages/core": {
+      "entry": ["src/index.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/package-managers": {
+      "entry": ["src/index.ts", "src/initializers/*.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/turbo": {
+      "entry": ["src/index.ts", "src/initializers/*.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/vercel": {
+      "entry": ["src/index.ts", "src/initializers/*.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    }
+  }
+}
