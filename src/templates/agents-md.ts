@@ -10,8 +10,8 @@ import {
 import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { generateText, getAiStatus } from "../services/ai/index.ts";
-import { runGit } from "../services/git.ts";
-import type { RepoConfig, TemplateAgentsMdConfig } from "../types.ts";
+import { createDefaultBranchResolver, runGit } from "../services/git.ts";
+import type { RepositorySource, TemplateAgentsMdConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import { ensureMirrorRepoGenerator } from "../workspace/repository.ts";
@@ -171,7 +171,7 @@ export async function getTemplateAgentsMdStatus(
 
 export async function refreshTemplateAgentsMd(
   template: Template,
-  repos: readonly RepoConfig[],
+  repos: readonly RepositorySource[],
   options: {
     force?: boolean;
     now?: Date;
@@ -352,7 +352,7 @@ export async function materializeTemplateAgentsMd(
 export async function refreshAndMaterializeTemplateAgentsMd(
   template: Template,
   workspaceDir: string,
-  repos: readonly RepoConfig[],
+  repos: readonly RepositorySource[],
   options: {
     force?: boolean;
     now?: Date;
@@ -594,7 +594,7 @@ function relativeSymlinkTarget(fromDirectory: string, target: string): string {
 }
 
 async function prepareSources(
-  repos: readonly RepoConfig[],
+  repos: readonly RepositorySource[],
   config: TemplateAgentsMdConfig,
   template: Template,
   onRepository?: (repository: string) => void,
@@ -604,6 +604,7 @@ async function prepareSources(
     path.join(os.tmpdir(), "workforest-agents-md-"),
   );
   const prepared: PreparedRepository[] = [];
+  const defaultBranchResolver = createDefaultBranchResolver();
   try {
     for (const repo of repos) {
       onRepository?.(repo.name);
@@ -611,7 +612,7 @@ async function prepareSources(
       for await (const state of ensureMirrorRepoGenerator(repo, mirror)) {
         if (state.status === "failed") throw state.error;
       }
-      const ref = await resolveDefaultRef(mirror, repo.defaultBranch);
+      const ref = await resolveDefaultRef(mirror, defaultBranchResolver);
       const { stdout: revisionOut } = await runGit(["rev-parse", ref], {
         cwd: mirror,
       });
@@ -777,8 +778,10 @@ async function cleanupSources(sources: PreparedSources): Promise<void> {
 
 async function resolveDefaultRef(
   mirror: string,
-  branch: string,
+  defaultBranchResolver = createDefaultBranchResolver(),
 ): Promise<string> {
+  const branch =
+    await defaultBranchResolver.resolveBareMirrorDefaultBranch(mirror);
   for (const ref of [
     `refs/remotes/origin/${branch}`,
     `refs/heads/${branch}`,
@@ -1037,7 +1040,7 @@ function status(
 
 function validateConfiguredRepositories(
   config: TemplateAgentsMdConfig,
-  repos: readonly RepoConfig[],
+  repos: readonly RepositorySource[],
 ): void {
   const names = new Set(repos.map((repo) => repo.name));
   for (const repo of Object.keys(config.paths ?? {}))

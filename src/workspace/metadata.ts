@@ -41,7 +41,6 @@ export type WriteMetadataOptions = {
   repos: readonly {
     name: string;
     remote: string;
-    defaultBranch: string;
     hasLockfile: boolean;
   }[];
 };
@@ -69,7 +68,6 @@ function metadataFromOptions(options: WriteMetadataOptions): WorkspaceMetadata {
     repos: options.repos.map((repo) => ({
       name: repo.name,
       remote: repo.remote,
-      default_branch: repo.defaultBranch,
       has_lockfile: repo.hasLockfile,
       ...(options.branchName ? { feature_branch: options.branchName } : {}),
     })),
@@ -384,12 +382,21 @@ export async function readWorkspaceMetadata(
     );
   }
 
-  const metadata = validateWorkspaceMetadata(
+  const validated = validateWorkspaceMetadata(
     parsed,
     workspaceDir,
     metadataPath,
   );
+  const { metadata, changed } = normalizeWorkspaceMetadata(validated);
   await validateWorkspaceMetadataFilesystemPaths(metadata, workspaceDir);
+  if (changed && metadataPath === getMetadataPath(workspaceDir)) {
+    await writeMetadataFile(metadataPath, workspaceDir, metadata, {
+      source: "workspace metadata",
+      ensureParent: async () => {
+        await assertWorkspaceMetadataPathNotSymlink(workspaceDir);
+      },
+    });
+  }
   return metadata;
 }
 
@@ -540,8 +547,20 @@ async function readMetadataFile(
     );
   }
 
-  const metadata = validateWorkspaceMetadata(parsed, rootDir, metadataPath);
+  const validated = validateWorkspaceMetadata(parsed, rootDir, metadataPath);
+  const { metadata, changed } = normalizeWorkspaceMetadata(validated);
   await validateWorkspaceMetadataFilesystemPaths(metadata, rootDir);
+  if (changed) {
+    await writeMetadataFile(metadataPath, rootDir, metadata, {
+      source,
+      ensureParent: async () => {
+        await assertContainedPathWithoutSymlinks(
+          rootDir,
+          path.dirname(metadataPath),
+        );
+      },
+    });
+  }
   return metadata;
 }
 
@@ -555,7 +574,7 @@ async function writeMetadataFile(
   }>,
 ): Promise<void> {
   const validated = validateWorkspaceMetadata(
-    metadata,
+    normalizeWorkspaceMetadata(metadata).metadata,
     rootDir,
     options.source,
   );
@@ -571,6 +590,26 @@ async function writeMetadataFile(
   } finally {
     await fs.rm(temporaryPath, { force: true });
   }
+}
+
+function normalizeWorkspaceMetadata(metadata: WorkspaceMetadata): {
+  metadata: WorkspaceMetadata;
+  changed: boolean;
+} {
+  let changed = false;
+  const repos = metadata.repos.map((repo) => {
+    const legacy = repo as WorkspaceRepoMetadata & { default_branch?: string };
+    if (legacy.default_branch === undefined) {
+      return repo;
+    }
+    changed = true;
+    const { default_branch: _defaultBranch, ...nextRepo } = legacy;
+    return nextRepo;
+  });
+
+  return changed
+    ? { metadata: { ...metadata, repos }, changed }
+    : { metadata, changed };
 }
 
 async function withWorkspaceMetadataLock<T>(
@@ -862,7 +901,6 @@ function validateWorkspaceRepoMetadata(value: unknown, source: string): void {
     "Repository name",
   );
   requireString(repo["remote"], `${source}.remote`);
-  requireString(repo["default_branch"], `${source}.default_branch`);
   requireBoolean(repo["has_lockfile"], `${source}.has_lockfile`);
   optionalString(repo["feature_branch"], `${source}.feature_branch`);
 }

@@ -560,13 +560,11 @@ async function createStatusFixture(
       {
         name: "agents",
         remote: "git@github.com:vercel/agents.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
       {
         name: "api",
         remote: "git@github.com:vercel/api.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
     ],
@@ -578,7 +576,6 @@ async function createStatusFixture(
       {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
     ],
@@ -590,7 +587,6 @@ async function createStatusFixture(
       {
         name: "workforest",
         remote: "git@github.com:tomdale/workforest.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
     ],

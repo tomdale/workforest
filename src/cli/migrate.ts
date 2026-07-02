@@ -19,7 +19,7 @@ import {
 } from "../terminal/report.ts";
 import type { StatusTone } from "../terminal/status-indicator.ts";
 import type {
-  RepoConfig,
+  RepositorySource,
   WorkspaceConfig,
   WorkspaceMetadata,
 } from "../types.ts";
@@ -70,7 +70,7 @@ export type RepositoryDirectoryMigrationEntry = Readonly<{
   target: string;
   metadataPath: string;
   branchName: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   hasLockfile: boolean;
 }>;
 
@@ -91,7 +91,7 @@ export type RepositoryMetadataMigrationEntry = Readonly<{
   worktreePath: string;
   metadataPath: string;
   branchName: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   hasLockfile: boolean;
 }>;
 
@@ -522,7 +522,7 @@ async function comparablePath(value: string): Promise<string> {
 function repoConfigFromCachedRepository(
   repository: CachedRepository,
   repoName: string,
-): RepoConfig | null {
+): RepositorySource | null {
   if (!repository.remote) {
     return null;
   }
@@ -530,7 +530,6 @@ function repoConfigFromCachedRepository(
   return {
     name: repoName,
     remote: repository.remote,
-    defaultBranch: repository.defaultBranch ?? "main",
   };
 }
 
@@ -599,7 +598,7 @@ async function planRepositoryMetadataMigration(
 async function inferRepoConfig(
   repoName: string,
   worktreePath: string,
-): Promise<RepoConfig | null> {
+): Promise<RepositorySource | null> {
   const remote = await optionalGitLine(
     ["remote", "get-url", "origin"],
     worktreePath,
@@ -608,7 +607,6 @@ async function inferRepoConfig(
     return {
       name: repoName,
       remote,
-      defaultBranch: (await inferDefaultBranch(worktreePath)) ?? "main",
     };
   }
 
@@ -616,18 +614,6 @@ async function inferRepoConfig(
     () => [],
   );
   return cached ?? null;
-}
-
-async function inferDefaultBranch(
-  worktreePath: string,
-): Promise<string | null> {
-  const symbolic = await optionalGitLine(
-    ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-    worktreePath,
-  );
-  return symbolic?.startsWith("origin/")
-    ? symbolic.slice("origin/".length)
-    : null;
 }
 
 async function optionalGitLine(

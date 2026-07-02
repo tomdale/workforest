@@ -290,13 +290,11 @@ async function createWorkspaceFixture(): Promise<WorkspaceFixture> {
       {
         name: "front",
         remote: "git@github.com:example/front.git",
-        defaultBranch: "main",
         hasLockfile: false,
       },
       {
         name: "docs",
         remote: "git@github.com:example/docs.git",
-        defaultBranch: "main",
         hasLockfile: false,
       },
     ],
@@ -344,7 +342,6 @@ async function createRepositoryTaskFixture(): Promise<RepositoryTaskFixture> {
       {
         name: "front",
         remote: "git@github.com:example/front.git",
-        defaultBranch: "main",
         hasLockfile: false,
       },
     ],

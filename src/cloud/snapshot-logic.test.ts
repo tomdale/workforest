@@ -5,7 +5,6 @@ import { baseSnapshotGroup, isSnapshotFresh } from "./snapshot.ts";
 const repo = (name: string, remote: string) => ({
   name,
   remote,
-  defaultBranch: "main",
 });
 
 describe("baseSnapshotGroup", () => {

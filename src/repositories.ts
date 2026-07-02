@@ -5,7 +5,7 @@ import { pathExists } from "@wf-plugin/core";
 import { getCacheDir, reposFromSlugs } from "./config.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import { runGit } from "./services/git.ts";
-import type { RepoConfig } from "./types.ts";
+import type { RepositorySource } from "./types.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
 import { ensureMirrorRepoGenerator } from "./workspace/repository.ts";
@@ -275,7 +275,7 @@ export async function resolveCachedRepository(
 }
 
 export async function resolveMirrorDir(
-  repo: RepoConfig,
+  repo: RepositorySource,
   cacheDir = getCacheDir(),
 ): Promise<string> {
   const repoName = validateRepositoryComponent(repo.name, "Repository name");
@@ -700,7 +700,7 @@ async function readWorktrees(
 
 function cachedRepositoryToRepoConfig(
   repository: CachedRepository,
-): RepoConfig {
+): RepositorySource {
   if (!repository.remote) {
     throw new Error(
       `Cached repository ${repositoryDisplayName(repository)} has no origin remote.`,
@@ -709,7 +709,6 @@ function cachedRepositoryToRepoConfig(
   return {
     name: validateRepositoryComponent(repository.name, "Repository name"),
     remote: repository.remote,
-    defaultBranch: repository.defaultBranch ?? "main",
   };
 }
 

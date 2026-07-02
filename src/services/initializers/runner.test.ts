@@ -100,7 +100,6 @@ describe("initializer runner", () => {
             repo: {
               name: "front",
               remote: "git@github.com:vercel/front.git",
-              defaultBranch: "main",
             },
           },
           disabledInitializers: true,
@@ -120,7 +119,6 @@ describe("initializer runner", () => {
           repo: {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
         },
         disabledInitializers: ["vercel-link"],
@@ -150,7 +148,6 @@ describe("initializer runner", () => {
           repo: {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
         },
       }),
@@ -178,7 +175,6 @@ describe("initializer runner", () => {
           repo: {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
         },
       }),

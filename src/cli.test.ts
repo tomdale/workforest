@@ -407,7 +407,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -461,7 +460,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -538,7 +536,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -615,7 +612,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -665,7 +661,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -847,7 +842,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -904,7 +898,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -987,7 +980,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -1057,7 +1049,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -1121,7 +1112,6 @@ describe("cli", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],

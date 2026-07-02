@@ -253,7 +253,7 @@ async function createInventoryFixture(): Promise<{ baseDir: string }> {
 }
 
 function metadataRepo(name: string, remote: string) {
-  return { name, remote, defaultBranch: "main", hasLockfile: false };
+  return { name, remote, hasLockfile: false };
 }
 
 async function createGitRepo(dir: string): Promise<void> {

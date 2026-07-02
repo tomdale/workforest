@@ -5,9 +5,9 @@ import { getCacheDir } from "./config.ts";
 import { resolveMirrorDir } from "./repositories.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "./services/events.ts";
-import { runGit } from "./services/git.ts";
+import { createDefaultBranchResolver, runGit } from "./services/git.ts";
 import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
-import type { RepoConfig } from "./types.ts";
+import type { RepositorySource } from "./types.ts";
 import { runCommand } from "./utils/exec.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
@@ -136,10 +136,10 @@ export async function createReviewWorktree({
     throw new Error(`Review worktree already exists: ${targetDir}`);
   }
 
-  const defaultBranch = await detectDefaultBranch(
-    mirrorDir,
-    repo.defaultBranch,
-  );
+  const defaultBranch =
+    await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
+      mirrorDir,
+    );
   await runGit(
     ["worktree", "add", "--detach", targetDir, `origin/${defaultBranch}`],
     {
@@ -209,10 +209,10 @@ export async function ensureReviewWorkspace({
   }
 
   if (!(await pathExists(repoDir))) {
-    const defaultBranch = await detectDefaultBranch(
-      mirrorDir,
-      repo.defaultBranch,
-    );
+    const defaultBranch =
+      await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
+        mirrorDir,
+      );
     await runGit(
       ["worktree", "add", "--detach", repoDir, `origin/${defaultBranch}`],
       { cwd: mirrorDir },
@@ -230,7 +230,6 @@ export async function ensureReviewWorkspace({
   const repoMetadata = {
     name: repo.name,
     remote: repo.remote,
-    defaultBranch: repo.defaultBranch,
     hasLockfile: false,
   };
   if (!existingMetadata) {
@@ -258,7 +257,6 @@ export async function ensureReviewWorkspace({
         {
           name: repo.name,
           remote: repo.remote,
-          default_branch: repo.defaultBranch,
           has_lockfile: false,
         },
       ],
@@ -278,7 +276,7 @@ async function runReviewInitializers({
   workspaceDir,
   onEvent,
 }: {
-  repo: RepoConfig;
+  repo: RepositorySource;
   repoDir: string;
   workspaceDir: string;
   onEvent?: ServiceEventSink;
@@ -510,32 +508,11 @@ function parsePrNumber(input: string): number {
   return Number(normalized);
 }
 
-function targetToRepoConfig(target: ReviewRepoTarget): RepoConfig {
+function targetToRepoConfig(target: ReviewRepoTarget): RepositorySource {
   return {
     name: target.repo,
     remote: `git@github.com:${target.owner}/${target.repo}.git`,
-    defaultBranch: "main",
   };
-}
-
-async function detectDefaultBranch(
-  mirrorDir: string,
-  fallback: string,
-): Promise<string> {
-  try {
-    const { stdout } = await runGit(["symbolic-ref", "HEAD"], {
-      cwd: mirrorDir,
-    });
-    const branch = stdout.trim().replace("refs/heads/", "");
-    const { stdout: refOutput } = await runGit(
-      ["for-each-ref", `refs/remotes/origin/${branch}`],
-      { cwd: mirrorDir },
-    );
-    if (refOutput.trim()) return branch;
-  } catch {
-    // Use the configured default branch when mirror introspection fails.
-  }
-  return fallback;
 }
 
 async function cleanupFailedReviewWorktree(

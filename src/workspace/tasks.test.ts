@@ -42,7 +42,6 @@ async function createWorkspaceDir(): Promise<string> {
       {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
     ],
@@ -80,7 +79,6 @@ describe("workspace tasks", () => {
       parentRepo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        default_branch: "main",
         has_lockfile: true,
       },
       slugs: ["fix-tests"],
@@ -137,7 +135,6 @@ describe("workspace tasks", () => {
       parentRepo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        default_branch: "main",
         has_lockfile: true,
       },
       slugs: ["optional-corepack"],
@@ -188,7 +185,6 @@ describe("workspace tasks", () => {
         parentRepo: {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           has_lockfile: true,
         },
         slugs: ["fix-tests"],
@@ -224,7 +220,6 @@ describe("workspace tasks", () => {
         parentRepo: {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           has_lockfile: true,
         },
         slugs: ["fix-tests"],
@@ -267,7 +262,6 @@ describe("workspace tasks", () => {
       parentRepo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        default_branch: "main",
         has_lockfile: true,
       },
       slugs: ["fix-tests"],
@@ -434,7 +428,6 @@ describe("workspace tasks", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
       changeName: "my-feature",
       slugs: ["fix-tests"],

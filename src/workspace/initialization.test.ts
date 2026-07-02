@@ -11,7 +11,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runGit } from "../services/git.ts";
 import { createTemplate } from "../templates/index.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import {
   buildRepoInitializerWorkerEnvironment,
   cancelRepoInitializations,
@@ -36,10 +36,9 @@ const originalAiDisabled = process.env["WORKFOREST_AI_DISABLED"];
 const originalPath = process.env["PATH"];
 const originalPromptLog = process.env["WORKFOREST_PROMPT_LOG"];
 const originalShell = process.env["SHELL"];
-const repo: RepoConfig = {
+const repo: RepositorySource = {
   name: "front",
   remote: "git@github.com:vercel/front.git",
-  defaultBranch: "main",
 };
 
 afterEach(async () => {
@@ -179,10 +178,9 @@ describe("background repository initialization", () => {
         paths: { source: ["src"] },
       },
     });
-    const sourceRepo: RepoConfig = {
+    const sourceRepo: RepositorySource = {
       name: "source",
       remote: `file://${source}`,
-      defaultBranch: "main",
     };
     await writeWorkspaceMetadata(workspaceDir, {
       featureName: "background-guidance",

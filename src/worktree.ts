@@ -1,6 +1,6 @@
 import { log } from "./logger.ts";
 import { resolveMirrorDir } from "./repositories.ts";
-import type { RepoConfig } from "./types.ts";
+import type { RepositorySource } from "./types.ts";
 import { ensureCacheDir } from "./workspace/index.ts";
 import {
   createWorkingCopyGenerator,
@@ -8,13 +8,13 @@ import {
 } from "./workspace/repository.ts";
 
 export type CreateSingleWorktreeOptions = {
-  repo: RepoConfig;
+  repo: RepositorySource;
   branchName: string;
   targetDir: string;
 };
 
 export type SingleWorktreeResult = {
-  repo: RepoConfig;
+  repo: RepositorySource;
   branchName: string;
   targetDir: string;
 };

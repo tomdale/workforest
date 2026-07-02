@@ -88,7 +88,6 @@ describe("pnpmInstallInitializer", () => {
           repo: {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -135,7 +134,6 @@ describe("pnpmInstallInitializer", () => {
           repo: {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
         },
         {},

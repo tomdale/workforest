@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SingleRepoInitializerState } from "../services/initializers/index.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import {
   getRepoInitializationLogPath,
   initializeWorkspaceInitialization,
@@ -76,10 +76,9 @@ vi.mock("../services/initializers/index.ts", () => ({
 }));
 
 const tempDirs: string[] = [];
-const repo: RepoConfig = {
+const repo: RepositorySource = {
   name: "front",
   remote: "git@github.com:vercel/front.git",
-  defaultBranch: "main",
 };
 
 afterEach(async () => {

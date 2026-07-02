@@ -230,7 +230,6 @@ async function createCleanupFixture(): Promise<{
       {
         name: "workforest",
         remote: "git@github.com:tomdale/workforest.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
     ],
@@ -242,13 +241,11 @@ async function createCleanupFixture(): Promise<{
       {
         name: "api",
         remote: "git@github.com:vercel/api.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
       {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
         hasLockfile: true,
       },
     ],

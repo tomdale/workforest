@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import { cloudRepoPipelineGenerator } from "./provisioning.ts";
 import type { CloudSandbox, StreamCommand } from "./vercel-sandbox.ts";
 
@@ -23,10 +23,9 @@ async function drain(generator: AsyncGenerator<unknown>): Promise<void> {
   }
 }
 
-const repo: RepoConfig = {
+const repo: RepositorySource = {
   name: "web",
   remote: "git@github.com:vercel/web.git",
-  defaultBranch: "trunk",
 };
 
 describe("cloudRepoPipelineGenerator", () => {
@@ -43,16 +42,22 @@ describe("cloudRepoPipelineGenerator", () => {
       }),
     );
 
-    expect(commands.slice(0, 2)).toEqual([
+    expect(commands.slice(0, 3)).toEqual([
       {
         cmd: "git",
-        args: ["fetch", "origin", "trunk"],
+        args: ["fetch", "origin"],
         cwd: "/vercel/sandbox/web",
         detached: true,
       },
       {
         cmd: "git",
-        args: ["checkout", "-B", "tomdale/cloud-fix", "origin/trunk"],
+        args: ["remote", "set-head", "origin", "-a"],
+        cwd: "/vercel/sandbox/web",
+        detached: true,
+      },
+      {
+        cmd: "git",
+        args: ["checkout", "-B", "tomdale/cloud-fix", "origin/HEAD"],
         cwd: "/vercel/sandbox/web",
         detached: true,
       },

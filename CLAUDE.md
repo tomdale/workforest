@@ -39,7 +39,7 @@ Long-running operations use async generators that yield state updates, enabling 
 - **Hooks** (`src/services/hooks.ts`): Shell commands run after workspace setup, defined in templates.
 
 ### Types (`src/types.ts`)
-- `RepoConfig`: `{ name, remote, defaultBranch }`
+- `RepositorySource`: `{ name, remote }`
 - `TemplateConfig`: `{ repos, description?, hooks?, branchPrefix? }`
 - `Hook`: `{ name, run, in?, if?, continueOnError? }`
 - `WorkspaceMetadata`: Stored in `.workforest/workspace.json` at workspace root

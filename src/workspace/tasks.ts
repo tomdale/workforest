@@ -10,7 +10,7 @@ import {
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
 import type {
-  RepoConfig,
+  RepositorySource,
   TaskMetadata,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
@@ -91,7 +91,7 @@ export type DeleteTasksResult = {
 
 export type CreateRepositoryTasksOptions = {
   parentRepoDir: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   changeName: string;
   slugs: readonly string[];
   branchPrefix?: string;
@@ -133,11 +133,10 @@ type CreateTaskState =
 
 export function workspaceRepoToRepoConfig(
   repo: WorkspaceRepoMetadata,
-): RepoConfig {
+): RepositorySource {
   return {
     name: repo.name,
     remote: repo.remote,
-    defaultBranch: repo.default_branch,
   };
 }
 
@@ -620,7 +619,7 @@ async function* createAndSetupTask({
 }: {
   workspaceDir: string;
   parentRepoDir: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   entry: TaskMetadata;
   disabledInitializers?: boolean | string[];
   onEvent?: ServiceEventSink;
@@ -684,7 +683,7 @@ async function runTaskInitializers({
   onEvent,
 }: {
   workspaceDir: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   slug: string;
   targetDir: string;
   disabledInitializers?: boolean | string[];

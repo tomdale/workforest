@@ -314,7 +314,6 @@ describe("wf review", () => {
         {
           name: "omniagent",
           remote: "git@github.com:vercel/omniagent.git",
-          defaultBranch: "main",
           hasLockfile: false,
         },
       ],
@@ -368,7 +367,6 @@ describe("wf review", () => {
         {
           name: "omniagent",
           remote: "git@github.com:vercel/omniagent.git",
-          defaultBranch: "main",
           hasLockfile: false,
         },
       ],
@@ -433,7 +431,6 @@ describe("wf review", () => {
         {
           name: "omniagent",
           remote: "git@github.com:vercel/omniagent.git",
-          defaultBranch: "main",
           hasLockfile: false,
         },
       ],

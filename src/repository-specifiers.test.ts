@@ -91,7 +91,6 @@ describe("repository specifiers", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       ],
       templateId: "site",

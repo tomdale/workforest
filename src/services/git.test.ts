@@ -10,7 +10,10 @@ vi.mock("../utils/exec.ts", () => ({
   runCommandWithStdin: runCommandWithStdinMock,
 }));
 
-import { fixBareRepoRefsGenerator } from "./git.ts";
+import {
+  createDefaultBranchResolver,
+  fixBareRepoRefsGenerator,
+} from "./git.ts";
 
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const states: T[] = [];
@@ -90,5 +93,87 @@ describe("fixBareRepoRefsGenerator", () => {
       ].join("\n"),
       { cwd: "/tmp/cache/front.git" },
     );
+  });
+});
+
+describe("createDefaultBranchResolver", () => {
+  it("reflects a bare mirror default branch from HEAD", async () => {
+    runCommandMock
+      .mockResolvedValueOnce({ stdout: "refs/heads/trunk\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const resolver = createDefaultBranchResolver();
+
+    await expect(
+      resolver.resolveBareMirrorDefaultBranch("/tmp/cache/front.git"),
+    ).resolves.toBe("trunk");
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["symbolic-ref", "HEAD"],
+      { cwd: "/tmp/cache/front.git" },
+    );
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["show-ref", "--verify", "--quiet", "refs/remotes/origin/trunk"],
+      { cwd: "/tmp/cache/front.git" },
+    );
+  });
+
+  it("reflects a worktree default branch from origin HEAD", async () => {
+    runCommandMock
+      .mockResolvedValueOnce({
+        stdout: "/tmp/worktrees/front/.git\n",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({ stdout: "/tmp/cache/front.git\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "origin/canary\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const resolver = createDefaultBranchResolver();
+
+    await expect(
+      resolver.resolveWorktreeDefaultBranch("/tmp/worktrees/front"),
+    ).resolves.toBe("canary");
+  });
+
+  it("fails when a reflected mirror branch has no origin ref", async () => {
+    runCommandMock
+      .mockResolvedValueOnce({ stdout: "refs/heads/main\n", stderr: "" })
+      .mockRejectedValueOnce(new Error("missing ref"));
+
+    const resolver = createDefaultBranchResolver();
+
+    await expect(
+      resolver.resolveBareMirrorDefaultBranch("/tmp/cache/front.git"),
+    ).rejects.toThrow("refs/remotes/origin/main does not exist");
+  });
+
+  it("deduplicates concurrent reflections for the same mirror", async () => {
+    let release!: () => void;
+    const reflected = new Promise<{ stdout: string; stderr: string }>(
+      (resolve) => {
+        release = () => resolve({ stdout: "refs/heads/main\n", stderr: "" });
+      },
+    );
+    runCommandMock
+      .mockReturnValueOnce(reflected)
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const resolver = createDefaultBranchResolver();
+    const first = resolver.resolveBareMirrorDefaultBranch(
+      "/tmp/cache/front.git",
+    );
+    const second = resolver.resolveBareMirrorDefaultBranch(
+      "/tmp/cache/front.git",
+    );
+    release();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      "main",
+      "main",
+    ]);
+    expect(runCommandMock).toHaveBeenCalledTimes(2);
   });
 });

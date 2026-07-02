@@ -103,7 +103,6 @@ async function createFixture(): Promise<Fixture> {
       {
         name: "front",
         remote: "local",
-        defaultBranch: "main",
         hasLockfile: false,
       },
     ],

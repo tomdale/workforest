@@ -84,7 +84,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@gitlab.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -114,7 +113,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "some-repo",
             remote: "git@github.com:SomeOwner/some-repo.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -171,7 +169,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -228,7 +225,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "some-repo",
             remote: "git@github.com:some-owner/some-repo.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -290,7 +286,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -334,7 +329,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -382,7 +376,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -439,7 +432,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -488,7 +480,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -532,7 +523,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -581,7 +571,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},
@@ -630,7 +619,6 @@ describe("vercelLinkInitializer.execute", () => {
           repo: {
             name: "omniagent",
             remote: "git@github.com:vercel/omniagent.git",
-            defaultBranch: "main",
           },
         },
         {},

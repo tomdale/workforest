@@ -69,7 +69,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -82,7 +81,6 @@ describe("workspace metadata", () => {
       {
         name: "docs",
         remote: "git@github.com:vercel/docs.git",
-        default_branch: "main",
         has_lockfile: false,
         feature_branch: "feature/fix-auth-bug",
       },
@@ -96,12 +94,55 @@ describe("workspace metadata", () => {
         {
           name: "docs",
           remote: "git@github.com:vercel/docs.git",
-          default_branch: "main",
           has_lockfile: false,
           feature_branch: "feature/fix-auth-bug",
         },
       ],
     });
+  });
+
+  it("strips legacy default_branch fields when reading metadata", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    await mkdir(path.dirname(getMetadataPath(workspaceDir)), {
+      recursive: true,
+    });
+    await writeFile(
+      getMetadataPath(workspaceDir),
+      JSON.stringify(
+        {
+          workspace: {
+            version: "1",
+            created_at: "2026-05-15T00:00:00.000Z",
+            feature_name: "fix-auth-bug",
+          },
+          repos: [
+            {
+              name: "front",
+              remote: "git@github.com:vercel/front.git",
+              default_branch: "main",
+              has_lockfile: true,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          has_lockfile: true,
+        },
+      ],
+    });
+    const rewritten = JSON.parse(
+      await readFile(getMetadataPath(workspaceDir), "utf8"),
+    );
+    expect(rewritten.repos[0]).not.toHaveProperty("default_branch");
   });
 
   it("fails when appending to a workspace without metadata", async () => {
@@ -112,7 +153,6 @@ describe("workspace metadata", () => {
         {
           name: "docs",
           remote: "git@github.com:vercel/docs.git",
-          default_branch: "main",
           has_lockfile: false,
         },
       ]),
@@ -162,7 +202,6 @@ describe("workspace metadata", () => {
       {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        default_branch: "main",
         has_lockfile: true,
       },
     ]);
@@ -175,7 +214,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           has_lockfile: true,
         },
       ],
@@ -198,7 +236,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -222,7 +259,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           has_lockfile: true,
         },
       ],
@@ -281,7 +317,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -309,7 +344,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           has_lockfile: true,
         },
       ],
@@ -466,7 +500,6 @@ describe("workspace metadata", () => {
         {
           name: "..",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           has_lockfile: false,
         },
       ]),
@@ -485,7 +518,6 @@ describe("repository change metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: true,
         },
       ],
@@ -514,7 +546,6 @@ describe("repository change metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: false,
         },
       ],
@@ -525,7 +556,6 @@ describe("repository change metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
           hasLockfile: false,
         },
       ],
@@ -556,7 +586,6 @@ type UnsafeMetadata = {
   repos: Array<{
     name: string;
     remote: string;
-    default_branch: string;
     has_lockfile: boolean;
   }>;
   tasks?: Array<{
@@ -588,7 +617,6 @@ function createUnsafeMetadataFixture(): UnsafeMetadata {
       {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        default_branch: "main",
         has_lockfile: true,
       },
     ],

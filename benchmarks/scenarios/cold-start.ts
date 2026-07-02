@@ -1,10 +1,10 @@
 import { stampWorkspaceGenerator } from "../../src/workspace/index.ts";
-import type { RepoConfig } from "../../src/types.ts";
+import type { RepositorySource } from "../../src/types.ts";
 import { Timer, type BenchmarkTiming } from "../utils/timing.ts";
 import { cleanupBenchmarkDirs } from "../utils/cleanup.ts";
 
 export type ColdStartOptions = {
-  repos: RepoConfig[];
+  repos: RepositorySource[];
   cacheDir: string;
   workspaceDir: string;
 };

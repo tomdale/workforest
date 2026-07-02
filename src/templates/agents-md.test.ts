@@ -138,7 +138,6 @@ describe("template AGENTS.md artifacts", () => {
           {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
         ],
         { force: true },
@@ -220,7 +219,6 @@ describe("template AGENTS.md artifacts", () => {
       {
         name: "source",
         remote: `file://${source}`,
-        defaultBranch: "main",
       },
     ]);
 
@@ -274,6 +272,77 @@ describe("template AGENTS.md artifacts", () => {
     expect(artifact).not.toMatch(/^# /m);
     expect(artifact).toContain("Template: explore.");
     expect(artifact).toContain("Scope: Settings");
+  });
+
+  it("uses the mirror default branch when preparing sources", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wf-agents-master-"));
+    roots.push(root);
+    const source = path.join(root, "source");
+    const configHome = path.join(root, "config");
+    const cache = path.join(root, "cache");
+    const bin = path.join(root, "bin");
+    await mkdir(path.join(source, "src"), { recursive: true });
+    await mkdir(bin);
+    await runGit(["init", "-b", "master"], { cwd: source });
+    await runGit(["config", "user.email", "test@example.com"], {
+      cwd: source,
+    });
+    await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
+    await writeFile(
+      path.join(source, "src", "integration.ts"),
+      "export const integration = true;\n",
+      "utf8",
+    );
+    await runGit(["add", "src/integration.ts"], { cwd: source });
+    await runGit(["commit", "-m", "add integration"], { cwd: source });
+    await mkdir(cache, { recursive: true });
+    await runGit(
+      ["clone", "--mirror", `file://${source}`, path.join(cache, "source.git")],
+      { cwd: root },
+    );
+    await writeFile(
+      path.join(bin, "codex"),
+      fakeCodexScript(
+        [
+          "<agents_md>",
+          "Template: master-default.",
+          "Scope: Start in source/src/integration.ts.",
+          "</agents_md>",
+        ].join("\n"),
+      ),
+      "utf8",
+    );
+    await chmod(path.join(bin, "codex"), 0o755);
+
+    process.env["XDG_CONFIG_HOME"] = configHome;
+    process.env["WORKFOREST_CACHE_DIR"] = cache;
+    process.env["WORKFOREST_AI_PROVIDER"] = "codex-cli";
+    delete process.env["WORKFOREST_AI_DISABLED"];
+    process.env["PATH"] = `${bin}${path.delimiter}${originalPath ?? ""}`;
+    delete process.env["SHELL"];
+    await createTemplate("master-default", {
+      repos: [`file://${source}`],
+      "AGENTS.md": {
+        focus: "How integrations are wired.",
+        paths: { source: ["src"] },
+      },
+    });
+    const template = await loadTemplate("master-default");
+    if (!template) throw new Error("Expected template");
+
+    const result = await refreshTemplateAgentsMd(template, [
+      {
+        name: "source",
+        remote: `file://${source}`,
+      },
+    ]);
+
+    expect(result.state).toBe("fresh");
+    if (!result.artifactPath) throw new Error("Expected artifact path");
+    expect(await readFile(result.artifactPath, "utf8")).toContain(
+      "Scope: Start in source/src/integration.ts.",
+    );
   });
 
   it("requires generated guidance to use the agents_md envelope", async () => {
@@ -330,7 +399,6 @@ describe("template AGENTS.md artifacts", () => {
         {
           name: "source",
           remote: `file://${source}`,
-          defaultBranch: "main",
         },
       ]),
     ).rejects.toThrow(/<agents_md>/);
@@ -575,7 +643,6 @@ describe("template AGENTS.md artifacts", () => {
         {
           name: "source",
           remote: `file://${source}`,
-          defaultBranch: "main",
         },
       ],
       { onProgress: (message) => progress.push(message) },
@@ -637,7 +704,6 @@ describe("template AGENTS.md artifacts", () => {
         {
           name: "source",
           remote: `file://${source}`,
-          defaultBranch: "main",
         },
       ],
       { onWarning: (message) => warnings.push(message) },

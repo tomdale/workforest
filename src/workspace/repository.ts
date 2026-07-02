@@ -3,10 +3,11 @@ import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import {
   cloneRepositoryGenerator,
+  createDefaultBranchResolver,
   fixBareRepoRefsGenerator,
   runGit,
 } from "../services/git.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import { asGenerator, withRetryGenerator } from "../utils/retry.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 
@@ -113,7 +114,7 @@ async function* pruneWorktreeMetadataGenerator(
 
 /** Ensures a mirror repository exists and yields progress states. */
 export async function* ensureMirrorRepoGenerator(
-  repo: RepoConfig,
+  repo: RepositorySource,
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
   const mirrorExists = await pathExists(mirrorDir);
@@ -184,41 +185,9 @@ async function* pruneStaleWorktreesIfNeededGenerator(
   await runGit(["worktree", "prune"], { cwd: mirrorDir });
 }
 
-/**
- * Detect the actual default branch of a bare mirror repo by reading its HEAD symref.
- *
- * After fixBareRepoRefsGenerator moves refs/heads/* to refs/remotes/origin/*,
- * HEAD still preserves the original default branch name. We verify the
- * corresponding remote ref exists before trusting it, falling back to the
- * configured value if anything goes wrong.
- */
-async function detectDefaultBranch(
-  mirrorDir: string,
-  fallback: string,
-): Promise<string> {
-  try {
-    const { stdout } = await runGit(["symbolic-ref", "HEAD"], {
-      cwd: mirrorDir,
-    });
-    const branch = stdout.trim().replace("refs/heads/", "");
-
-    const { stdout: refOutput } = await runGit(
-      ["for-each-ref", `refs/remotes/origin/${branch}`],
-      { cwd: mirrorDir },
-    );
-
-    if (refOutput.trim()) {
-      return branch;
-    }
-  } catch {
-    // Fall through to return fallback
-  }
-  return fallback;
-}
-
 /** Ensures a working copy exists and yields progress states. */
 export async function* ensureWorkingCopyGenerator(
-  repo: RepoConfig,
+  repo: RepositorySource,
   mirrorDir: string,
   targetDir: string,
   branchName: string,
@@ -234,15 +203,10 @@ export async function* ensureWorkingCopyGenerator(
     return;
   }
 
-  // The configured defaultBranch defaults to "main" for org/repo slugs, but
-  // many repos use a different trunk (e.g. "canary", "master", "develop").
-  // Read the actual default branch from the mirror's HEAD symref, which is
-  // set by git during clone and remains accurate even after fixBareRepoRefsGenerator
-  // moves the local branch refs to refs/remotes/origin/*.
-  const defaultBranch = await detectDefaultBranch(
-    mirrorDir,
-    repo.defaultBranch,
-  );
+  const defaultBranch =
+    await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
+      mirrorDir,
+    );
 
   yield {
     status: "log",
@@ -292,7 +256,7 @@ async function branchExists(
  * Create a new worktree and branch, failing instead of reusing existing state.
  */
 export async function* createWorkingCopyGenerator(
-  repo: RepoConfig,
+  repo: RepositorySource,
   mirrorDir: string,
   targetDir: string,
   branchName: string,
@@ -305,10 +269,10 @@ export async function* createWorkingCopyGenerator(
     throw new Error(`Branch already exists: ${branchName}`);
   }
 
-  const defaultBranch = await detectDefaultBranch(
-    mirrorDir,
-    repo.defaultBranch,
-  );
+  const defaultBranch =
+    await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
+      mirrorDir,
+    );
 
   yield {
     status: "log",
@@ -380,7 +344,7 @@ export async function* cleanupWorkspaceWorktreesGenerator(
  * Generator version of updatePristineRepo that yields log messages.
  */
 async function* updatePristineRepoGenerator(
-  repo: RepoConfig,
+  repo: RepositorySource,
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
   // --no-tags: Skip fetching tags (faster, we only need branches)

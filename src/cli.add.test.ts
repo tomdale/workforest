@@ -105,7 +105,6 @@ describe("wf add", () => {
         {
           name: "api",
           remote: "git@github.com:vercel/api.git",
-          defaultBranch: "main",
         },
       ],
       branchName: "tomdale/billing",
@@ -178,7 +177,6 @@ describe("wf add", () => {
         {
           name: "api",
           remote: "git@github.com:vercel/api.git",
-          defaultBranch: "main",
         },
       ],
       branchName: "billing",
@@ -249,7 +247,6 @@ describe("wf add", () => {
         {
           name: "api",
           remote: "git@github.com:vercel/api.git",
-          defaultBranch: "main",
         },
       ],
       branchName: "billing",
@@ -363,7 +360,6 @@ function fakeAddReposToWorkspace(
         addOptions.repos.map((repo) => ({
           name: repo.name,
           remote: repo.remote,
-          default_branch: repo.defaultBranch,
           has_lockfile: false,
           feature_branch: addOptions.branchName,
         })),
@@ -399,10 +395,9 @@ function metadataRepo(
 ): {
   name: string;
   remote: string;
-  defaultBranch: string;
   hasLockfile: boolean;
 } {
-  return { name, remote, defaultBranch: "main", hasLockfile: false };
+  return { name, remote, hasLockfile: false };
 }
 
 function restoreEnv(name: string, value: string | undefined): void {

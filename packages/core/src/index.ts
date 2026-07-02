@@ -4,10 +4,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import semver from "semver";
 
-export type RepoConfig = {
+export type RepositorySource = {
   name: string;
   remote: string;
-  defaultBranch: string;
 };
 
 export type VercelRepoOverride = {
@@ -36,7 +35,7 @@ export type WorkspaceConfig = {
 export type InitializerContext = {
   repoDir: string;
   workspaceDir: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   workspaceConfig?: WorkspaceConfig;
 };
 

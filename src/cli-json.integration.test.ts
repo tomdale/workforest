@@ -466,7 +466,6 @@ async function createWorkspaceFixture(): Promise<string> {
       {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
         hasLockfile: false,
       },
     ],

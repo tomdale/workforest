@@ -7,7 +7,7 @@ import {
   runSingleRepoInitializersGenerator,
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import {
@@ -41,7 +41,7 @@ export type RepoPipelineState =
   | { phase: "failed"; error: Error; step?: string };
 
 export type RepoPipelineOptions = {
-  repo: RepoConfig;
+  repo: RepositorySource;
   workspaceDir: string;
   repoDir?: string;
   branchName: string;
@@ -49,14 +49,14 @@ export type RepoPipelineOptions = {
   disabledInitializers?: boolean | string[];
   skipInitializers?: boolean;
   beforeInitializers?: (context: {
-    repo: RepoConfig;
+    repo: RepositorySource;
     repoDir: string;
     workspaceDir: string;
   }) => Promise<void>;
 };
 
 export type RepoInitializationOptions = {
-  repo: RepoConfig;
+  repo: RepositorySource;
   workspaceDir: string;
   repoDir?: string;
   disabledInitializers?: boolean | string[];

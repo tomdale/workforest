@@ -1,7 +1,6 @@
-export type RepoConfig = {
+export type RepositorySource = {
   name: string;
   remote: string;
-  defaultBranch: string;
 };
 
 export type VercelRepoOverride = {
@@ -164,7 +163,6 @@ export type WorkspaceMetadata = {
 export type WorkspaceRepoMetadata = {
   name: string;
   remote: string;
-  default_branch: string;
   has_lockfile: boolean;
   feature_branch?: string;
 };

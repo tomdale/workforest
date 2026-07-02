@@ -9,6 +9,9 @@ const { runGitMock } = vi.hoisted(() => ({
 
 vi.mock("../services/git.ts", () => ({
   cloneRepositoryGenerator: vi.fn(),
+  createDefaultBranchResolver: () => ({
+    resolveBareMirrorDefaultBranch: vi.fn(async () => "main"),
+  }),
   fixBareRepoRefsGenerator: vi.fn(),
   runGit: runGitMock,
 }));
@@ -191,7 +194,6 @@ bare
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
         mirrorDir,
       ),
@@ -241,7 +243,6 @@ bare
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
         mirrorDir,
       ),
@@ -292,11 +293,6 @@ describe("createWorkingCopyGenerator", () => {
 
     runGitMock
       .mockRejectedValueOnce(new Error("missing branch"))
-      .mockResolvedValueOnce({ stdout: "refs/heads/main\n", stderr: "" })
-      .mockResolvedValueOnce({
-        stdout: "refs/remotes/origin/main\n",
-        stderr: "",
-      })
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     const states = await collectStates(
@@ -304,7 +300,6 @@ describe("createWorkingCopyGenerator", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
         "/tmp/cache/front.git",
         targetDir,
@@ -326,7 +321,7 @@ describe("createWorkingCopyGenerator", () => {
       { cwd: "/tmp/cache/front.git" },
     );
     expect(runGitMock).toHaveBeenNthCalledWith(
-      4,
+      2,
       ["worktree", "add", "-b", "tomdale/fix-auth", targetDir, "origin/main"],
       { cwd: "/tmp/cache/front.git" },
     );
@@ -341,7 +336,6 @@ describe("createWorkingCopyGenerator", () => {
           {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
           "/tmp/cache/front.git",
           targetDir,
@@ -367,7 +361,6 @@ describe("createWorkingCopyGenerator", () => {
           {
             name: "front",
             remote: "git@github.com:vercel/front.git",
-            defaultBranch: "main",
           },
           "/tmp/cache/front.git",
           targetDir,

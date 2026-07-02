@@ -93,7 +93,6 @@ describe("ensureMirrorRepoGenerator", () => {
         {
           name: "front",
           remote: sourceDir,
-          defaultBranch: "main",
         },
         mirrorDir,
       ),

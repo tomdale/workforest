@@ -8,7 +8,7 @@ import { validateRepositoryComponent } from "../repository-components.ts";
 import { refreshAndMaterializeTemplateAgentsMd } from "../templates/agents-md.ts";
 import { applyTemplateGenerator } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
 import {
   getInitializationRepoDir,
@@ -94,7 +94,7 @@ export type WorkspaceInitializationState = {
 export type StartRepoInitializationOptions = {
   workspaceDir?: string;
   scope?: InitializationScope;
-  repo: RepoConfig;
+  repo: RepositorySource;
   disabledInitializers?: boolean | string[];
 };
 
@@ -142,7 +142,7 @@ export async function initializeWorkspaceInitialization({
   repos,
 }: {
   workspaceDir: string;
-  repos: readonly RepoConfig[];
+  repos: readonly RepositorySource[];
 }): Promise<void> {
   await initializeScopedInitialization({
     scope: workspaceInitializationScope(workspaceDir),
@@ -158,7 +158,7 @@ export async function initializeWorktreeSetup({
 }: {
   repoRootDir: string;
   changeName: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
 }): Promise<void> {
   await initializeScopedInitialization({
     scope: worktreeInitializationScope({ repoRootDir, changeName }),
@@ -173,7 +173,7 @@ async function initializeScopedInitialization({
   message,
 }: {
   scope: InitializationScope;
-  repos: readonly RepoConfig[];
+  repos: readonly RepositorySource[];
   message: string;
 }): Promise<void> {
   await fs.mkdir(getInitializationDir(scope), { recursive: true });
@@ -471,10 +471,9 @@ export async function runRepoInitializationWorker({
     throw new Error(`Workspace repository not found: ${repoName}`);
   }
 
-  const repo: RepoConfig = {
+  const repo: RepositorySource = {
     name: repoMetadata.name,
     remote: repoMetadata.remote,
-    defaultBranch: repoMetadata.default_branch,
   };
   const template = metadata.workspace.template_id
     ? await loadTemplate(
@@ -638,7 +637,6 @@ export async function retryRepoInitializations(
           repo: {
             name: repoMetadata.name,
             remote: repoMetadata.remote,
-            defaultBranch: repoMetadata.default_branch,
           },
         },
         launchWorker,
@@ -702,7 +700,6 @@ export async function finalizeWorkspaceInitialization(
           metadata.repos.map((repo) => ({
             name: repo.name,
             remote: repo.remote,
-            defaultBranch: repo.default_branch,
           })),
           {
             onWarning: (message) => {
@@ -887,7 +884,7 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
 
 async function recordWorkerPipelineState(
   scope: InitializationScope,
-  repo: RepoConfig,
+  repo: RepositorySource,
   runId: string,
   state: RepoPipelineState,
 ): Promise<void> {
@@ -937,7 +934,6 @@ async function recordWorkerPipelineState(
     await updateInitializationRepoMetadata(scope, {
       name: repo.name,
       remote: repo.remote,
-      default_branch: repo.defaultBranch,
       has_lockfile: state.hasLockfile,
       ...(featureBranch ? { feature_branch: featureBranch } : {}),
     });

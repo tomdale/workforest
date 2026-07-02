@@ -221,7 +221,6 @@ async function createReviewFixture(): Promise<ReviewFixture> {
       {
         name: "omniagent",
         remote: "git@github.com:vercel/omniagent.git",
-        defaultBranch: "main",
         hasLockfile: false,
       },
     ],

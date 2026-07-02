@@ -7,7 +7,7 @@ import {
   loadTemplate,
   validateTemplateIdentifier,
 } from "../templates/index.ts";
-import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
+import type { RepositorySource, WorkspaceMetadata } from "../types.ts";
 import {
   buildBranchName,
   resolveBranchPrefix,
@@ -248,11 +248,10 @@ async function resolveAdhocStartSource(
   return { kind: "adhoc", repos: reposFromMetadata(metadata) };
 }
 
-function reposFromMetadata(metadata: WorkspaceMetadata): RepoConfig[] {
+function reposFromMetadata(metadata: WorkspaceMetadata): RepositorySource[] {
   return metadata.repos.map((repo) => ({
     name: repo.name,
     remote: repo.remote,
-    defaultBranch: repo.default_branch,
   }));
 }
 

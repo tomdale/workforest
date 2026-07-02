@@ -1,6 +1,6 @@
 import { log } from "../logger.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
-import type { RepoConfig, WorkspaceConfig } from "../types.ts";
+import type { RepositorySource, WorkspaceConfig } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
 import { runCommand } from "../utils/exec.ts";
 import type { CreateInput, ResolvedSource } from "../workspace/create.ts";
@@ -190,7 +190,7 @@ type RepoSetupMode = "forked" | "cold";
 
 type CloudRepoPipelineParams = Readonly<{
   sandbox: CloudSandbox;
-  repo: RepoConfig;
+  repo: RepositorySource;
   branchName: string;
   mode: RepoSetupMode;
   vercelEnvEnabled: boolean;
@@ -216,13 +216,7 @@ export async function* cloudRepoPipelineGenerator(
         ? [
             {
               cmd: "git",
-              args: [
-                "clone",
-                "--branch",
-                repo.defaultBranch,
-                httpsCloneUrl(repo.remote),
-                repo.name,
-              ],
+              args: ["clone", httpsCloneUrl(repo.remote), repo.name],
               cwd: SANDBOX_WORKDIR,
             },
             { cmd: "git", args: ["checkout", "-B", branchName], cwd: repoDir },
@@ -230,17 +224,17 @@ export async function* cloudRepoPipelineGenerator(
         : [
             {
               cmd: "git",
-              args: ["fetch", "origin", repo.defaultBranch],
+              args: ["fetch", "origin"],
               cwd: repoDir,
             },
             {
               cmd: "git",
-              args: [
-                "checkout",
-                "-B",
-                branchName,
-                `origin/${repo.defaultBranch}`,
-              ],
+              args: ["remote", "set-head", "origin", "-a"],
+              cwd: repoDir,
+            },
+            {
+              cmd: "git",
+              args: ["checkout", "-B", branchName, "origin/HEAD"],
               cwd: repoDir,
             },
           ];
@@ -439,7 +433,7 @@ function reportReady(
 }
 
 /** Repos for a resolved start source, in a single uniform list. */
-function reposOf(source: ResolvedSource): readonly RepoConfig[] {
+function reposOf(source: ResolvedSource): readonly RepositorySource[] {
   if (source.kind === "repository") return [source.repo];
   return source.repos;
 }

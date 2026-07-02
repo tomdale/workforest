@@ -26,6 +26,9 @@ async function createTempDir(prefix: string): Promise<string> {
 
 async function importReviewWithMocks(): Promise<typeof import("./review.ts")> {
   vi.doMock("./services/git.ts", () => ({
+    createDefaultBranchResolver: () => ({
+      resolveBareMirrorDefaultBranch: vi.fn(async () => "main"),
+    }),
     runGit: runGitMock,
   }));
   vi.doMock("./utils/exec.ts", () => ({
@@ -178,7 +181,6 @@ describe("review worktrees", () => {
         repo: {
           name: "omniagent",
           remote: "git@github.com:vercel/omniagent.git",
-          defaultBranch: "main",
         },
         repoDir,
         workspaceDir,
@@ -267,7 +269,6 @@ describe("review worktrees", () => {
         repo: {
           name: "omniagent",
           remote: "git@github.com:vercel/omniagent.git",
-          defaultBranch: "main",
         },
         repoDir: targetDir,
         workspaceDir: path.join(reviewsRoot, "omniagent"),

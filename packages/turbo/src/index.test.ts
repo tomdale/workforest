@@ -40,7 +40,6 @@ const context = {
   repo: {
     name: "repo",
     remote: "git@github.com:vercel/repo.git",
-    defaultBranch: "main",
   },
 };
 

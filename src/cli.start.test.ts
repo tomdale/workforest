@@ -135,7 +135,6 @@ describe("wf new", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
       branchName: "tomdale/redesign-cli",
       targetDir: path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
@@ -149,7 +148,6 @@ describe("wf new", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
     });
     expect(fixture.cdTargets).toEqual([
@@ -168,7 +166,6 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           feature_branch: "tomdale/redesign-cli",
           has_lockfile: false,
         },
@@ -277,7 +274,6 @@ describe("wf new", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
       branchName: "tomdale/custom",
       targetDir: path.join(fixture.baseDir, "Repos", "front", "fix-auth"),
@@ -323,7 +319,6 @@ describe("wf new", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
       branchName: "tomdale/follow-up",
       targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
@@ -365,7 +360,6 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       ],
       templateId: "vercel-agent",
@@ -410,7 +404,6 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       ],
       templateId: "vercel-agent",
@@ -453,7 +446,6 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       ],
       templateId: "vercel-agent",
@@ -493,12 +485,10 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
         {
           name: "api",
           remote: "git@github.com:vercel/api.git",
-          defaultBranch: "main",
         },
       ],
     });
@@ -540,12 +530,10 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
         {
           name: "api",
           remote: "git@github.com:vercel/api.git",
-          defaultBranch: "main",
         },
       ],
     });
@@ -608,7 +596,6 @@ describe("wf new", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
       branchName: "tomdale/follow-up",
       targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
@@ -622,7 +609,6 @@ describe("wf new", () => {
       repo: {
         name: "front",
         remote: "git@github.com:vercel/front.git",
-        defaultBranch: "main",
       },
     });
   });
@@ -667,12 +653,10 @@ describe("wf new", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
         {
           name: "api",
           remote: "git@github.com:vercel/api.git",
-          defaultBranch: "main",
         },
       ],
     });
@@ -732,7 +716,6 @@ describe("buildCreateInput", () => {
         repo: {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       },
       directories: expect.objectContaining({ base: fixture.baseDir }),
@@ -902,10 +885,9 @@ function metadataRepo(
 ): {
   name: string;
   remote: string;
-  defaultBranch: string;
   hasLockfile: boolean;
 } {
-  return { name, remote, defaultBranch: "main", hasLockfile: false };
+  return { name, remote, hasLockfile: false };
 }
 
 function fakeCreateSingleWorktree() {

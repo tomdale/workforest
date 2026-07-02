@@ -7,7 +7,7 @@ import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
 import {
   buildBranchName,
@@ -43,14 +43,14 @@ import { getRepoSetupLogPath } from "./setup-logs.ts";
  * This is the input contract shared by `wf new` and the entry surface.
  */
 export type ResolvedSource =
-  | Readonly<{ kind: "repository"; repo: RepoConfig }>
-  | Readonly<{ kind: "adhoc"; repos: readonly RepoConfig[] }>
+  | Readonly<{ kind: "repository"; repo: RepositorySource }>
+  | Readonly<{ kind: "adhoc"; repos: readonly RepositorySource[] }>
   | Readonly<{
       kind: "template";
       templateId: string;
       templateVariant?: string;
       groupName: string;
-      repos: readonly RepoConfig[];
+      repos: readonly RepositorySource[];
       branchPrefix?: string;
     }>;
 
@@ -133,7 +133,7 @@ async function createWorktree(
 }
 
 type WorktreeContext = Readonly<{
-  repo: RepoConfig;
+  repo: RepositorySource;
   changeName: string;
   branchName: string;
   targetDir: string;

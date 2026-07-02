@@ -325,10 +325,9 @@ function metadataRepo(
 ): {
   name: string;
   remote: string;
-  defaultBranch: string;
   hasLockfile: boolean;
 } {
-  return { name, remote, defaultBranch: "main", hasLockfile: false };
+  return { name, remote, hasLockfile: false };
 }
 
 function renderResult(result: Awaited<ReturnType<typeof executeCli>>): {

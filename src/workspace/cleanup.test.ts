@@ -82,7 +82,6 @@ beforeEach(() => {
       {
         name: "api",
         remote: "git@github.com:vercel/api.git",
-        default_branch: "main",
         has_lockfile: true,
       },
     ],

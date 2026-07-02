@@ -296,7 +296,6 @@ describe("repository parsing", () => {
       {
         name: "lib",
         remote: input,
-        defaultBranch: "main",
       },
     ]);
   });

@@ -69,7 +69,6 @@ describe("workspace stamping output", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       ],
     });
@@ -77,7 +76,6 @@ describe("workspace stamping output", () => {
     await updateWorkspaceRepo(workspaceDir, {
       name: "front",
       remote: "git@github.com:vercel/front.git",
-      default_branch: "main",
       feature_branch: "tomdale/fix-auth",
       has_lockfile: true,
     });
@@ -108,7 +106,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          defaultBranch: "main",
         },
       ],
     });
@@ -124,7 +121,6 @@ describe("workspace metadata", () => {
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
-          default_branch: "main",
           feature_branch: "tomdale/fix-auth",
           has_lockfile: false,
         },

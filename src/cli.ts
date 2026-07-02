@@ -77,7 +77,7 @@ import {
   type ReportSection,
 } from "./terminal/report.ts";
 import type {
-  RepoConfig,
+  RepositorySource,
   TaskMetadata,
   WorkspaceConfig,
   WorkspaceMetadata,
@@ -123,7 +123,7 @@ type RepositoryTaskCommandContext = {
   repoRootDir: string;
   repoName: string;
   changeName: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
 };
 
 const humanServiceEventSink: ServiceEventSink = (event) => {

@@ -13,7 +13,7 @@ import {
   loadTemplate,
   validateTemplateIdentifier,
 } from "../templates/index.ts";
-import type { RepoConfig, WorkspaceMetadata } from "../types.ts";
+import type { RepositorySource, WorkspaceMetadata } from "../types.ts";
 import { cancel, promptConfirm } from "../ui/prompts/index.ts";
 import {
   resolveWorkforestContext,
@@ -255,7 +255,6 @@ async function promoteWorktree(
       {
         name: currentRepo.name,
         remote: currentRepo.remote,
-        defaultBranch: currentRepo.defaultBranch,
         hasLockfile: await hasLockfile(destinationPath),
       },
     ],
@@ -324,15 +323,15 @@ async function resolveWorkspaceAddTarget(
 
 async function resolvePromotionRepos(
   parsed: ParsedAddOperands,
-  currentRepo: RepoConfig,
+  currentRepo: RepositorySource,
 ): Promise<
-  | Readonly<{ kind: "adhoc"; repos: readonly RepoConfig[] }>
+  | Readonly<{ kind: "adhoc"; repos: readonly RepositorySource[] }>
   | Readonly<{
       kind: "template";
       templateId: string;
       templateVariant?: string;
       groupName: string;
-      repos: readonly RepoConfig[];
+      repos: readonly RepositorySource[];
     }>
 > {
   if (parsed.kind === "repositories") {
@@ -384,7 +383,7 @@ async function confirmPromotion({
 }: {
   sourcePath: string;
   destinationPath: string;
-  addedRepos: readonly RepoConfig[];
+  addedRepos: readonly RepositorySource[];
   yes: boolean;
   options: RunAddCommandOptions;
 }): Promise<boolean> {
@@ -405,7 +404,7 @@ async function confirmPromotion({
   );
 }
 
-async function resolveCurrentRepo(repoName: string): Promise<RepoConfig> {
+async function resolveCurrentRepo(repoName: string): Promise<RepositorySource> {
   const [repo] = await resolveRepositorySpecifiers([repoName]);
   if (!repo) {
     throw new OperationalError(`Cached repository not found: ${repoName}`);

@@ -5,10 +5,10 @@ import {
   resolveRegisteredRepository,
 } from "./repositories.ts";
 import { listTemplates, loadTemplate } from "./templates/index.ts";
-import type { RepoConfig, TemplateConfig } from "./types.ts";
+import type { RepositorySource, TemplateConfig } from "./types.ts";
 
 export type ResolvedRepositorySelections = {
-  repos: RepoConfig[];
+  repos: RepositorySource[];
   templateId?: string;
   templateBranchPrefix?: string;
 };
@@ -44,7 +44,7 @@ export async function qualifyRepositorySpecifiers(
 
 export async function resolveRepositorySpecifiers(
   specifiers: readonly string[],
-): Promise<RepoConfig[]> {
+): Promise<RepositorySource[]> {
   return reposFromSlugs(await qualifyRepositorySpecifiers(specifiers));
 }
 

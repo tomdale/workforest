@@ -17,7 +17,7 @@ import {
   type HookState,
 } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
-import type { RepoConfig } from "../types.ts";
+import type { RepositorySource } from "../types.ts";
 import { renderPipelinesGrid } from "../ui/grid-consumer.ts";
 import { ensureDir } from "../utils/fs.ts";
 import {
@@ -68,7 +68,7 @@ export type StampWorkspaceOptions = {
   description?: string;
   branchName?: string;
   workspaceDir: string;
-  repos: readonly RepoConfig[];
+  repos: readonly RepositorySource[];
   templateId?: string;
   templateVariant?: string;
   onEvent?: ServiceEventSink;
@@ -76,21 +76,21 @@ export type StampWorkspaceOptions = {
 };
 
 export type PreparedRepo = {
-  repo: RepoConfig;
+  repo: RepositorySource;
   targetDir: string;
   hasLockfile: boolean;
 };
 
 export type AddReposOptions = {
   workspaceDir: string;
-  repos: readonly RepoConfig[];
+  repos: readonly RepositorySource[];
   branchName: string;
   disabledInitializers?: boolean | string[];
   onEvent?: ServiceEventSink;
 };
 
 export type AddReposResult = {
-  addedRepos: readonly RepoConfig[];
+  addedRepos: readonly RepositorySource[];
   failedRepos: readonly {
     name: string;
     error: Error;
@@ -125,7 +125,11 @@ export type WorkspaceState =
   | { phase: "hook"; hookState: HookState }
   | { phase: "hooks-complete" }
   | { phase: "finalize"; message: string }
-  | { phase: "complete"; workspaceDir: string; repos: readonly RepoConfig[] };
+  | {
+      phase: "complete";
+      workspaceDir: string;
+      repos: readonly RepositorySource[];
+    };
 
 // ============================================================================
 // Generator-based workspace stamping
@@ -355,7 +359,6 @@ export async function* stampWorkspaceGenerator({
     repos: preparedRepos.map((r) => ({
       name: r.repo.name,
       remote: r.repo.remote,
-      defaultBranch: r.repo.defaultBranch,
       hasLockfile: r.hasLockfile,
     })),
     ...(description && { description }),
@@ -424,7 +427,7 @@ export async function stampWorkspace(
 
   const prepared = new Map<
     string,
-    { repo: RepoConfig; hasLockfile: boolean }
+    { repo: RepositorySource; hasLockfile: boolean }
   >();
   const setupFailures = new Map<string, RepoSetupFailureSummary>();
   const templateBarrier =
@@ -441,7 +444,7 @@ export async function stampWorkspace(
     repo,
     repoDir,
   }: {
-    repo: RepoConfig;
+    repo: RepositorySource;
     repoDir: string;
   }): Promise<void> => {
     const hasLockfile = await hasAny(repoDir, [
@@ -584,7 +587,7 @@ export async function stampWorkspaceInteractive(
 
   const prepared = new Map<
     string,
-    { repo: RepoConfig; hasLockfile: boolean }
+    { repo: RepositorySource; hasLockfile: boolean }
   >();
   const setupFailures = new Map<string, RepoSetupFailureSummary>();
   const templateBarrier =
@@ -601,7 +604,7 @@ export async function stampWorkspaceInteractive(
     repo,
     repoDir,
   }: {
-    repo: RepoConfig;
+    repo: RepositorySource;
     repoDir: string;
   }): Promise<void> => {
     const hasLockfile = await hasAny(repoDir, [
@@ -676,7 +679,7 @@ async function* createBackgroundRepoSetupPipeline({
   monitorBackground,
   templateBarrier,
 }: {
-  repo: RepoConfig;
+  repo: RepositorySource;
   workspaceDir: string;
   branchName: string;
   isNewWorkspace: boolean;
@@ -698,7 +701,7 @@ async function* createBackgroundRepoSetupPipeline({
 }
 
 export type ScopedRepoSetupPipelineOptions = {
-  repo: RepoConfig;
+  repo: RepositorySource;
   /** Initialization scope used to record state, launch, and locate logs. */
   scope: InitializationScope;
   /** Root the worktree lives under (cleanup + log root). */
@@ -957,7 +960,6 @@ export async function addReposToWorkspace({
       addedRepos.map((repo) => ({
         name: repo.name,
         remote: repo.remote,
-        default_branch: repo.defaultBranch,
         has_lockfile: completed.get(repo.name)?.hasLockfile ?? false,
         feature_branch: branchName,
       })),
@@ -969,7 +971,6 @@ export async function addReposToWorkspace({
         ...metadata.repos.map((repo) => ({
           name: repo.name,
           remote: repo.remote,
-          defaultBranch: repo.default_branch,
         })),
         ...addedRepos,
       ],
@@ -1166,7 +1167,6 @@ export async function writeInitialWorkspaceMetadata({
     repos: repos.map((repo) => ({
       name: repo.name,
       remote: repo.remote,
-      defaultBranch: repo.defaultBranch,
       hasLockfile: false,
     })),
     ...(description && { description }),
@@ -1183,13 +1183,12 @@ async function updatePreparedWorkspaceRepoMetadata({
 }: {
   workspaceDir: string;
   branchName: string;
-  repo: RepoConfig;
+  repo: RepositorySource;
   hasLockfile: boolean;
 }): Promise<void> {
   await updateWorkspaceRepo(workspaceDir, {
     name: repo.name,
     remote: repo.remote,
-    default_branch: repo.defaultBranch,
     feature_branch: branchName,
     has_lockfile: hasLockfile,
   });
@@ -1208,7 +1207,7 @@ function getNextSteps(workspaceDir: string): string[] {
 
 export async function writeVSCodeWorkspaceFile(
   workspaceDir: string,
-  repos: readonly RepoConfig[],
+  repos: readonly RepositorySource[],
   { onEvent }: { onEvent?: ServiceEventSink } = {},
 ): Promise<void> {
   for (const repo of repos) {

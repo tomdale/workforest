@@ -13,13 +13,12 @@ import {
 } from "./environment.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import type {
-  RepoConfig,
+  RepositorySource,
   ResolvedWorkspaceConfig,
   WorkspaceConfig,
 } from "./types.ts";
 import { ensureDir } from "./utils/fs.ts";
 
-const DEFAULT_TRUNK_BRANCH = "main";
 const CONFIG_FILENAME = "config.json";
 const LEGACY_CONFIG_DIR = ".workforest";
 const XDG_CONFIG_DIR = "workforest";
@@ -119,7 +118,7 @@ export function isRepoSlug(token: string): boolean {
 }
 
 /**
- * Convert repo inputs (org/repo slugs or git URLs) to RepoConfig objects.
+ * Convert repo inputs (org/repo slugs or git URLs) to RepositorySource objects.
  * Deduplicates by remote URL and validates format.
  *
  * Supported formats:
@@ -129,8 +128,8 @@ export function isRepoSlug(token: string): boolean {
  * - ssh://git@host/path/to/repo.git (SSH URL)
  * - git://host/path/to/repo.git (Git protocol)
  */
-export function reposFromSlugs(inputs: readonly string[]): RepoConfig[] {
-  const resolved: RepoConfig[] = [];
+export function reposFromSlugs(inputs: readonly string[]): RepositorySource[] {
+  const resolved: RepositorySource[] = [];
   const seenRemotes = new Set<string>();
   const names = new Map<string, string>();
 
@@ -153,11 +152,7 @@ export function reposFromSlugs(inputs: readonly string[]): RepoConfig[] {
 
       names.set(name, remote);
       seenRemotes.add(remote);
-      resolved.push({
-        name,
-        remote,
-        defaultBranch: DEFAULT_TRUNK_BRANCH,
-      });
+      resolved.push({ name, remote });
       continue;
     }
 
@@ -325,10 +320,9 @@ function isSafeGitRemotePathComponent(value: string): boolean {
   });
 }
 
-function createRepoConfig(org: string, repo: string): RepoConfig {
+function createRepoConfig(org: string, repo: string): RepositorySource {
   return {
     name: repo,
     remote: `git@github.com:${org}/${repo}.git`,
-    defaultBranch: DEFAULT_TRUNK_BRANCH,
   };
 }

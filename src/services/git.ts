@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import type { RunCommandOptions } from "../types.ts";
 import { runCommand, runCommandWithStdin } from "../utils/exec.ts";
 import type { TaskState } from "../utils/task-generator.ts";
@@ -15,6 +16,127 @@ export function runGitWithStdin(
   options: { cwd?: string } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return runCommandWithStdin("git", args, stdin, options);
+}
+
+export type DefaultBranchResolver = {
+  resolveBareMirrorDefaultBranch(mirrorDir: string): Promise<string>;
+  resolveWorktreeDefaultBranch(worktreeDir: string): Promise<string>;
+};
+
+export function createDefaultBranchResolver(): DefaultBranchResolver {
+  const cache = new Map<string, Promise<string>>();
+
+  const cached = (key: string, reflect: () => Promise<string>) => {
+    const existing = cache.get(key);
+    if (existing) return existing;
+    const pending = reflect();
+    cache.set(key, pending);
+    return pending;
+  };
+
+  return {
+    async resolveBareMirrorDefaultBranch(mirrorDir) {
+      const key = `mirror:${await realpathOrSelf(mirrorDir)}`;
+      return cached(key, () => reflectBareMirrorDefaultBranch(mirrorDir));
+    },
+    async resolveWorktreeDefaultBranch(worktreeDir) {
+      const gitDir = await gitPath(worktreeDir, "--git-dir");
+      const commonDir = await gitPath(worktreeDir, "--git-common-dir");
+      const key = `worktree:${await realpathOrSelf(commonDir)}:${await realpathOrSelf(gitDir)}`;
+      return cached(key, () =>
+        reflectWorktreeDefaultBranch(worktreeDir, commonDir),
+      );
+    },
+  };
+}
+
+async function realpathOrSelf(targetPath: string): Promise<string> {
+  try {
+    return await fs.realpath(targetPath);
+  } catch {
+    return targetPath;
+  }
+}
+
+async function gitPath(cwd: string, flag: "--git-dir" | "--git-common-dir") {
+  const { stdout } = await runGit(
+    ["rev-parse", "--path-format=absolute", flag],
+    {
+      cwd,
+    },
+  );
+  return stdout.trim();
+}
+
+async function reflectBareMirrorDefaultBranch(mirrorDir: string) {
+  let branch: string;
+  try {
+    const { stdout } = await runGit(["symbolic-ref", "HEAD"], {
+      cwd: mirrorDir,
+    });
+    branch = stdout.trim().replace(/^refs\/heads\//, "");
+  } catch (error) {
+    throw new Error(
+      `Unable to reflect default branch from bare mirror at ${mirrorDir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  await verifyDefaultBranchRef(mirrorDir, branch, mirrorDir);
+  return branch;
+}
+
+async function reflectWorktreeDefaultBranch(
+  worktreeDir: string,
+  commonDir: string,
+) {
+  try {
+    const { stdout } = await runGit(
+      ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+      { cwd: worktreeDir },
+    );
+    const branch = stdout.trim().replace(/^origin\//, "");
+    await verifyDefaultBranchRef(worktreeDir, branch, worktreeDir);
+    return branch;
+  } catch {
+    // Fall through to the common git dir. Linked Workforest worktrees share the
+    // mirror's HEAD even when origin/HEAD is absent in an individual checkout.
+  }
+
+  let branch: string;
+  try {
+    const { stdout } = await runGit(["symbolic-ref", "HEAD"], {
+      cwd: commonDir,
+    });
+    branch = stdout.trim().replace(/^refs\/heads\//, "");
+  } catch (error) {
+    throw new Error(
+      `Unable to reflect default branch for worktree at ${worktreeDir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  await verifyDefaultBranchRef(worktreeDir, branch, worktreeDir);
+  return branch;
+}
+
+async function verifyDefaultBranchRef(
+  cwd: string,
+  branch: string,
+  source: string,
+): Promise<void> {
+  if (!branch) {
+    throw new Error(`Unable to reflect default branch from ${source}.`);
+  }
+
+  try {
+    await runGit(
+      ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
+      { cwd },
+    );
+  } catch {
+    throw new Error(
+      `Unable to reflect default branch from ${source}: refs/remotes/origin/${branch} does not exist.`,
+    );
+  }
 }
 
 type CloneResult = { stdout: string; stderr: string };

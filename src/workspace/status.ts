@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
-import { runGit } from "../services/git.ts";
+import { createDefaultBranchResolver, runGit } from "../services/git.ts";
 import {
   getWorkspaceAgentsMdStatus,
   type TemplateAgentsMdState,
@@ -144,7 +144,7 @@ export type RenderStatusOptions = Readonly<{
 type RepositoryTarget = Readonly<{
   name: string;
   path: string;
-  defaultBranch?: string;
+  defaultBranch: string | null;
   setup?: RepoInitializationState;
   setupLogPath?: string;
 }>;
@@ -658,7 +658,6 @@ async function getRepositoryTargets(
       (repo): WorkspaceRepoMetadata => ({
         name: repo,
         remote: "",
-        default_branch: "main",
         has_lockfile: false,
       }),
     );
@@ -676,7 +675,9 @@ async function getRepositoryTargets(
       return {
         name: repo.name,
         path: path.join(entry.path, repo.name),
-        defaultBranch: repo.default_branch,
+        defaultBranch: await inferDefaultBranch(
+          path.join(entry.path, repo.name),
+        ),
         ...(setup ? { setup } : {}),
         ...(setupLogPath ? { setupLogPath } : {}),
       };
@@ -790,15 +791,14 @@ async function optionalGitLine(
   }
 }
 
-async function inferDefaultBranch(cwd: string): Promise<string> {
-  const symbolic = await optionalGitLine(
-    ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-    cwd,
-  );
-  if (symbolic?.startsWith("origin/")) {
-    return symbolic.slice("origin/".length);
+async function inferDefaultBranch(cwd: string): Promise<string | null> {
+  try {
+    return await createDefaultBranchResolver().resolveWorktreeDefaultBranch(
+      cwd,
+    );
+  } catch {
+    return null;
   }
-  return "main";
 }
 
 async function readAheadBehind(
@@ -822,7 +822,7 @@ async function isIntegrated(
   cwd: string,
   base: string,
   branch: string | null,
-  defaultBranch: string | undefined,
+  defaultBranch: string | null,
 ): Promise<boolean | null> {
   if (branch && defaultBranch && branch === defaultBranch) {
     return true;

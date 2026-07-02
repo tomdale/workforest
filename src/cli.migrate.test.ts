@@ -379,13 +379,11 @@ async function createWorktreeIn(
 function metadataRepo(name: string): {
   name: string;
   remote: string;
-  defaultBranch: string;
   hasLockfile: boolean;
 } {
   return {
     name,
     remote: `git@github.com:vercel/${name}.git`,
-    defaultBranch: "main",
     hasLockfile: true,
   };
 }

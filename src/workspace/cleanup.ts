@@ -3,8 +3,8 @@ import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
-import { runGit } from "../services/git.ts";
-import type { CleanupOptions, RepoConfig } from "../types.ts";
+import { createDefaultBranchResolver, runGit } from "../services/git.ts";
+import type { CleanupOptions, RepositorySource } from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";
@@ -68,7 +68,7 @@ export type CleanupExecutionOptions = CleanupOptions & {
 export type WorktreeCleanupOptions = Readonly<{
   repoName: string;
   targetPath: string;
-  repo?: RepoConfig;
+  repo?: RepositorySource;
   dryRun?: boolean;
   onState?: CleanupStateSink;
 }>;
@@ -198,14 +198,19 @@ export async function previewCleanup(
   // Check for merged remote branches if requested
   const remoteBranches: RemoteBranchInfo[] = [];
   if (options.checkRemoteBranches && metadata) {
+    const defaultBranchResolver = createDefaultBranchResolver();
     for (const repo of metadata.repos) {
-      // Skip if no feature branch recorded or if it's the same as default
-      if (!repo.feature_branch || repo.feature_branch === repo.default_branch) {
+      if (!repo.feature_branch) {
         continue;
       }
 
       const repoDir = resolveContainedPath(resolvedDir, repo.name);
       if (!(await pathExists(repoDir))) {
+        continue;
+      }
+      const defaultBranch =
+        await defaultBranchResolver.resolveWorktreeDefaultBranch(repoDir);
+      if (repo.feature_branch === defaultBranch) {
         continue;
       }
 
@@ -219,7 +224,7 @@ export async function previewCleanup(
       const merged = await isBranchMerged(
         repoDir,
         repo.feature_branch,
-        repo.default_branch,
+        defaultBranch,
       );
 
       // Only include merged branches (safe to delete)
@@ -283,21 +288,25 @@ export async function* cleanupWorkspaceGenerator(
       {
         name: repo.name,
         remote: repo.remote,
-        defaultBranch: repo.default_branch,
-      } satisfies RepoConfig,
+      } satisfies RepositorySource,
     ]) ?? [],
   );
 
   // Delete remote branches first (before removing worktrees)
   if (deleteRemoteBranches && metadata) {
+    const defaultBranchResolver = createDefaultBranchResolver();
     for (const repo of metadata.repos) {
-      // Skip if no feature branch recorded or if it's the same as default
-      if (!repo.feature_branch || repo.feature_branch === repo.default_branch) {
+      if (!repo.feature_branch) {
         continue;
       }
 
       const repoDir = resolveContainedPath(resolvedDir, repo.name);
       if (!(await pathExists(repoDir))) {
+        continue;
+      }
+      const defaultBranch =
+        await defaultBranchResolver.resolveWorktreeDefaultBranch(repoDir);
+      if (repo.feature_branch === defaultBranch) {
         continue;
       }
 
@@ -325,7 +334,7 @@ export async function* cleanupWorkspaceGenerator(
       const merged = await isBranchMerged(
         repoDir,
         repo.feature_branch,
-        repo.default_branch,
+        defaultBranch,
       );
 
       if (!merged) {
