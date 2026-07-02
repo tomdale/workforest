@@ -102,12 +102,18 @@ export type TemplateAgentsMdConfig = {
   paths?: Record<string, string[]>;
   /** Guidance lifetime. Defaults to 24 hours. */
   maxAgeHours?: number;
+  /** Workspace-root relative generated guidance file. Defaults to AGENTS.md. */
+  file?: string;
+  /** Workspace-root relative symlink paths pointing to file. Defaults to CLAUDE.md. */
+  symlinks?: string[];
 };
 
 export type TemplateAgentsMdConfigOverride = {
   focus?: string | null;
   paths?: Record<string, string[] | null> | null;
   maxAgeHours?: number | null;
+  file?: string | null;
+  symlinks?: string[] | null;
 };
 
 export type Hook = {

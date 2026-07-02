@@ -21,6 +21,8 @@ const XDG_TEMPLATES_DIR = "workforest/templates";
 const TEMPLATE_FILENAME_JSONC = "template.jsonc";
 const TEMPLATE_FILENAME_JSON = "template.json";
 const VARIANTS_DIR = "variants";
+const DEFAULT_AGENTS_MD_FILE = "AGENTS.md";
+const DEFAULT_AGENTS_MD_SYMLINKS = ["CLAUDE.md"] as const;
 
 export type Template = {
   id: string;
@@ -286,7 +288,9 @@ function generateTemplateJsonc(config: TemplateConfig): string {
     lines.push('  // "AGENTS.md": {');
     lines.push('  //   "focus": "How a workflow crosses these repositories.",');
     lines.push('  //   "paths": { "repo": ["src/component"] },');
-    lines.push('  //   "maxAgeHours": 24');
+    lines.push('  //   "maxAgeHours": 24,');
+    lines.push('  //   "file": "AGENTS.md",');
+    lines.push('  //   "symlinks": ["CLAUDE.md"]');
     lines.push("  // },");
   }
 
@@ -383,6 +387,10 @@ function normalizeAgentsMdConfig(config: TemplateConfig): TemplateConfig {
           }
         : {}),
       maxAgeHours: agents.maxAgeHours ?? 24,
+      file: normalizeWorkspaceFilePath(agents.file ?? DEFAULT_AGENTS_MD_FILE),
+      symlinks: (agents.symlinks ?? [...DEFAULT_AGENTS_MD_SYMLINKS]).map(
+        normalizeWorkspaceFilePath,
+      ),
     },
   };
 }
@@ -508,6 +516,7 @@ function validateTemplateConfigPaths(config: TemplateConfig): void {
       resolveContainedPath("/workforest-agents-md-root", componentPath);
     }
   }
+  validateAgentsMdFilePaths(config["AGENTS.md"]);
   for (const hook of config.hooks ?? []) {
     const hookDirs = hook.in
       ? Array.isArray(hook.in)
@@ -521,6 +530,51 @@ function validateTemplateConfigPaths(config: TemplateConfig): void {
     if (hook.if?.fileExists) {
       resolveContainedPath("/workforest-hook-root", hook.if.fileExists);
     }
+  }
+}
+
+function validateAgentsMdFilePaths(agents: TemplateConfig["AGENTS.md"]): void {
+  if (!agents) return;
+  const file = normalizeWorkspaceFilePath(
+    agents.file ?? DEFAULT_AGENTS_MD_FILE,
+  );
+  const symlinks = (agents.symlinks ?? [...DEFAULT_AGENTS_MD_SYMLINKS]).map(
+    normalizeWorkspaceFilePath,
+  );
+  const seen = new Set<string>();
+  seen.add(file);
+  for (const symlink of symlinks) {
+    if (symlink === file) {
+      throw new Error(
+        "AGENTS.md symlinks must not include the generated file.",
+      );
+    }
+    if (seen.has(symlink)) {
+      throw new Error(
+        `AGENTS.md symlinks contains duplicate path "${symlink}".`,
+      );
+    }
+    seen.add(symlink);
+  }
+}
+
+function normalizeWorkspaceFilePath(value: string): string {
+  const root = "/workforest-workspace-root";
+  const resolved = resolveContainedPath(root, value);
+  const relative = path.relative(root, resolved);
+  if (!relative) {
+    throw new Error("Configured AGENTS.md paths must reference a file.");
+  }
+  return relative.split(path.sep).join("/");
+}
+
+function isValidWorkspaceFilePath(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  try {
+    normalizeWorkspaceFilePath(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -635,6 +689,20 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
     ) {
       return false;
     }
+    if (
+      value["file"] !== undefined &&
+      !isValidWorkspaceFilePath(value["file"])
+    ) {
+      return false;
+    }
+    if (value["symlinks"] !== undefined) {
+      if (
+        !Array.isArray(value["symlinks"]) ||
+        value["symlinks"].some((item) => !isValidWorkspaceFilePath(item))
+      ) {
+        return false;
+      }
+    }
     if (value["paths"] !== undefined) {
       if (value["paths"] === null || typeof value["paths"] !== "object") {
         return false;
@@ -746,7 +814,13 @@ function isValidAgentsMdConfigOverride(value: unknown): boolean {
     return false;
   }
   const agents = value as Record<string, unknown>;
-  const allowedKeys = new Set(["focus", "paths", "maxAgeHours"]);
+  const allowedKeys = new Set([
+    "focus",
+    "paths",
+    "maxAgeHours",
+    "file",
+    "symlinks",
+  ]);
   for (const key of Object.keys(agents)) {
     if (!allowedKeys.has(key)) return false;
   }
@@ -764,6 +838,21 @@ function isValidAgentsMdConfigOverride(value: unknown): boolean {
       (agents["maxAgeHours"] as number) <= 0)
   ) {
     return false;
+  }
+  if (
+    agents["file"] !== undefined &&
+    agents["file"] !== null &&
+    !isValidWorkspaceFilePath(agents["file"])
+  ) {
+    return false;
+  }
+  if (agents["symlinks"] !== undefined && agents["symlinks"] !== null) {
+    if (
+      !Array.isArray(agents["symlinks"]) ||
+      agents["symlinks"].some((item) => !isValidWorkspaceFilePath(item))
+    ) {
+      return false;
+    }
   }
   if (agents["paths"] !== undefined && agents["paths"] !== null) {
     if (

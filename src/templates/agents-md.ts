@@ -26,6 +26,8 @@ const STAGED_TEMPLATE_FILES_DIR = ".workforest/template-files";
 const MAX_GUIDANCE_LENGTH = 16_000;
 const AGENTS_MD_MODEL_CATEGORY: AiModelCategory = "generate-context";
 const AGENTS_MD_MIN_AI_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_AGENTS_MD_FILE = "AGENTS.md";
+const DEFAULT_AGENTS_MD_SYMLINKS = ["CLAUDE.md"] as const;
 
 export type TemplateAgentsMdState =
   | "disabled"
@@ -90,16 +92,21 @@ export function agentsMdDirectory(template: Template): string {
 }
 
 function authoredAgentsMdPaths(template: Template): string[] {
+  const file = agentsMdFile(template);
   return [
     ...(template.parentPath
-      ? [path.join(path.dirname(template.parentPath), "files", "AGENTS.md")]
+      ? [path.join(path.dirname(template.parentPath), "files", file)]
       : []),
-    path.join(path.dirname(template.path), "files", "AGENTS.md"),
+    path.join(path.dirname(template.path), "files", file),
   ];
 }
 
 function ownedAuthoredAgentsMdPath(template: Template): string {
-  return path.join(path.dirname(template.path), "files", "AGENTS.md");
+  return path.join(
+    path.dirname(template.path),
+    "files",
+    agentsMdFile(template),
+  );
 }
 
 export function agentsMdScopeFingerprint(template: Template): string {
@@ -182,7 +189,13 @@ export async function refreshTemplateAgentsMd(
   const inheritedAuthoredPaths = (
     await Promise.all(
       (template.parentPath
-        ? [path.join(path.dirname(template.parentPath), "files", "AGENTS.md")]
+        ? [
+            path.join(
+              path.dirname(template.parentPath),
+              "files",
+              agentsMdFile(template),
+            ),
+          ]
         : []
       ).map(async (candidate) =>
         (await pathExists(candidate)) ? candidate : null,
@@ -198,12 +211,12 @@ export async function refreshTemplateAgentsMd(
   ];
   if (existingAuthoredPaths.length > 0 && !options.force) {
     throw new Error(
-      `Template contains files/AGENTS.md. Remove it or refresh with --force.`,
+      `Template contains files/${agentsMdFile(template)}. Remove it or refresh with --force.`,
     );
   }
   if (inheritedAuthoredPaths.length > 0 && options.force) {
     throw new Error(
-      `Template inherits files/AGENTS.md from its parent. Remove it from the parent template before refreshing "${template.id}".`,
+      `Template inherits files/${agentsMdFile(template)} from its parent. Remove it from the parent template before refreshing "${template.id}".`,
     );
   }
   options.onProgress?.("Synchronizing clean default-branch sources…");
@@ -287,7 +300,7 @@ export async function materializeTemplateAgentsMd(
   options: { force?: boolean; now?: Date } = {},
 ): Promise<TemplateAgentsMdStatus> {
   const current = await getTemplateAgentsMdStatus(template, options.now);
-  const target = path.join(workspaceDir, "AGENTS.md");
+  const target = workspaceAgentsMdFilePath(template, workspaceDir);
   const provenancePath = path.join(
     workspaceDir,
     ".workforest",
@@ -302,6 +315,9 @@ export async function materializeTemplateAgentsMd(
       provenancePath,
       options.force ?? false,
     );
+    await updateWorkspaceAgentsMdSymlinks(template, workspaceDir, {
+      force: options.force ?? false,
+    });
     await atomicWriteJson(provenancePath, {
       version: 1,
       templateId: template.id,
@@ -318,6 +334,9 @@ export async function materializeTemplateAgentsMd(
     provenancePath,
     options.force ?? false,
   );
+  await updateWorkspaceAgentsMdSymlinks(template, workspaceDir, {
+    force: options.force ?? false,
+  });
   await atomicWriteJson(provenancePath, {
     version: 1,
     templateId: template.id,
@@ -377,7 +396,7 @@ export async function getWorkspaceAgentsMdStatus(
 ): Promise<TemplateAgentsMdStatus> {
   const templateStatus = await getTemplateAgentsMdStatus(template, now);
   if (templateStatus.state === "disabled") return templateStatus;
-  const target = path.join(workspaceDir, "AGENTS.md");
+  const target = workspaceAgentsMdFilePath(template, workspaceDir);
   const provenancePath = path.join(
     workspaceDir,
     ".workforest",
@@ -393,6 +412,14 @@ export async function getWorkspaceAgentsMdStatus(
     return status(template, "conflict", templateStatus.manifest, target);
   if (sha256(await fs.readFile(target)) !== provenance.sha256)
     return status(template, "modified", templateStatus.manifest, target);
+  const symlinks = await getWorkspaceAgentsMdSymlinkState(
+    template,
+    workspaceDir,
+  );
+  if (symlinks === "missing")
+    return status(template, "missing", templateStatus.manifest, null);
+  if (symlinks === "conflict")
+    return status(template, "conflict", templateStatus.manifest, target);
   if (provenance.scopeFingerprint !== agentsMdScopeFingerprint(template))
     return status(template, "scope-changed", templateStatus.manifest, target);
   return { ...templateStatus, artifactPath: target };
@@ -420,7 +447,7 @@ export async function invalidateWorkspaceAgentsMd(
   workspaceDir: string,
 ): Promise<void> {
   if (!template.config["AGENTS.md"]) return;
-  const target = path.join(workspaceDir, "AGENTS.md");
+  const target = workspaceAgentsMdFilePath(template, workspaceDir);
   const provenancePath = path.join(
     workspaceDir,
     ".workforest",
@@ -428,6 +455,9 @@ export async function invalidateWorkspaceAgentsMd(
   );
   const contents = unavailableDocument(template.id, "scope-changed");
   await replaceManagedFile(target, contents, provenancePath, false);
+  await updateWorkspaceAgentsMdSymlinks(template, workspaceDir, {
+    force: false,
+  });
   await atomicWriteJson(provenancePath, {
     version: 1,
     templateId: template.id,
@@ -473,6 +503,94 @@ async function replaceManagedFile(
   }
   await ensureDir(path.dirname(target));
   await fs.writeFile(target, contents, "utf8");
+}
+
+type WorkspaceAgentsMdSymlinkState = "fresh" | "missing" | "conflict";
+
+async function getWorkspaceAgentsMdSymlinkState(
+  template: Template,
+  workspaceDir: string,
+): Promise<WorkspaceAgentsMdSymlinkState> {
+  const file = workspaceAgentsMdFilePath(template, workspaceDir);
+  for (const symlink of agentsMdSymlinks(template)) {
+    const target = resolveContainedPath(workspaceDir, symlink);
+    try {
+      const stat = await fs.lstat(target);
+      if (!stat.isSymbolicLink()) return "conflict";
+      const expected = relativeSymlinkTarget(path.dirname(target), file);
+      if ((await fs.readlink(target)) !== expected) return "conflict";
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+      throw error;
+    }
+  }
+  return "fresh";
+}
+
+async function updateWorkspaceAgentsMdSymlinks(
+  template: Template,
+  workspaceDir: string,
+  options: { force: boolean },
+): Promise<void> {
+  const file = workspaceAgentsMdFilePath(template, workspaceDir);
+  for (const symlink of agentsMdSymlinks(template)) {
+    const target = resolveContainedPath(workspaceDir, symlink);
+    await updateWorkspaceAgentsMdSymlink(
+      target,
+      relativeSymlinkTarget(path.dirname(target), file),
+      options,
+    );
+  }
+}
+
+async function updateWorkspaceAgentsMdSymlink(
+  target: string,
+  linkTarget: string,
+  options: { force: boolean },
+): Promise<void> {
+  try {
+    const stat = await fs.lstat(target);
+    if (stat.isSymbolicLink() && (await fs.readlink(target)) === linkTarget) {
+      return;
+    }
+
+    if (!options.force) {
+      throw new Error(`Refusing to replace existing ${target}. Use --force.`);
+    }
+    if (stat.isDirectory()) {
+      throw new Error(`Refusing to replace directory ${target}.`);
+    }
+    if (stat.isSymbolicLink()) {
+      await fs.rename(target, backupPath(target));
+    } else {
+      await backupFile(target);
+      await fs.rm(target);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  await ensureDir(path.dirname(target));
+  await fs.symlink(linkTarget, target);
+}
+
+function workspaceAgentsMdFilePath(
+  template: Template,
+  workspaceDir: string,
+): string {
+  return resolveContainedPath(workspaceDir, agentsMdFile(template));
+}
+
+function agentsMdFile(template: Template): string {
+  return template.config["AGENTS.md"]?.file ?? DEFAULT_AGENTS_MD_FILE;
+}
+
+function agentsMdSymlinks(template: Template): readonly string[] {
+  return template.config["AGENTS.md"]?.symlinks ?? DEFAULT_AGENTS_MD_SYMLINKS;
+}
+
+function relativeSymlinkTarget(fromDirectory: string, target: string): string {
+  return path.relative(fromDirectory, target).split(path.sep).join("/");
 }
 
 async function prepareSources(
@@ -573,14 +691,19 @@ async function collectTemplateRootFiles(
   }
 
   const files: TemplateRootFile[] = [];
-  await collectTemplateRootFilesFromDirectory(filesRoot, "", true, files);
+  await collectTemplateRootFilesFromDirectory(
+    filesRoot,
+    "",
+    agentsMdFile(template),
+    files,
+  );
   return files.sort((a, b) => a.workspacePath.localeCompare(b.workspacePath));
 }
 
 async function collectTemplateRootFilesFromDirectory(
   directory: string,
   relativeDirectory: string,
-  isRoot: boolean,
+  generatedFile: string,
   files: TemplateRootFile[],
 ): Promise<void> {
   const entries = (await fs.readdir(directory, { withFileTypes: true })).sort(
@@ -588,12 +711,11 @@ async function collectTemplateRootFilesFromDirectory(
   );
 
   for (const entry of entries) {
-    if (isRoot && entry.name === "AGENTS.md") continue;
-
     const absolutePath = resolveContainedPath(directory, entry.name);
     const workspacePath = relativeDirectory
       ? `${relativeDirectory}/${entry.name}`
       : entry.name;
+    if (workspacePath === generatedFile) continue;
     const stat = await fs.lstat(absolutePath);
 
     if (stat.isSymbolicLink()) {
@@ -605,7 +727,7 @@ async function collectTemplateRootFilesFromDirectory(
       await collectTemplateRootFilesFromDirectory(
         absolutePath,
         workspacePath,
-        false,
+        generatedFile,
         files,
       );
       continue;
@@ -745,7 +867,7 @@ function generationPrompt(
     `Checked-out clean default-branch repositories are available from the current working directory:\n${repositories}`,
     [
       "Template-provided workspace root files:",
-      "The template's `files/` directory is staged read-only at `.workforest/template-files/`. These files will be copied to the workspace root; paths under repository names act as overlays on those checkouts. Root `files/AGENTS.md` is excluded because Workforest writes the generated root AGENTS.md.",
+      "The template's `files/` directory is staged read-only at `.workforest/template-files/`. These files will be copied to the workspace root; paths under repository names act as overlays on those checkouts. The configured generated guidance file is excluded because Workforest writes it.",
       "Inspect only the staged files relevant to the configured focus, and do not repeat secrets or environment values from `.env`, credential, token, key, or certificate files.",
       templateRootFiles,
     ].join("\n"),
@@ -879,8 +1001,11 @@ async function atomicWriteJson(file: string, value: unknown): Promise<void> {
 }
 
 async function backupFile(file: string): Promise<void> {
-  const backup = `${file}.backup-${portableTimestamp(new Date())}`;
-  await fs.copyFile(file, backup, fsConstants.COPYFILE_EXCL);
+  await fs.copyFile(file, backupPath(file), fsConstants.COPYFILE_EXCL);
+}
+
+function backupPath(file: string): string {
+  return `${file}.backup-${portableTimestamp(new Date())}`;
 }
 
 async function removeSupersededArtifacts(

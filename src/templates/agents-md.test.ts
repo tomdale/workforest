@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -16,6 +17,7 @@ import {
   agentsMdScopeFingerprint,
   agentsMdTemplateFilesFingerprint,
   getTemplateAgentsMdStatus,
+  getWorkspaceAgentsMdStatus,
   materializeTemplateAgentsMd,
   refreshAndMaterializeTemplateAgentsMd,
   refreshTemplateAgentsMd,
@@ -429,7 +431,7 @@ describe("template AGENTS.md artifacts", () => {
     ).toBe("scope-changed");
   });
 
-  it("materializes only at the workspace root and fails closed after expiry", async () => {
+  it("materializes with the default generated file and symlink", async () => {
     const { template, workspace } = await fixture();
     const generated = new Date("2026-06-26T10:00:00Z");
     const expires = new Date("2026-06-27T10:00:00Z");
@@ -441,6 +443,71 @@ describe("template AGENTS.md artifacts", () => {
     await materializeTemplateAgentsMd(template, workspace, { now: expires });
     expect(await readFile(path.join(workspace, "AGENTS.md"), "utf8")).toContain(
       "guidance unavailable",
+    );
+    await expect(readlink(path.join(workspace, "CLAUDE.md"))).resolves.toBe(
+      "AGENTS.md",
+    );
+  });
+
+  it("materializes a nested generated file and nested symlink", async () => {
+    const { template, workspace } = await fixture();
+    const generated = new Date("2026-06-26T10:00:00Z");
+    const expires = new Date("2026-06-27T10:00:00Z");
+    if (!template.config["AGENTS.md"]) throw new Error("Expected config");
+    template.config["AGENTS.md"].file = ".agents/AGENTS.md";
+    template.config["AGENTS.md"].symlinks = ["docs/CLAUDE.md"];
+    await publish(template, generated, expires);
+
+    await materializeTemplateAgentsMd(template, workspace, { now: generated });
+
+    await expect(
+      readFile(path.join(workspace, ".agents", "AGENTS.md"), "utf8"),
+    ).resolves.toContain("# Focus");
+    await expect(
+      readlink(path.join(workspace, "docs", "CLAUDE.md")),
+    ).resolves.toBe("../.agents/AGENTS.md");
+  });
+
+  it("reports missing workspace guidance when the default CLAUDE.md symlink is removed", async () => {
+    const { template, workspace } = await fixture();
+    const generated = new Date("2026-06-26T10:00:00Z");
+    const expires = new Date("2026-06-27T10:00:00Z");
+    await publish(template, generated, expires);
+    await materializeTemplateAgentsMd(template, workspace, { now: generated });
+    await rm(path.join(workspace, "CLAUDE.md"));
+
+    await expect(
+      getWorkspaceAgentsMdStatus(template, workspace, generated),
+    ).resolves.toMatchObject({ state: "missing" });
+  });
+
+  it("does not create symlinks when configured with an empty symlink list", async () => {
+    const { template, workspace } = await fixture();
+    const generated = new Date("2026-06-26T10:00:00Z");
+    const expires = new Date("2026-06-27T10:00:00Z");
+    if (!template.config["AGENTS.md"]) throw new Error("Expected config");
+    template.config["AGENTS.md"].symlinks = [];
+    await publish(template, generated, expires);
+
+    await materializeTemplateAgentsMd(template, workspace, { now: generated });
+
+    await expect(readlink(path.join(workspace, "CLAUDE.md"))).rejects.toThrow();
+  });
+
+  it("excludes a custom generated file from template files", async () => {
+    const { template } = await fixture();
+    if (!template.config["AGENTS.md"]) throw new Error("Expected config");
+    template.config["AGENTS.md"].file = ".agents/AGENTS.md";
+    const filesDir = path.join(path.dirname(template.path), "files");
+    await mkdir(path.join(filesDir, ".agents"), { recursive: true });
+    await writeFile(
+      path.join(filesDir, ".agents", "AGENTS.md"),
+      "authored guidance\n",
+      "utf8",
+    );
+
+    await expect(agentsMdTemplateFilesFingerprint(template)).resolves.toBe(
+      createHash("sha256").update(JSON.stringify([])).digest("hex"),
     );
   });
 

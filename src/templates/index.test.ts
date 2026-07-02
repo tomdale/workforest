@@ -232,6 +232,8 @@ describe("templates", () => {
       focus: "How settings flow through the API.",
       paths: { front: ["app/settings"], api: ["services/settings"] },
       maxAgeHours: 24,
+      file: "AGENTS.md",
+      symlinks: ["CLAUDE.md"],
     });
     await expect(
       readFile(path.join(templateDir, "AGENTS.md"), "utf8"),
@@ -282,6 +284,8 @@ describe("templates", () => {
         focus: "Chat workflow",
         paths: { front: ["app/chat"] },
         maxAgeHours: 12,
+        file: "AGENTS.md",
+        symlinks: ["CLAUDE.md"],
       },
     });
   });
@@ -335,6 +339,16 @@ describe("templates", () => {
     { focus: "" },
     { focus: "workflow", maxAgeHours: 0 },
     { focus: "workflow", maxAgeHours: 1.5 },
+    { focus: "workflow", file: "" },
+    { focus: "workflow", file: "/AGENTS.md" },
+    { focus: "workflow", file: "../AGENTS.md" },
+    { focus: "workflow", file: "." },
+    { focus: "workflow", file: "nested/\u0000AGENTS.md" },
+    { focus: "workflow", symlinks: "CLAUDE.md" },
+    { focus: "workflow", symlinks: ["/CLAUDE.md"] },
+    { focus: "workflow", symlinks: ["../CLAUDE.md"] },
+    { focus: "workflow", symlinks: ["AGENTS.md"] },
+    { focus: "workflow", symlinks: ["CLAUDE.md", "CLAUDE.md"] },
     { focus: "workflow", paths: { unknown: ["src"] } },
     { focus: "workflow", paths: { front: ["../outside"] } },
   ])("rejects invalid AGENTS.md configuration %j", async (agents) => {

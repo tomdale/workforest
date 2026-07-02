@@ -21,6 +21,7 @@ export type HookState =
   | { phase: "hook-complete"; hookName: string };
 
 const TEMPLATE_FILES_DIR = "files";
+const DEFAULT_AGENTS_MD_FILE = "AGENTS.md";
 
 export async function copyTemplateFiles(
   template: Template,
@@ -31,18 +32,23 @@ export async function copyTemplateFiles(
     path.dirname(template.path),
   ];
   const copiedTargets = new Set<string>();
+  const generatedAgentsMdFile =
+    template.config["AGENTS.md"]?.file ?? DEFAULT_AGENTS_MD_FILE;
+  const options = {
+    ...(template.config["AGENTS.md"] !== undefined
+      ? { generatedAgentsMdFile }
+      : {}),
+    copiedTargets,
+  };
   for (const templateDir of templateDirs) {
-    await copyTemplateFilesLayer(templateDir, workspaceDir, {
-      skipRootAgentsMd: template.config["AGENTS.md"] !== undefined,
-      copiedTargets,
-    });
+    await copyTemplateFilesLayer(templateDir, workspaceDir, options);
   }
 }
 
 async function copyTemplateFilesLayer(
   templateDir: string,
   workspaceDir: string,
-  options: { skipRootAgentsMd: boolean; copiedTargets: Set<string> },
+  options: { generatedAgentsMdFile?: string; copiedTargets: Set<string> },
 ): Promise<void> {
   const templateDirStat = await fs.lstat(templateDir);
   if (templateDirStat.isSymbolicLink()) {
@@ -81,7 +87,8 @@ async function copyDirectoryContents(
   sourceDir: string,
   targetDir: string,
   workspaceDir: string,
-  options: { skipRootAgentsMd: boolean; copiedTargets: Set<string> },
+  options: { generatedAgentsMdFile?: string; copiedTargets: Set<string> },
+  relativeDirectory = "",
 ): Promise<void> {
   await assertContainedPathWithoutSymlinks(workspaceDir, targetDir);
   await fs.mkdir(targetDir, { recursive: true });
@@ -89,11 +96,10 @@ async function copyDirectoryContents(
 
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (
-      options.skipRootAgentsMd &&
-      sourceDir.endsWith(`${path.sep}${TEMPLATE_FILES_DIR}`) &&
-      entry.name === "AGENTS.md"
-    ) {
+    const workspacePath = relativeDirectory
+      ? `${relativeDirectory}/${entry.name}`
+      : entry.name;
+    if (options.generatedAgentsMdFile === workspacePath) {
       continue;
     }
     const sourcePath = resolveContainedPath(sourceDir, entry.name);
@@ -105,10 +111,13 @@ async function copyDirectoryContents(
       );
     }
     if (entry.isDirectory()) {
-      await copyDirectoryContents(sourcePath, targetPath, workspaceDir, {
-        ...options,
-        skipRootAgentsMd: false,
-      });
+      await copyDirectoryContents(
+        sourcePath,
+        targetPath,
+        workspaceDir,
+        options,
+        workspacePath,
+      );
       continue;
     }
     if (!entry.isFile()) {

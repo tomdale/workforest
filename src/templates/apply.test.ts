@@ -204,6 +204,47 @@ describe("copyTemplateFiles", () => {
     ).resolves.toBe("variant\n");
   });
 
+  it("does not copy the configured generated guidance file from template files", async () => {
+    const xdgConfigHome = await createTempDir("workforest-templates-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      "AGENTS.md": {
+        focus: "Workflow guidance",
+        file: ".agents/AGENTS.md",
+      },
+    });
+
+    const filesDir = path.join(
+      xdgConfigHome,
+      "workforest",
+      "templates",
+      "demo",
+      "files",
+    );
+    await mkdir(path.join(filesDir, ".agents"), { recursive: true });
+    await writeFile(
+      path.join(filesDir, ".agents", "AGENTS.md"),
+      "generated guidance\n",
+      "utf8",
+    );
+    await writeFile(path.join(filesDir, "README.md"), "notes\n", "utf8");
+
+    const template = await loadTemplate("demo");
+    if (!template) throw new Error("Expected template.");
+
+    await copyTemplateFiles(template, workspaceDir);
+
+    await expect(
+      readFile(path.join(workspaceDir, ".agents", "AGENTS.md"), "utf8"),
+    ).rejects.toThrow();
+    await expect(
+      readFile(path.join(workspaceDir, "README.md"), "utf8"),
+    ).resolves.toBe("notes\n");
+  });
+
   it("fails when a copied file would overwrite an existing file", async () => {
     const xdgConfigHome = await createTempDir("workforest-templates-");
     const workspaceDir = await createTempDir("workforest-workspace-");
