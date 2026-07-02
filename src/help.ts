@@ -172,7 +172,7 @@ Nouns:
   cached mirror        A bare local clone of a remote repository kept under \`~/.cache/workforest/\`.
                        All worktrees are built from these mirrors, so creation works offline after
                        the first clone, and is fast on every subsequent call.
-                       Inspect and repair with \`wf cache\`.
+                       Inspect and repair with \`wf cache list\` and \`wf cache doctor\`.
 
   review workspace     A persistent bare workspace for reviewing pull requests from one repository.
                        Created once with \`wf review open\`; individual PRs are added as worktrees
