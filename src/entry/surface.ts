@@ -65,6 +65,8 @@ export type EntryDeps = Readonly<{
   }) => Promise<void>;
   /** Target highlighted first when the command line supplies a preference. */
   initialTarget?: EntryTarget;
+  /** Change name prefilled in create mode when the command line supplied one. */
+  initialName?: string;
   /**
    * The Workforest container the command was launched from, when inside one.
    * Phase 1 defaults its change list to this scope (Tab toggles to all changes)
@@ -96,7 +98,13 @@ export async function runEntry(
   };
 
   try {
-    const phase1 = await runPhase1(screen, stage, mode, deps.scope);
+    const phase1 = await runPhase1(
+      screen,
+      stage,
+      mode,
+      deps.scope,
+      deps.initialName,
+    );
     if (phase1.kind === "cancel") return;
     if (phase1.kind === "cd") {
       await cdToEntry(phase1.candidate);
@@ -135,6 +143,7 @@ async function runPhase1(
   stage: Box,
   mode: EntryMode,
   scope: Scope | undefined,
+  initialName: string | undefined,
 ): Promise<Phase1Result> {
   const candidates = mode === "go" ? await listCandidates() : [];
 
@@ -170,6 +179,7 @@ async function runPhase1(
       parent: stage,
       items: itemsNow(),
       placeholder,
+      ...(initialName ? { initialQuery: initialName } : {}),
       ...(canScope
         ? {
             scopeToggle: { options: scopeOptions, active: activeScopeIndex() },

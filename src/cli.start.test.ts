@@ -300,6 +300,39 @@ describe("wf new", () => {
     });
   });
 
+  it("uses the current repository root for a source-less start", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const repoRoot = path.join(fixture.baseDir, "Repos", "front");
+    await mkdir(repoRoot, { recursive: true });
+    process.chdir(repoRoot);
+    const created = fakeCreateSingleWorktree();
+
+    await runNewCommand(invocation(["follow-up"]), {
+      interactive: false,
+      writeShellCdPath: fixture.writeShellCdPath,
+      createSingleWorktree: created,
+      startRepoInitialization: fakeStartRepoInitialization(),
+    });
+
+    expect(created).toHaveBeenCalledWith({
+      repo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        defaultBranch: "main",
+      },
+      branchName: "tomdale/follow-up",
+      targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
+    });
+    expect(fixture.cdTargets).toEqual([
+      path.join(fixture.baseDir, "Repos", "front", "follow-up"),
+    ]);
+  });
+
   it("routes a template source to the template workspace layout", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(

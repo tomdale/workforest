@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FuzzyListOptions, FuzzyResult } from "../terminal/fuzzy-list.ts";
 
 type ScriptedFuzzyResult =
@@ -80,6 +80,39 @@ import { type EntryDeps, runEntry } from "./surface.ts";
 type CommitIntent = Parameters<EntryDeps["commit"]>[0];
 
 describe("runEntry", () => {
+  beforeEach(() => {
+    fuzzyResults.length = 0;
+    createFuzzyListMock.mockClear();
+    screenDestroyMock.mockClear();
+  });
+
+  it("prefills create mode with an initial name", async () => {
+    const commit = vi.fn(async () => {});
+    fuzzyResults.push(
+      { kind: "action", query: "follow-up" },
+      { kind: "item", value: { kind: "repo", id: "tomdale/workforest" } },
+      { kind: "item", value: "local" },
+    );
+
+    await runEntry("create", {
+      initialName: "follow-up",
+      commit,
+    });
+
+    expect(createFuzzyListMock).toHaveBeenCalledTimes(3);
+    const [phase1Options] = createFuzzyListMock.mock.calls as unknown as Array<
+      [Record<string, unknown>]
+    >;
+    expect(phase1Options?.[0]).toMatchObject({
+      initialQuery: "follow-up",
+    });
+    expect(commit).toHaveBeenCalledWith({
+      changeName: "follow-up",
+      sources: [{ kind: "repo", token: "tomdale/workforest" }],
+      target: "local",
+    });
+  });
+
   it("preselects an explicit target while showing the target picker", async () => {
     const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
     fuzzyResults.push(

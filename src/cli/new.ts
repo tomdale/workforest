@@ -42,7 +42,7 @@ type SourceSpec = ResolvedSource;
 
 export type RunNewCommandOptions = CreateOptions;
 
-const NEW_CONTEXT_ERROR = [
+export const NEW_CONTEXT_ERROR = [
   "Not in a Workforest-managed repo or workspace.",
   "Create explicitly: wf new <name> <repo|@template>",
 ].join("\n");

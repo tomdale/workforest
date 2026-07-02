@@ -257,19 +257,11 @@ async function runInvocation(
         if (!shouldUseFullscreenTui()) {
           throw new UsageError("wf new requires a name.");
         }
-        return runEntryCommand(
-          "create",
-          invocation.flags["cloud"] === true ? "cloud" : undefined,
-        );
-      }
-      return runTypedCommand(async () => {
-        const { runNewCommand } = await import("./cli/new.ts");
-        return runNewCommand(invocation, {
-          interactive: isInteractive(),
-          onEvent: humanServiceEventSink,
-          writeShellCdPath,
+        return runEntryCommand("create", {
+          ...(invocation.flags["cloud"] === true ? { target: "cloud" } : {}),
         });
-      });
+      }
+      return runNewInvocation(invocation);
     case "list":
       return runTypedCommand(() => runListCommand(invocation));
     case "status":
@@ -411,18 +403,65 @@ async function runInvocation(
  * searches existing changes and can create; `create` (`wf new`) skips the
  * existing-change search and goes straight to naming a new change.
  */
+async function runNewInvocation(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const sourceLess = invocation.beforeDoubleDash.length === 1;
+  try {
+    return await runTypedCommand(async () => {
+      const { runNewCommand } = await import("./cli/new.ts");
+      return runNewCommand(invocation, {
+        interactive: isInteractive(),
+        onEvent: humanServiceEventSink,
+        writeShellCdPath,
+      });
+    });
+  } catch (error) {
+    if (
+      !(
+        sourceLess &&
+        error instanceof OperationalError &&
+        error.message === (await import("./cli/new.ts")).NEW_CONTEXT_ERROR &&
+        shouldUseFullscreenTui()
+      )
+    ) {
+      throw error;
+    }
+
+    const initialName = invocation.beforeDoubleDash[0];
+    if (!initialName) throw error;
+    const branchOverride = stringInvocationFlag(invocation, "branch");
+    return runEntryCommand("create", {
+      initialName,
+      ...(invocation.flags["cloud"] === true ? { target: "cloud" } : {}),
+      ...(branchOverride ? { branchOverride } : {}),
+    });
+  }
+}
+
 async function runEntryCommand(
   mode: "go" | "create",
-  target?: "local" | "cloud",
+  options: {
+    initialName?: string;
+    branchOverride?: string;
+    target?: "local" | "cloud";
+  } = {},
 ): Promise<CommandResult> {
   const { runEntry } = await import("./entry/surface.ts");
   const { buildCreateInput, create } = await import("./workspace/create.ts");
   const scope = await resolveCurrentScope();
   await runEntry(mode, {
     ...(scope ? { scope } : {}),
-    ...(target ? { initialTarget: target } : {}),
+    ...(options.initialName ? { initialName: options.initialName } : {}),
+    ...(options.target ? { initialTarget: options.target } : {}),
     commit: async ({ changeName, sources, target }) => {
-      const input = await buildCreateInput({ changeName, sources });
+      const input = await buildCreateInput({
+        changeName,
+        sources,
+        ...(options.branchOverride
+          ? { branchOverride: options.branchOverride }
+          : {}),
+      });
       if (target === "cloud") {
         const { config } = await loadWorkspaceConfig();
         const { createCloud } = await import("./cloud/provisioning.ts");
