@@ -16,6 +16,7 @@ describe("configuration registry", () => {
       "directory",
       "branchPrefix",
       "vercelLink",
+      "cache",
       "ai",
       "cloud",
     ]);
@@ -55,6 +56,12 @@ describe("configuration registry", () => {
       vercelLink: {
         teamByGitHubOwner: {
           vercel: "vercel",
+        },
+      },
+      cache: {
+        nodeModules: {
+          enabled: true,
+          maxRetainedPerRepo: 3,
         },
       },
       ai: {

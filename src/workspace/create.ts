@@ -3,6 +3,7 @@ import path from "node:path";
 import { UsageError } from "../cli/errors.ts";
 import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
+import { restoreNodeModules } from "../node-modules-cache.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
@@ -154,6 +155,15 @@ async function createWorktreeFallback(
     branchName,
     targetDir,
   });
+  const { config } = await loadWorkspaceConfig();
+  const restoreResult = await restoreNodeModules({
+    repo,
+    repoDir: targetDir,
+    config: config.cache?.nodeModules,
+  });
+  if (restoreResult.status === "warning") {
+    log.warn(restoreResult.warning);
+  }
   await writeWorktreeMetadata(repoRootDir, {
     featureName: changeName,
     branchName,

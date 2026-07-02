@@ -2,6 +2,12 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathExists } from "@wf-plugin/core";
+import { loadWorkspaceConfig } from "../config.ts";
+import {
+  preserveNodeModules,
+  restoreNodeModules,
+  rollbackPreservedNodeModules,
+} from "../node-modules-cache.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
@@ -108,6 +114,7 @@ export type RepositoryTasksOptions = {
 };
 
 export type RemoveRepositoryTasksOptions = RepositoryTasksOptions & {
+  repo?: RepositorySource;
   slugs: readonly string[];
   force?: boolean;
   dryRun?: boolean;
@@ -122,6 +129,7 @@ type RemoveWorkspaceTasksOptions = {
 };
 
 type RemoveRepositoryTasksInternalOptions = RepositoryTasksOptions & {
+  repo?: RepositorySource;
   slugs: readonly string[];
   force: boolean;
   dryRun: boolean;
@@ -429,6 +437,7 @@ export async function deleteRepositoryTasks({
   parentRepoDir,
   repoName,
   changeName,
+  repo,
   slugs,
   force = false,
   dryRun = false,
@@ -437,6 +446,7 @@ export async function deleteRepositoryTasks({
     parentRepoDir,
     repoName,
     changeName,
+    ...(repo ? { repo } : {}),
     slugs,
     force,
     dryRun,
@@ -462,6 +472,10 @@ async function removeWorkspaceTasks({
     slugs,
     parentRepoName,
   );
+  const reposByName = new Map(
+    metadata.repos.map((repo) => [repo.name, workspaceRepoToRepoConfig(repo)]),
+  );
+  const { config } = await loadWorkspaceConfig();
 
   if (dryRun) {
     return { removed: targets };
@@ -501,11 +515,25 @@ async function removeWorkspaceTasks({
       );
     }
 
+    const repo = reposByName.get(entry.parent_repo);
+    const preserved = repo
+      ? await preserveNodeModules({
+          repo,
+          repoDir: absolutePath,
+          config: config.cache?.nodeModules,
+        })
+      : { status: "missing" as const };
+
     const removeArgs = ["worktree", "remove"];
     if (force) removeArgs.push("--force");
     removeArgs.push(absolutePath);
     await withGitWorktreeLock(parentRepoDir, async () => {
-      await runGit(removeArgs, { cwd: parentRepoDir, timeout: 30_000 });
+      try {
+        await runGit(removeArgs, { cwd: parentRepoDir, timeout: 30_000 });
+      } catch (error) {
+        await rollbackPreservedNodeModules(preserved);
+        throw error;
+      }
       await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
     });
 
@@ -533,6 +561,7 @@ async function removeRepositoryTasks({
   parentRepoDir,
   repoName,
   changeName,
+  repo,
   slugs,
   force,
   dryRun,
@@ -549,6 +578,7 @@ async function removeRepositoryTasks({
     changeName: safeName,
   });
   const targets = resolveRemovalTargets(available, slugs, safeRepoName);
+  const { config } = await loadWorkspaceConfig();
 
   if (dryRun) {
     return { removed: targets };
@@ -588,11 +618,27 @@ async function removeRepositoryTasks({
       );
     }
 
+    const preserved = repo
+      ? await preserveNodeModules({
+          repo,
+          repoDir: absolutePath,
+          config: config.cache?.nodeModules,
+        })
+      : { status: "missing" as const };
+
     const removeArgs = ["worktree", "remove"];
     if (force) removeArgs.push("--force");
     removeArgs.push(absolutePath);
     await withGitWorktreeLock(resolvedParentRepoDir, async () => {
-      await runGit(removeArgs, { cwd: resolvedParentRepoDir, timeout: 30_000 });
+      try {
+        await runGit(removeArgs, {
+          cwd: resolvedParentRepoDir,
+          timeout: 30_000,
+        });
+      } catch (error) {
+        await rollbackPreservedNodeModules(preserved);
+        throw error;
+      }
       await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, force);
     });
 
@@ -637,6 +683,26 @@ async function* createAndSetupTask({
         cwd: parentRepoDir,
       }),
     );
+    const { config } = await loadWorkspaceConfig();
+    const restoreResult = await restoreNodeModules({
+      repo,
+      repoDir: targetDir,
+      config: config.cache?.nodeModules,
+      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+    });
+    if (restoreResult.status === "restored") {
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "info",
+        message: `${repo.name}-${entry.slug}: restored pooled node_modules`,
+      });
+    } else if (restoreResult.status === "warning") {
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "warning",
+        message: restoreResult.warning,
+      });
+    }
 
     const result = await runTaskInitializers({
       workspaceDir,

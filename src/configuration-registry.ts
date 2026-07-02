@@ -1,6 +1,8 @@
 import type {
   AiConfig,
+  CacheConfig,
   CloudConfig,
+  NodeModulesCacheConfig,
   VercelCloudConfig,
   VercelLinkConfig,
   VercelRepoOverride,
@@ -31,6 +33,7 @@ export type ConfigurationChildFieldDefinition = Readonly<{
 export const DEFAULT_WORKSPACE_CONFIG: {
   directory: Required<WorkforestDirectoryConfig>;
   branchPrefix: string;
+  cache: { nodeModules: Required<NodeModulesCacheConfig> };
 } = {
   directory: {
     base: "~/Code",
@@ -39,6 +42,12 @@ export const DEFAULT_WORKSPACE_CONFIG: {
     reviews: "Reviews",
   },
   branchPrefix: "",
+  cache: {
+    nodeModules: {
+      enabled: true,
+      maxRetainedPerRepo: 3,
+    },
+  },
 };
 
 /*
@@ -158,6 +167,46 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
       const vercelLink = normalizeVercelLinkConfig(value, pathLabel);
       return vercelLink === undefined ? {} : { vercelLink };
     },
+  },
+  {
+    key: "cache",
+    type: "object",
+    description:
+      "Controls Workforest-owned caches beyond bare repository mirrors.",
+    defaultBehavior:
+      "nodeModules pooling is enabled and retains the 3 newest installs per repository.",
+    example: {
+      nodeModules: {
+        enabled: true,
+        maxRetainedPerRepo: 3,
+      },
+    },
+    children: [
+      {
+        key: "nodeModules",
+        type: "object",
+        description:
+          "Controls the pnpm node_modules pool under the Workforest cache root.",
+        defaultBehavior: "Enabled with maxRetainedPerRepo set to 3.",
+      },
+      {
+        key: "nodeModules.enabled",
+        type: "boolean",
+        description:
+          "Whether eligible pnpm node_modules directories are restored from and preserved into the pool.",
+        defaultBehavior: "true.",
+      },
+      {
+        key: "nodeModules.maxRetainedPerRepo",
+        type: "positive integer",
+        description:
+          "Maximum number of pooled node_modules installs retained per repository.",
+        defaultBehavior: "3.",
+      },
+    ],
+    normalize: (value, pathLabel) => ({
+      cache: normalizeCacheConfig(value, pathLabel),
+    }),
   },
   {
     key: "ai",
@@ -341,6 +390,47 @@ function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeCacheConfig(value: unknown, pathLabel: string): CacheConfig {
+  if (value === undefined) {
+    return { nodeModules: { ...DEFAULT_WORKSPACE_CONFIG.cache.nodeModules } };
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  return {
+    nodeModules: normalizeNodeModulesCacheConfig(
+      config["nodeModules"],
+      `${pathLabel}.nodeModules`,
+    ),
+  };
+}
+
+function normalizeNodeModulesCacheConfig(
+  value: unknown,
+  pathLabel: string,
+): Required<NodeModulesCacheConfig> {
+  if (value === undefined) {
+    return { ...DEFAULT_WORKSPACE_CONFIG.cache.nodeModules };
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  return {
+    enabled:
+      normalizeBoolean(config["enabled"], `${pathLabel}.enabled`) ??
+      DEFAULT_WORKSPACE_CONFIG.cache.nodeModules.enabled,
+    maxRetainedPerRepo:
+      normalizePositiveInteger(
+        config["maxRetainedPerRepo"],
+        `${pathLabel}.maxRetainedPerRepo`,
+      ) ?? DEFAULT_WORKSPACE_CONFIG.cache.nodeModules.maxRetainedPerRepo,
+  };
 }
 
 function normalizeVercelLinkConfig(

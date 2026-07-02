@@ -184,6 +184,10 @@ describe("JSON CLI integration", () => {
       data: {
         dryRun: false,
         deleted: [],
+        nodeModules: {
+          deleted: [],
+          totalSizeBytes: 0,
+        },
         message: "No unused cached repositories.",
       },
     });

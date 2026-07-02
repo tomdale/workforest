@@ -1870,6 +1870,7 @@ async function runRepositoryTaskDelete({
     const invocationCwd = process.cwd();
     const result = await deleteRepositoryTasks({
       parentRepoDir: context.parentRepoDir,
+      repo: context.repo,
       repoName: context.repoName,
       changeName: context.changeName,
       slugs: names,

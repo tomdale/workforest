@@ -45,6 +45,12 @@ describe("workspace config", () => {
       workspaces: "Workspaces",
       reviews: "Reviews",
     });
+    expect(loaded.config.cache).toEqual({
+      nodeModules: {
+        enabled: true,
+        maxRetainedPerRepo: 3,
+      },
+    });
     expect(resolveWorkforestDirectories(loaded.config)).toEqual({
       base: path.join(os.homedir(), "Code"),
       repos: path.join(os.homedir(), "Code", "Repos"),
@@ -217,6 +223,50 @@ describe("workspace config", () => {
       timeoutMs: 45000,
       disabled: true,
     });
+  });
+
+  it("loads node_modules cache config", async () => {
+    const configDir = await createConfigDir();
+    await writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        cache: {
+          nodeModules: {
+            enabled: false,
+            maxRetainedPerRepo: 5,
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadWorkspaceConfig();
+
+    expect(loaded.config.cache).toEqual({
+      nodeModules: {
+        enabled: false,
+        maxRetainedPerRepo: 5,
+      },
+    });
+  });
+
+  it("rejects invalid node_modules cache config", async () => {
+    const configDir = await createConfigDir();
+    await writeFile(
+      path.join(configDir, "config.json"),
+      JSON.stringify({
+        cache: {
+          nodeModules: {
+            maxRetainedPerRepo: 0,
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    await expect(loadWorkspaceConfig()).rejects.toThrow(
+      "config.json.cache.nodeModules.maxRetainedPerRepo must be a positive integer.",
+    );
   });
 
   it("preserves branch prefixes when loading", async () => {

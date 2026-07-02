@@ -1,6 +1,7 @@
 import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
-import { getCacheDir } from "../config.ts";
+import { getCacheDir, loadWorkspaceConfig } from "../config.ts";
+import { restoreNodeModules } from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import {
@@ -140,6 +141,29 @@ export async function* repoPipelineGenerator({
       workspaceDir,
       repo,
     };
+
+    const { config } = await loadWorkspaceConfig();
+    const restoreResult = await restoreNodeModules({
+      repo,
+      repoDir: targetDir,
+      config: config.cache?.nodeModules,
+      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+    });
+    if (restoreResult.status === "restored") {
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "log",
+        message: `Restored pooled node_modules for ${repo.name}`,
+      };
+    } else if (restoreResult.status === "warning") {
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "log",
+        message: restoreResult.warning,
+      };
+    }
 
     if (beforeInitializers) {
       currentStep = "initializer:preflight";

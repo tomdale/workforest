@@ -27,6 +27,15 @@ export type AiConfig = {
   disabled?: boolean;
 };
 
+export type NodeModulesCacheConfig = {
+  enabled?: boolean;
+  maxRetainedPerRepo?: number;
+};
+
+export type CacheConfig = {
+  nodeModules?: NodeModulesCacheConfig;
+};
+
 /**
  * Provider-specific defaults for Vercel Sandbox provisioning. Nested under
  * `cloud.vercel` so the provider context is explicit and a future provider can
@@ -64,6 +73,7 @@ export type CloudConfig = {
 export type WorkspaceConfig = {
   directory?: WorkforestDirectoryConfig;
   branchPrefix?: string;
+  cache?: CacheConfig;
   vercelLink?: VercelLinkConfig;
   ai?: AiConfig;
   cloud?: CloudConfig;

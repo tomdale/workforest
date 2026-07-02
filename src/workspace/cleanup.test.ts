@@ -28,6 +28,25 @@ vi.mock("node:fs", () => ({
   },
 }));
 
+vi.mock("../config.ts", () => ({
+  getCacheDir: vi.fn(() => "/tmp/cache"),
+  loadWorkspaceConfig: vi.fn(async () => ({
+    path: "/tmp/config/config.json",
+    config: {
+      cache: {
+        nodeModules: {
+          enabled: true,
+          maxRetainedPerRepo: 3,
+        },
+      },
+    },
+  })),
+}));
+
+vi.mock("../node-modules-cache.ts", () => ({
+  preserveNodeModules: vi.fn(async () => ({ status: "missing" })),
+}));
+
 vi.mock("@wf-plugin/core", async () => {
   const actual =
     await vi.importActual<typeof import("@wf-plugin/core")>("@wf-plugin/core");

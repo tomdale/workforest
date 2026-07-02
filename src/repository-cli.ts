@@ -12,6 +12,11 @@ import {
 import type { CommandResult, ParsedInvocation } from "./cli/types.ts";
 import { getCacheDir } from "./config.ts";
 import {
+  deleteNodeModulesCache,
+  type NodeModulesCacheSummary,
+  summarizeNodeModulesCache,
+} from "./node-modules-cache.ts";
+import {
   addCachedRepository,
   type CachedRepository,
   cleanCachedRepositories,
@@ -165,6 +170,7 @@ async function runGitWorktree(
 
 async function runCacheList(json: boolean): Promise<CommandResult> {
   const repositories = await listCachedRepositories();
+  const nodeModules = await summarizeNodeModulesCache();
   if (json) {
     return jsonSuccess(repositories.map(toJson));
   }
@@ -173,8 +179,11 @@ async function runCacheList(json: boolean): Promise<CommandResult> {
       reportOutput(
         renderReport({
           title: "Cached repositories",
-          sections: [{ note: "No cached repositories." }],
-          footer: `Directory: ${getCacheDir()}`,
+          sections: [
+            { note: "No cached repositories." },
+            nodeModulesSummarySection(nodeModules),
+          ],
+          footer: cacheListFooter(repositories, nodeModules),
         }),
       ),
     );
@@ -203,11 +212,9 @@ async function runCacheList(json: boolean): Promise<CommandResult> {
               ],
             })),
           },
+          nodeModulesSummarySection(nodeModules),
         ],
-        footer: [
-          `Directory: ${getCacheDir()}`,
-          `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}, ${formatByteSize(totalSize(repositories))}`,
-        ].join("\n"),
+        footer: cacheListFooter(repositories, nodeModules),
       }),
     ),
   );
@@ -485,11 +492,16 @@ async function runCacheClean(
   const repositories = (await listCachedRepositories()).filter(
     (repository) => activeWorktreeCount(repository) === 0,
   );
-  if (repositories.length === 0) {
+  const nodeModules = await summarizeNodeModulesCache();
+  if (repositories.length === 0 && nodeModules.entryCount === 0) {
     if (options.json) {
       return jsonSuccess({
         dryRun: options.dryRun,
         deleted: [],
+        nodeModules: {
+          deleted: [],
+          totalSizeBytes: 0,
+        },
         message: "No unused cached repositories.",
       });
     }
@@ -497,34 +509,77 @@ async function runCacheClean(
       humanOutput(formatMessage("info", "No unused cached repositories.")),
     );
   }
-  if (!(await confirmDeletion(repositories, options.force, options.dryRun))) {
+  if (
+    !(await confirmDeletion(repositories, options.force, options.dryRun, {
+      nodeModules,
+    }))
+  ) {
     return success();
   }
 
   try {
-    const results = await cleanCachedRepositories({
-      dryRun: options.dryRun,
-      force: options.force,
-    });
+    const [results, nodeModulesResult] = await Promise.all([
+      cleanCachedRepositories({
+        dryRun: options.dryRun,
+        force: options.force,
+      }),
+      deleteNodeModulesCache(options.dryRun),
+    ]);
     if (options.json) {
       return jsonSuccess({
         dryRun: options.dryRun,
         deleted: results.map((result) => toJson(result.repository)),
         totalSizeBytes: totalSize(results.map((result) => result.repository)),
+        nodeModules: {
+          deleted: nodeModulesResult.deleted.map((entry) => ({
+            path: entry.entryPath,
+            repo: entry.metadata.repo,
+            cachedAt: entry.metadata.cachedAt,
+            sourcePath: entry.metadata.sourcePath,
+            sizeBytes: entry.metadata.sizeBytes,
+          })),
+          totalSizeBytes: nodeModulesResult.totalSizeBytes,
+        },
       });
     }
     const verb = options.dryRun ? "Would delete" : "Deleted";
+    const repositorySize = totalSize(
+      results.map((result) => result.repository),
+    );
     return success(
       humanOutput(
         formatMessage(
           "success",
-          `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(totalSize(results.map((result) => result.repository)))})`,
+          `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(repositorySize)}) and ${nodeModulesResult.deleted.length} node_modules entr${nodeModulesResult.deleted.length === 1 ? "y" : "ies"} (${formatByteSize(nodeModulesResult.totalSizeBytes)})`,
         ),
       ),
     );
   } catch (error) {
     throw operationalError(error);
   }
+}
+
+function nodeModulesSummarySection(nodeModules: NodeModulesCacheSummary) {
+  return {
+    title: "node_modules pool",
+    fields: [
+      { label: "Entries", value: String(nodeModules.entryCount) },
+      { label: "Repositories", value: String(nodeModules.repositoryCount) },
+      { label: "Size", value: formatByteSize(nodeModules.sizeBytes) },
+      { label: "Directory", value: nodeModules.path },
+    ],
+  };
+}
+
+function cacheListFooter(
+  repositories: CachedRepository[],
+  nodeModules: NodeModulesCacheSummary,
+): string {
+  return [
+    `Directory: ${getCacheDir()}`,
+    `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}, ${formatByteSize(totalSize(repositories))}`,
+    `${nodeModules.entryCount} node_modules entr${nodeModules.entryCount === 1 ? "y" : "ies"}, ${formatByteSize(nodeModules.sizeBytes)}`,
+  ].join("\n");
 }
 
 async function resolveRepositorySelection(
@@ -561,6 +616,7 @@ async function confirmDeletion(
   repositories: CachedRepository[],
   force: boolean,
   dryRun: boolean,
+  extra?: Readonly<{ nodeModules?: NodeModulesCacheSummary }>,
 ): Promise<boolean> {
   if (dryRun || force) return true;
   if (!isInteractive()) {
@@ -570,8 +626,13 @@ async function confirmDeletion(
   }
 
   const size = formatByteSize(totalSize(repositories));
+  const nodeModules = extra?.nodeModules;
+  const nodeModulesText =
+    nodeModules && nodeModules.entryCount > 0
+      ? ` and ${nodeModules.entryCount} node_modules entr${nodeModules.entryCount === 1 ? "y" : "ies"} (${formatByteSize(nodeModules.sizeBytes)})`
+      : "";
   return promptConfirm(
-    `Delete ${repositories.length} cached repositor${repositories.length === 1 ? "y" : "ies"} (${size})?`,
+    `Delete ${repositories.length} cached repositor${repositories.length === 1 ? "y" : "ies"} (${size})${nodeModulesText}?`,
     false,
   );
 }

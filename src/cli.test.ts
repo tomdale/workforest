@@ -178,6 +178,12 @@ describe("cli", () => {
         reviews: "Reviews",
       },
       branchPrefix: "tomdale/",
+      cache: {
+        nodeModules: {
+          enabled: true,
+          maxRetainedPerRepo: 3,
+        },
+      },
     });
   });
 

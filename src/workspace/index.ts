@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { hasAny, pathExists } from "@wf-plugin/core";
-import { getCacheDir } from "../config.ts";
+import { getCacheDir, loadWorkspaceConfig } from "../config.ts";
+import { restoreNodeModules } from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
@@ -321,6 +322,26 @@ export async function* stampWorkspaceGenerator({
     repo: r.repo,
   }));
 
+  const { config } = await loadWorkspaceConfig();
+  for (const context of contexts) {
+    const restoreResult = await restoreNodeModules({
+      repo: context.repo,
+      repoDir: context.repoDir,
+      config: config.cache?.nodeModules,
+      ...(template?.config.disableInitializers !== undefined
+        ? { disabledInitializers: template.config.disableInitializers }
+        : {}),
+    });
+    if (restoreResult.status === "restored") {
+      yield {
+        phase: "init",
+        message: `Restored pooled node_modules for ${context.repo.name}`,
+      };
+    } else if (restoreResult.status === "warning") {
+      yield { phase: "init", message: restoreResult.warning };
+    }
+  }
+
   yield { phase: "initializers-start", repoCount: contexts.length };
 
   for await (const state of runInitializersGenerator({
@@ -469,6 +490,9 @@ export async function stampWorkspace(
         branchName: effectiveBranchName,
         isNewWorkspace,
         beforeInitializers,
+        ...(template?.config.disableInitializers !== undefined
+          ? { disabledInitializers: template.config.disableInitializers }
+          : {}),
         monitorBackground: false,
         templateBarrier,
       }),
@@ -629,6 +653,9 @@ export async function stampWorkspaceInteractive(
         branchName: effectiveBranchName,
         isNewWorkspace,
         beforeInitializers,
+        ...(template?.config.disableInitializers !== undefined
+          ? { disabledInitializers: template.config.disableInitializers }
+          : {}),
         monitorBackground: true,
         templateBarrier,
       }),
@@ -676,6 +703,7 @@ async function* createBackgroundRepoSetupPipeline({
   branchName,
   isNewWorkspace,
   beforeInitializers,
+  disabledInitializers,
   monitorBackground,
   templateBarrier,
 }: {
@@ -684,6 +712,7 @@ async function* createBackgroundRepoSetupPipeline({
   branchName: string;
   isNewWorkspace: boolean;
   beforeInitializers: NonNullable<RepoPipelineOptions["beforeInitializers"]>;
+  disabledInitializers?: boolean | string[];
   monitorBackground: boolean;
   templateBarrier: TemplateCopyBarrier | null;
 }): AsyncGenerator<RepoPipelineState> {
@@ -695,6 +724,7 @@ async function* createBackgroundRepoSetupPipeline({
     branchName,
     isNewWorkspace,
     beforeInitializers,
+    ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     monitorBackground,
     onFailed: () => templateBarrier?.markRepoFailed(),
   });
@@ -711,6 +741,7 @@ export type ScopedRepoSetupPipelineOptions = {
   branchName: string;
   isNewWorkspace: boolean;
   beforeInitializers?: RepoPipelineOptions["beforeInitializers"];
+  disabledInitializers?: boolean | string[];
   /** When true, watch the detached initializer and keep yielding its state. */
   monitorBackground: boolean;
   /** Invoked the first time the foreground git pipeline reports a failure. */
@@ -734,6 +765,7 @@ export async function* runScopedRepoSetupPipeline({
   branchName,
   isNewWorkspace,
   beforeInitializers,
+  disabledInitializers,
   monitorBackground,
   onFailed,
 }: ScopedRepoSetupPipelineOptions): AsyncGenerator<RepoPipelineState> {
@@ -746,6 +778,7 @@ export async function* runScopedRepoSetupPipeline({
       branchName,
       isNewWorkspace,
       ...(beforeInitializers ? { beforeInitializers } : {}),
+      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
       skipInitializers: true,
     }),
     {

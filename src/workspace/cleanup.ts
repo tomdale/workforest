@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
+import { loadWorkspaceConfig } from "../config.ts";
+import { preserveNodeModules } from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
@@ -280,6 +282,7 @@ export async function* cleanupWorkspaceGenerator(
   };
 
   const cacheDir = await ensureCacheDir();
+  const { config } = await loadWorkspaceConfig();
   const removedRepos: string[] = [];
   const deletedBranches: string[] = [];
   const repoConfigs = new Map(
@@ -425,6 +428,45 @@ export async function* cleanupWorkspaceGenerator(
       yield { phase: "worktree-complete", repo: repoName };
       removedRepos.push(repoName);
     } else {
+      if (repo) {
+        const preserveResult = await preserveNodeModules({
+          repo,
+          repoDir: resolveContainedPath(resolvedDir, repoName),
+          config: config.cache?.nodeModules,
+        });
+        if (preserveResult.status === "warning") {
+          yield {
+            phase: "worktree",
+            repo: repoName,
+            state: {
+              status: "log",
+              level: "warn",
+              message: preserveResult.warning,
+            },
+          };
+        }
+        for (const task of metadata?.tasks ?? []) {
+          if (task.parent_repo !== repoName) {
+            continue;
+          }
+          const taskPreserveResult = await preserveNodeModules({
+            repo,
+            repoDir: resolveContainedPath(resolvedDir, task.path),
+            config: config.cache?.nodeModules,
+          });
+          if (taskPreserveResult.status === "warning") {
+            yield {
+              phase: "worktree",
+              repo: repoName,
+              state: {
+                status: "log",
+                level: "warn",
+                message: taskPreserveResult.warning,
+              },
+            };
+          }
+        }
+      }
       let cleaned = false;
 
       try {
@@ -554,6 +596,7 @@ export async function cleanupWorktree({
   const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
   const resolvedChangePath = path.resolve(targetPath);
   const cacheDir = await ensureCacheDir();
+  const { config } = await loadWorkspaceConfig();
   const mirrorDir = repo
     ? await resolveMirrorDir(repo, cacheDir)
     : resolveContainedPath(cacheDir, `${safeRepoName}.git`);
@@ -578,6 +621,24 @@ export async function cleanupWorktree({
       await onState?.({ phase: "worktree-complete", repo: safeRepoName });
       removedRepos.push(safeRepoName);
     } else {
+      if (repo) {
+        const preserveResult = await preserveNodeModules({
+          repo,
+          repoDir: resolvedChangePath,
+          config: config.cache?.nodeModules,
+        });
+        if (preserveResult.status === "warning") {
+          await onState?.({
+            phase: "worktree",
+            repo: safeRepoName,
+            state: {
+              status: "log",
+              level: "warn",
+              message: preserveResult.warning,
+            },
+          });
+        }
+      }
       let cleaned = false;
       try {
         for await (const state of cleanupWorkspaceWorktreesGenerator(
