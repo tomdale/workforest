@@ -46,8 +46,8 @@ selector rules.
 wf task new <task>
 wf task list
 wf template list
-wf review open <repo>
-wf review checkout <repo>#<pr>
+wf review <repo>
+wf review <repo>#<pr>
 ```
 
 Use tasks for parallel subagents, templates for repeatable workspace setups,

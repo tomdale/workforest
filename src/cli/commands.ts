@@ -1231,74 +1231,44 @@ export const commandRegistry: CommandRegistry = {
           }),
         ],
       }),
-      group({
+      leaf({
         name: "review",
         path: ["review"],
-        summary: "Manage review workspaces and PR worktrees",
+        summary: "Open a review workspace or check out a PR",
         description:
-          "Set up review workspaces and check out pull request worktrees inside them, for reviewing someone else's PR without disturbing your own workspaces. `wf review open` creates the per-repository review workspace; `wf review checkout` adds a worktree for a specific PR. Both store worktrees under `directory.reviews`.",
+          "Opens a review workspace when the target names a repository, or checks out a pull request worktree when the target names a PR. Review workspaces and PR worktrees are stored under `directory.reviews`.",
+        handler: "review",
         help: { kind: "command", command: "review" },
-        children: [
-          leaf({
-            name: "open",
-            path: ["review", "open"],
-            summary: "Open a review workspace",
+        operands: operands(
+          1,
+          2,
+          "review targets",
+          "<target> [pull request]",
+          "A repository target opens its review workspace: `org/repo`, a cached repo name, or a GitHub git URL. A PR target checks out a PR worktree: a GitHub PR URL, `org/repo#<number>`, `org/repo <number>`, or — inside a review workspace — `<number>`/`#<number>`.",
+        ),
+        examples: [
+          {
+            command: "wf review <owner>/<repo>",
             description:
-              "Sets up a review workspace for a repository: caches its bare mirror and adds a detached worktree under `directory.reviews`, defaulting to `~/Code/Reviews`. Changes your shell's directory to the workspace under shell integration. See also `wf review checkout`.",
-            handler: "review.open",
-            help: nestedHelp("review", "open"),
-            operands: operands(
-              1,
-              1,
-              "repository",
-              undefined,
-              "The repository to review, as `org/repo`, a cached repo name, or a git URL.",
-            ),
-            examples: [
-              {
-                command: "wf review open <owner>/<repo>",
-                description:
-                  "Set up a review workspace for the repository, then enter it.",
-              },
-            ],
-            outputModes: ["human", "report"],
-            tty: optionalStdin,
-          }),
-          leaf({
-            name: "checkout",
-            path: ["review", "checkout"],
-            summary: "Check out a pull request worktree",
+              "Set up a review workspace for the repository, then enter it.",
+          },
+          {
+            command: "wf review <owner>/<repo>#<number>",
+            description: "Check out a PR by compact org/repo and number.",
+          },
+          {
+            command: "wf review <owner>/<repo> <number>",
             description:
-              "Adds a worktree for one pull request inside its review workspace, running `gh pr checkout` to fetch the PR branch — requires the `gh` CLI and network access. Run from inside a review workspace and you can pass just a PR number, taking the repository from the workspace's metadata. Uses `directory.reviews`, defaulting to `~/Code/Reviews`. Changes your shell's directory to the worktree under shell integration. See also `wf review open`.",
-            handler: "review.checkout",
-            help: nestedHelp("review", "checkout"),
-            operands: operands(
-              1,
-              2,
-              "review targets",
-              "<review target> [pull request]",
-              "The PR to check out: a GitHub PR URL, `org/repo#<number>`, a bare `org/repo` slug, or — inside a review workspace — a bare `<number>`/`#<number>`. A second `[pull request]` argument gives the number, valid only when the target is a bare `org/repo` slug.",
-            ),
-            examples: [
-              {
-                command: "wf review checkout <owner>/<repo>#<number>",
-                description: "Check out a PR by compact org/repo and number.",
-              },
-              {
-                command: "wf review checkout <owner>/<repo> <number>",
-                description:
-                  "Same target supplied as two space-separated arguments.",
-              },
-              {
-                command: "wf review checkout <number>",
-                description:
-                  "From inside a review workspace, check out a PR using the workspace's repository.",
-              },
-            ],
-            outputModes: ["human", "report"],
-            tty: optionalStdin,
-          }),
+              "Same PR target supplied as two space-separated arguments.",
+          },
+          {
+            command: "wf review <number>",
+            description:
+              "From inside a review workspace, check out a PR using the workspace's repository.",
+          },
         ],
+        outputModes: ["human", "report"],
+        tty: optionalStdin,
       }),
       group({
         name: "template",

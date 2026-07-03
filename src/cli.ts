@@ -256,8 +256,7 @@ async function runInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
   switch (invocation.command.leaf.handler) {
-    case "review.open":
-    case "review.checkout":
+    case "review":
       return runReviewInvocation(invocation);
     case "new":
       if (invocation.beforeDoubleDash.length === 0) {
@@ -1155,34 +1154,93 @@ function stringFlag(
 async function runReviewInvocation(
   invocation: ParsedInvocation,
 ): Promise<CommandResult> {
-  switch (invocation.command.leaf.handler) {
-    case "review.open":
-      return runReviewOpen(
-        invocation.beforeDoubleDash[0] ?? "",
-        jsonRequested(invocation),
-      );
-    case "review.checkout":
-      return runReviewCheckout(
-        invocation.beforeDoubleDash,
-        jsonRequested(invocation),
-      );
-    default:
-      throw new Error(
-        `Unsupported review handler: ${invocation.command.leaf.handler}`,
-      );
+  if (invocation.command.leaf.handler !== "review") {
+    throw new Error(
+      `Unsupported review handler: ${invocation.command.leaf.handler}`,
+    );
   }
+
+  const json = jsonRequested(invocation);
+  const dispatch = await resolveReviewDispatch(invocation.beforeDoubleDash);
+  return dispatch.kind === "workspace"
+    ? runReviewWorkspace(dispatch.target, json)
+    : runReviewCheckout(dispatch.target, json);
 }
 
-async function runReviewOpen(
-  repoInput: string,
+type ReviewDispatch =
+  | Readonly<{
+      kind: "workspace";
+      target: { owner: string; repo: string };
+    }>
+  | Readonly<{
+      kind: "checkout";
+      target: { owner: string; repo: string; prNumber: number };
+    }>;
+
+async function resolveReviewDispatch(
+  targetArgs: readonly string[],
+): Promise<ReviewDispatch> {
+  let resolvedTargetArgs: string[];
+  try {
+    resolvedTargetArgs = await qualifyReviewRepositorySpecifier(targetArgs);
+  } catch (error) {
+    throw reviewTargetUsageError(targetArgs, error);
+  }
+
+  const { parseReviewRepoTarget, resolveReviewTarget } = await import(
+    "./review.ts"
+  );
+  const context = await resolveCurrentReviewWorkspaceContext();
+
+  if (resolvedTargetArgs.length === 1) {
+    try {
+      return {
+        kind: "checkout",
+        target: resolveReviewTarget(resolvedTargetArgs, context ?? undefined),
+      };
+    } catch (checkoutError) {
+      try {
+        return {
+          kind: "workspace",
+          target: parseReviewRepoTarget(resolvedTargetArgs),
+        };
+      } catch {
+        throw reviewTargetUsageError(targetArgs, checkoutError);
+      }
+    }
+  }
+
+  if (resolvedTargetArgs.length === 2) {
+    try {
+      return {
+        kind: "checkout",
+        target: resolveReviewTarget(resolvedTargetArgs, context ?? undefined),
+      };
+    } catch (error) {
+      throw reviewTargetUsageError(targetArgs, error);
+    }
+  }
+
+  throw reviewTargetUsageError(targetArgs);
+}
+
+function reviewTargetUsageError(
+  targetArgs: readonly string[],
+  cause?: unknown,
+): UsageError {
+  const target = targetArgs.length > 0 ? targetArgs.join(" ") : "(missing)";
+  const detail = cause ? ` ${getErrorMessage(cause)}` : "";
+  return new UsageError(
+    `Invalid review target "${target}". Accepted forms: wf review <owner>/<repo>, wf review <cached-repo>, wf review <owner>/<repo>#<number>, wf review <owner>/<repo> <number>, wf review https://github.com/<owner>/<repo>/pull/<number>, or inside a review workspace wf review <number>.${detail}`,
+  );
+}
+
+async function runReviewWorkspace(
+  target: { owner: string; repo: string },
   json: boolean,
 ): Promise<CommandResult> {
   try {
-    const [qualifiedRepo] = await qualifyReviewRepositorySpecifier([repoInput]);
-    const { ensureReviewWorkspace, parseReviewRepoTarget } = await import(
-      "./review.ts"
-    );
-    const target = parseReviewRepoTarget([qualifiedRepo ?? repoInput]);
+    const { ensureReviewWorkspace } = await import("./review.ts");
     const reviewsRoot = await resolveReviewsDir();
     const workspace = await ensureReviewWorkspace({
       target,
@@ -1206,20 +1264,11 @@ async function runReviewOpen(
 }
 
 async function runReviewCheckout(
-  targetArgs: readonly string[],
+  target: { owner: string; repo: string; prNumber: number },
   json: boolean,
 ): Promise<CommandResult> {
   try {
-    const resolvedTargetArgs =
-      await qualifyReviewRepositorySpecifier(targetArgs);
-    const { createReviewWorktree, resolveReviewTarget } = await import(
-      "./review.ts"
-    );
-    const context = await resolveCurrentReviewWorkspaceContext();
-    const target = resolveReviewTarget(
-      resolvedTargetArgs,
-      context ?? undefined,
-    );
+    const { createReviewWorktree } = await import("./review.ts");
     const reviewsRoot = await resolveReviewsDir();
     const metadata = await createReviewWorktree({
       target,

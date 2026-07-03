@@ -78,7 +78,7 @@ describe("shell integration", () => {
     });
     registry.shortcuts.push({
       name: "visit",
-      target: ["review", "open"],
+      target: ["review"],
       visibility: "visible",
       summary: "Visit a review workspace",
       help: { kind: "command", command: "visit" },

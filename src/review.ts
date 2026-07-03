@@ -79,7 +79,7 @@ export function parseReviewTarget(args: readonly string[]): ReviewTarget {
   }
 
   if (args.length === 2) {
-    const repo = parseRepoSlug(args[0] ?? "");
+    const repo = parseRepoTarget(args[0] ?? "");
     const prNumber = parsePrNumber(args[1] ?? "");
     return { ...repo, prNumber };
   }
@@ -109,10 +109,10 @@ export function parseReviewRepoTarget(
   args: readonly string[],
 ): ReviewRepoTarget {
   if (args.length !== 1) {
-    throw new Error("Expected <owner>/<repo>.");
+    throw new Error("Expected <owner>/<repo> or a GitHub git URL.");
   }
 
-  return parseRepoSlug(args[0] ?? "");
+  return parseRepoTarget(args[0] ?? "");
 }
 
 export async function createReviewWorktree({
@@ -481,10 +481,77 @@ function parseSingleTarget(input: string): ReviewTarget {
   throw new Error("Expected a GitHub PR URL or <owner>/<repo> <pr-number>.");
 }
 
-function parseRepoSlug(input: string): Pick<ReviewTarget, "owner" | "repo"> {
+function parseRepoTarget(input: string): Pick<ReviewTarget, "owner" | "repo"> {
+  const target = parseRepoSlugTarget(input) ?? parseGitHubRepoUrlTarget(input);
+  if (target) {
+    return target;
+  }
+  throw new Error(
+    `Invalid repository "${input}". Expected <owner>/<repo> or a GitHub git URL.`,
+  );
+}
+
+function parseRepoSlugTarget(
+  input: string,
+): Pick<ReviewTarget, "owner" | "repo"> | null {
+  const trimmed = input.trim();
+  if (
+    trimmed.includes("://") ||
+    trimmed.includes("@") ||
+    trimmed.startsWith("github.com/") ||
+    trimmed.startsWith("git:") ||
+    trimmed.includes("#")
+  ) {
+    return null;
+  }
+
   const parts = input.trim().split("/");
   if (parts.length !== 2) {
-    throw new Error(`Invalid repository "${input}". Expected <owner>/<repo>.`);
+    return null;
+  }
+
+  return {
+    owner: validateRepoPart(parts[0] ?? "", "owner"),
+    repo: validateRepoPart(parts[1] ?? "", "repo"),
+  };
+}
+
+function parseGitHubRepoUrlTarget(
+  input: string,
+): Pick<ReviewTarget, "owner" | "repo"> | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const sshMatch = trimmed.match(
+    /^git@github\.com:([^/\s#]+)\/([^/\s#]+?)(?:\.git)?$/i,
+  );
+  if (sshMatch?.[1] && sshMatch[2]) {
+    return {
+      owner: validateRepoPart(sshMatch[1], "owner"),
+      repo: validateRepoPart(sshMatch[2], "repo"),
+    };
+  }
+
+  const normalized = trimmed.startsWith("github.com/")
+    ? `https://${trimmed}`
+    : trimmed;
+  if (!/^(?:https?|ssh|git):\/\//i.test(normalized)) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLowerCase() !== "github.com") {
+    return null;
+  }
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts.length !== 2) {
+    return null;
   }
 
   return {

@@ -8,16 +8,16 @@ description: Workforest guidance for review workspaces and PR checkout flows.
 Use this skill when you need a dedicated review workspace for a pull request.
 
 ```sh
-wf review open vercel/next.js
-wf review checkout vercel/next.js#1234
+wf review vercel/next.js
+wf review vercel/next.js#1234
 ```
 
 Use `wf review --help` for the review workspace syntax.
 
 ## Review Flow
 
-- Open the review workspace once for a repository.
-- Check out individual PRs as separate worktrees.
+- Open the review workspace once with `wf review <repo>`.
+- Check out individual PRs as separate worktrees with `wf review <repo>#<pr>`.
 - Keep review workspaces separate from normal changes.
 
 ## Good Review Hygiene

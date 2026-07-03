@@ -289,8 +289,6 @@ describe("cli", () => {
     [["task", "delete", "--help"], "Usage: wf task delete"],
     [["ai", "status", "--help"], "Usage: wf ai status"],
     [["migrate", "workspaces", "--help"], "Usage: wf migrate workspaces"],
-    [["review", "open", "--help"], "Usage: wf review open"],
-    [["review", "checkout", "--help"], "Usage: wf review checkout"],
     [["template", "list", "--help"], "Usage: wf template list"],
     [["template", "open", "--help"], "Usage: wf template open"],
     [["template", "show", "--help"], "Usage: wf template show"],

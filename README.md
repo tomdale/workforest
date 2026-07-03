@@ -314,14 +314,14 @@ project, vCPUs, timeout, exposed ports, runtime) live under the `cloud` key in
 Open a repository review workspace:
 
 ```sh
-wf review open vercel/omniagent
+wf review vercel/omniagent
 ```
 
 Check out a pull request into that review workspace:
 
 ```sh
-wf review checkout vercel/omniagent#123
-wf review checkout https://github.com/vercel/omniagent/pull/123
+wf review vercel/omniagent#123
+wf review https://github.com/vercel/omniagent/pull/123
 ```
 
 Review worktrees are stored below `directory.reviews`, which defaults to
@@ -522,8 +522,7 @@ wf cloud status        Show one cloud workspace
 wf cloud attach        Resume and open a shell in a cloud workspace
 wf cloud stop          Stop a cloud workspace (snapshot + halt)
 wf cloud delete        Delete a cloud workspace
-wf review open         Open a review workspace
-wf review checkout     Check out a pull request
+wf review              Open a review workspace or check out a pull request
 wf template list       List templates
 wf template show       Show template details
 wf template open       Open a template directory

@@ -25,8 +25,7 @@ const REQUIRED_COMMANDS: readonly (readonly string[])[] = [
   ["cache", "worktree", "add"],
   ["cache", "worktree", "move"],
   ["cache", "worktree", "remove"],
-  ["review", "open"],
-  ["review", "checkout"],
+  ["review"],
   ["template", "open"],
   ["template", "show"],
   ["shell", "init"],
@@ -44,6 +43,7 @@ describe("final CLI contract", () => {
   it.each([
     ["task delete", ["task", "delete"]],
     ["cache delete", ["cache", "delete"]],
+    ["review", ["review"]],
   ] as const)("%s requires an explicit target", (_name, argv) => {
     expect(() => parseInvocation(resolve(argv))).toThrow(/Invalid operands/);
   });

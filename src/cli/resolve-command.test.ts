@@ -16,7 +16,7 @@ describe("resolveCommand", () => {
       ["cache", "worktree", "list"],
       "cache.worktree.list",
     ],
-    [["review", "checkout", "123"], ["review", "checkout"], "review.checkout"],
+    [["review", "123"], ["review"], "review"],
     [["shell", "init", "zsh"], ["shell", "init"], "shell.init"],
     [["config"], ["config"], "config.show"],
     [["skills"], ["skills"], "skills.list"],
@@ -49,7 +49,6 @@ describe("resolveCommand", () => {
   it.each([
     "cache",
     "task",
-    "review",
     "template",
     "shell",
   ])("shows scoped help for the bare %s namespace", (command) => {
@@ -64,9 +63,10 @@ describe("resolveCommand", () => {
     expect(() => resolveCommand(commandRegistry, ["task", "--force"])).toThrow(
       "Unknown wf task subcommand: --force",
     );
-    expect(() => resolveCommand(commandRegistry, ["review", "123"])).toThrow(
-      "Unknown wf review subcommand: 123",
-    );
+    expect(resolveCommand(commandRegistry, ["review", "123"])).toMatchObject({
+      kind: "command",
+      canonicalPath: ["review"],
+    });
   });
 
   it("rejects unknown root and scoped commands", () => {

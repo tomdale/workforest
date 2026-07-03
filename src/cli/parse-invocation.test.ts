@@ -51,12 +51,8 @@ describe("parseInvocation", () => {
     [["task", "delete"], "Expected 1 or more task names"],
     [["cache", "show"], "Expected 1 repository"],
     [["cache", "delete"], "Expected 1 or more repositories"],
-    [["review", "open"], "Expected 1 repository"],
-    [["review", "checkout"], "Expected 1-2 review targets"],
-    [
-      ["review", "checkout", "one", "two", "three"],
-      "Expected 1-2 review targets",
-    ],
+    [["review"], "Expected 1-2 review targets"],
+    [["review", "one", "two", "three"], "Expected 1-2 review targets"],
     [["template", "copy", "one"], "Expected 2 templates"],
     [["shell", "init", "zsh", "bash"], "Expected 0-1 shell"],
   ])("enforces exact positional cardinality for %j", (argv, message) => {

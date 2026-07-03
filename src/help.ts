@@ -128,8 +128,8 @@ Examples:
   wf task new fix-tests
   wf delete workforest/cli-redesign
   wf cache doctor
-  wf review open vercel/omniagent
-  wf review checkout vercel/omniagent#123
+  wf review vercel/omniagent
+  wf review vercel/omniagent#123
   wf template list
   eval "$(wf shell init zsh)"
 
@@ -175,8 +175,8 @@ Nouns:
                        Inspect and repair with \`wf cache list\` and \`wf cache doctor\`.
 
   review workspace     A persistent bare workspace for reviewing pull requests from one repository.
-                       Created once with \`wf review open\`; individual PRs are added as worktrees
-                       with \`wf review checkout\`.
+                       Created with \`wf review <repo>\`; individual PRs are added as worktrees
+                       with \`wf review <repo>#<number>\`.
 
   shell integration    A wrapper function installed by \`eval "$(wf shell init zsh)"\` that intercepts
                        directory-changing commands and changes your shell's working directory, so
@@ -241,8 +241,8 @@ Interactive user workflows:
     wf status workforest/cli-redesign
 
   Review a pull request:
-    wf review open vercel/next.js       # one-time setup for this repo
-    wf review checkout vercel/next.js#1234
+    wf review vercel/next.js            # one-time setup for this repo
+    wf review vercel/next.js#1234
 
   Add an isolated task inside an existing worktree or workspace:
     wf task new fix-auth                # new branch, instant setup

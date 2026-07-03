@@ -122,34 +122,32 @@ afterEach(async () => {
 });
 
 describe("wf review", () => {
-  it("keeps the bare namespace scoped to help", async () => {
+  it("requires a target", async () => {
     const { executeCli } = await importCliWithReviewMock();
 
     const result = await executeCli(["review"]);
 
     expect(result).toMatchObject({
-      exitCode: 0,
+      exitCode: 2,
       render: {
         kind: "text",
-        stream: "stdout",
+        stream: "stderr",
       },
     });
     if (result.render.kind !== "text") return;
-    expect(result.render.value).toContain("Usage: wf review");
-    expect(result.render.value).toContain("open");
-    expect(result.render.value).toContain("checkout");
+    expect(result.render.value).toContain("Expected 1-2 review targets");
     expect(ensureReviewWorkspaceMock).not.toHaveBeenCalled();
     expect(createReviewWorktreeMock).not.toHaveBeenCalled();
   });
 
   it.each([
-    [["review", "open"], "Expected 1 repository"],
-    [
-      ["review", "checkout", "vercel/omniagent#123", "--bogus"],
-      'Unknown flag "--bogus"',
-    ],
+    [["review", "open"], "Accepted forms: wf review <owner>/<repo>"],
+    [["review", "checkout"], "Accepted forms: wf review <owner>/<repo>"],
+    [["review", "vercel/omniagent#123", "--bogus"], 'Unknown flag "--bogus"'],
   ])("returns a stack-free usage error for %j", async (argv, expectedMessage) => {
     const { executeCli } = await importCliWithReviewMock();
+    process.env["WORKFOREST_CACHE_DIR"] =
+      await createTempDir("workforest-cache-");
     process.exitCode = 1;
 
     const result = await executeCli(argv);
@@ -196,7 +194,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "open", "omniagent"];
+    process.argv = ["node", "wf", "review", "omniagent"];
     process.exitCode = undefined;
 
     await cli();
@@ -231,7 +229,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "open", "vercel/omniagent"];
+    process.argv = ["node", "wf", "review", "vercel/omniagent"];
     process.exitCode = undefined;
 
     await cli();
@@ -249,7 +247,44 @@ describe("wf review", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("creates a review worktree and writes the shell cd target", async () => {
+  it("returns JSON when opening a repo review workspace", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
+    const repoDir = path.join(workspaceDir, "omniagent");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      directory: { reviews: reviewsRoot },
+    });
+    ensureReviewWorkspaceMock.mockResolvedValue({
+      owner: "vercel",
+      repo: "omniagent",
+      path: workspaceDir,
+      repoDir,
+    });
+
+    const { executeCli } = await importCliWithReviewMock();
+    const result = await executeCli(["review", "vercel/omniagent", "--json"]);
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      render: {
+        kind: "json",
+        value: {
+          target: { owner: "vercel", repo: "omniagent" },
+          path: workspaceDir,
+        },
+      },
+    });
+    expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
+      reviewsRoot,
+      target: { owner: "vercel", repo: "omniagent" },
+    });
+    expect(createReviewWorktreeMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a review worktree from a split repo and PR target", async () => {
     const configDir = await createTempDir("workforest-config-");
     const reviewsRoot = await createTempDir("workforest-reviews-");
     const cdDir = await createTempDir("workforest-cd-");
@@ -271,14 +306,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = [
-      "node",
-      "wf",
-      "review",
-      "checkout",
-      "vercel/omniagent",
-      "#123",
-    ];
+    process.argv = ["node", "wf", "review", "vercel/omniagent", "#123"];
     process.exitCode = undefined;
 
     await cli();
@@ -329,7 +357,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "checkout", "#123"];
+    process.argv = ["node", "wf", "review", "#123"];
     process.exitCode = undefined;
 
     await cli();
@@ -400,7 +428,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "checkout", "456"];
+    process.argv = ["node", "wf", "review", "456"];
     process.exitCode = undefined;
 
     await cli();
@@ -450,7 +478,6 @@ describe("wf review", () => {
       "node",
       "wf",
       "review",
-      "checkout",
       "https://github.com/other/repo/pull/456",
     ];
     process.exitCode = undefined;
@@ -483,7 +510,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "checkout", "vercel/omniagent#123"];
+    process.argv = ["node", "wf", "review", "vercel/omniagent#123"];
     process.exitCode = undefined;
 
     await cli();
@@ -516,7 +543,7 @@ describe("wf review", () => {
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "checkout", "vercel/omniagent#123"];
+    process.argv = ["node", "wf", "review", "vercel/omniagent#123"];
     process.exitCode = undefined;
 
     await cli();
@@ -545,7 +572,7 @@ describe("wf review", () => {
     });
 
     const { cli } = await importCliWithReviewMock();
-    process.argv = ["node", "wf", "review", "checkout", "vercel/omniagent#123"];
+    process.argv = ["node", "wf", "review", "vercel/omniagent#123"];
     process.exitCode = undefined;
 
     await cli();

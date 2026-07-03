@@ -89,6 +89,10 @@ describe("parseReviewTarget", () => {
       ["github.com/vercel/omniagent/pull/123"],
       { owner: "vercel", repo: "omniagent", prNumber: 123 },
     ],
+    [
+      ["git@github.com:vercel/omniagent.git", "123"],
+      { owner: "vercel", repo: "omniagent", prNumber: 123 },
+    ],
   ])("parses %j", async (args, expected) => {
     const { parseReviewTarget } = await import("./review.ts");
     expect(parseReviewTarget(args)).toEqual(expected);
@@ -109,9 +113,14 @@ describe("parseReviewTarget", () => {
 });
 
 describe("parseReviewRepoTarget", () => {
-  it("parses a repository slug", async () => {
+  it.each([
+    ["vercel/omniagent"],
+    ["https://github.com/vercel/omniagent.git"],
+    ["git@github.com:vercel/omniagent.git"],
+    ["ssh://git@github.com/vercel/omniagent.git"],
+  ])("parses repository target %s", async (input) => {
     const { parseReviewRepoTarget } = await import("./review.ts");
-    expect(parseReviewRepoTarget(["vercel/omniagent"])).toEqual({
+    expect(parseReviewRepoTarget([input])).toEqual({
       owner: "vercel",
       repo: "omniagent",
     });
@@ -120,6 +129,7 @@ describe("parseReviewRepoTarget", () => {
   it.each([
     [[]],
     [["vercel/omniagent", "123"]],
+    [["https://example.com/vercel/omniagent.git"]],
   ])("rejects invalid repo target %j", async (args) => {
     const { parseReviewRepoTarget } = await import("./review.ts");
     expect(() => parseReviewRepoTarget(args)).toThrow();

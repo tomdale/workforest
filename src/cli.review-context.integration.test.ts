@@ -63,11 +63,7 @@ describe("review command directory contexts", () => {
       const cwd = cwdFor(fixture);
       const prNumber = 456;
 
-      const result = await runCli(fixture, cwd, [
-        "review",
-        "checkout",
-        String(prNumber),
-      ]);
+      const result = await runCli(fixture, cwd, ["review", String(prNumber)]);
 
       const targetDir = path.join(fixture.workspaceDir, `pr-${prNumber}`);
       expectSuccessfulReviewCheckout(result, targetDir);
@@ -93,17 +89,11 @@ describe("review command directory contexts", () => {
     const unrelatedDir = path.join(fixture.rootDir, "unrelated");
     await mkdir(unrelatedDir);
 
-    const result = await runCli(fixture, unrelatedDir, [
-      "review",
-      "checkout",
-      "456",
-    ]);
+    const result = await runCli(fixture, unrelatedDir, ["review", "456"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain(
-      "Expected a GitHub PR URL or <owner>/<repo> <pr-number>.",
-    );
+    expect(result.stderr).toContain("Accepted forms: wf review <owner>/<repo>");
     expectStackFree(result);
   });
 
@@ -113,7 +103,6 @@ describe("review command directory contexts", () => {
 
     const result = await runCli(fixture, fixture.checkoutDir, [
       "review",
-      "checkout",
       "acme/tools#789",
     ]);
 
