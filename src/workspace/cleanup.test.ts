@@ -121,6 +121,47 @@ beforeEach(() => {
 });
 
 describe("streamWorkspaceCleanup", () => {
+  it("pluralizes the repository cleanup count", async () => {
+    const states = await collectStates(
+      streamWorkspaceCleanup("/tmp/workspace/demo", { dryRun: true }),
+    );
+
+    expect(states).toContainEqual({
+      phase: "init",
+      message: "Found 1 repository to clean",
+    });
+
+    readWorkspaceMetadataMock.mockResolvedValue({
+      workspace: {
+        version: "1",
+        created_at: "2026-04-16T00:00:00.000Z",
+        feature_name: "demo",
+      },
+      repos: [
+        {
+          name: "api",
+          remote: "git@github.com:vercel/api.git",
+          has_lockfile: true,
+        },
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          has_lockfile: true,
+        },
+      ],
+      tasks: [],
+    });
+
+    const multiRepoStates = await collectStates(
+      streamWorkspaceCleanup("/tmp/workspace/demo", { dryRun: true }),
+    );
+
+    expect(multiRepoStates).toContainEqual({
+      phase: "init",
+      message: "Found 2 repositories to clean",
+    });
+  });
+
   it("does not mark a repo as complete when worktree cleanup throws", async () => {
     cleanupWorkspaceWorktreesMock.mockImplementation(async function* () {
       yield { status: "running", message: "Removing worktree" };

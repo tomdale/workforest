@@ -275,10 +275,13 @@ export async function* streamWorkspaceCleanup(
   const workspace = await validateWorkspace(resolvedDir);
   const repos = workspace.folders.map((f) => f.path);
   const metadata = await readWorkspaceMetadata(resolvedDir);
+  const repoCount = `${repos.length} ${
+    repos.length === 1 ? "repository" : "repositories"
+  }`;
 
   yield {
     phase: "init",
-    message: `Found ${repos.length} repository/ies to clean`,
+    message: `Found ${repoCount} to clean`,
   };
 
   const cacheDir = await ensureCacheDir();
