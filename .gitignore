@@ -1,4 +1,5 @@
 node_modules
 dist
+.agent/
 benchmarks/ghostty-real/.build/
 benchmarks/ghostty-real/Vendor/
