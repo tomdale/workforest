@@ -287,6 +287,47 @@ describe("JSON CLI integration", () => {
     });
   });
 
+  it("suppresses inferred variant warnings in JSON mode", async () => {
+    const workspaceDir = await createTempDir("workforest-json-variant-");
+    await mkdir(path.join(workspaceDir, "front"), { recursive: true });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "json-variant",
+      templateId: "json-parent",
+      templateVariant: "chat",
+      branchName: "tomdale/json-variant",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: false,
+        },
+      ],
+    });
+
+    await runJson(["template", "new", "json-parent", "vercel/front", "--json"]);
+    await runJson([
+      "template",
+      "variant",
+      "new",
+      "json-parent",
+      "chat",
+      "--description",
+      "Chat variant",
+      "--json",
+    ]);
+
+    const result = await runJson(["template", "show", "--json"], {
+      cwd: path.join(workspaceDir, "front"),
+    });
+
+    expectJsonResult(result, 0, {
+      ok: true,
+      data: expect.objectContaining({
+        template: expect.objectContaining({ id: "json-parent+chat" }),
+      }),
+    });
+  });
+
   it("returns JSON usage errors for interactive-only raw paths", async () => {
     const suggest = await runJson(["template", "suggest", "--json"]);
 

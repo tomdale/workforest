@@ -396,9 +396,16 @@ function normalizeAgentsMdConfig(config: TemplateConfig): TemplateConfig {
 }
 
 export async function deleteTemplate(templateId: string): Promise<void> {
-  validateTemplateName(templateId);
+  const identifier = parseTemplateIdentifier(templateId);
   const templatesDir = getTemplatesDir();
-  const templateDir = resolveContainedPath(templatesDir, templateId);
+  const templateDir = identifier.variant
+    ? resolveContainedPath(
+        templatesDir,
+        identifier.parent,
+        VARIANTS_DIR,
+        identifier.variant,
+      )
+    : resolveContainedPath(templatesDir, identifier.parent);
 
   const exists = await pathExists(templateDir);
   if (!exists) {

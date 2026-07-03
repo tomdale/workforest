@@ -58,7 +58,6 @@ describe("parseInvocation", () => {
       "Expected 1-2 review targets",
     ],
     [["template", "copy", "one"], "Expected 2 templates"],
-    [["template", "delete"], "Expected 1 template"],
     [["shell", "init", "zsh", "bash"], "Expected 0-1 shell"],
   ])("enforces exact positional cardinality for %j", (argv, message) => {
     expect(() => parse(argv)).toThrow(message);

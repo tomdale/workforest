@@ -98,6 +98,15 @@ function operands(
   };
 }
 
+const inferableTemplateFlags = [
+  booleanFlag(
+    "parent",
+    "--parent",
+    undefined,
+    "When inferring from a variant workspace, target the parent template.",
+  ),
+];
+
 function leaf(options: {
   name: string;
   path: readonly string[];
@@ -1325,12 +1334,13 @@ export const commandRegistry: CommandRegistry = {
             handler: "template.open",
             help: nestedHelp("template", "open"),
             operands: operands(
-              1,
+              0,
               1,
               "template",
-              undefined,
-              "Name of an existing template (lowercase, hyphen-separated).",
+              "[template]",
+              "Name of an existing template (lowercase, hyphen-separated). Defaults to the current workspace template.",
             ),
+            flags: inferableTemplateFlags,
             examples: [
               {
                 command: "wf template open <template>",
@@ -1349,12 +1359,13 @@ export const commandRegistry: CommandRegistry = {
             handler: "template.show",
             help: nestedHelp("template", "show"),
             operands: operands(
-              1,
+              0,
               1,
               "template",
-              undefined,
-              "Name of an existing template (lowercase, hyphen-separated).",
+              "[template]",
+              "Name of an existing template (lowercase, hyphen-separated). Defaults to the current workspace template.",
             ),
+            flags: inferableTemplateFlags,
             examples: [
               {
                 command: "wf template show <template>",
@@ -1446,12 +1457,13 @@ export const commandRegistry: CommandRegistry = {
             handler: "template.edit",
             help: nestedHelp("template", "edit"),
             operands: operands(
-              1,
+              0,
               1,
               "template",
-              undefined,
-              "Name of an existing template (lowercase, hyphen-separated).",
+              "[template]",
+              "Name of an existing template (lowercase, hyphen-separated). Defaults to the current workspace template.",
             ),
+            flags: inferableTemplateFlags,
             examples: [
               {
                 command: "wf template edit <template>",
@@ -1560,7 +1572,8 @@ export const commandRegistry: CommandRegistry = {
                   "Reports whether a template's generated guidance is disabled, missing, fresh, expired, scope-changed, modified, or conflicting.",
                 handler: "template.agents-md.status",
                 help: nestedHelp("template", "agents-md"),
-                operands: operands(1, 1, "template"),
+                operands: operands(0, 1, "template", "[template]"),
+                flags: inferableTemplateFlags,
                 outputModes: ["report", "json"],
               }),
               leaf({
@@ -1571,8 +1584,9 @@ export const commandRegistry: CommandRegistry = {
                   "Analyzes clean default-branch repository state, streams progress and AI provider output, verifies the focused guidance independently, and atomically publishes it. JSON mode suppresses progress so stdout remains machine-readable.",
                 handler: "template.agents-md.refresh",
                 help: nestedHelp("template", "agents-md"),
-                operands: operands(1, 1, "template"),
+                operands: operands(0, 1, "template", "[template]"),
                 flags: [
+                  ...inferableTemplateFlags,
                   booleanFlag(
                     "force",
                     "--force",
@@ -1616,13 +1630,14 @@ export const commandRegistry: CommandRegistry = {
             handler: "template.delete",
             help: nestedHelp("template", "delete"),
             operands: operands(
-              1,
+              0,
               1,
               "template",
-              undefined,
-              "Name of an existing template (lowercase, hyphen-separated).",
+              "[template]",
+              "Name of an existing template (lowercase, hyphen-separated). Defaults to the current workspace template.",
             ),
             flags: [
+              ...inferableTemplateFlags,
               booleanFlag(
                 "force",
                 "--force",

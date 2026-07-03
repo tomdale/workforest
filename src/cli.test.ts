@@ -58,7 +58,11 @@ vi.mock("./ui/grid-consumer.ts", async () => {
 import { cli } from "./cli.ts";
 import { saveWorkspaceConfig } from "./config.ts";
 import { WORKFOREST_CD_PATH_ENV } from "./shell.ts";
-import { createTemplate, loadTemplate } from "./templates/index.ts";
+import {
+  createTemplate,
+  createTemplateVariant,
+  loadTemplate,
+} from "./templates/index.ts";
 import { writeWorkspaceMetadata } from "./workspace/metadata.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -341,6 +345,279 @@ describe("cli", () => {
     expect(written).toBe(
       `${path.resolve(xdgConfigHome, "workforest", "templates", "demo")}\n`,
     );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("infers a template operand from a template workspace root", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const logs: string[] = [];
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "show"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("Template demo");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("infers a template operand from a repository subdirectory", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const repoSubdir = path.join(workspaceDir, "front", "src");
+    const logs: string[] = [];
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    await mkdir(repoSubdir, { recursive: true });
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(repoSubdir);
+    process.argv = ["node", "wf", "template", "show"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("Template demo");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("infers variant templates by default and warns in human mode", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const logs: string[] = [];
+    const warnings: string[] = [];
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+    vi.spyOn(console, "warn").mockImplementation((...args) => {
+      warnings.push(args.join(" "));
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+    await createTemplateVariant("demo", "chat", {
+      description: "Chat variant",
+    });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      templateVariant: "chat",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "show"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("Template demo+chat");
+    expect(warnings.join("\n")).toContain(
+      'Inferred template variant "demo+chat"',
+    );
+    expect(warnings.join("\n")).toContain('Use --parent to target "demo"');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("uses the parent template from a variant workspace with --parent", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const logs: string[] = [];
+    const warnings: string[] = [];
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+    vi.spyOn(console, "warn").mockImplementation((...args) => {
+      warnings.push(args.join(" "));
+    });
+
+    await createTemplate("demo", {
+      repos: ["vercel/front"],
+      description: "Demo template",
+    });
+    await createTemplateVariant("demo", "chat", {
+      description: "Chat variant",
+    });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      templateVariant: "chat",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "show", "--parent"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(logs.join("\n")).toContain("Template demo");
+    expect(logs.join("\n")).not.toContain("Template demo+chat");
+    expect(warnings.join("\n")).not.toContain("Inferred template variant");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("rejects --parent with an explicit template operand", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const errors: string[] = [];
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    await createTemplate("demo", { repos: ["vercel/front"] });
+
+    process.argv = ["node", "wf", "template", "show", "demo", "--parent"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      'Flag "--parent" can only be used when <template> is omitted.',
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("requires an omitted template operand outside a workspace", async () => {
+    const cwd = await createTempDir("workforest-outside-");
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+
+    process.chdir(cwd);
+    process.argv = ["node", "wf", "template", "show"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      "wf template show requires <template>.",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("requires omitted template operands to run in template workspaces", async () => {
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "manual-work",
+      branchName: "tomdale/manual-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "show"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(errors.join("\n")).toContain(
+      "Current workspace was not created from a template.",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("confirms before deleting an inferred template", async () => {
+    const xdgConfigHome = await createTempDir("workforest-xdg-");
+    const workspaceDir = await createTempDir("workforest-workspace-");
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    promptConfirmMock.mockResolvedValue(false);
+
+    await createTemplate("demo", { repos: ["vercel/front"] });
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "demo-work",
+      templateId: "demo",
+      branchName: "tomdale/demo-work",
+      repos: [
+        {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+          hasLockfile: true,
+        },
+      ],
+    });
+
+    process.chdir(workspaceDir);
+    process.argv = ["node", "wf", "template", "delete"];
+    process.exitCode = undefined;
+
+    await cli();
+
+    expect(promptConfirmMock).toHaveBeenCalledWith('Delete template "demo"?');
+    await expect(loadTemplate("demo")).resolves.toMatchObject({ id: "demo" });
     expect(process.exitCode).toBeUndefined();
   });
 

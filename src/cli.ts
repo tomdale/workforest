@@ -1960,9 +1960,15 @@ async function runTemplateInvocation(
     case "template.list":
       return runTemplateList(json);
     case "template.open":
-      return runTemplateOpen(invocation.beforeDoubleDash[0] ?? "", json);
+      return runTemplateOpen(
+        await resolveTemplateOperand(invocation, json),
+        json,
+      );
     case "template.show":
-      return runTemplateShow(invocation.beforeDoubleDash[0] ?? "", json);
+      return runTemplateShow(
+        await resolveTemplateOperand(invocation, json),
+        json,
+      );
     case "template.suggest": {
       if (json) return unsupportedJson(invocation);
       const { runTemplateSuggestCommand } = await import(
@@ -1976,17 +1982,17 @@ async function runTemplateInvocation(
       return runTemplateVariantNew(invocation, json);
     case "template.edit":
       if (json) return unsupportedJson(invocation);
-      return runTemplateEdit(invocation.beforeDoubleDash[0] ?? "");
+      return runTemplateEdit(await resolveTemplateOperand(invocation, json));
     case "template.add-file":
       return runTemplateAddFile(invocation, json);
     case "template.agents-md.status":
       return runTemplateAgentsMdStatus(
-        invocation.beforeDoubleDash[0] ?? "",
+        await resolveTemplateOperand(invocation, json),
         json,
       );
     case "template.agents-md.refresh":
       return runTemplateAgentsMdRefresh(
-        invocation.beforeDoubleDash[0] ?? "",
+        await resolveTemplateOperand(invocation, json),
         invocation.flags["force"] === true,
         json,
       );
@@ -1998,7 +2004,7 @@ async function runTemplateInvocation(
       );
     case "template.delete":
       return runTemplateDelete(
-        invocation.beforeDoubleDash[0] ?? "",
+        await resolveTemplateOperand(invocation, json),
         invocation.flags["force"] === true,
         json,
       );
@@ -2007,6 +2013,50 @@ async function runTemplateInvocation(
         `No template handler registered for ${invocation.command.leaf.handler}.`,
       );
   }
+}
+
+async function resolveTemplateOperand(
+  invocation: ParsedInvocation,
+  json: boolean,
+): Promise<string> {
+  const explicitTemplateId = invocation.beforeDoubleDash[0];
+  const useParent = invocation.flags["parent"] === true;
+
+  if (explicitTemplateId) {
+    if (useParent) {
+      throw new UsageError(
+        'Flag "--parent" can only be used when <template> is omitted.',
+      );
+    }
+    return explicitTemplateId;
+  }
+
+  const commandName = invocation.command.canonicalPath.join(" ");
+  const workspaceDir = await detectWorkspaceFromCwd();
+  if (!workspaceDir) {
+    throw new UsageError(`wf ${commandName} requires <template>.`);
+  }
+
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (!metadata?.workspace.template_id) {
+    throw new OperationalError(
+      "Current workspace was not created from a template.",
+    );
+  }
+
+  const parent = metadata.workspace.template_id;
+  const variant = metadata.workspace.template_variant;
+  if (variant && !useParent) {
+    const templateId = formatTemplateIdentifier({ parent, variant });
+    if (!json) {
+      log.warn(
+        `Inferred template variant "${templateId}" from the current workspace. Use --parent to target "${parent}".`,
+      );
+    }
+    return templateId;
+  }
+
+  return parent;
 }
 
 async function requireTemplate(templateId: string) {
@@ -2465,7 +2515,7 @@ async function runTemplateDelete(
   force: boolean,
   json: boolean,
 ): Promise<CommandResult> {
-  validateTemplateName(templateId);
+  validateTemplateIdentifier(templateId);
   const template = await loadTemplate(templateId);
   if (!template) {
     if (json) {
@@ -2508,7 +2558,7 @@ async function runTemplateDelete(
 }
 
 async function runTemplateEdit(templateId: string): Promise<CommandResult> {
-  validateTemplateName(templateId);
+  validateTemplateIdentifier(templateId);
   if (!isInteractive()) {
     log.error("Template editing requires an interactive terminal.");
     return templateFailure();
@@ -2532,10 +2582,16 @@ async function runTemplateEdit(templateId: string): Promise<CommandResult> {
     initialConfig: template.config,
     workspaceConfig,
     onSave: async (config) => {
-      await createTemplate(
-        templateId,
-        await qualifyTemplateRepositories(config),
-      );
+      const qualifiedConfig = await qualifyTemplateRepositories(config);
+      if (template.variantId) {
+        await createTemplateVariant(
+          template.parentId,
+          template.variantId,
+          qualifiedConfig,
+        );
+      } else {
+        await createTemplate(templateId, qualifiedConfig);
+      }
       log.success(`Template "${templateId}" saved.`);
     },
   });
