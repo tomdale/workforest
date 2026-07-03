@@ -23,5 +23,5 @@ Use `wf review --help` for the review workspace syntax.
 ## Good Review Hygiene
 
 - Verify the PR branch before making local edits.
-- Treat review checkouts as disposable inspection space.
+- Treat PR worktrees as disposable inspection space.
 - Use the review commands rather than manually building paths.

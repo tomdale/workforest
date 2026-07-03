@@ -93,7 +93,7 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
       {
         key: "reviews",
         type: "string (path)",
-        description: "Directory for pull request review checkouts.",
+        description: "Directory for pull request review worktrees.",
         defaultBehavior:
           "Reviews. Relative values resolve against directory.base.",
       },

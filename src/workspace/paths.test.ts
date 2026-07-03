@@ -271,7 +271,13 @@ describe("resolveWorkforestContext", () => {
     });
   });
 
-  it("classifies review checkouts and outside paths", () => {
+  it("classifies PR review worktrees and outside paths", () => {
+    expect(
+      resolveWorkforestContext(path.join("/reviews", "workforest"), roots),
+    ).toMatchObject({
+      kind: "review-checkout",
+      repoName: "workforest",
+    });
     expect(
       resolveWorkforestContext(
         path.join("/reviews", "workforest", "pr-1"),

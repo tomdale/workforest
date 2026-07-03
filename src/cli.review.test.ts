@@ -142,7 +142,6 @@ describe("wf review", () => {
 
   it.each([
     [["review", "open"], "Accepted forms: wf review <owner>/<repo>"],
-    [["review", "checkout"], "Accepted forms: wf review <owner>/<repo>"],
     [["review", "vercel/omniagent#123", "--bogus"], 'Unknown flag "--bogus"'],
   ])("returns a stack-free usage error for %j", async (argv, expectedMessage) => {
     const { executeCli } = await importCliWithReviewMock();
@@ -189,7 +188,6 @@ describe("wf review", () => {
       owner: "vercel",
       repo: "omniagent",
       path: workspaceDir,
-      repoDir: path.join(workspaceDir, "omniagent"),
     });
 
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -207,12 +205,11 @@ describe("wf review", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("creates a repo review workspace and writes the shell cd target when no PR is specified", async () => {
+  it("creates review workspace metadata and writes the shell cd target when no PR is specified", async () => {
     const configDir = await createTempDir("workforest-config-");
     const reviewsRoot = await createTempDir("workforest-reviews-");
     const cdDir = await createTempDir("workforest-cd-");
     const workspaceDir = path.join(reviewsRoot, "omniagent");
-    const repoDir = path.join(workspaceDir, "omniagent");
     const cdPathFile = path.join(cdDir, "target");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
@@ -224,7 +221,6 @@ describe("wf review", () => {
       owner: "vercel",
       repo: "omniagent",
       path: workspaceDir,
-      repoDir,
     });
 
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -251,7 +247,6 @@ describe("wf review", () => {
     const configDir = await createTempDir("workforest-config-");
     const reviewsRoot = await createTempDir("workforest-reviews-");
     const workspaceDir = path.join(reviewsRoot, "omniagent");
-    const repoDir = path.join(workspaceDir, "omniagent");
 
     process.env["WORKFOREST_CONFIG_DIR"] = configDir;
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
@@ -261,7 +256,6 @@ describe("wf review", () => {
       owner: "vercel",
       repo: "omniagent",
       path: workspaceDir,
-      repoDir,
     });
 
     const { executeCli } = await importCliWithReviewMock();

@@ -68,7 +68,6 @@ export type EnsureReviewWorkspaceOptions = {
 
 export type ReviewWorkspace = ReviewRepoTarget & {
   path: string;
-  repoDir: string;
 };
 
 export type ReviewTargetContext = {
@@ -213,7 +212,6 @@ export async function ensureReviewWorkspace({
   const repo = targetToRepoConfig(target);
   const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
   const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
-  const repoDir = resolveContainedPath(workspaceDir, target.repo);
 
   await ensureDir(workspaceDir);
 
@@ -222,7 +220,7 @@ export async function ensureReviewWorkspace({
     [
       repo.name,
       reviewWorkspaceSetupPipeline(
-        { repo, mirrorDir, repoDir, workspaceDir },
+        { repo, mirrorDir },
         {
           recordFailure: (error) => {
             failure = error;
@@ -244,7 +242,6 @@ export async function ensureReviewWorkspace({
   return {
     ...target,
     path: workspaceDir,
-    repoDir,
   };
 }
 
@@ -304,6 +301,20 @@ async function reconcileReviewWorkspaceMetadata(
  * so `wf review` renders the same grid as every other creation command. Shared by
  * `open` (base workspace) and `checkout` (before the PR worktree).
  */
+async function* reviewMirrorSteps({
+  repo,
+  mirrorDir,
+}: {
+  repo: RepositorySource;
+  mirrorDir: string;
+}): AsyncGenerator<RepoPipelineState> {
+  for await (const state of ensureMirrorRepo(repo, mirrorDir)) {
+    if (state.status === "failed") throw state.error;
+    const mapped = mapTaskStateToPipelineState(state, "mirror");
+    if (mapped) yield mapped;
+  }
+}
+
 async function* reviewBaseSetupSteps({
   repo,
   mirrorDir,
@@ -315,11 +326,7 @@ async function* reviewBaseSetupSteps({
   repoDir: string;
   workspaceDir: string;
 }): AsyncGenerator<RepoPipelineState> {
-  for await (const state of ensureMirrorRepo(repo, mirrorDir)) {
-    if (state.status === "failed") throw state.error;
-    const mapped = mapTaskStateToPipelineState(state, "mirror");
-    if (mapped) yield mapped;
-  }
+  yield* reviewMirrorSteps({ repo, mirrorDir });
 
   if (!(await pathExists(repoDir))) {
     for await (const state of addWorktree({
@@ -358,18 +365,19 @@ async function* reviewInitializerPipeline({
   }
 }
 
-/** `wf review open`: base workspace setup as a single grid pane. */
+/**
+ * `wf review` (no PR): ensure the bare mirror exists as a single grid pane. The
+ * review workspace is metadata-only — no base repo worktree is checked out.
+ */
 async function* reviewWorkspaceSetupPipeline(
   args: {
     repo: RepositorySource;
     mirrorDir: string;
-    repoDir: string;
-    workspaceDir: string;
   },
   { recordFailure }: { recordFailure: (error: Error) => void },
 ): AsyncGenerator<RepoPipelineState> {
   try {
-    yield* reviewBaseSetupSteps(args);
+    yield* reviewMirrorSteps(args);
     yield { phase: "complete", hasLockfile: false };
   } catch (error) {
     const normalized =

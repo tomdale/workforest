@@ -38,7 +38,6 @@ type ReviewFixture = {
   cacheDir: string;
   reviewsRoot: string;
   workspaceDir: string;
-  repoDir: string;
   checkoutDir: string;
   binDir: string;
   realGit: string;
@@ -54,7 +53,6 @@ afterEach(async () => {
 describe("review command directory contexts", () => {
   it.each([
     ["review workspace root", (fixture: ReviewFixture) => fixture.workspaceDir],
-    ["review repository", (fixture: ReviewFixture) => fixture.repoDir],
     ["PR checkout", (fixture: ReviewFixture) => fixture.checkoutDir],
   ])(
     "infers a numeric checkout target from the %s",
@@ -119,8 +117,6 @@ describe("review command directory contexts", () => {
 
   it.each([
     ["review workspace root", (fixture: ReviewFixture) => fixture.workspaceDir],
-    ["review repository", (fixture: ReviewFixture) => fixture.repoDir],
-    ["PR checkout", (fixture: ReviewFixture) => fixture.checkoutDir],
   ])(
     "does not infer destructive command operands from the %s",
     async (_label, cwdFor) => {
@@ -143,6 +139,25 @@ describe("review command directory contexts", () => {
     },
     30_000,
   );
+
+  it("deletes the current PR worktree from inside it", async () => {
+    const fixture = await createReviewFixture();
+    const result = await runCli(fixture, fixture.checkoutDir, ["delete"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Deleted: omniagent#123");
+    expect(result.stderr).toBe("");
+    await expect(readFile(cdPath(fixture), "utf8")).resolves.toBe(
+      `${fixture.workspaceDir}\n`,
+    );
+    await expect(
+      readFile(path.join(fixture.checkoutDir, ".git"), "utf8"),
+    ).rejects.toThrow();
+    expect(
+      (await readWorkspaceMetadata(fixture.workspaceDir))?.review_worktrees,
+    ).toBeUndefined();
+    expectStackFree(result);
+  }, 30_000);
 });
 
 async function createReviewFixture(): Promise<ReviewFixture> {
@@ -155,7 +170,6 @@ async function createReviewFixture(): Promise<ReviewFixture> {
   const cacheDir = path.join(rootDir, "cache");
   const reviewsRoot = path.join(rootDir, "reviews");
   const workspaceDir = path.join(reviewsRoot, "omniagent");
-  const repoDir = path.join(workspaceDir, "omniagent");
   const checkoutDir = path.join(workspaceDir, "pr-123");
   const binDir = path.join(rootDir, "bin");
   const shellPath = path.join(rootDir, "test-shell");
@@ -178,7 +192,6 @@ async function createReviewFixture(): Promise<ReviewFixture> {
     cacheDir,
     reviewsRoot,
     workspaceDir,
-    repoDir,
     checkoutDir,
     binDir,
     realGit,
@@ -187,10 +200,6 @@ async function createReviewFixture(): Promise<ReviewFixture> {
   const mirrorDir = await createMirror(fixture, "omniagent", "vercel");
 
   await mkdir(workspaceDir, { recursive: true });
-  await runGit(
-    ["worktree", "add", "--detach", repoDir, "refs/remotes/origin/main"],
-    mirrorDir,
-  );
   await runGit(
     [
       "worktree",

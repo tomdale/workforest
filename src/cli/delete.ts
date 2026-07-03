@@ -1,15 +1,22 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
+import { type ReviewTarget, removeReviewWorktree } from "../review.ts";
 import { reportShellCdTarget } from "../shell.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import {
   type CleanupStateSink,
   cleanupWorkspace,
   cleanupWorktree,
 } from "../workspace/cleanup.ts";
 import type { InventoryEntry } from "../workspace/inventory.ts";
-import { isComparablePathInsideOrEqual } from "../workspace/paths.ts";
+import { readWorkspaceMetadata } from "../workspace/metadata.ts";
+import {
+  isComparablePathInsideOrEqual,
+  resolveWorkforestDirectories,
+} from "../workspace/paths.ts";
 import { resolveSelector } from "../workspace/selectors.ts";
 import {
   buildStatus,
@@ -49,6 +56,15 @@ export async function runDeleteCommand(
   options: RunCleanupOptions,
 ): Promise<CommandResult> {
   const force = invocation.flags["force"] === true;
+  if (!invocation.beforeDoubleDash[0]) {
+    const reviewWorktree = await resolveCurrentReviewWorktree(
+      options.cwd ?? process.cwd(),
+    );
+    if (reviewWorktree) {
+      return deleteReviewWorktree(reviewWorktree, force, options);
+    }
+  }
+
   const entry = await resolveDeleteSelector(invocation.beforeDoubleDash[0]);
 
   if (!force) {
@@ -62,6 +78,89 @@ export async function runDeleteCommand(
   await cleanupTarget(entry, options);
   log.success(`Deleted: ${entry.selector}`);
   return success();
+}
+
+async function deleteReviewWorktree(
+  reviewWorktree: ResolvedReviewWorktree,
+  force: boolean,
+  options: RunCleanupOptions,
+): Promise<CommandResult> {
+  const initialCwd = options.cwd ?? process.cwd();
+  const isInsideTarget = await isComparablePathInsideOrEqual(
+    reviewWorktree.path,
+    initialCwd,
+  );
+  const result = await removeReviewWorktree({
+    target: reviewWorktree.target,
+    reviewsRoot: reviewWorktree.reviewsRoot,
+    force,
+  });
+  if (isInsideTarget) {
+    await reportShellCdTarget(path.dirname(result.path), {
+      writeShellCdPath: options.writeShellCdPath,
+    });
+  }
+  log.success(
+    `Deleted: ${reviewWorktree.target.repo}#${reviewWorktree.target.prNumber}`,
+  );
+  return success();
+}
+
+type ResolvedReviewWorktree = Readonly<{
+  target: ReviewTarget;
+  reviewsRoot: string;
+  path: string;
+}>;
+
+async function resolveCurrentReviewWorktree(
+  cwd: string,
+): Promise<ResolvedReviewWorktree | null> {
+  const { config } = await loadWorkspaceConfig();
+  const reviewsRoot = resolveWorkforestDirectories(config).reviews;
+  const reviewRepos = await readReviewWorkspaceDirs(reviewsRoot);
+
+  for (const workspaceDir of reviewRepos) {
+    const metadata = await readWorkspaceMetadata(workspaceDir).catch(
+      () => null,
+    );
+    if (metadata?.workspace.type !== "review" || !metadata.workspace.review) {
+      continue;
+    }
+
+    for (const worktree of metadata.review_worktrees ?? []) {
+      const worktreePath = resolveContainedPath(workspaceDir, worktree.path);
+      if (await isComparablePathInsideOrEqual(worktreePath, cwd)) {
+        return {
+          reviewsRoot,
+          path: worktreePath,
+          target: {
+            owner: metadata.workspace.review.owner,
+            repo: metadata.workspace.review.repo,
+            prNumber: worktree.pr_number,
+          },
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function readReviewWorkspaceDirs(reviewsRoot: string): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(reviewsRoot, {
+      withFileTypes: true,
+      encoding: "utf8",
+    });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(reviewsRoot, entry.name));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
 }
 
 async function resolveDeleteSelector(

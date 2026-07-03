@@ -154,7 +154,7 @@ describe("resolveReviewTarget", () => {
 });
 
 describe("review worktrees", () => {
-  it("creates a repo review workspace when no pull request is specified", async () => {
+  it("creates review workspace metadata when no pull request is specified", async () => {
     const reviewsRoot = await createTempDir("workforest-reviews-");
     const cacheDir = await createTempDir("workforest-cache-");
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
@@ -179,23 +179,12 @@ describe("review worktrees", () => {
     });
 
     const workspaceDir = path.join(reviewsRoot, "omniagent");
-    const repoDir = path.join(workspaceDir, "omniagent");
-    expect(runGitMock).toHaveBeenCalledWith(
-      ["worktree", "add", "--detach", repoDir, "origin/main"],
-      { cwd: path.join(cacheDir, "omniagent.git"), timeout: 120_000 },
+    expect(runGitMock).not.toHaveBeenCalledWith(
+      expect.arrayContaining(["worktree", "add"]),
+      expect.anything(),
     );
-    expect(runSingleRepoInitializersMock).toHaveBeenCalledWith({
-      context: {
-        repo: {
-          name: "omniagent",
-          remote: "git@github.com:vercel/omniagent.git",
-        },
-        repoDir,
-        workspaceDir,
-      },
-    });
+    expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
     expect(result.path).toBe(workspaceDir);
-    expect(result.repoDir).toBe(repoDir);
 
     const metadata = JSON.parse(
       await readFile(

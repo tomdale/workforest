@@ -225,6 +225,7 @@ export async function executeCli(
     const invocation = parseInvocation(resolution, {
       interactive: isInteractive(),
     });
+    rejectLegacyReviewSubcommand(invocation);
     if (invocation.helpRequested) {
       return success({
         kind: "text",
@@ -248,6 +249,15 @@ export async function executeCli(
       return result;
     }
     throw error;
+  }
+}
+
+function rejectLegacyReviewSubcommand(invocation: ParsedInvocation): void {
+  if (
+    invocation.command.leaf.handler === "review" &&
+    invocation.beforeDoubleDash[0] === "checkout"
+  ) {
+    throw new UsageError("Unknown wf review subcommand: checkout");
   }
 }
 
@@ -490,7 +500,7 @@ async function runEntryCommand(
 /**
  * Map the current working directory onto a entry scope so the surface can
  * default to the container the user launched from. Returns undefined outside a
- * Workforest change (e.g. a review checkout or an unrelated directory).
+ * Workforest change (e.g. a PR review worktree or an unrelated directory).
  */
 async function resolveCurrentScope(): Promise<Scope | undefined> {
   try {

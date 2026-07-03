@@ -288,6 +288,11 @@ function resolveReviewContext(
     return null;
   }
 
+  const reviewChild = parts[1];
+  if (parts.length > 1 && !reviewChild?.startsWith("pr-")) {
+    return null;
+  }
+
   return {
     kind: "review-checkout",
     repoName: safeRepoName,
