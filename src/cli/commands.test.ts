@@ -39,7 +39,7 @@ describe("commandRegistry", () => {
       shell: ["init"],
       config: ["show", "init", "edit"],
       skills: ["list", "get"],
-      help: ["concepts", "workflow"],
+      help: ["concepts", "workflow", "templates"],
       version: null,
     });
   });

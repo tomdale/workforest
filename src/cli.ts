@@ -38,6 +38,7 @@ import {
   help,
   nestedCommandHelp,
   renderHelp,
+  templatesPage,
   workflowPage,
 } from "./help.ts";
 import { log } from "./logger.ts";
@@ -384,6 +385,15 @@ async function runInvocation(
       return success({
         kind: "text",
         value: workflowPage(),
+        stream: "stdout",
+      });
+    case "help.templates":
+      if (jsonRequested(invocation)) {
+        return jsonSuccess({ page: "templates", content: templatesPage() });
+      }
+      return success({
+        kind: "text",
+        value: templatesPage(),
         stream: "stdout",
       });
     case "version":

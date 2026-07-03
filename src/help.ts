@@ -12,13 +12,14 @@ import type {
 } from "./cli/types.ts";
 import { loadWorkspaceConfig } from "./config.ts";
 import { getTemplatesDir, listTemplates } from "./templates/index.ts";
+import { annotateCommand, tokenize } from "./terminal/command-annotate.ts";
+import { renderMarkdown } from "./terminal/markdown.ts";
 import { compactHomePath } from "./terminal/paths.ts";
 import {
   renderTerminalDocInline,
   type TerminalDoc,
   type TerminalLineInput,
   type TerminalSpan,
-  type TerminalSpanInput,
   terminalDoc,
   terminalSpan,
 } from "./terminal/render-model.ts";
@@ -197,7 +198,51 @@ Git model:
 See also:
   wf --help            Overview of all commands and examples
   wf help workflow     Recommended workflows for users and agents
+  wf help templates    What templates are and how to build them
   wf skills get core   Agent skill covering the full workspace lifecycle
+`);
+}
+
+export function templatesPage(): string {
+  return renderHelp(`
+wf help templates - What templates are, and how to create and use them.
+
+Overview:
+  A template is a saved recipe for a workspace: the repositories to check out,
+  plus any hooks, branch prefix, and files they should start with. Save that
+  setup once, then create a ready-to-work workspace from it with a single
+  command, \`wf new <name> @<template>\`, instead of cloning several repositories
+  and wiring them together by hand. Reach for a template whenever you keep coming
+  back to the same group of repositories.
+
+What a template holds:
+  repositories         The repositories the workspace is built from. The only required part.
+  hooks                Optional commands run after each repository is set up, for dependency
+                       installs, codegen, and other one-time setup.
+  branch prefix        An optional prefix for the branch created in each repository,
+                       overriding the global \`branchPrefix\`.
+  bundled files        Optional files copied into every new workspace, added with
+                       \`wf template add-file\`.
+
+  Each template is stored as JSONC at
+  \`~/.config/workforest/templates/<name>/template.jsonc\` and can also be edited by hand.
+
+Creating and maintaining templates:
+  wf template new       Save a template from a name and one or more repositories.
+  wf template suggest   Propose templates from your recent GitHub pull request activity.
+  wf template edit      Change a template's repositories, hooks, and branch prefix.
+  wf template add-file  Bundle files that every new workspace should start with.
+  wf template variant   Derive a variant that overrides only part of a parent template.
+
+Inspecting templates:
+  wf template list      List saved templates and where they live on disk.
+  wf template show      Print one template's repositories, hooks, and branch prefix.
+  wf template open      Open a template's directory to edit its files directly.
+
+See also:
+  wf template --help              Every template subcommand, with flags and examples
+  wf skills get create-templates  Step-by-step guidance for authoring a good template
+  wf help concepts                Where templates fit among workforest's core concepts
 `);
 }
 
@@ -340,20 +385,22 @@ function groupHelp(group: CommandGroup): string {
     key: nodeDisplayName(child),
     description: child.summary,
   }));
-  const description = group.description ? ` ${group.description}` : "";
+  // The Usage line already names the command, so the body opens with the
+  // Markdown description; the summary (used in the root command list) is only a
+  // fallback when a group has no description.
+  const description = group.description ?? `${group.summary}.`;
+  const examples = formatExamplesSection(group.examples ?? []);
 
-  return renderHelp(`Usage: ${formatCommand(group.path)} ${subcommand}
-
-${group.summary}.${description}
-
-Subcommands:
-${formatRows(children)}
-`);
+  return joinBlocks([
+    renderHelp(`Usage: ${formatCommand(group.path)} ${subcommand}`),
+    renderMarkdownInline(description),
+    renderHelp(`Subcommands:\n${formatRows(children)}${examples}`),
+  ]);
 }
 
 function leafHelp(leaf: CommandLeaf, path: readonly string[]): string {
   const usage = formatUsage(commandUsageLines(leaf, path));
-  const description = leaf.description ? ` ${leaf.description}` : "";
+  const description = leaf.description ?? `${leaf.summary}.`;
   const argumentsSection = formatArgumentsSection(collectOperands(leaf));
   const flags = commandFlags(leaf);
   const options =
@@ -370,10 +417,11 @@ ${formatRows(
 )}`;
   const examples = formatExamplesSection(leaf.examples);
 
-  return renderHelp(`${usage}
-
-${leaf.summary}.${description}${argumentsSection}${options}${examples}
-`);
+  return joinBlocks([
+    renderHelp(usage),
+    renderMarkdownInline(description),
+    renderHelp(`${argumentsSection}${options}${examples}`),
+  ]);
 }
 
 function flagDescription(flag: FlagDefinition): string {
@@ -590,8 +638,12 @@ export function helpDoc(content: string): TerminalDoc {
         ];
       }
 
+      // A left-aligned line ending in a colon is a section heading
+      // ("Subcommands:", "See also:"). A prose sentence that happens to end in
+      // a colon — a list lead-in like "... It bundles:" — is not; those contain
+      // a period, which section labels never do.
       const heading = line.match(/^([^ ].*):$/);
-      if (heading) {
+      if (heading && !line.includes(".")) {
         section = heading[1] ?? "";
         return helpHeading(line);
       }
@@ -660,41 +712,11 @@ function helpHeading(value: string): TerminalSpan[] {
 }
 
 function styleCommandSyntax(value: string): TerminalLineInput {
-  return styleTokens(value, true);
+  return annotateCommand(value);
 }
 
 function styleOptionSyntax(value: string): TerminalLineInput {
-  return styleTokens(value, false);
-}
-
-function styleTokens(
-  value: string,
-  colorBareWords: boolean,
-): TerminalLineInput {
-  const tokens =
-    /(?:^|[\s,])--?[a-z][\w-]*|\b(?:wf|workforest)\b|<[^>]+>|\[[^\]]+\]|(?:^|\s)[a-z][\w|.-]*(?=\s|$)/gi;
-
-  return tokenize(value, tokens, (token) => {
-    const normalized = token.trimStart();
-    const prefix = token.slice(0, token.length - normalized.length);
-
-    if (normalized === "wf" || normalized === "workforest") {
-      return [
-        prefix,
-        terminalSpan(normalized, { role: "focus", emphasis: "bold" }),
-      ];
-    }
-    if (normalized.startsWith("-")) {
-      return [prefix, terminalSpan(normalized, { role: "warning" })];
-    }
-    if (normalized.startsWith("<") || normalized.startsWith("[")) {
-      return [prefix, terminalSpan(normalized, { role: "accent" })];
-    }
-    if (colorBareWords) {
-      return [prefix, terminalSpan(normalized, { role: "accent" })];
-    }
-    return [token];
-  });
+  return annotateCommand(value, { colorBareWords: false });
 }
 
 function styleRowKey(value: string, section: string): TerminalLineInput {
@@ -719,10 +741,7 @@ function styleExample(value: string): TerminalLineInput {
       const prefix = token.slice(0, token.length - normalized.length);
 
       if (normalized === "wf" || normalized === "workforest") {
-        return [
-          prefix,
-          terminalSpan(normalized, { role: "focus", emphasis: "bold" }),
-        ];
+        return [prefix, terminalSpan(normalized, { role: "command" })];
       }
       if (normalized.startsWith("-")) {
         return [prefix, terminalSpan(normalized, { role: "warning" })];
@@ -735,7 +754,7 @@ function styleExample(value: string): TerminalLineInput {
       ) {
         return [prefix, terminalSpan(normalized, { role: "accent" })];
       }
-      return [prefix, terminalSpan(normalized, { role: "accent" })];
+      return [prefix, terminalSpan(normalized, { role: "subcommand" })];
     },
   );
 }
@@ -760,30 +779,18 @@ function styleInlineCode(value: string): TerminalLineInput {
   return [terminalSpan(value, { role: "accent" })];
 }
 
-function tokenize(
-  value: string,
-  pattern: RegExp,
-  style: (token: string) => TerminalLineInput,
-): TerminalLineInput {
-  const spans: TerminalSpanInput[] = [];
-  let cursor = 0;
-  for (const match of value.matchAll(pattern)) {
-    const token = match[0] ?? "";
-    const index = match.index ?? cursor;
-    if (index > cursor) {
-      spans.push(value.slice(cursor, index));
-    }
-    spans.push(...style(token));
-    cursor = index + token.length;
-  }
-  if (cursor < value.length) {
-    spans.push(value.slice(cursor));
-  }
-  return spans;
-}
-
 function renderInlineDoc(doc: TerminalDoc): string {
   return renderTerminalDocInline(doc);
+}
+
+/** Render a Markdown `description` to a themed, inline (non-fullscreen) string. */
+function renderMarkdownInline(markdown: string): string {
+  return renderInlineDoc(renderMarkdown(markdown));
+}
+
+/** Join already-rendered help sections with a blank line, dropping empties. */
+function joinBlocks(blocks: readonly string[]): string {
+  return blocks.filter((block) => block.trim().length > 0).join("\n\n");
 }
 
 function stripMarkdownCodeDelimiters(value: string): string {

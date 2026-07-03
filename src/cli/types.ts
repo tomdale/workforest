@@ -106,6 +106,8 @@ export type CommandGroup = CommandMetadata &
     kind: "group";
     children: readonly CommandNode[];
     default?: CommandLeaf;
+    /** Cross-subcommand examples shown on the group's help page. */
+    examples?: readonly CommandExample[];
   }>;
 
 export type CommandNode = CommandGroup | CommandLeaf;

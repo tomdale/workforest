@@ -166,6 +166,7 @@ function group(options: {
   default?: CommandLeaf;
   aliases?: readonly AliasDefinition[];
   visibility?: Visibility;
+  examples?: readonly CommandExample[];
 }): CommandGroup {
   return {
     kind: "group",
@@ -178,6 +179,7 @@ function group(options: {
     help: options.help,
     children: options.children,
     ...(options.default ? { default: options.default } : {}),
+    ...(options.examples ? { examples: options.examples } : {}),
   };
 }
 
@@ -1315,9 +1317,32 @@ export const commandRegistry: CommandRegistry = {
         name: "template",
         path: ["template"],
         summary: "Manage templates",
-        description:
-          "Create, inspect, and maintain reusable workspace templates. A template names a set of repositories plus optional hooks, a branch prefix, and bundled files, stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf new <name> @<template>` to build a workspace from one.",
+        description: `A template is a saved recipe for a workspace. It bundles:
+
+- a set of repositories
+- any setup hooks
+- a branch prefix
+- files every new workspace should start with
+
+Once saved, create a fully set-up workspace from it with \`wf new <name> @<template>\`.
+
+See \`wf help templates\` for an overview.
+<wf:muted>Agents: Run \`wf skills get create-templates\` for step-by-step authoring instructions.</wf:muted>`,
         help: { kind: "command", command: "template" },
+        examples: [
+          {
+            command: "wf template new my-stack vercel/next.js vercel/turborepo",
+            description: "Save a set of repositories as a reusable template.",
+          },
+          {
+            command: "wf new auth-fix @my-stack",
+            description: "Start a workspace from a saved template.",
+          },
+          {
+            command: "wf template show my-stack",
+            description: "Review a template's repositories, hooks, and prefix.",
+          },
+        ],
         children: [
           leaf({
             name: "list",
@@ -1856,7 +1881,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["help"],
         summary: "Show help pages",
         description:
-          "Prints the overview help page, the conceptual glossary, or the recommended workflow guide. With no subcommand, `wf help` prints the same overview as `wf --help`.",
+          "Prints the overview help page, the conceptual glossary, the templates guide, or the recommended workflow guide. With no subcommand, `wf help` prints the same overview as `wf --help`.",
         help: { kind: "command", command: "help" },
         default: leaf({
           name: "help",
@@ -1898,6 +1923,23 @@ export const commandRegistry: CommandRegistry = {
                 command: "wf help workflow",
                 description:
                   "Read the recommended workflows for users and agents.",
+              },
+            ],
+          }),
+          leaf({
+            name: "templates",
+            path: ["help", "templates"],
+            summary: "Explain templates",
+            description:
+              "Explains what a template is (a saved workspace recipe of repositories, optional hooks, a branch prefix, and bundled files) and the commands for creating, inspecting, and building workspaces from them. See also `wf skills get create-templates`.",
+            handler: "help.templates",
+            help: nestedHelp("help", "templates"),
+            outputModes: ["human"],
+            examples: [
+              {
+                command: "wf help templates",
+                description:
+                  "Read what templates are and how to create and use them.",
               },
             ],
           }),

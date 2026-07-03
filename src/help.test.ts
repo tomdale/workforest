@@ -14,7 +14,9 @@ import {
   helpDoc,
   renderHelp,
   rootHelp,
+  templatesPage,
 } from "./help.ts";
+import { inlinePalette } from "./terminal/theme-system.ts";
 
 const ROOT_CONTEXT = {
   configPath: "/config/config.json",
@@ -109,6 +111,38 @@ describe("registry-derived help", () => {
     expect(unbounded).toContain("<task names...>");
   });
 
+  it("renders cross-subcommand examples on a group's help page", () => {
+    const template = stripAnsi(
+      commandPathHelp(commandRegistry, ["template"]) ?? "",
+    );
+
+    expect(template).toContain("Examples:");
+    expect(template).toContain(
+      "wf template new my-stack vercel/next.js vercel/turborepo",
+    );
+    expect(template).toContain("wf new auth-fix @my-stack");
+  });
+
+  it("renders a command description as Markdown", () => {
+    const template = stripAnsi(
+      commandPathHelp(commandRegistry, ["template"]) ?? "",
+    );
+
+    // Markdown `- ` bullets become themed list items...
+    expect(template).toContain("• a set of repositories");
+    expect(template).not.toContain("- a set of repositories");
+    // ...and inline code stays as plain command text (backticks stripped).
+    expect(template).toContain("wf new <name> @<template>");
+    expect(template).not.toContain("`wf new");
+  });
+
+  it("omits the Examples section from groups without examples", () => {
+    const cache = stripAnsi(commandPathHelp(commandRegistry, ["cache"]) ?? "");
+
+    expect(cache).toContain("Subcommands:");
+    expect(cache).not.toContain("Examples:");
+  });
+
   it("renders inline markdown code as formatted terminal text", () => {
     const output = stripAnsi(
       renderHelp("Use `wf new <name> @<template>` to build a workspace."),
@@ -131,10 +165,12 @@ describe("registry-derived help", () => {
 
     expect(pathSpan).toMatchObject({ role: "accent" });
     expect(pathSpan?.emphasis).toBeUndefined();
-    expect(commandSpan).toMatchObject({
-      role: "focus",
-      emphasis: "bold",
-    });
+    // The bare `wf` program name gets its own "command" role, distinct from
+    // accent-colored paths. Its bold weight lives on the role in the palette,
+    // not on the span, so the span itself carries no emphasis.
+    expect(commandSpan).toMatchObject({ role: "command" });
+    expect(commandSpan?.emphasis).toBeUndefined();
+    expect(inlinePalette().command.emphasis).toContain("bold");
   });
 
   it("does not leak markdown backticks in concept help", () => {
@@ -142,6 +178,37 @@ describe("registry-derived help", () => {
 
     expect(output).toContain("wf new <name> @<template>");
     expect(output).not.toContain("`");
+  });
+
+  it("explains templates and points to further help on the templates page", () => {
+    const output = stripAnsi(templatesPage());
+
+    expect(output).toContain(
+      "wf help templates - What templates are, and how to create and use them.",
+    );
+    expect(output).toContain("A template is a saved recipe for a workspace");
+    expect(output).toContain("wf new <name> @<template>");
+    expect(output).toContain("wf skills get create-templates");
+    expect(output).not.toContain("`");
+  });
+
+  it("registers wf help templates as a routable help page", () => {
+    const output = stripAnsi(commandPathHelp(commandRegistry, ["help"]) ?? "");
+
+    expect(output).toContain("templates");
+    expect(findGroup(commandRegistry.root, "help").children).toContainEqual(
+      expect.objectContaining({ name: "templates", handler: "help.templates" }),
+    );
+  });
+
+  it("expands the template group help with references to further guidance", () => {
+    const output = stripAnsi(
+      commandPathHelp(commandRegistry, ["template"]) ?? "",
+    );
+
+    expect(output).toContain("A template is a saved recipe for a workspace");
+    expect(output).toContain("wf help templates");
+    expect(output).toContain("wf skills get create-templates");
   });
 });
 

@@ -330,7 +330,8 @@ Review worktrees are stored below `directory.reviews`, which defaults to
 ## Templates
 
 Templates capture repeated repository sets, branch prefixes, setup hooks, and
-default files.
+default files. For a conceptual overview of what templates are and how to build
+them, run `wf help templates`.
 
 Use the template subcommands to create, edit, copy, or delete templates:
 
