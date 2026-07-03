@@ -30,6 +30,7 @@ import {
 } from "./repositories.ts";
 import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
 import { detectDefaultBranch } from "./services/worktree.ts";
+import { compactHomePath } from "./terminal/paths.ts";
 import {
   renderTerminalLineAnsi,
   type TerminalStyleRole,
@@ -622,7 +623,7 @@ function nodeModulesSummarySection(nodeModules: NodeModulesCacheSummary) {
       { label: "Entries", value: String(nodeModules.entryCount) },
       { label: "Repositories", value: String(nodeModules.repositoryCount) },
       { label: "Size", value: formatByteSize(nodeModules.sizeBytes) },
-      { label: "Directory", value: nodeModules.path },
+      { label: "Directory", value: compactHomePath(nodeModules.path) },
     ],
   };
 }
@@ -632,7 +633,7 @@ function cacheListFooter(
   nodeModules: NodeModulesCacheSummary,
 ): string {
   return [
-    `Directory: ${getCacheDir()}`,
+    `Directory: ${compactHomePath(getCacheDir())}`,
     `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}, ${formatByteSize(totalSize(repositories))}`,
     `${nodeModules.entryCount} node_modules entr${nodeModules.entryCount === 1 ? "y" : "ies"}, ${formatByteSize(nodeModules.sizeBytes)}`,
   ].join("\n");
@@ -716,7 +717,7 @@ function renderRepositoryInfo(repository: CachedRepository): string {
             label: "Last updated",
             value: formatDate(repository.lastFetchedAt),
           },
-          { label: "Mirror", value: repository.mirrorPath },
+          { label: "Mirror", value: compactHomePath(repository.mirrorPath) },
         ],
       },
       ...(repository.issues.length > 0
@@ -737,7 +738,7 @@ function renderRepositoryInfo(repository: CachedRepository): string {
             ? repository.worktrees.map((worktree) => {
                 const stale = worktree.prunable || !worktree.exists;
                 return {
-                  title: worktree.path,
+                  title: compactHomePath(worktree.path),
                   tone: stale ? ("cancelled" as const) : ("success" as const),
                   details: [
                     {

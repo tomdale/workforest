@@ -1,7 +1,7 @@
-import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { type Scope, sortEntriesByRecency } from "../entry/entries-data.ts";
 import { reportShellCdTarget } from "../shell.ts";
+import { compactHomePath } from "../terminal/paths.ts";
 import {
   CancelError,
   cancel,
@@ -155,23 +155,11 @@ async function runDefaultSwitchSurface(
 function switchCandidateDescription(entry: InventoryEntry): string {
   const searchText =
     entry.type === "worktree"
-      ? `${entry.repository} ${entry.path}`
-      : `${entry.repos.join(", ")} ${entry.path}`;
+      ? `${entry.repository} ${compactHomePath(entry.path)}`
+      : `${entry.repos.join(", ")} ${compactHomePath(entry.path)}`;
   return [
     entry.type === "worktree" ? "repository" : entry.groupName,
     entry.changeName,
-    compactHome(searchText),
+    searchText,
   ].join(" - ");
-}
-
-function compactHome(value: string): string {
-  const home = process.env["HOME"];
-  if (!home) return value;
-  const resolved = path.resolve(value);
-  const resolvedHome = path.resolve(home);
-  return resolved === resolvedHome
-    ? "~"
-    : resolved.startsWith(`${resolvedHome}${path.sep}`)
-      ? `~/${path.relative(resolvedHome, resolved)}`
-      : value;
 }

@@ -12,6 +12,7 @@ import type {
 } from "./cli/types.ts";
 import { loadWorkspaceConfig } from "./config.ts";
 import { getTemplatesDir, listTemplates } from "./templates/index.ts";
+import { compactHomePath } from "./terminal/paths.ts";
 import {
   renderTerminalDocInline,
   type TerminalDoc,
@@ -85,8 +86,8 @@ export async function help(): Promise<string> {
         );
 
   return rootHelp(commandRegistry, {
-    configPath,
-    templatesDir,
+    configPath: compactHomePath(configPath),
+    templatesDir: compactHomePath(templatesDir),
     templates,
   });
 }
@@ -568,7 +569,7 @@ function isVisible(
 }
 
 export function renderHelp(content: string): string {
-  return renderInlineDoc(helpDoc(content));
+  return stripMarkdownCodeDelimiters(renderInlineDoc(helpDoc(content)));
 }
 
 export function helpDoc(content: string): TerminalDoc {
@@ -593,6 +594,15 @@ export function helpDoc(content: string): TerminalDoc {
       if (heading) {
         section = heading[1] ?? "";
         return helpHeading(line);
+      }
+
+      const continuation = line.match(/^(\s{4,})(\S.*)$/);
+      if (
+        continuation &&
+        !["Examples", "Start here (for AI agents)"].includes(section)
+      ) {
+        const [, indent = "", rest = ""] = continuation;
+        return [indent, ...styleDescription(rest)];
       }
 
       const row = line.match(/^(\s+)(.*?\S)(\s{2,})(\S.*)$/);
@@ -634,7 +644,13 @@ export function helpDoc(content: string): TerminalDoc {
         ];
       }
 
-      return line;
+      const indentedText = line.match(/^(\s+)(.*)$/);
+      if (indentedText) {
+        const [, indent = "", rest = ""] = indentedText;
+        return [indent, ...styleDescription(rest)];
+      }
+
+      return styleDescription(line);
     }),
   );
 }
@@ -682,6 +698,9 @@ function styleTokens(
 }
 
 function styleRowKey(value: string, section: string): TerminalLineInput {
+  if (value.includes("`")) {
+    return styleDescription(value);
+  }
   if (section === "Options") {
     return styleOptionSyntax(value);
   }
@@ -722,11 +741,23 @@ function styleExample(value: string): TerminalLineInput {
 }
 
 function styleDescription(value: string): TerminalLineInput {
-  return value
-    .split(/(\([^)]*(?:default|none|current)[^)]*\)|\$[A-Z][A-Z0-9_]*)/gi)
-    .map((part, index) =>
-      index % 2 === 1 ? terminalSpan(part, { role: "muted" }) : part,
-    );
+  return tokenize(
+    value,
+    /\\?`[^`]+\\?`|\([^)]*(?:default|none|current)[^)]*\)|\$[A-Z][A-Z0-9_]*/gi,
+    (token) => {
+      if (token.includes("`")) {
+        return styleInlineCode(token.replace(/^\\?`|\\?`$/g, ""));
+      }
+      return [terminalSpan(token, { role: "muted" })];
+    },
+  );
+}
+
+function styleInlineCode(value: string): TerminalLineInput {
+  if (/^(?:wf|workforest)(?:\s|$)/.test(value)) {
+    return styleCommandSyntax(value);
+  }
+  return [terminalSpan(value, { role: "accent" })];
 }
 
 function tokenize(
@@ -753,4 +784,8 @@ function tokenize(
 
 function renderInlineDoc(doc: TerminalDoc): string {
   return renderTerminalDocInline(doc);
+}
+
+function stripMarkdownCodeDelimiters(value: string): string {
+  return value.replace(/\\?`([^`]+)\\?`/g, "$1");
 }

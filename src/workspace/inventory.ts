@@ -1,5 +1,4 @@
 import { type Dirent, promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { validateRepositoryComponent } from "../repository-components.ts";
@@ -7,6 +6,7 @@ import {
   formatTemplateIdentifier,
   validateTemplateIdentifier,
 } from "../templates/index.ts";
+import { compactHomePath } from "../terminal/paths.ts";
 import {
   renderTerminalDocInline,
   type TerminalDoc,
@@ -494,7 +494,7 @@ function formatColumns(
   return showPath && entryPath
     ? intersperseSpans([
         ...columns,
-        terminalSpan(compactHome(entryPath), { role: "muted" }),
+        terminalSpan(compactHomePath(entryPath), { role: "muted" }),
       ])
     : intersperseSpans(columns);
 }
@@ -523,15 +523,6 @@ function formatRelativeTime(modifiedAtMs: number, now = Date.now()): string {
   }
 
   return `${Math.floor(hours / 24)}d`;
-}
-
-function compactHome(value: string): string {
-  const home = os.homedir();
-  return value === home
-    ? "~"
-    : value.startsWith(`${home}${path.sep}`)
-      ? path.join("~", path.relative(home, value))
-      : value;
 }
 
 function groupNameFromMetadata(metadata: WorkspaceMetadata): string {

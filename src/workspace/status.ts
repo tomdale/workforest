@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
@@ -7,6 +6,7 @@ import {
   type TemplateAgentsMdState,
 } from "../templates/agents-md.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
+import { compactHomePath } from "../terminal/paths.ts";
 import {
   literalSpan,
   renderTerminalDocInline,
@@ -208,7 +208,7 @@ export function renderStatus(
 ): string {
   const lines: TerminalLine[] = [
     headerLine(status),
-    { spans: [terminalSpan(compactHome(status.path), { role: "dim" })] },
+    { spans: [terminalSpan(compactHomePath(status.path), { role: "dim" })] },
   ];
 
   const guidance = guidanceLine(status.guidance);
@@ -240,7 +240,9 @@ export function renderStatus(
       ),
     );
     if (repo.setup.status === "failed" && repo.setup.logPath) {
-      lines.push(dimLine(`${TASK_INDENT}${compactHome(repo.setup.logPath)}`));
+      lines.push(
+        dimLine(`${TASK_INDENT}${compactHomePath(repo.setup.logPath)}`),
+      );
     }
     for (const task of tasksByRepo.get(repo.name) ?? []) {
       pushTaskLines(lines, task, taskWidths);
@@ -475,7 +477,9 @@ function pushTaskLines(
   );
   if (task.state === "failed") {
     const log = task.details.find((detail) => detail.label === "Log");
-    if (log) lines.push(dimLine(`${TASK_LOG_INDENT}${compactHome(log.value)}`));
+    if (log) {
+      lines.push(dimLine(`${TASK_LOG_INDENT}${compactHomePath(log.value)}`));
+    }
   }
 }
 
@@ -1118,15 +1122,6 @@ function formatDuration(deltaMs: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
-}
-
-function compactHome(value: string): string {
-  const home = os.homedir();
-  return value === home
-    ? "~"
-    : value.startsWith(`${home}${path.sep}`)
-      ? path.join("~", path.relative(home, value))
-      : value;
 }
 
 function countLabel(count: number, label: string): string | null {

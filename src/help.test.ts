@@ -7,7 +7,14 @@ import type {
   CommandNode,
   CommandRegistry,
 } from "./cli/types.ts";
-import { commandPathHelp, commandUsageLines, rootHelp } from "./help.ts";
+import {
+  commandPathHelp,
+  commandUsageLines,
+  conceptsPage,
+  helpDoc,
+  renderHelp,
+  rootHelp,
+} from "./help.ts";
 
 const ROOT_CONTEXT = {
   configPath: "/config/config.json",
@@ -100,6 +107,41 @@ describe("registry-derived help", () => {
 
     expect(fixed).toContain("<source template> <destination template>");
     expect(unbounded).toContain("<task names...>");
+  });
+
+  it("renders inline markdown code as formatted terminal text", () => {
+    const output = stripAnsi(
+      renderHelp("Use `wf new <name> @<template>` to build a workspace."),
+    );
+
+    expect(output).toBe("Use wf new <name> @<template> to build a workspace.");
+    expect(output).not.toContain("`");
+  });
+
+  it("does not command-style paths that contain workforest", () => {
+    const doc = helpDoc(
+      "Stored at `~/.config/workforest/templates/<name>/template.jsonc`. Use `wf new <name>`.",
+    );
+    const spans = doc.lines.flatMap((line) => line.spans);
+
+    const pathSpan = spans.find((span) =>
+      span.text.includes("~/.config/workforest"),
+    );
+    const commandSpan = spans.find((span) => span.text === "wf");
+
+    expect(pathSpan).toMatchObject({ role: "accent" });
+    expect(pathSpan?.emphasis).toBeUndefined();
+    expect(commandSpan).toMatchObject({
+      role: "focus",
+      emphasis: "bold",
+    });
+  });
+
+  it("does not leak markdown backticks in concept help", () => {
+    const output = stripAnsi(conceptsPage());
+
+    expect(output).toContain("wf new <name> @<template>");
+    expect(output).not.toContain("`");
   });
 });
 

@@ -197,6 +197,21 @@ pwd -P
     logSpy.mockRestore();
   });
 
+  it("compacts home paths in fallback cd target output", async () => {
+    delete process.env[WORKFOREST_CD_PATH_ENV];
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const target = path.join(os.homedir(), "Code", "workforest-demo");
+
+    await reportShellCdTarget(target);
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `Run: cd ${path.join("~", "Code", "workforest-demo")}`,
+      ),
+    );
+    logSpy.mockRestore();
+  });
+
   it("prints manual cd targets without writing shell integration files", async () => {
     const tempDir = await createTempDir();
     const cdPathFile = path.join(tempDir, "cd-target");

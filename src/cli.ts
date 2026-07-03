@@ -71,6 +71,7 @@ import {
 } from "./templates/index.ts";
 import { createAgentOutputStream } from "./terminal/agent-output.ts";
 import { shouldUseFullscreenTui } from "./terminal/capabilities.ts";
+import { compactHomePath } from "./terminal/paths.ts";
 import {
   printReport,
   type ReportField,
@@ -764,7 +765,7 @@ async function runConfigInit(): Promise<CommandResult> {
   }
 
   await saveWorkspaceConfigForCommand(configPath, newConfig);
-  outro(`Config saved to ${configPath}`);
+  outro(`Config saved to ${compactHomePath(configPath)}`);
   return success();
 }
 
@@ -911,7 +912,7 @@ async function runConfigShow(json: boolean): Promise<CommandResult> {
           ]
         : []),
     ],
-    footer: `Config: ${configPath}`,
+    footer: `Config: ${compactHomePath(configPath)}`,
   });
   return success();
 }
@@ -922,7 +923,7 @@ async function runConfigEdit(): Promise<CommandResult> {
   // Get editor from environment
   const editor = process.env["EDITOR"] || process.env["VISUAL"] || "vi";
 
-  log.info(`Opening ${configPath} in ${editor}...`);
+  log.info(`Opening ${compactHomePath(configPath)} in ${editor}...`);
 
   const child = spawn(editor, [configPath], {
     stdio: "inherit",
@@ -1524,7 +1525,7 @@ async function runTaskStart(
               details: [
                 { label: "Repository", value: worktree.parentRepo },
                 { label: "Branch", value: worktree.branch },
-                { label: "Target", value: worktree.path },
+                { label: "Target", value: compactHomePath(worktree.path) },
               ],
             })),
           },
@@ -1537,8 +1538,14 @@ async function runTaskStart(
       const setup =
         worktree.setupStatus === "ready"
           ? "ready"
-          : `setup failed${worktree.setupLog ? ` (log: ${worktree.setupLog})` : ""}`;
-      log.success(`${worktree.slug}: ${worktree.path} (${setup})`);
+          : `setup failed${
+              worktree.setupLog
+                ? ` (log: ${compactHomePath(worktree.setupLog)})`
+                : ""
+            }`;
+      log.success(
+        `${worktree.slug}: ${compactHomePath(worktree.path)} (${setup})`,
+      );
     }
 
     for (const failure of result.failures) {
@@ -1608,7 +1615,7 @@ async function runRepositoryTaskStart({
                 { label: "Repository", value: worktree.parentRepo },
                 { label: "Change", value: context.changeName },
                 { label: "Branch", value: worktree.branch },
-                { label: "Target", value: worktree.path },
+                { label: "Target", value: compactHomePath(worktree.path) },
               ],
             })),
           },
@@ -1621,8 +1628,14 @@ async function runRepositoryTaskStart({
       const setup =
         worktree.setupStatus === "ready"
           ? "ready"
-          : `setup failed${worktree.setupLog ? ` (log: ${worktree.setupLog})` : ""}`;
-      log.success(`${worktree.slug}: ${worktree.path} (${setup})`);
+          : `setup failed${
+              worktree.setupLog
+                ? ` (log: ${compactHomePath(worktree.setupLog)})`
+                : ""
+            }`;
+      log.success(
+        `${worktree.slug}: ${compactHomePath(worktree.path)} (${setup})`,
+      );
     }
 
     for (const failure of result.failures) {
@@ -1906,7 +1919,9 @@ async function runTaskDelete({
                 { label: "Branch", value: entry.branch },
                 {
                   label: "Path",
-                  value: resolveContainedPath(workspaceDir, entry.path),
+                  value: compactHomePath(
+                    resolveContainedPath(workspaceDir, entry.path),
+                  ),
                 },
               ],
             })),
@@ -1976,7 +1991,9 @@ async function runRepositoryTaskDelete({
                 { label: "Branch", value: entry.branch },
                 {
                   label: "Path",
-                  value: resolveContainedPath(context.repoRootDir, entry.path),
+                  value: compactHomePath(
+                    resolveContainedPath(context.repoRootDir, entry.path),
+                  ),
                 },
               ],
             })),
@@ -2161,7 +2178,10 @@ async function runTemplateAgentsMdStatus(
             ? [
                 { label: "Generated", value: guidance.manifest.generatedAt },
                 { label: "Expires", value: guidance.manifest.expiresAt },
-                { label: "Artifact", value: guidance.manifest.artifact },
+                {
+                  label: "Artifact",
+                  value: compactHomePath(guidance.manifest.artifact),
+                },
               ]
             : []),
         ],
@@ -2209,7 +2229,9 @@ async function runTemplateAgentsMdRefresh(
   }
   if (json) return jsonSuccess({ action: "refreshed", guidance });
   log.success(`Refreshed AGENTS.md guidance for "${template.id}".`);
-  log.info(`Artifact: ${guidance.artifactPath}`);
+  if (guidance.artifactPath) {
+    log.info(`Artifact: ${compactHomePath(guidance.artifactPath)}`);
+  }
   return templateSuccess();
 }
 
@@ -2263,7 +2285,7 @@ async function runTemplateList(json: boolean): Promise<CommandResult> {
     printReport({
       title: "Templates",
       sections: [{ note: "No templates configured." }],
-      footer: `Directory: ${getTemplatesDir()}`,
+      footer: `Directory: ${compactHomePath(getTemplatesDir())}`,
     });
     return templateSuccess();
   }
@@ -2291,7 +2313,7 @@ async function runTemplateList(json: boolean): Promise<CommandResult> {
       },
     ],
     footer: [
-      `Directory: ${getTemplatesDir()}`,
+      `Directory: ${compactHomePath(getTemplatesDir())}`,
       `${templates.length} template${templates.length === 1 ? "" : "s"}`,
     ].join("\n"),
   });
@@ -2391,7 +2413,9 @@ async function runTemplateShow(
             : []),
           { label: "Branch prefix", value: branchPrefixSummary },
           { label: "AGENTS.md", value: guidance.state },
-          ...(hasFiles ? [{ label: "Files", value: filesDir }] : []),
+          ...(hasFiles
+            ? [{ label: "Files", value: compactHomePath(filesDir) }]
+            : []),
         ],
       },
       {
@@ -2428,7 +2452,7 @@ async function runTemplateShow(
           ]
         : []),
     ],
-    footer: `Config: ${template.path}`,
+    footer: `Config: ${compactHomePath(template.path)}`,
   });
   return templateSuccess();
 }
@@ -2495,7 +2519,15 @@ async function runTemplateVariantNew(
   }
   log.success(`Template variant "${canonicalId}" created.`);
   log.info(
-    `Location: ${getTemplatesDir()}/${parentId}/variants/${variantId}/template.jsonc`,
+    `Location: ${compactHomePath(
+      path.join(
+        getTemplatesDir(),
+        parentId,
+        "variants",
+        variantId,
+        "template.jsonc",
+      ),
+    )}`,
   );
   return templateSuccess();
 }
@@ -2584,7 +2616,11 @@ async function runTemplateNew(
   }
 
   log.success(`Template "${templateId}" created.`);
-  log.info(`Location: ${getTemplatesDir()}/${templateId}/template.jsonc`);
+  log.info(
+    `Location: ${compactHomePath(
+      path.join(getTemplatesDir(), templateId, "template.jsonc"),
+    )}`,
+  );
   return templateSuccess();
 }
 

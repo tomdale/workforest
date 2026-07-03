@@ -1,3 +1,4 @@
+import path from "node:path";
 import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
 import {
@@ -95,5 +96,12 @@ describe("terminal render model", () => {
     expect(renderTerminalDocBlessed(doc)).toContain(
       "\\{red-fg\\}child\\{/red-fg\\}",
     );
+  });
+
+  it("preserves literal span text exactly", () => {
+    const literal = path.join(path.parse(process.cwd()).root, "child-output");
+    const doc = terminalDoc([[literalSpan(literal)]]);
+
+    expect(renderTerminalDocPlain(doc)).toBe(literal);
   });
 });

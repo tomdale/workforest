@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { type Dirent, promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
@@ -12,6 +11,7 @@ import { validateRepositoryComponent } from "../repository-components.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
 import { formatTemplateIdentifier } from "../templates/index.ts";
+import { compactHomePath } from "../terminal/paths.ts";
 import {
   type ReportEntry,
   type ReportSection,
@@ -695,8 +695,8 @@ function workspaceEntry(
     tone,
     ...(reason ? { description: reason } : {}),
     details: [
-      { label: "From", value: compactHome(entry.source) },
-      { label: "To", value: compactHome(entry.target) },
+      { label: "From", value: compactHomePath(entry.source) },
+      { label: "To", value: compactHomePath(entry.target) },
     ],
   };
 }
@@ -713,9 +713,9 @@ function repositoryDirectoryEntry(
     tone,
     ...(reason ? { description: reason } : {}),
     details: [
-      { label: "From", value: compactHome(entry.source) },
-      { label: "To", value: compactHome(entry.target) },
-      { label: "Metadata", value: compactHome(entry.metadataPath) },
+      { label: "From", value: compactHomePath(entry.source) },
+      { label: "To", value: compactHomePath(entry.target) },
+      { label: "Metadata", value: compactHomePath(entry.metadataPath) },
     ],
   };
 }
@@ -732,8 +732,8 @@ function repositoryMetadataEntry(
     tone,
     ...(reason ? { description: reason } : {}),
     details: [
-      { label: "Worktree", value: compactHome(entry.worktreePath) },
-      { label: "Metadata", value: compactHome(entry.metadataPath) },
+      { label: "Worktree", value: compactHomePath(entry.worktreePath) },
+      { label: "Metadata", value: compactHomePath(entry.metadataPath) },
     ],
   };
 }
@@ -756,13 +756,4 @@ function safeResourceName(value: string): string | null {
   } catch {
     return null;
   }
-}
-
-function compactHome(value: string): string {
-  const home = os.homedir();
-  return value === home
-    ? "~"
-    : value.startsWith(`${home}${path.sep}`)
-      ? path.join("~", path.relative(home, value))
-      : value;
 }
