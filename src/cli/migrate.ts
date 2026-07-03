@@ -32,6 +32,7 @@ import {
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
+  comparablePath,
   getWorkspacePath,
   getWorktreePath,
   isPathInsideOrEqual,
@@ -509,14 +510,6 @@ async function comparableWorkforestDirectories(
     workspaces: await comparablePath(directories.workspaces),
     reviews: await comparablePath(directories.reviews),
   };
-}
-
-async function comparablePath(value: string): Promise<string> {
-  try {
-    return await fs.realpath(value);
-  } catch {
-    return path.resolve(value);
-  }
 }
 
 function repoConfigFromCachedRepository(

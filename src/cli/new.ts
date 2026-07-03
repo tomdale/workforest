@@ -1,5 +1,3 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import { runGit } from "../services/git.ts";
@@ -22,6 +20,7 @@ import {
 import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
+  comparablePath,
   getWorkspacePath,
   resolveWorkforestDirectories,
   type WorkforestDirectories,
@@ -265,12 +264,4 @@ async function comparableDirectories(
     comparablePath(directories.reviews),
   ]);
   return { base, repos, workspaces, reviews };
-}
-
-async function comparablePath(value: string): Promise<string> {
-  try {
-    return await fs.realpath(value);
-  } catch {
-    return path.resolve(value);
-  }
 }

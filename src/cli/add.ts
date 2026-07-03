@@ -6,7 +6,7 @@ import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
-import { isShellAutoCdEnabled } from "../shell.ts";
+import { reportShellCdTarget } from "../shell.ts";
 import { invalidateWorkspaceAgentsMd } from "../templates/agents-md.ts";
 import {
   formatTemplateIdentifier,
@@ -30,6 +30,7 @@ import {
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
+  comparablePath,
   getWorkspacePath,
   getWorkspaceRepoPath,
   resolveWorkforestDirectories,
@@ -191,7 +192,9 @@ async function addToWorkspace(
       );
     }
   }
-  await options.writeShellCdPath(target.workspaceDir);
+  await reportShellCdTarget(target.workspaceDir, {
+    writeShellCdPath: options.writeShellCdPath,
+  });
   return success();
 }
 
@@ -290,11 +293,10 @@ async function promoteWorktree(
     }
   }
 
-  await options.writeShellCdPath(workspaceDir);
   log.success(`Promoted change to workspace: ${workspaceDir}`);
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${workspaceDir}`);
-  }
+  await reportShellCdTarget(workspaceDir, {
+    writeShellCdPath: options.writeShellCdPath,
+  });
   return success();
 }
 
@@ -464,12 +466,4 @@ async function comparableDirectories(
     comparablePath(directories.reviews),
   ]);
   return { base, repos, workspaces, reviews };
-}
-
-async function comparablePath(value: string): Promise<string> {
-  try {
-    return await fs.realpath(value);
-  } catch {
-    return path.resolve(value);
-  }
 }

@@ -10,13 +10,13 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { commandRegistry } from "./cli/commands.ts";
 import type { CommandRegistry } from "./cli/types.ts";
 import {
   normalizeShellName,
   renderShellInit,
-  resolveCleanupCdTarget,
+  reportShellCdTarget,
   WORKFOREST_CD_PATH_ENV,
   writeShellCdPath,
 } from "./shell.ts";
@@ -160,26 +160,6 @@ pwd -P
     expect(result.stdout.trim()).toBe(await realpath(target));
   });
 
-  it("resolves cleanup cd target only when current dir is inside the workspace", () => {
-    expect(
-      resolveCleanupCdTarget(
-        "/tmp/workspaces/feature-name/api",
-        "/tmp/workspaces/feature-name",
-      ),
-    ).toBe("/tmp/workspaces");
-
-    expect(
-      resolveCleanupCdTarget(
-        "/tmp/workspaces/feature-name",
-        "/tmp/workspaces/feature-name",
-      ),
-    ).toBe("/tmp/workspaces");
-
-    expect(
-      resolveCleanupCdTarget("/tmp/elsewhere", "/tmp/workspaces/feature-name"),
-    ).toBeNull();
-  });
-
   it("writes the target workspace path for the shell wrapper", async () => {
     const tempDir = await createTempDir();
     const cdPathFile = path.join(tempDir, "cd-target");
@@ -189,6 +169,49 @@ pwd -P
 
     const written = await readFile(cdPathFile, "utf8");
     expect(written).toBe(`${path.resolve("./examples/demo")}\n`);
+  });
+
+  it("reports auto-cd targets through shell integration", async () => {
+    const tempDir = await createTempDir();
+    const cdPathFile = path.join(tempDir, "cd-target");
+    process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await reportShellCdTarget("./examples/demo");
+
+    const written = await readFile(cdPathFile, "utf8");
+    expect(written).toBe(`${path.resolve("./examples/demo")}\n`);
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
+  it("prints a fallback cd target when auto-cd is unavailable", async () => {
+    delete process.env[WORKFOREST_CD_PATH_ENV];
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await reportShellCdTarget("/tmp/workforest-demo");
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Run: cd /tmp/workforest-demo"),
+    );
+    logSpy.mockRestore();
+  });
+
+  it("prints manual cd targets without writing shell integration files", async () => {
+    const tempDir = await createTempDir();
+    const cdPathFile = path.join(tempDir, "cd-target");
+    process.env[WORKFOREST_CD_PATH_ENV] = cdPathFile;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await reportShellCdTarget("/tmp/workforest-demo", { mode: "manual" });
+
+    await expect(readFile(cdPathFile, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Run: cd /tmp/workforest-demo"),
+    );
+    logSpy.mockRestore();
   });
 });
 

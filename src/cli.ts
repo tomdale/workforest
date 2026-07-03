@@ -48,9 +48,9 @@ import {
 } from "./repository-specifiers.ts";
 import type { ServiceEventSink } from "./services/events.ts";
 import {
-  isShellAutoCdEnabled,
   normalizeShellName,
   renderShellInit,
+  reportShellCdTarget,
   writeShellCdPath,
 } from "./shell.ts";
 import {
@@ -102,10 +102,17 @@ import {
 } from "./workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
+  comparablePath,
   getWorktreePath,
+  isComparablePathInsideOrEqual,
+  isPathInsideOrEqual,
   resolveWorkforestDirectories,
 } from "./workspace/paths.ts";
-import type { TaskFailure, TaskListEntry } from "./workspace/tasks.ts";
+import type {
+  CreateTasksResult,
+  TaskFailure,
+  TaskListEntry,
+} from "./workspace/tasks.ts";
 
 export { log };
 
@@ -1190,11 +1197,8 @@ async function runReviewOpen(
       });
     }
 
-    await writeShellCdPath(workspace.path);
     log.success(`Review workspace ready: ${workspace.path}`);
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${workspace.path}`);
-    }
+    await reportShellCdTarget(workspace.path);
     return success();
   } catch (error) {
     throw toOperationalError(error);
@@ -1231,11 +1235,8 @@ async function runReviewCheckout(
       });
     }
 
-    await writeShellCdPath(metadata.path);
     log.success(`Review worktree ready: ${metadata.path}`);
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${metadata.path}`);
-    }
+    await reportShellCdTarget(metadata.path);
     return success();
   } catch (error) {
     throw toOperationalError(error);
@@ -1367,14 +1368,6 @@ async function comparableWorkforestDirectories(
   };
 }
 
-async function comparablePath(targetPath: string): Promise<string> {
-  try {
-    return await fs.realpath(targetPath);
-  } catch {
-    return path.resolve(targetPath);
-  }
-}
-
 async function runTaskStart(
   {
     slugs,
@@ -1433,10 +1426,8 @@ async function runTaskStart(
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
 
+    const failed = taskStartFailed(result);
     if (json) {
-      const failed =
-        result.failures.length > 0 ||
-        result.created.some((w) => w.setupStatus === "failed");
       return withExitCode(
         jsonSuccess({
           dryRun,
@@ -1477,20 +1468,9 @@ async function runTaskStart(
       log.error(`${failure.slug}: ${failure.error.message}`);
     }
 
-    if (result.created.length === 1 && result.failures.length === 0) {
-      const target = result.created[0]?.path;
-      if (target) {
-        await writeShellCdPath(target);
-        if (!isShellAutoCdEnabled()) {
-          log.info(`Run: cd ${target}`);
-        }
-      }
-    }
+    await reportSingleCreatedTaskTarget(result, failed);
 
-    if (
-      result.failures.length > 0 ||
-      result.created.some((w) => w.setupStatus === "failed")
-    ) {
+    if (failed) {
       return failure(1, { kind: "none" });
     }
     return success();
@@ -1527,10 +1507,8 @@ async function runRepositoryTaskStart({
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
 
+    const failed = taskStartFailed(result);
     if (json) {
-      const failed =
-        result.failures.length > 0 ||
-        result.created.some((w) => w.setupStatus === "failed");
       return withExitCode(
         jsonSuccess({
           dryRun,
@@ -1573,26 +1551,43 @@ async function runRepositoryTaskStart({
       log.error(`${failure.slug}: ${failure.error.message}`);
     }
 
-    if (result.created.length === 1 && result.failures.length === 0) {
-      const target = result.created[0]?.path;
-      if (target) {
-        await writeShellCdPath(target);
-        if (!isShellAutoCdEnabled()) {
-          log.info(`Run: cd ${target}`);
-        }
-      }
-    }
+    await reportSingleCreatedTaskTarget(result, failed);
 
-    if (
-      result.failures.length > 0 ||
-      result.created.some((w) => w.setupStatus === "failed")
-    ) {
+    if (failed) {
       return failure(1, { kind: "none" });
     }
     return success();
   } catch (error) {
     throw operationalError(error);
   }
+}
+
+function taskStartFailed(result: CreateTasksResult): boolean {
+  return (
+    result.failures.length > 0 ||
+    result.created.some((worktree) => worktree.setupStatus === "failed")
+  );
+}
+
+async function reportSingleCreatedTaskTarget(
+  result: CreateTasksResult,
+  commandFailed: boolean,
+): Promise<void> {
+  if (result.created.length !== 1 || result.failures.length > 0) {
+    return;
+  }
+
+  const target = result.created[0]?.path;
+  if (!target) {
+    return;
+  }
+
+  if (commandFailed) {
+    await reportShellCdTarget(target, { mode: "manual" });
+    return;
+  }
+
+  await reportShellCdTarget(target);
 }
 
 async function runTaskList({
@@ -1810,7 +1805,7 @@ async function runTaskDelete({
       ...(parentRepoName ? { parentRepoName } : {}),
     });
 
-    const cdTarget = workspaceTaskRemovalCdTarget(
+    const cdTarget = await workspaceTaskRemovalCdTarget(
       result.removed,
       workspaceDir,
       invocationCwd,
@@ -1878,7 +1873,7 @@ async function runRepositoryTaskDelete({
       force,
     });
 
-    const cdTarget = repositoryTaskRemovalCdTarget(
+    const cdTarget = await repositoryTaskRemovalCdTarget(
       result.removed,
       context,
       invocationCwd,
@@ -1922,28 +1917,28 @@ async function runRepositoryTaskDelete({
   }
 }
 
-function workspaceTaskRemovalCdTarget(
+async function workspaceTaskRemovalCdTarget(
   removed: readonly Pick<TaskMetadata, "parent_repo" | "path">[],
   workspaceDir: string,
   invocationCwd: string,
-): string | undefined {
+): Promise<string | undefined> {
   for (const entry of removed) {
     const taskDir = resolveContainedPath(workspaceDir, entry.path);
-    if (isPathInsideOrEqual(invocationCwd, taskDir)) {
+    if (await isComparablePathInsideOrEqual(taskDir, invocationCwd)) {
       return resolveContainedPath(workspaceDir, entry.parent_repo);
     }
   }
   return undefined;
 }
 
-function repositoryTaskRemovalCdTarget(
+async function repositoryTaskRemovalCdTarget(
   removed: readonly Pick<TaskMetadata, "path">[],
   context: RepositoryTaskCommandContext,
   invocationCwd: string,
-): string | undefined {
+): Promise<string | undefined> {
   for (const entry of removed) {
     const taskDir = resolveContainedPath(context.repoRootDir, entry.path);
-    if (isPathInsideOrEqual(invocationCwd, taskDir)) {
+    if (await isComparablePathInsideOrEqual(taskDir, invocationCwd)) {
       return context.parentRepoDir;
     }
   }
@@ -1954,10 +1949,7 @@ async function writeTaskRemovalCdTarget(
   target: string | undefined,
 ): Promise<void> {
   if (!target) return;
-  await writeShellCdPath(target);
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${target}`);
-  }
+  await reportShellCdTarget(target);
 }
 
 async function runTemplateInvocation(
@@ -2203,11 +2195,7 @@ async function runTemplateOpen(
     });
   }
 
-  await writeShellCdPath(templateDir);
-
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${templateDir}`);
-  }
+  await reportShellCdTarget(templateDir);
   return templateSuccess();
 }
 
@@ -3162,7 +3150,7 @@ function resolveWorkspaceRepoNameFromCwd({
 
   for (const repo of metadata.repos) {
     const repoDir = resolveContainedPath(resolvedWorkspaceDir, repo.name);
-    if (isPathInsideOrEqual(resolvedCwd, repoDir)) {
+    if (isPathInsideOrEqual(repoDir, resolvedCwd)) {
       return repo.name;
     }
   }
@@ -3170,7 +3158,7 @@ function resolveWorkspaceRepoNameFromCwd({
   if (
     metadata.workspace.type === "review" &&
     metadata.repos.length === 1 &&
-    isPathInsideOrEqual(resolvedCwd, resolvedWorkspaceDir)
+    isPathInsideOrEqual(resolvedWorkspaceDir, resolvedCwd)
   ) {
     return metadata.repos[0]?.name;
   }
@@ -3181,21 +3169,13 @@ function resolveWorkspaceRepoNameFromCwd({
         resolvedWorkspaceDir,
         entry.path,
       );
-      if (isPathInsideOrEqual(resolvedCwd, worktreeDir)) {
+      if (isPathInsideOrEqual(worktreeDir, resolvedCwd)) {
         return entry.parent_repo;
       }
     }
   }
 
   return undefined;
-}
-
-function isPathInsideOrEqual(child: string, parent: string): boolean {
-  const relative = path.relative(path.resolve(parent), path.resolve(child));
-  return (
-    relative === "" ||
-    (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
 }
 
 function showDryRunReport({

@@ -6,7 +6,7 @@ import { log } from "../logger.ts";
 import { restoreNodeModules } from "../node-modules-cache.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
-import { isShellAutoCdEnabled } from "../shell.ts";
+import { reportShellCdTarget } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
 import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
@@ -124,11 +124,10 @@ async function createWorktree(
     ? await createWorktreeWithGrid(context, options)
     : await createWorktreeFallback(context, options);
 
-  await options.writeShellCdPath(targetDir);
   log.success(`Change ready: ${targetDir}`);
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${targetDir}`);
-  }
+  await reportShellCdTarget(targetDir, {
+    writeShellCdPath: options.writeShellCdPath,
+  });
 
   return { targetDir, setupFailures };
 }
@@ -293,11 +292,10 @@ async function createWorkspace(
     await (options.stampWorkspace ?? stampWorkspace)(stampOptions);
   }
 
-  await options.writeShellCdPath(workspaceDir);
   log.success(`Change ready: ${workspaceDir}`);
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${workspaceDir}`);
-  }
+  await reportShellCdTarget(workspaceDir, {
+    writeShellCdPath: options.writeShellCdPath,
+  });
 
   return { targetDir: workspaceDir, setupFailures };
 }

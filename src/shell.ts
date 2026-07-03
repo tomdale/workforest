@@ -80,22 +80,28 @@ export function isShellAutoCdEnabled(): boolean {
   return Boolean(process.env[WORKFOREST_CD_PATH_ENV]);
 }
 
-export function resolveCleanupCdTarget(
-  currentDir: string,
-  workspaceDir: string,
-): string | null {
-  const resolvedCurrentDir = path.resolve(currentDir);
-  const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const relativePath = path.relative(resolvedWorkspaceDir, resolvedCurrentDir);
-  const isInsideWorkspace =
-    relativePath === "" ||
-    (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+export type ShellCdReportMode = "auto" | "manual";
 
-  if (!isInsideWorkspace) {
-    return null;
+export type ShellCdReporter = (targetDir: string) => Promise<void>;
+
+export async function reportShellCdTarget(
+  targetDir: string,
+  options: Readonly<{
+    mode?: ShellCdReportMode;
+    writeShellCdPath?: ShellCdReporter;
+  }> = {},
+): Promise<void> {
+  const mode = options.mode ?? "auto";
+
+  if (mode === "manual") {
+    log.info(`Run: cd ${targetDir}`);
+    return;
   }
 
-  return path.dirname(resolvedWorkspaceDir);
+  await (options.writeShellCdPath ?? writeShellCdPath)(targetDir);
+  if (!isShellAutoCdEnabled()) {
+    log.info(`Run: cd ${targetDir}`);
+  }
 }
 
 export async function writeShellCdPath(targetDir: string): Promise<void> {

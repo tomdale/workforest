@@ -1,6 +1,6 @@
 import { loadWorkspaceConfig } from "../config.ts";
 import { runGit } from "../services/git.ts";
-import { writeShellCdPath } from "../shell.ts";
+import { reportShellCdTarget } from "../shell.ts";
 import {
   collectInventory,
   type InventoryEntry,
@@ -99,10 +99,10 @@ export function filterCandidates(
 
 /**
  * Hand the change's directory back to the shell wrapper so it can `cd` into it.
- * A no-op when shell auto-cd is not enabled (see {@link writeShellCdPath}).
+ * Prints a manual `cd` fallback when shell auto-cd is not enabled.
  */
 export async function cdToEntry(candidate: Candidate): Promise<void> {
-  await writeShellCdPath(candidate.path);
+  await reportShellCdTarget(candidate.path);
 }
 
 /**

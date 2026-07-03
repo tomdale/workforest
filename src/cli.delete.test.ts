@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +78,8 @@ describe("wf delete", () => {
 
   it("uses --force to delete a worktree when Workforest cannot prove integration", async () => {
     const fixture = await createCleanupFixture();
+    const invocationCwd = path.join(fixture.repoChange, "src");
+    await mkdir(invocationCwd);
     const cdTargets: string[] = [];
     const cleanupWorktree = vi.fn(async () => ({
       dryRun: false,
@@ -96,7 +98,7 @@ describe("wf delete", () => {
         buildStatus,
         cleanupWorktree,
         resolveRepositorySpecifiers: async () => [],
-        cwd: path.join(fixture.repoChange, "src"),
+        cwd: invocationCwd,
       },
     );
 
@@ -201,6 +203,30 @@ describe("wf delete", () => {
       fixture.workspace,
       expect.objectContaining({ keepMirrors: true }),
     );
+  });
+
+  it("writes a parent cd target when deleting from an equivalent symlinked cwd", async () => {
+    const fixture = await createCleanupFixture();
+    const aliasRoot = await createTempDir("workforest-finish-alias-");
+    const aliasBase = path.join(aliasRoot, "base");
+    await symlink(fixture.baseDir, aliasBase);
+    const cdTargets: string[] = [];
+    const cleanupWorkspace = vi.fn(async () => ({
+      dryRun: false,
+      removedRepos: ["api", "front"],
+      deletedBranches: [],
+    }));
+
+    await runDeleteCommand(invocation(["_adhoc/experiment"], { force: true }), {
+      interactive: false,
+      writeShellCdPath: async (targetDir: string) => {
+        cdTargets.push(targetDir);
+      },
+      cleanupWorkspace,
+      cwd: path.join(aliasBase, "Workspaces", "_adhoc", "experiment"),
+    });
+
+    expect(cdTargets).toEqual([path.dirname(fixture.workspace)]);
   });
 });
 

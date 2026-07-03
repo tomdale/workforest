@@ -1,8 +1,6 @@
-import { realpath } from "node:fs/promises";
-import path from "node:path";
 import type { WorkspaceConfig } from "../types.ts";
 import { collectInventory, type InventoryEntry } from "./inventory.ts";
-import { isPathInsideOrEqual } from "./paths.ts";
+import { comparablePath, isPathInsideOrEqual } from "./paths.ts";
 
 export type SelectorResolution =
   | Readonly<{
@@ -128,12 +126,4 @@ async function resolveCurrentEntry(
   }
 
   return { kind: "outside" };
-}
-
-async function comparablePath(value: string): Promise<string> {
-  try {
-    return await realpath(value);
-  } catch {
-    return path.resolve(value);
-  }
 }

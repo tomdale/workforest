@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -270,7 +277,42 @@ describe("core command family conformance", () => {
       stderr: "Skill not found: missing\n",
     });
   });
+
+  it("keeps production shell cd writes behind the shared reporter", async () => {
+    const sourceFiles = await listSourceFiles(path.resolve("src"));
+    const directCallSites: string[] = [];
+
+    for (const file of sourceFiles) {
+      if (file.endsWith(".test.ts") || file === path.resolve("src/shell.ts")) {
+        continue;
+      }
+      const source = await readFile(file, "utf8");
+      source.split("\n").forEach((line, index) => {
+        if (line.includes("writeShellCdPath(")) {
+          directCallSites.push(
+            `${path.relative(process.cwd(), file)}:${index + 1}`,
+          );
+        }
+      });
+    }
+
+    expect(directCallSites).toEqual([]);
+  });
 });
+
+async function listSourceFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return listSourceFiles(entryPath);
+      }
+      return entry.isFile() && entry.name.endsWith(".ts") ? [entryPath] : [];
+    }),
+  );
+  return files.flat();
+}
 
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));

@@ -1,8 +1,7 @@
 import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { type Scope, sortEntriesByRecency } from "../entry/entries-data.ts";
-import { log } from "../logger.ts";
-import { isShellAutoCdEnabled } from "../shell.ts";
+import { reportShellCdTarget } from "../shell.ts";
 import {
   CancelError,
   cancel,
@@ -62,10 +61,9 @@ export async function runSwitchCommand(
     if (!entry) return success();
   }
 
-  await options.writeShellCdPath(entry.path);
-  if (!isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${entry.path}`);
-  }
+  await reportShellCdTarget(entry.path, {
+    writeShellCdPath: options.writeShellCdPath,
+  });
   return success();
 }
 

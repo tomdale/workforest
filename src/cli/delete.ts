@@ -2,14 +2,14 @@ import path from "node:path";
 import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
-import { isShellAutoCdEnabled, resolveCleanupCdTarget } from "../shell.ts";
+import { reportShellCdTarget } from "../shell.ts";
 import {
   type CleanupStateSink,
   cleanupWorkspace,
   cleanupWorktree,
 } from "../workspace/cleanup.ts";
 import type { InventoryEntry } from "../workspace/inventory.ts";
-import { isPathInsideOrEqual } from "../workspace/paths.ts";
+import { isComparablePathInsideOrEqual } from "../workspace/paths.ts";
 import { resolveSelector } from "../workspace/selectors.ts";
 import {
   buildStatus,
@@ -164,7 +164,10 @@ async function cleanupTarget(
 ): Promise<void> {
   const initialCwd = options.cwd ?? process.cwd();
   const cleanupRoot = entry.path;
-  const isInsideTarget = isPathInsideOrEqual(cleanupRoot, initialCwd);
+  const isInsideTarget = await isComparablePathInsideOrEqual(
+    cleanupRoot,
+    initialCwd,
+  );
 
   if (entry.type === "worktree") {
     const resolveRepositories =
@@ -186,12 +189,9 @@ async function cleanupTarget(
   }
 
   if (isInsideTarget) {
-    const target =
-      resolveCleanupCdTarget(initialCwd, cleanupRoot) ??
-      path.dirname(path.resolve(cleanupRoot));
-    await options.writeShellCdPath(target);
-    if (!isShellAutoCdEnabled()) {
-      log.info(`Run: cd ${target}`);
-    }
+    const target = path.dirname(path.resolve(cleanupRoot));
+    await reportShellCdTarget(target, {
+      writeShellCdPath: options.writeShellCdPath,
+    });
   }
 }

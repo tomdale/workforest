@@ -5,6 +5,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -176,6 +177,28 @@ describe("task command workspace context", () => {
       await realpath(fixture.frontRepoDir),
     );
   }, 60_000);
+
+  it("deleting a workspace task from a symlinked cwd writes the parent repo cd target", async () => {
+    const fixture = await createWorkspaceFixture();
+    const aliasRoot = await createTempDir("workforest-workspace-task-alias-");
+    const aliasWorkspaceDir = path.join(aliasRoot, "workspace");
+    await symlink(fixture.workspaceDir, aliasWorkspaceDir);
+
+    const deleteCurrent = await runCli(
+      path.join(aliasWorkspaceDir, "_tasks", "front", "front-current"),
+      fixture.env,
+      "task",
+      "delete",
+      "front-current",
+      "--force",
+    );
+
+    expectSuccess(deleteCurrent);
+    await expectPathNotToExist(fixture.frontTaskDir);
+    await expect(readCdTarget(fixture.env)).resolves.toBe(
+      await realpath(fixture.frontRepoDir),
+    );
+  }, 60_000);
 });
 
 describe("task command worktree context", () => {
@@ -221,6 +244,27 @@ describe("task command worktree context", () => {
       "delete",
       "existing-task",
     );
+    expectSuccess(finishTask);
+    await expectPathNotToExist(fixture.taskDir);
+    await expect(readCdTarget(fixture.env)).resolves.toBe(
+      await realpath(fixture.parentRepoDir),
+    );
+  }, 60_000);
+
+  it("deleting a repository task from a symlinked cwd writes the parent repo cd target", async () => {
+    const fixture = await createRepositoryTaskFixture();
+    const aliasRoot = await createTempDir("workforest-repo-task-alias-");
+    const aliasRepoRootDir = path.join(aliasRoot, "front");
+    await symlink(path.dirname(fixture.parentRepoDir), aliasRepoRootDir);
+
+    const finishTask = await runCli(
+      path.join(aliasRepoRootDir, "_tasks", "my-feature", "existing-task"),
+      fixture.env,
+      "task",
+      "delete",
+      "existing-task",
+    );
+
     expectSuccess(finishTask);
     await expectPathNotToExist(fixture.taskDir);
     await expect(readCdTarget(fixture.env)).resolves.toBe(

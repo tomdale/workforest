@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { validateRepositoryComponent } from "../repository-components.ts";
@@ -118,6 +119,24 @@ export function isPathInsideOrEqual(
     (relative !== ".." &&
       !relative.startsWith(`..${path.sep}`) &&
       !path.isAbsolute(relative))
+  );
+}
+
+export async function comparablePath(value: string): Promise<string> {
+  try {
+    return await realpath(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+export async function isComparablePathInsideOrEqual(
+  parent: string,
+  candidate: string,
+): Promise<boolean> {
+  return isPathInsideOrEqual(
+    await comparablePath(parent),
+    await comparablePath(candidate),
   );
 }
 
