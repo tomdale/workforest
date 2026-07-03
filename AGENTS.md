@@ -16,6 +16,11 @@ up the work. `pnpm check` is the standard validation gate and includes linting
 and tests; use narrower focused commands only as additional local iteration, not
 as a substitute for the final check.
 
+When you need to run the Workforest CLI from this source checkout, use
+`pnpm wf ...`. Do not use `pnpm exec wf` for source-checkout behavior; pnpm does
+not link the root package's own bins into `node_modules/.bin`, so `pnpm exec wf`
+may resolve a globally installed `wf` instead of the current checkout.
+
 These instructions are the user's standing, explicit authorization to use
 subagents when this file says they are appropriate. In particular, a request to
 commit work authorizes delegating commit creation to the registered `commit`

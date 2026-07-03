@@ -189,6 +189,81 @@ describe("packed package", () => {
     }
   }, 60_000);
 
+  it("loads a cwd source checkout when pnpm exec invokes an external bin there", async () => {
+    const checkoutDir = path.join(fixture.rootDir, "source-checkout");
+    await mkdir(path.join(checkoutDir, "bin"), { recursive: true });
+    await mkdir(path.join(checkoutDir, "src"), { recursive: true });
+    await writeFile(
+      path.join(checkoutDir, "package.json"),
+      `${JSON.stringify({ name: "workforest", type: "module" }, null, 2)}\n`,
+    );
+    await writeFile(path.join(checkoutDir, "bin", "workforest.js"), "", "utf8");
+    await writeFile(
+      path.join(checkoutDir, "src", "cli.ts"),
+      [
+        "export const log = {",
+        "  warn(message) {",
+        "    console.error(message);",
+        "  },",
+        "};",
+        "export async function cli() {",
+        "  console.log(JSON.stringify({ argv: process.argv.slice(2) }));",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runSubprocess(fixture.bins.wf, ["version", "--json"], {
+      cwd: checkoutDir,
+      env: {
+        ...fixture.env,
+        npm_command: "exec",
+        npm_config_user_agent: "pnpm/11.9.0 npm/? node/v25.9.0 darwin arm64",
+      },
+      timeout: 10_000,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ argv: ["version", "--json"] });
+    expect(result.stderr).toBe("Running local copy from ./src\n");
+  });
+
+  it("keeps ordinary external bin invocations on the installed dist", async () => {
+    const checkoutDir = path.join(fixture.rootDir, "ordinary-source-checkout");
+    await mkdir(path.join(checkoutDir, "bin"), { recursive: true });
+    await mkdir(path.join(checkoutDir, "src"), { recursive: true });
+    await writeFile(
+      path.join(checkoutDir, "package.json"),
+      `${JSON.stringify({ name: "workforest", type: "module" }, null, 2)}\n`,
+    );
+    await writeFile(path.join(checkoutDir, "bin", "workforest.js"), "", "utf8");
+    await writeFile(
+      path.join(checkoutDir, "src", "cli.ts"),
+      [
+        "export const log = { warn() {} };",
+        "export async function cli() {",
+        '  console.log("source checkout");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const env: NodeJS.ProcessEnv = { ...fixture.env };
+    Reflect.deleteProperty(env, "npm_command");
+    Reflect.deleteProperty(env, "npm_config_user_agent");
+
+    const result = await runSubprocess(fixture.bins.wf, ["version"], {
+      cwd: checkoutDir,
+      env,
+      timeout: 10_000,
+    });
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: "workforest 0.0.1\n",
+      stderr: "",
+    });
+  });
+
   it.each([
     "wf",
     "workforest",

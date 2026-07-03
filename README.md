@@ -542,6 +542,10 @@ pnpm check
 pnpm build
 ```
 
+To exercise the CLI from the current checkout, use `pnpm wf ...`. `pnpm exec wf`
+can resolve a globally installed `wf` because pnpm does not link the root
+package's own bins into `node_modules/.bin`.
+
 ## Troubleshooting
 
 ### Repository Access Fails
