@@ -242,7 +242,7 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     padding: { left: 1, right: 1 },
     style: {
       bg: toBlessed(theme.chrome.background),
-      fg: toBlessed(theme.palette.primary),
+      fg: toBlessed(theme.palette.primary.color),
     },
   });
 

@@ -11,7 +11,7 @@ import { activeTheme, inlinePalette, toChalk } from "./theme-system.ts";
  * shared via {@link activeTheme}.
  */
 const palette = inlinePalette();
-const role = (key: keyof typeof palette) => toChalk(palette[key]);
+const role = (key: keyof typeof palette) => toChalk(palette[key].color);
 
 export const terminalColor = {
   focus: role("focus"),

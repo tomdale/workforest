@@ -71,12 +71,12 @@ function colors(): {
   const theme = activeTheme();
   const { palette } = theme;
   return {
-    focus: toBlessed(palette.focus),
-    success: toBlessed(palette.success),
-    warning: toBlessed(palette.warning),
-    error: toBlessed(palette.error),
-    muted: toBlessed(palette.muted),
-    primary: toBlessed(palette.primary),
+    focus: toBlessed(palette.focus.color),
+    success: toBlessed(palette.success.color),
+    warning: toBlessed(palette.warning.color),
+    error: toBlessed(palette.error.color),
+    muted: toBlessed(palette.muted.color),
+    primary: toBlessed(palette.primary.color),
     border: toBlessed(theme.chrome.border),
     background: toBlessed(theme.chrome.background),
   };

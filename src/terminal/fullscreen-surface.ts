@@ -187,7 +187,7 @@ export function createFullscreenStatusLine(
     height: 1,
     tags: true,
     style: {
-      fg: toBlessed(theme.palette.muted),
+      fg: toBlessed(theme.palette.muted.color),
       bg: background,
     },
   });

@@ -3,6 +3,7 @@ import {
   activeTheme,
   inlinePalette,
   type NamedColor,
+  type TerminalEmphasis,
   type ThemeColor,
   type ThemePalette,
   toBlessed,
@@ -13,7 +14,9 @@ export type TerminalBackgroundRole =
   | TerminalStyleRole
   | "background"
   | "border";
-export type TerminalEmphasis = "bold" | "underline" | "inverse";
+// Defined alongside the palette in theme-system; re-exported here so existing
+// importers of the render model keep working.
+export type { TerminalEmphasis };
 
 export type TerminalSpan = Readonly<{
   text: string;
@@ -104,11 +107,13 @@ function renderAnsiSpan(span: TerminalSpan, chalk: ChalkInstance): string {
   if (span.literal) return span.text;
 
   let style = (value: string) => value;
+  const emphases: TerminalEmphasis[] = [];
   if (span.role) {
     style = compose(
       style,
       foregroundStyler(resolveAnsiPaletteColor(span.role), chalk),
     );
+    emphases.push(...resolveAnsiPaletteEmphasis(span.role));
   }
   if (span.background) {
     style = compose(
@@ -116,7 +121,8 @@ function renderAnsiSpan(span: TerminalSpan, chalk: ChalkInstance): string {
       backgroundStyler(resolveAnsiBackgroundColor(span.background), chalk),
     );
   }
-  for (const emphasis of normalizedEmphasis(span.emphasis)) {
+  emphases.push(...normalizedEmphasis(span.emphasis));
+  for (const emphasis of emphases) {
     style = compose(style, emphasisStyler(emphasis, chalk));
   }
   return style(span.text);
@@ -132,17 +138,20 @@ function renderBlessedSpan(span: TerminalSpan): string {
 
   const open: string[] = [];
   const close: string[] = [];
+  const emphases: TerminalEmphasis[] = [];
   if (span.role) {
     const token = toBlessed(resolveBlessedPaletteColor(span.role));
     open.push(`{${token}-fg}`);
     close.unshift(`{/${token}-fg}`);
+    emphases.push(...resolveBlessedPaletteEmphasis(span.role));
   }
   if (span.background) {
     const token = toBlessed(resolveBlessedBackgroundColor(span.background));
     open.push(`{${token}-bg}`);
     close.unshift(`{/${token}-bg}`);
   }
-  for (const emphasis of normalizedEmphasis(span.emphasis)) {
+  emphases.push(...normalizedEmphasis(span.emphasis));
+  for (const emphasis of emphases) {
     open.push(`{${emphasis}}`);
     close.unshift(`{/${emphasis}}`);
   }
@@ -157,18 +166,30 @@ function normalizedEmphasis(
 }
 
 function resolveAnsiPaletteColor(role: TerminalStyleRole): ThemeColor {
-  return inlinePalette()[role];
+  return inlinePalette()[role].color;
 }
 
 function resolveBlessedPaletteColor(role: TerminalStyleRole): ThemeColor {
-  return activeTheme().palette[role];
+  return activeTheme().palette[role].color;
+}
+
+function resolveAnsiPaletteEmphasis(
+  role: TerminalStyleRole,
+): readonly TerminalEmphasis[] {
+  return inlinePalette()[role].emphasis ?? [];
+}
+
+function resolveBlessedPaletteEmphasis(
+  role: TerminalStyleRole,
+): readonly TerminalEmphasis[] {
+  return activeTheme().palette[role].emphasis ?? [];
 }
 
 function resolveAnsiBackgroundColor(role: TerminalBackgroundRole): ThemeColor {
   const theme = activeTheme();
   if (role === "background") return theme.chrome.background;
   if (role === "border") return theme.chrome.border;
-  return inlinePalette()[role];
+  return inlinePalette()[role].color;
 }
 
 function resolveBlessedBackgroundColor(
@@ -177,7 +198,7 @@ function resolveBlessedBackgroundColor(
   const theme = activeTheme();
   if (role === "background") return theme.chrome.background;
   if (role === "border") return theme.chrome.border;
-  return theme.palette[role];
+  return theme.palette[role].color;
 }
 
 function compose(

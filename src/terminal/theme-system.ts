@@ -58,29 +58,73 @@ const rgb = (r: number, g: number, b: number): ThemeColor => ({
   kind: "rgb",
   rgb: [r, g, b],
 });
+/** Pair a color with optional emphasis into a {@link ThemeRoleStyle}. */
+const style = (
+  color: ThemeColor,
+  ...emphasis: TerminalEmphasis[]
+): ThemeRoleStyle => (emphasis.length ? { color, emphasis } : { color });
 
-/** Semantic color roles. Chrome and decorative roles are grouped separately. */
+/** Text weight/decoration a role carries in addition to its color. */
+export type TerminalEmphasis = "bold" | "underline" | "inverse";
+
+/**
+ * A role's full text style: a {@link ThemeColor} plus any emphasis applied
+ * wherever the role is used. Emphasis lives on the role (not just the call
+ * site) so a rule like "the command name is bold" is defined once, in the
+ * theme, rather than repeated at every span that draws it.
+ */
+export type ThemeRoleStyle = Readonly<{
+  color: ThemeColor;
+  emphasis?: readonly TerminalEmphasis[];
+}>;
+
+/** Semantic text roles. Chrome and decorative roles are grouped separately. */
 export type ThemePalette = Readonly<{
   /** Focus, active selection, and progress. */
-  focus: ThemeColor;
-  success: ThemeColor;
-  warning: ThemeColor;
-  error: ThemeColor;
+  focus: ThemeRoleStyle;
+  success: ThemeRoleStyle;
+  warning: ThemeRoleStyle;
+  error: ThemeRoleStyle;
   /** Hints, labels, inactive chrome. */
-  muted: ThemeColor;
+  muted: ThemeRoleStyle;
   /** Primary content. */
-  primary: ThemeColor;
+  primary: ThemeRoleStyle;
   /**
    * A dimmed {@link primary}: same hue, lower intensity. For secondary content
    * that should still read as "primary-colored" but recede — e.g. metadata on
    * unselected rows.
    */
-  dim: ThemeColor;
+  dim: ThemeRoleStyle;
   /**
    * Secondary neon accent. Pairs against {@link primary} for duotone contrast —
    * metadata, separators, active markers — and must not encode state.
    */
-  accent: ThemeColor;
+  accent: ThemeRoleStyle;
+  /**
+   * The `wf` program name in help output. Bold is part of the role, so the
+   * program name reads distinctly from the {@link subcommand} that follows it
+   * even though they share a hue.
+   */
+  command: ThemeRoleStyle;
+  /**
+   * Subcommand words in help output (e.g. `template`, `new`). A dedicated role,
+   * separate from {@link accent} arguments, so subcommands can be recolored on
+   * their own even while they currently share the {@link command} hue.
+   */
+  subcommand: ThemeRoleStyle;
+  /**
+   * Markdown headings in a rendered description. Carries the heading color only;
+   * heading level is conveyed by emphasis applied in the Markdown style map
+   * (h1 bold, deeper levels plain).
+   */
+  heading: ThemeRoleStyle;
+  /**
+   * Inline code that is not a command — a file name, path, or config key like
+   * `template.jsonc` or `branchPrefix`. Distinct from {@link accent} argument
+   * placeholders and from the {@link command}/{@link subcommand} roles that a
+   * command invocation inside inline code resolves to.
+   */
+  code: ThemeRoleStyle;
 }>;
 
 export type ThemeChrome = Readonly<{
@@ -211,14 +255,18 @@ const DEFAULT_SYMBOLS: ThemeSymbols = {
  */
 const THEME: Theme = {
   palette: {
-    focus: named("white"),
-    success: named("cyan"),
-    warning: named("yellow"),
-    error: named("red"),
-    muted: rgb(90, 70, 100),
-    primary: named("red"),
-    dim: rgb(130, 90, 90),
-    accent: named("cyan"),
+    focus: style(named("white")),
+    success: style(named("cyan")),
+    warning: style(named("yellow")),
+    error: style(named("red")),
+    muted: style(rgb(90, 70, 100)),
+    primary: style(named("red")),
+    dim: style(rgb(130, 90, 90)),
+    accent: style(named("cyan")),
+    command: style(named("yellow"), "bold"),
+    subcommand: style(named("yellow")),
+    heading: style(named("magenta")),
+    code: style(named("green")),
   },
   chrome: {
     background: rgb(18, 20, 22),
@@ -250,17 +298,30 @@ export function activeTheme(): Theme {
  * only the color depth changes.
  */
 const INLINE_ANSI_PALETTE: ThemePalette = {
-  focus: named("whiteBright"),
-  success: named("cyan"),
-  warning: named("yellow"),
-  error: named("red"),
-  muted: named("gray"),
-  primary: named("red"),
-  dim: named("gray"),
-  accent: named("cyan"),
+  focus: style(named("whiteBright")),
+  success: style(named("cyan")),
+  warning: style(named("yellow")),
+  error: style(named("red")),
+  muted: style(named("gray")),
+  primary: style(named("red")),
+  dim: style(named("gray")),
+  accent: style(named("blueBright")),
+  command: style(named("yellow"), "bold"),
+  subcommand: style(named("yellow")),
+  heading: style(named("magenta")),
+  code: style(named("green")),
 };
 
 /** The 16-color ANSI palette used for inline (non-fullscreen) terminal output. */
 export function inlinePalette(): ThemePalette {
   return INLINE_ANSI_PALETTE;
+}
+
+/**
+ * Narrow an arbitrary string to a palette role. Used to validate the semantic
+ * role names authors write in Markdown annotations (`{muted}`, `[text]{error}`)
+ * before applying them.
+ */
+export function isThemeRole(name: string): name is keyof ThemePalette {
+  return Object.hasOwn(INLINE_ANSI_PALETTE, name);
 }
