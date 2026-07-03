@@ -11,6 +11,7 @@ describe("commandRegistry", () => {
   it("defines the exact visible command tree", () => {
     expect(visibleTree(commandRegistry.root)).toEqual({
       new: null,
+      adopt: null,
       list: null,
       status: null,
       add: null,

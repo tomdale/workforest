@@ -275,6 +275,46 @@ const newCommand = leaf({
   outputModes: ["human"],
 });
 
+const adoptCommand = leaf({
+  name: "adopt",
+  path: ["adopt"],
+  summary: "Adopt an existing checkout",
+  description:
+    "Converts an existing clean Git checkout with an origin remote into a Workforest-managed linked worktree under `Repos/<repo>/<name>`, seeding the cached bare mirror from local refs instead of the network.",
+  handler: "adopt",
+  help: { kind: "command", command: "adopt" },
+  operands: operands(
+    0,
+    1,
+    "path",
+    "[path]",
+    "Existing Git checkout to adopt. Defaults to the current directory.",
+  ),
+  flags: [
+    stringFlag("name", "--name", "name", {
+      description:
+        "Use this Workforest change name instead of deriving it from the current branch.",
+    }),
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit the adoption result as a JSON envelope instead of text.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf adopt",
+      description: "Adopt the current checkout.",
+    },
+    {
+      command: "wf adopt ../checkout --name auth-fix",
+      description: "Adopt a checkout with an explicit Workforest name.",
+    },
+  ],
+  outputModes: ["human", "json"],
+});
+
 const listCommand = leaf({
   name: "list",
   path: ["list"],
@@ -554,6 +594,7 @@ export const commandRegistry: CommandRegistry = {
     help: { kind: "root" },
     children: [
       newCommand,
+      adoptCommand,
       listCommand,
       statusCommand,
       addCommand,

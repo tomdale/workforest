@@ -8,6 +8,7 @@ describe("shell command model", () => {
 
     expect(model.commands.map((command) => command.name)).toEqual([
       "new",
+      "adopt",
       "list",
       "status",
       "add",

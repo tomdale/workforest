@@ -99,6 +99,7 @@ import { resolveWorkforestContext } from "./workspace/context.ts";
 import {
   hasWorkspaceMetadata,
   readWorkspaceMetadata,
+  readWorktreeMetadata,
 } from "./workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
@@ -277,6 +278,11 @@ async function runInvocation(
         });
       }
       return runNewInvocation(invocation);
+    case "adopt":
+      return runTypedCommand(async () => {
+        const { runAdoptCommand } = await import("./cli/adopt.ts");
+        return runAdoptCommand(invocation, { writeShellCdPath });
+      });
     case "list":
       return runTypedCommand(() => runListCommand(invocation));
     case "status":
@@ -1395,22 +1401,32 @@ async function resolveRepositoryTaskCommandContext(
     );
   }
 
-  const [repo] = await resolveRepositorySpecifiers([
-    repositoryContext.repoName,
-  ]);
-  if (!repo) {
-    throw new Error(`Unknown repository "${repositoryContext.repoName}".`);
-  }
-
   const parentRepoDir = getWorktreePath(
     directories,
     repositoryContext.repoName,
     repositoryContext.changeName,
   );
+  const repoRootDir = path.dirname(parentRepoDir);
+  const metadata = await readWorktreeMetadata(
+    repoRootDir,
+    repositoryContext.changeName,
+  );
+  const metadataRepo = metadata?.repos.find(
+    (entry) => entry.name === repositoryContext.repoName,
+  );
+  let repo: RepositorySource | undefined = metadataRepo
+    ? { name: metadataRepo.name, remote: metadataRepo.remote }
+    : undefined;
+  if (!repo) {
+    [repo] = await resolveRepositorySpecifiers([repositoryContext.repoName]);
+  }
+  if (!repo) {
+    throw new Error(`Unknown repository "${repositoryContext.repoName}".`);
+  }
 
   return {
     parentRepoDir,
-    repoRootDir: path.dirname(parentRepoDir),
+    repoRootDir,
     repoName: repositoryContext.repoName,
     changeName: repositoryContext.changeName,
     repo,
