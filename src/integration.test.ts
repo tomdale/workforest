@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +22,22 @@ function run(
 
 function git(cwd: string, args: string[]): string {
   return run("git", args, cwd);
+}
+
+async function createRepositoryFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "workforest-queue-"));
+  const repoDir = path.join(root, "repo");
+
+  run("git", ["init", "-b", "main", repoDir], root);
+  git(repoDir, ["config", "user.email", "test@example.com"]);
+  git(repoDir, ["config", "user.name", "Test User"]);
+  git(repoDir, ["config", "commit.gpgsign", "false"]);
+
+  await writeFile(path.join(repoDir, "README.md"), "base\n");
+  git(repoDir, ["add", "README.md"]);
+  git(repoDir, ["commit", "-m", "base"]);
+
+  return { root, repoDir };
 }
 
 async function createQueuedCherryPickFixture() {
@@ -258,5 +274,119 @@ describe("integration queue worktree sync", () => {
     expect(result.status).toBe("skipped");
     expect(result.reason).toContain(`moved from queued SHA ${featureSha}`);
     expect(git(featureDir, ["rev-parse", "HEAD"])).toBe(laterSha);
+  });
+});
+
+describe("integration lock", () => {
+  it("acquires and releases the main integration lock by token", async () => {
+    const { repoDir } = await createRepositoryFixture();
+    const gitCommonDir = git(repoDir, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
+    const lockPath = path.join(gitCommonDir, "workforest-main.lock");
+
+    const acquiredOutput = run(
+      process.execPath,
+      [queueScript, "acquire-lock"],
+      repoDir,
+    );
+    const acquired = JSON.parse(acquiredOutput) as {
+      path: string;
+      token: string;
+    };
+    const lock = JSON.parse(await readFile(lockPath, "utf8")) as {
+      token: string;
+    };
+
+    expect(acquired.path).toBe(lockPath);
+    expect(lock.token).toBe(acquired.token);
+
+    const releasedOutput = run(
+      process.execPath,
+      [queueScript, "release-lock", "--token", acquired.token],
+      repoDir,
+    );
+    const released = JSON.parse(releasedOutput) as {
+      released: boolean;
+      token: string;
+    };
+
+    expect(released).toMatchObject({ released: true, token: acquired.token });
+    await expect(readFile(lockPath, "utf8")).rejects.toThrow();
+  });
+
+  it("refuses to release a lock held by a different token", async () => {
+    const { repoDir } = await createRepositoryFixture();
+    const acquired = JSON.parse(
+      run(process.execPath, [queueScript, "acquire-lock"], repoDir),
+    ) as { token: string };
+
+    try {
+      const released = spawnSync(
+        process.execPath,
+        [queueScript, "release-lock", "--token", "wrong-token"],
+        {
+          cwd: repoDir,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      expect(released.status).toBe(1);
+      expect(released.stderr).toContain("held by a different token");
+    } finally {
+      run(
+        process.execPath,
+        [queueScript, "release-lock", "--token", acquired.token],
+        repoDir,
+      );
+    }
+  });
+
+  it("prevents a second integration from taking the lock unless forced", async () => {
+    const { repoDir } = await createRepositoryFixture();
+    const first = JSON.parse(
+      run(process.execPath, [queueScript, "acquire-lock"], repoDir),
+    ) as { token: string };
+    const blocked = spawnSync(process.execPath, [queueScript, "acquire-lock"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain("Integration lock already exists");
+
+    const forced = JSON.parse(
+      run(process.execPath, [queueScript, "acquire-lock", "--force"], repoDir),
+    ) as { token: string };
+
+    expect(forced.token).not.toBe(first.token);
+
+    run(
+      process.execPath,
+      [queueScript, "release-lock", "--token", forced.token],
+      repoDir,
+    );
+  });
+
+  it("removes the main integration lock after a wrapped command exits", async () => {
+    const { repoDir } = await createRepositoryFixture();
+    const gitCommonDir = git(repoDir, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
+    const lockPath = path.join(gitCommonDir, "workforest-main.lock");
+
+    run(
+      process.execPath,
+      [queueScript, "with-lock", "--", process.execPath, "-e", ""],
+      repoDir,
+    );
+
+    await expect(readFile(lockPath, "utf8")).rejects.toThrow();
   });
 });

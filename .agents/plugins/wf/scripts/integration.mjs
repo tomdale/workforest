@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 
 const QUEUE_PREFIX = "refs/workforest/integration-ready";
 const BRANCH_PREFIX = "tomdale/";
 const MAIN_BRANCH = "main";
+const MAIN_LOCK_FILENAME = "workforest-main.lock";
 
 function runGit(args, options = {}) {
   return execFileSync("git", args, {
@@ -33,6 +37,78 @@ function runCommand(command, args, options = {}) {
   });
   if (result.error) throw result.error;
   return result.status ?? 1;
+}
+
+function resolveGitCommonDir() {
+  return runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+}
+
+function integrationLockPath() {
+  return path.join(resolveGitCommonDir(), MAIN_LOCK_FILENAME);
+}
+
+async function acquireIntegrationLock({ force = false } = {}) {
+  const lockPath = integrationLockPath();
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+
+  if (force) {
+    await fs.rm(lockPath, { force: true });
+  }
+
+  const token = `${process.pid}:${randomUUID()}`;
+  const lock = {
+    token,
+    pid: process.pid,
+    acquiredAt: new Date().toISOString(),
+    cwd: process.cwd(),
+    path: lockPath,
+  };
+
+  let handle;
+  try {
+    handle = await fs.open(lockPath, "wx");
+    await handle.writeFile(`${JSON.stringify(lock, null, 2)}\n`, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      throw new Error(
+        `Integration lock already exists at ${lockPath}. Use acquire-lock --force only if the previous integration process died.`,
+      );
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+
+  return lock;
+}
+
+async function readIntegrationLock(lockPath) {
+  try {
+    return JSON.parse(await fs.readFile(lockPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function releaseIntegrationLock(token) {
+  if (!token) throw new Error("release-lock requires --token <token>");
+  const lockPath = integrationLockPath();
+  const lock = await readIntegrationLock(lockPath);
+  if (!lock) throw new Error(`No integration lock found at ${lockPath}`);
+  if (lock.token !== token) {
+    throw new Error(`Integration lock at ${lockPath} is held by a different token.`);
+  }
+  await fs.rm(lockPath, { force: true });
+  return { released: true, token, path: lockPath };
+}
+
+async function withIntegrationLock(operation) {
+  const lock = await acquireIntegrationLock();
+  try {
+    return await operation();
+  } finally {
+    await releaseIntegrationLock(lock.token);
+  }
 }
 
 function gitSucceeds(args, options = {}) {
@@ -233,7 +309,10 @@ function printHelp() {
   integration.mjs list [--json]
   integration.mjs refresh <branch|id>
   integration.mjs sync-worktree <branch|id> [--target <commit>]
-  integration.mjs dequeue <branch|id>`);
+  integration.mjs dequeue <branch|id>
+  integration.mjs acquire-lock [--force]
+  integration.mjs release-lock --token <token>
+  integration.mjs with-lock -- <command> [args...]`);
 }
 
 function enqueue(branchArg) {
@@ -420,6 +499,38 @@ function parseSyncArgs(args) {
   return { identifier, target };
 }
 
+function parseAcquireLockArgs(args) {
+  const options = { force: false };
+  for (const arg of args) {
+    if (arg === "--force") {
+      options.force = true;
+      continue;
+    }
+    throw new Error(`Unknown acquire-lock option: ${arg}`);
+  }
+  return options;
+}
+
+function parseReleaseLockArgs(args) {
+  let token = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--token") {
+      token = args[index + 1] ?? null;
+      if (!token) throw new Error("release-lock --token requires a token");
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--token=")) {
+      token = arg.slice("--token=".length);
+      if (!token) throw new Error("release-lock --token requires a token");
+      continue;
+    }
+    throw new Error(`Unknown release-lock option: ${arg}`);
+  }
+  return { token };
+}
+
 function printList(jsonOutput) {
   const entries = queueEntries().map((entry) => ({
     ...entry,
@@ -440,7 +551,15 @@ function printList(jsonOutput) {
   }
 }
 
-function main(argv) {
+async function runWithLock(args) {
+  const commandArgs = args[0] === "--" ? args.slice(1) : args;
+  const [command, ...rest] = commandArgs;
+  if (!command) throw new Error("with-lock requires a command to run");
+
+  return await withIntegrationLock(async () => runCommand(command, rest));
+}
+
+async function main(argv) {
   const [command, ...rest] = argv;
   if (!command || command === "-h" || command === "--help") {
     printHelp();
@@ -482,11 +601,29 @@ function main(argv) {
     return;
   }
 
+  if (command === "acquire-lock") {
+    const result = await acquireIntegrationLock(parseAcquireLockArgs(rest));
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "release-lock") {
+    const { token } = parseReleaseLockArgs(rest);
+    const result = await releaseIntegrationLock(token);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "with-lock") {
+    process.exitCode = await runWithLock(rest);
+    return;
+  }
+
   throw new Error(`Unknown command: ${command}`);
 }
 
 try {
-  main(process.argv.slice(2));
+  await main(process.argv.slice(2));
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(message);
