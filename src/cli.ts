@@ -93,7 +93,7 @@ import {
   promptText,
 } from "./ui/prompts/index.ts";
 import { resolveBranchPrefix } from "./utils/branch-prefix.ts";
-import { resolveContainedPath } from "./utils/path-safety.ts";
+import { comparablePath, resolveContainedPath } from "./utils/path-safety.ts";
 import type { CleanupState } from "./workspace/cleanup.ts";
 import { resolveWorkforestContext } from "./workspace/context.ts";
 import {
@@ -102,7 +102,6 @@ import {
 } from "./workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  comparablePath,
   getWorktreePath,
   isComparablePathInsideOrEqual,
   isPathInsideOrEqual,

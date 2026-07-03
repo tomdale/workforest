@@ -23,7 +23,7 @@ import type {
   WorkspaceConfig,
   WorkspaceMetadata,
 } from "../types.ts";
-import { validateResourceName } from "../utils/path-safety.ts";
+import { comparablePath, validateResourceName } from "../utils/path-safety.ts";
 import {
   getWorktreeMetadataPath,
   readWorkspaceMetadata,
@@ -32,7 +32,6 @@ import {
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  comparablePath,
   getWorkspacePath,
   getWorktreePath,
   isPathInsideOrEqual,

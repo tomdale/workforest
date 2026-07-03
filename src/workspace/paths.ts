@@ -1,10 +1,9 @@
-import { realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { validateTemplateIdentifier } from "../templates/index.ts";
 import type { WorkspaceConfig } from "../types.ts";
-import { validateResourceName } from "../utils/path-safety.ts";
+import { comparablePath, validateResourceName } from "../utils/path-safety.ts";
 
 export const ADHOC_WORKSPACE_GROUP = "_adhoc";
 export const TASKS_DIRECTORY_NAME = "_tasks";
@@ -120,14 +119,6 @@ export function isPathInsideOrEqual(
       !relative.startsWith(`..${path.sep}`) &&
       !path.isAbsolute(relative))
   );
-}
-
-export async function comparablePath(value: string): Promise<string> {
-  try {
-    return await realpath(value);
-  } catch {
-    return path.resolve(value);
-  }
 }
 
 export async function isComparablePathInsideOrEqual(

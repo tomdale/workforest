@@ -10,7 +10,7 @@ import {
   buildBranchName,
   resolveBranchPrefix,
 } from "../utils/branch-prefix.ts";
-import { validateResourceName } from "../utils/path-safety.ts";
+import { comparablePath, validateResourceName } from "../utils/path-safety.ts";
 import { resolveWorkforestContext } from "../workspace/context.ts";
 import {
   type CreateOptions,
@@ -20,7 +20,6 @@ import {
 import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  comparablePath,
   getWorkspacePath,
   resolveWorkforestDirectories,
   type WorkforestDirectories,

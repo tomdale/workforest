@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { comparablePath } from "../utils/path-safety.ts";
 import { resolveWorkforestContext } from "./context.ts";
 import {
-  comparablePath,
   getRepositoryTaskPath,
   getReviewRepoPath,
   getWorkspacePath,

@@ -16,6 +16,7 @@ import {
 } from "../templates/index.ts";
 import type { RepositorySource, WorkspaceMetadata } from "../types.ts";
 import { cancel, promptConfirm } from "../ui/prompts/index.ts";
+import { comparablePath } from "../utils/path-safety.ts";
 import {
   resolveWorkforestContext,
   type WorkforestManagedContext,
@@ -31,7 +32,6 @@ import {
 } from "../workspace/metadata.ts";
 import {
   ADHOC_WORKSPACE_GROUP,
-  comparablePath,
   getWorkspacePath,
   getWorkspaceRepoPath,
   resolveWorkforestDirectories,

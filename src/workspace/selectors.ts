@@ -1,6 +1,7 @@
 import type { WorkspaceConfig } from "../types.ts";
+import { comparablePath } from "../utils/path-safety.ts";
 import { collectInventory, type InventoryEntry } from "./inventory.ts";
-import { comparablePath, isPathInsideOrEqual } from "./paths.ts";
+import { isPathInsideOrEqual } from "./paths.ts";
 
 export type SelectorResolution =
   | Readonly<{
