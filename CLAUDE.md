@@ -23,13 +23,13 @@ node bin/workforest.js templates
 
 ### Entry Flow
 1. `src/cli.ts` — CLI argument parsing, routes to subcommands
-2. `src/workspace/index.ts` — `stampWorkspaceGenerator()` orchestrates workspace creation
+2. `src/workspace/index.ts` — `stampWorkspace()` orchestrates workspace creation
 3. For each repo: mirror → worktree → pnpm install → template hooks
 
-### Generator Pattern
-Long-running operations use async generators that yield state updates, enabling both TUI and simple console output:
-- `stampWorkspaceGenerator()` yields `WorkspaceState` for each phase
-- `applyTemplateGenerator()` yields `HookState` for hook execution
+### Async Generator Pattern
+Long-running operations are async generators that yield state updates, enabling both the grid TUI and simple console output. Generator-ness lives in the return type (`AsyncGenerator<...>` / `TaskGenerator`), not a name suffix:
+- `repoPipeline()` yields `RepoPipelineState` for each repo's git + initializer phases
+- `applyTemplate()` yields `HookState` for hook execution
 - `runParallel()` in `task-generator.ts` runs multiple generators concurrently
 
 ### Key Components

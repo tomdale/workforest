@@ -144,10 +144,10 @@ async function copyDirectoryContents(
 }
 
 /**
- * Generator that applies a template to a workspace.
+ * Applies a template to a workspace, yielding hook state as it runs.
  * Runs hooks defined in the template.
  */
-export async function* applyTemplateGenerator({
+export async function* applyTemplate({
   template,
   workspaceDir,
   repoDirs,

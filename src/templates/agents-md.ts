@@ -11,10 +11,11 @@ import { getCacheDir } from "../config.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { generateText, getAiStatus } from "../services/ai/index.ts";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
+import { addWorktree, removeWorktree } from "../services/worktree.ts";
 import type { RepositorySource, TemplateAgentsMdConfig } from "../types.ts";
 import { ensureDir } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
-import { ensureMirrorRepoGenerator } from "../workspace/repository.ts";
+import { ensureMirrorRepo } from "../workspace/repository.ts";
 import type { Template } from "./index.ts";
 
 export const AGENTS_MD_DEFAULT_MAX_AGE_HOURS = 24;
@@ -609,7 +610,7 @@ async function prepareSources(
     for (const repo of repos) {
       onRepository?.(repo.name);
       const mirror = await resolveMirrorDir(repo, cacheDir);
-      for await (const state of ensureMirrorRepoGenerator(repo, mirror)) {
+      for await (const state of ensureMirrorRepo(repo, mirror)) {
         if (state.status === "failed") throw state.error;
       }
       const ref = await resolveDefaultRef(mirror, defaultBranchResolver);
@@ -617,9 +618,14 @@ async function prepareSources(
         cwd: mirror,
       });
       const target = resolveContainedPath(root, repo.name);
-      await runGit(["worktree", "add", "--detach", target, ref], {
-        cwd: mirror,
-      });
+      for await (const state of addWorktree({
+        gitDir: mirror,
+        targetDir: target,
+        base: { ref },
+        branch: { kind: "detach" },
+      })) {
+        if (state.status === "failed") throw state.error;
+      }
       const hints = config.paths?.[repo.name] ?? [];
       prepared.push({
         name: repo.name,
@@ -764,10 +770,13 @@ async function cleanupSources(sources: PreparedSources): Promise<void> {
   await Promise.all(
     sources.repositories.map(async (repo) => {
       try {
-        await runGit(
-          ["worktree", "remove", "--force", path.join(sources.root, repo.path)],
-          { cwd: repo.mirror },
-        );
+        for await (const _state of removeWorktree({
+          gitDir: repo.mirror,
+          worktreePath: path.join(sources.root, repo.path),
+          force: true,
+        })) {
+          // Best effort; the temporary root is removed below regardless.
+        }
       } catch {
         // The temporary root is removed below even if Git already forgot it.
       }

@@ -100,6 +100,20 @@ export async function assertContainedPathWithoutSymlinks(
   return resolvedTarget;
 }
 
+/**
+ * Resolve a path for equality/prefix comparison, following symlinks when the
+ * path exists. Falls back to `path.resolve` for paths that don't exist yet, so
+ * a symlinked ancestor (e.g. `~/Code` -> `/Volumes/Code`) doesn't cause two
+ * references to the same location to compare unequal.
+ */
+export async function comparablePath(value: string): Promise<string> {
+  try {
+    return await fs.realpath(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
 function hasControlCharacters(value: string): boolean {
   return [...value].some((character) => {
     const code = character.charCodeAt(0);

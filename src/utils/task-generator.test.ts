@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TaskState } from "./task-generator.ts";
-import { runCommandGenerator, runParallel } from "./task-generator.ts";
+import { runParallel, spawnCommand } from "./task-generator.ts";
 
 async function collectStates(
   generator: AsyncGenerator<TaskState>,
@@ -26,10 +26,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe("runCommandGenerator", () => {
+describe("spawnCommand", () => {
   it("reports command start failures as failed states", async () => {
     const states = await collectStates(
-      runCommandGenerator("__workforest_missing_command__", ["--version"]),
+      spawnCommand("__workforest_missing_command__", ["--version"]),
     );
 
     const failedState = states.find((state) => state.status === "failed");
@@ -42,7 +42,7 @@ describe("runCommandGenerator", () => {
 
   it("drains high-volume output from child processes", async () => {
     const states = await collectStates(
-      runCommandGenerator(process.execPath, [
+      spawnCommand(process.execPath, [
         "-e",
         "for (let i = 0; i < 2048; i++) process.stdout.write('x'.repeat(1024));",
       ]),
@@ -60,7 +60,7 @@ describe("runCommandGenerator", () => {
 
   it("keeps failed command stderr messages bounded to the tail", async () => {
     const states = await collectStates(
-      runCommandGenerator(process.execPath, [
+      spawnCommand(process.execPath, [
         "-e",
         [
           "process.stderr.write('early-' + 'marker');",
@@ -87,7 +87,7 @@ describe("runParallel", () => {
     let maxActive = 0;
     const started: string[] = [];
 
-    const createGenerator = (id: string) =>
+    const makeTask = (id: string) =>
       async function* () {
         active += 1;
         maxActive = Math.max(maxActive, active);
@@ -98,7 +98,7 @@ describe("runParallel", () => {
       };
 
     const tasks = new Map(
-      ["a", "b", "c", "d", "e"].map((id) => [id, createGenerator(id)()]),
+      ["a", "b", "c", "d", "e"].map((id) => [id, makeTask(id)()]),
     );
 
     const states = await collectUpdates(

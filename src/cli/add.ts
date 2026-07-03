@@ -6,6 +6,7 @@ import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
+import { withGitWorktreeLock } from "../services/worktree.ts";
 import { reportShellCdTarget } from "../shell.ts";
 import { invalidateWorkspaceAgentsMd } from "../templates/agents-md.ts";
 import {
@@ -156,10 +157,29 @@ async function addToWorkspace(
 
   const repos = await resolveRepositorySpecifiers(parsed.tokens);
   const branchName = existingBranchName(target.metadata);
+
+  // Load the workspace's template up front so a repo added later honors the
+  // same `disableInitializers` setting `wf new` applied when the workspace was
+  // created — otherwise `wf add` would run pnpm install / vercel link that the
+  // template opted out of. The template is also reused for AGENTS.md below.
+  const templateId = target.metadata.workspace.template_id;
+  const template = templateId
+    ? await loadTemplate(
+        formatTemplateIdentifier({
+          parent: templateId,
+          variant: target.metadata.workspace.template_variant,
+        }),
+      )
+    : null;
+
   const result = await (options.addReposToWorkspace ?? addReposToWorkspace)({
     workspaceDir: target.workspaceDir,
     repos,
     branchName,
+    interactive: options.interactive,
+    ...(template?.config.disableInitializers !== undefined
+      ? { disabledInitializers: template.config.disableInitializers }
+      : {}),
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
 
@@ -173,15 +193,6 @@ async function addToWorkspace(
     log.success(
       `Added ${result.addedRepos.length} repo${result.addedRepos.length === 1 ? "" : "s"} to ${target.metadata.workspace.feature_name}.`,
     );
-    const templateId = target.metadata.workspace.template_id;
-    const template = templateId
-      ? await loadTemplate(
-          formatTemplateIdentifier({
-            parent: templateId,
-            variant: target.metadata.workspace.template_variant,
-          }),
-        )
-      : null;
     if (template) {
       await invalidateWorkspaceAgentsMd(template, target.workspaceDir).catch(
         (error: unknown) => {
@@ -246,43 +257,53 @@ async function promoteWorktree(
     );
   }
   await fs.mkdir(workspaceDir, { recursive: true });
-  await (options.moveRepoWorktree ?? moveRepoWorktree)(
-    target.sourcePath,
-    destinationPath,
-  );
+  // Read the lockfile state from the source before moving — content is
+  // identical after the move, and this keeps the metadata write self-contained.
+  const lockfilePresent = await hasLockfile(target.sourcePath);
+  const moveWorktree = options.moveRepoWorktree ?? moveRepoWorktree;
+  await moveWorktree(target.sourcePath, destinationPath);
 
-  await writeWorkspaceMetadata(workspaceDir, {
-    featureName: target.changeName,
-    branchName,
-    repos: [
-      {
-        name: currentRepo.name,
-        remote: currentRepo.remote,
-        hasLockfile: await hasLockfile(destinationPath),
-      },
-    ],
-    ...(sourceRepos.kind === "template"
-      ? {
-          templateId: sourceRepos.templateId,
-          ...(sourceRepos.templateVariant
-            ? { templateVariant: sourceRepos.templateVariant }
-            : {}),
-        }
-      : {}),
-  });
-  await writeVSCodeWorkspaceFile(workspaceDir, [currentRepo], {
-    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-  });
-  await removeWorktreeMetadata(
-    path.dirname(target.sourcePath),
-    target.changeName,
-  );
+  // The move is destructive; if any metadata step fails, roll the worktree back
+  // to its source so we never leave a relocated checkout with no workspace
+  // record (and a source change record still pointing at the vanished path).
+  try {
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: target.changeName,
+      branchName,
+      repos: [
+        {
+          name: currentRepo.name,
+          remote: currentRepo.remote,
+          hasLockfile: lockfilePresent,
+        },
+      ],
+      ...(sourceRepos.kind === "template"
+        ? {
+            templateId: sourceRepos.templateId,
+            ...(sourceRepos.templateVariant
+              ? { templateVariant: sourceRepos.templateVariant }
+              : {}),
+          }
+        : {}),
+    });
+    await writeVSCodeWorkspaceFile(workspaceDir, [currentRepo], {
+      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+    });
+    await removeWorktreeMetadata(
+      path.dirname(target.sourcePath),
+      target.changeName,
+    );
+  } catch (error) {
+    await moveWorktree(destinationPath, target.sourcePath).catch(() => {});
+    throw error;
+  }
 
   if (sourceRepos.repos.length > 0) {
     const result = await (options.addReposToWorkspace ?? addReposToWorkspace)({
       workspaceDir,
       repos: sourceRepos.repos,
       branchName,
+      interactive: options.interactive,
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     });
 
@@ -451,9 +472,12 @@ async function moveRepoWorktree(
   const commonDir = path.isAbsolute(rawCommonDir)
     ? rawCommonDir
     : path.resolve(sourcePath, rawCommonDir);
-  await runGit(["worktree", "move", sourcePath, destinationPath], {
-    cwd: commonDir,
-  });
+  // Serialize against any other worktree mutation on the same mirror.
+  await withGitWorktreeLock(commonDir, () =>
+    runGit(["worktree", "move", sourcePath, destinationPath], {
+      cwd: commonDir,
+    }),
+  );
 }
 
 async function comparableDirectories(

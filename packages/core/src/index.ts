@@ -152,7 +152,7 @@ const MAX_STDERR_CHARS = 4096;
 const MAX_QUEUED_OUTPUT_BYTES = 1024 * 1024;
 const RESUME_QUEUED_OUTPUT_BYTES = MAX_QUEUED_OUTPUT_BYTES / 2;
 
-export async function* runCommandGenerator(
+export async function* spawnCommand(
   command: string,
   args: string[],
   options: RunCommandOptions = {},

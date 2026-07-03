@@ -8,19 +8,12 @@ const { runGitMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("../services/git.ts", () => ({
-  cloneRepositoryGenerator: vi.fn(),
-  createDefaultBranchResolver: () => ({
-    resolveBareMirrorDefaultBranch: vi.fn(async () => "main"),
-  }),
-  fixBareRepoRefsGenerator: vi.fn(),
+  cloneRepository: vi.fn(),
+  fixBareRepoRefs: vi.fn(),
   runGit: runGitMock,
 }));
 
-import {
-  cleanupWorkspaceWorktreesGenerator,
-  createWorkingCopyGenerator,
-  ensureMirrorRepoGenerator,
-} from "./repository.ts";
+import { cleanupWorkspaceWorktrees, ensureMirrorRepo } from "./repository.ts";
 
 const tempDirs: string[] = [];
 
@@ -48,7 +41,7 @@ afterEach(async () => {
   );
 });
 
-describe("cleanupWorkspaceWorktreesGenerator", () => {
+describe("cleanupWorkspaceWorktrees", () => {
   it("prunes stale target metadata when git marks the worktree as prunable", async () => {
     const workspaceDir = await createTempDir("workforest-cleanup-");
     const repoDir = path.join(workspaceDir, "api");
@@ -69,7 +62,7 @@ prunable gitdir file points to non-existent location
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     const states = await collectStates(
-      cleanupWorkspaceWorktreesGenerator("/tmp/cache/api.git", workspaceDir),
+      cleanupWorkspaceWorktrees("/tmp/cache/api.git", workspaceDir),
     );
 
     expect(states).toEqual([
@@ -118,7 +111,7 @@ branch refs/heads/test
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     const states = await collectStates(
-      cleanupWorkspaceWorktreesGenerator("/tmp/cache/front.git", workspaceDir),
+      cleanupWorkspaceWorktrees("/tmp/cache/front.git", workspaceDir),
     );
 
     expect(states).toEqual([
@@ -165,7 +158,7 @@ branch refs/heads/test
       .mockResolvedValueOnce({ stdout: "", stderr: "" });
 
     await collectStates(
-      cleanupWorkspaceWorktreesGenerator("/tmp/cache/api.git", workspaceDir),
+      cleanupWorkspaceWorktrees("/tmp/cache/api.git", workspaceDir),
     );
 
     expect(runGitMock).toHaveBeenNthCalledWith(
@@ -176,7 +169,7 @@ branch refs/heads/test
   });
 });
 
-describe("ensureMirrorRepoGenerator", () => {
+describe("ensureMirrorRepo", () => {
   it("fetches remote branches into remote-tracking refs explicitly", async () => {
     const mirrorDir = await createTempDir("workforest-front.git-");
 
@@ -190,7 +183,7 @@ bare
       });
 
     await collectStates(
-      ensureMirrorRepoGenerator(
+      ensureMirrorRepo(
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
@@ -239,7 +232,7 @@ bare
       });
 
     const states = await collectStates(
-      ensureMirrorRepoGenerator(
+      ensureMirrorRepo(
         {
           name: "front",
           remote: "git@github.com:vercel/front.git",
@@ -280,99 +273,6 @@ bare
         "+refs/heads/*:refs/remotes/origin/*",
       ],
       { cwd: mirrorDir },
-    );
-  });
-});
-
-describe("createWorkingCopyGenerator", () => {
-  it("creates a new branch worktree without resetting existing branches", async () => {
-    const targetDir = path.join(
-      await createTempDir("workforest-worktree-"),
-      "front",
-    );
-
-    runGitMock
-      .mockRejectedValueOnce(new Error("missing branch"))
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
-
-    const states = await collectStates(
-      createWorkingCopyGenerator(
-        {
-          name: "front",
-          remote: "git@github.com:vercel/front.git",
-        },
-        "/tmp/cache/front.git",
-        targetDir,
-        "tomdale/fix-auth",
-      ),
-    );
-
-    expect(states).toEqual([
-      {
-        status: "log",
-        level: "info",
-        message:
-          'Creating worktree for front on branch "tomdale/fix-auth" from origin/main',
-      },
-    ]);
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      1,
-      ["show-ref", "--verify", "--quiet", "refs/heads/tomdale/fix-auth"],
-      { cwd: "/tmp/cache/front.git" },
-    );
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      2,
-      ["worktree", "add", "-b", "tomdale/fix-auth", targetDir, "origin/main"],
-      { cwd: "/tmp/cache/front.git" },
-    );
-  });
-
-  it("fails when the target directory already exists", async () => {
-    const targetDir = await createTempDir("workforest-worktree-");
-
-    await expect(
-      collectStates(
-        createWorkingCopyGenerator(
-          {
-            name: "front",
-            remote: "git@github.com:vercel/front.git",
-          },
-          "/tmp/cache/front.git",
-          targetDir,
-          "tomdale/fix-auth",
-        ),
-      ),
-    ).rejects.toThrow(`Target directory already exists: ${targetDir}`);
-
-    expect(runGitMock).not.toHaveBeenCalled();
-  });
-
-  it("fails when the branch already exists", async () => {
-    const targetDir = path.join(
-      await createTempDir("workforest-worktree-"),
-      "front",
-    );
-
-    runGitMock.mockResolvedValueOnce({ stdout: "", stderr: "" });
-
-    await expect(
-      collectStates(
-        createWorkingCopyGenerator(
-          {
-            name: "front",
-            remote: "git@github.com:vercel/front.git",
-          },
-          "/tmp/cache/front.git",
-          targetDir,
-          "tomdale/fix-auth",
-        ),
-      ),
-    ).rejects.toThrow("Branch already exists: tomdale/fix-auth");
-
-    expect(runGitMock).toHaveBeenCalledOnce();
-    expect(runGitMock).not.toHaveBeenCalledWith(
-      expect.arrayContaining(["-B"]),
-      expect.anything(),
     );
   });
 });

@@ -10,7 +10,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyTemplateGenerator, copyTemplateFiles } from "./apply.ts";
+import { applyTemplate, copyTemplateFiles } from "./apply.ts";
 import {
   createTemplate,
   createTemplateVariant,
@@ -56,7 +56,7 @@ describe("template hooks", () => {
 
     await expect(
       drain(
-        applyTemplateGenerator({
+        applyTemplate({
           template,
           workspaceDir,
           repoDirs: [],
@@ -94,7 +94,7 @@ describe("template hooks", () => {
 
     await expect(
       drain(
-        applyTemplateGenerator({
+        applyTemplate({
           template,
           workspaceDir,
           repoDirs: [],

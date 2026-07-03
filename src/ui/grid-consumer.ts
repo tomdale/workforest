@@ -9,6 +9,7 @@ import {
   STANDARD_ENVIRONMENT_VARIABLES,
   WORKFOREST_ENVIRONMENT_VARIABLES,
 } from "../environment.ts";
+import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import { CommandStreamAdapter } from "../terminal/command-stream-adapter.ts";
 import {
   createFullscreenKeypress,
@@ -573,6 +574,205 @@ export async function renderPipelinesGrid({
   } finally {
     destroyScreen();
   }
+}
+
+type PipelineProgressState =
+  | Extract<RepoPipelineState, { phase: "git" }>
+  | Extract<RepoPipelineState, { phase: "initializer" }>;
+
+/** Emit a git/initializer step's running, retry, completion, or failure line. */
+function emitPipelineProgress(
+  onEvent: ServiceEventSink | undefined,
+  id: string,
+  label: string,
+  state: PipelineProgressState,
+): void {
+  switch (state.status) {
+    case "running":
+      if (state.message) {
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "info",
+          message: `${id}: ${label} - ${state.message}`,
+        });
+      }
+      break;
+    case "retrying":
+      if (state.message) {
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "warning",
+          message: `${id}: ${label} - ${state.message}`,
+        });
+      }
+      break;
+    case "completed":
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "success",
+        message: `${id}: ${label} complete`,
+      });
+      break;
+    case "failed":
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "error",
+        message: `${id}: ${label} failed`,
+      });
+      break;
+    // "output" / "log" / "skipped" / "pending" carry no inline progress line.
+  }
+}
+
+export type DrainPipelinesToConsoleOptions = {
+  onEvent?: ServiceEventSink;
+  onFailure?: (
+    repoName: string,
+    state: Extract<RepoPipelineState, { phase: "failed" }>,
+  ) => void | Promise<void>;
+  getLogPath?: (repoName: string) => Promise<string>;
+  onBeforeCompletionPrompt?: (
+    repoResults: Map<string, { hasLockfile: boolean }>,
+  ) => void | Promise<void>;
+};
+
+/**
+ * Console fallback for {@link presentPipelines}: drains the per-repo pipelines to
+ * inline service events and returns the completed repos. The return value mirrors
+ * {@link renderPipelinesGrid}'s contract so callers build their result the same
+ * way regardless of which surface ran. `onBeforeCompletionPrompt` runs once all
+ * pipelines settle — the same point the grid invokes it — so finalization is
+ * deferred identically whether the grid rendered or this drain did.
+ */
+export async function drainPipelinesToConsole(
+  pipelines: Map<string, AsyncGenerator<RepoPipelineState>>,
+  {
+    onEvent,
+    onFailure,
+    getLogPath,
+    onBeforeCompletionPrompt,
+  }: DrainPipelinesToConsoleOptions = {},
+): Promise<Map<string, { hasLockfile: boolean }>> {
+  const completed = new Map<string, { hasLockfile: boolean }>();
+
+  // A repo can settle successfully via `worktree-ready` (initialization moved to
+  // the background) or `complete`; record the latest lockfile signal from either
+  // but announce readiness only once.
+  const recordSuccess = (id: string, hasLockfile: boolean): void => {
+    const announced = completed.has(id);
+    completed.set(id, { hasLockfile });
+    if (!announced) {
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "success",
+        message: `${id}: ready`,
+      });
+    }
+  };
+
+  for await (const { id, state } of runParallel(pipelines)) {
+    switch (state.phase) {
+      case "git":
+        emitPipelineProgress(onEvent, id, state.step, state);
+        break;
+      case "initializer":
+        emitPipelineProgress(onEvent, id, state.name, state);
+        break;
+      case "worktree-ready":
+      case "complete":
+        recordSuccess(id, state.hasLockfile);
+        break;
+      case "failed":
+        await onFailure?.(id, state);
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "error",
+          message: `${id}: ${state.error.message}`,
+        });
+        if (getLogPath) {
+          emitServiceEvent(onEvent, {
+            type: "message",
+            level: "error",
+            message: `${id}: setup log saved to ${await getLogPath(id)}`,
+          });
+        }
+        break;
+      // "cancelled" is a grid-only affordance; the console drain stays quiet.
+    }
+  }
+
+  await onBeforeCompletionPrompt?.(completed);
+  return completed;
+}
+
+export type PresentPipelinesOptions = {
+  pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;
+  repoNames: string[];
+  /** Render the setup grid when the terminal supports it; else drain to events. */
+  interactive: boolean;
+  onEvent?: ServiceEventSink;
+  getLogPath?: (repoName: string) => Promise<string>;
+  onFailure?: (
+    repoName: string,
+    state: Extract<RepoPipelineState, { phase: "failed" }>,
+  ) => void | Promise<void>;
+  workspacePath?: string;
+  completeOnWorktreesReady?: boolean;
+  backgroundInitialization?: boolean;
+  onBeforeCompletionPrompt?: (
+    repoResults: Map<string, { hasLockfile: boolean }>,
+  ) => void | Promise<void>;
+  shouldUseGrid?: typeof shouldUseGrid;
+  renderPipelinesGrid?: typeof renderPipelinesGrid;
+};
+
+/**
+ * The single seam every parallel repo/task/cloud fan-out routes through: render
+ * the interactive grid when the terminal supports it, otherwise drain the same
+ * pipelines to inline service events. Both branches return the completed repos so
+ * callers assemble their result identically.
+ */
+export async function presentPipelines({
+  pipelines,
+  repoNames,
+  interactive,
+  onEvent,
+  getLogPath,
+  onFailure,
+  workspacePath,
+  completeOnWorktreesReady,
+  backgroundInitialization,
+  onBeforeCompletionPrompt,
+  shouldUseGrid: useGrid = shouldUseGrid,
+  renderPipelinesGrid: renderGrid = renderPipelinesGrid,
+}: PresentPipelinesOptions): Promise<Map<string, { hasLockfile: boolean }>> {
+  if (interactive && useGrid(repoNames.length)) {
+    return renderGrid({
+      pipelines,
+      repoNames,
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
+      ...(getLogPath !== undefined ? { getLogPath } : {}),
+      ...(onFailure !== undefined ? { onFailure } : {}),
+      ...(onBeforeCompletionPrompt !== undefined
+        ? { onBeforeCompletionPrompt }
+        : {}),
+      ...(completeOnWorktreesReady !== undefined
+        ? { completeOnWorktreesReady }
+        : {}),
+      ...(backgroundInitialization !== undefined
+        ? { backgroundInitialization }
+        : {}),
+    });
+  }
+
+  return drainPipelinesToConsole(pipelines, {
+    ...(onEvent !== undefined ? { onEvent } : {}),
+    ...(onFailure !== undefined ? { onFailure } : {}),
+    ...(getLogPath !== undefined ? { getLogPath } : {}),
+    ...(onBeforeCompletionPrompt !== undefined
+      ? { onBeforeCompletionPrompt }
+      : {}),
+  });
 }
 
 /**

@@ -10,7 +10,7 @@ import {
   success,
 } from "./cli/output.ts";
 import type { CommandResult, ParsedInvocation } from "./cli/types.ts";
-import { getCacheDir } from "./config.ts";
+import { getCacheDir, loadWorkspaceConfig } from "./config.ts";
 import {
   deleteNodeModulesCache,
   type NodeModulesCacheSummary,
@@ -29,6 +29,7 @@ import {
   updateCachedRepository,
 } from "./repositories.ts";
 import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
+import { detectDefaultBranch } from "./services/worktree.ts";
 import {
   renderTerminalLineAnsi,
   type TerminalStyleRole,
@@ -44,6 +45,11 @@ import {
   withSpinner,
 } from "./ui/prompts/index.ts";
 import { S_BAR } from "./ui/prompts/symbols.ts";
+import {
+  isPathInsideOrEqual,
+  resolveWorkforestDirectories,
+  type WorkforestDirectories,
+} from "./workspace/paths.ts";
 
 export async function runCacheInvocation(
   invocation: ParsedInvocation,
@@ -100,6 +106,15 @@ export async function runWorktreeInvocation(
     throw new Error("The CLI kernel accepted an invalid worktree invocation.");
   }
 
+  // Resolve the mirror before building the argv: `add` pins an explicit
+  // start-point derived from the mirror's default branch. Workforest mirrors are
+  // normalized to keep a *dangling* HEAD (the refs/heads target it names is
+  // deleted), so a start-point-less `git worktree add` resolves HEAD to a
+  // missing ref and fails. `origin/<default>` is the real commit-ish to branch
+  // from.
+  const repository = await requireRepository(selector);
+  const directories = await resolveManagedDirectories();
+
   let args: readonly string[];
   switch (invocation.command.leaf.handler) {
     case "cache.worktree.list":
@@ -112,9 +127,16 @@ export async function runWorktreeInvocation(
           "The CLI kernel accepted an invalid worktree add invocation.",
         );
       }
+      const target = path.resolve(worktreePath);
+      assertUnmanagedWorktreePath(target, directories);
+      const defaultBranch = await detectDefaultBranch(
+        repository.mirrorPath,
+        repository.defaultBranch ?? "main",
+      );
+      const startPoint = `origin/${defaultBranch}`;
       args = branch
-        ? ["add", "-b", branch, path.resolve(worktreePath)]
-        : ["add", path.resolve(worktreePath)];
+        ? ["add", "-b", branch, target, startPoint]
+        : ["add", target, startPoint];
       break;
     }
     case "cache.worktree.move": {
@@ -124,7 +146,11 @@ export async function runWorktreeInvocation(
           "The CLI kernel accepted an invalid worktree move invocation.",
         );
       }
-      args = ["move", path.resolve(worktreePath), path.resolve(newPath)];
+      const from = path.resolve(worktreePath);
+      const to = path.resolve(newPath);
+      assertUnmanagedWorktreePath(from, directories);
+      assertUnmanagedWorktreePath(to, directories);
+      args = ["move", from, to];
       break;
     }
     case "cache.worktree.remove": {
@@ -134,7 +160,9 @@ export async function runWorktreeInvocation(
           "The CLI kernel accepted an invalid worktree remove invocation.",
         );
       }
-      args = ["remove", path.resolve(worktreePath)];
+      const target = path.resolve(worktreePath);
+      assertUnmanagedWorktreePath(target, directories);
+      args = ["remove", target];
       break;
     }
     default:
@@ -143,9 +171,37 @@ export async function runWorktreeInvocation(
       );
   }
 
-  const repository = await requireRepository(selector);
   const exitCode = await runGitWorktree(repository.mirrorPath, args);
   return exitCode === 0 ? success() : failure(exitCode, { kind: "none" });
+}
+
+async function resolveManagedDirectories(): Promise<WorkforestDirectories> {
+  const { config } = await loadWorkspaceConfig();
+  return resolveWorkforestDirectories(config);
+}
+
+/**
+ * The raw `cache worktree` primitives deliberately bypass Workforest lifecycle
+ * rules — they write no metadata and run no setup. Pointed at a path inside a
+ * managed directory they would silently desync that worktree or workspace's
+ * `workspace.json` from the mirror, so refuse and steer the caller to the
+ * lifecycle commands (or a path outside the managed tree).
+ */
+function assertUnmanagedWorktreePath(
+  target: string,
+  directories: WorkforestDirectories,
+): void {
+  const managed = [
+    directories.repos,
+    directories.workspaces,
+    directories.reviews,
+  ];
+  if (managed.some((directory) => isPathInsideOrEqual(directory, target))) {
+    throw new UsageError(
+      `Refusing to run a raw cache worktree op inside a managed Workforest directory (${target}). ` +
+        `Use 'wf new'/'wf add'/'wf delete' for managed worktrees, or target a path outside ${directories.base}.`,
+    );
+  }
 }
 
 async function runGitWorktree(

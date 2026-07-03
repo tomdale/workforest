@@ -3,30 +3,30 @@ import path from "node:path";
 import { UsageError } from "../cli/errors.ts";
 import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
-import { restoreNodeModules } from "../node-modules-cache.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { reportShellCdTarget } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
-import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
+import {
+  presentPipelines,
+  type renderPipelinesGrid,
+  type shouldUseGrid,
+} from "../ui/grid-consumer.ts";
 import {
   buildBranchName,
   resolveBranchPrefix,
 } from "../utils/branch-prefix.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
-import { createSingleWorktree } from "../worktree.ts";
 import {
   createRepoSetupFailureSummary,
   printRepoSetupFailures,
   type RepoSetupFailureSummary,
   runScopedRepoSetupPipeline,
   stampWorkspace,
-  stampWorkspaceInteractive,
 } from "./index.ts";
 import {
   initializeWorktreeSetup,
-  startRepoInitialization,
   worktreeInitializationScope,
 } from "./initialization.ts";
 import { writeWorktreeMetadata } from "./metadata.ts";
@@ -66,11 +66,9 @@ export type CreateOptions = Readonly<{
   interactive: boolean;
   onEvent?: ServiceEventSink;
   writeShellCdPath: (targetDir: string) => Promise<void>;
-  createSingleWorktree?: typeof createSingleWorktree;
   initializeWorktreeSetup?: typeof initializeWorktreeSetup;
-  startRepoInitialization?: typeof startRepoInitialization;
+  runScopedRepoSetupPipeline?: typeof runScopedRepoSetupPipeline;
   stampWorkspace?: typeof stampWorkspace;
-  stampWorkspaceInteractive?: typeof stampWorkspaceInteractive;
   renderPipelinesGrid?: typeof renderPipelinesGrid;
   shouldUseGrid?: typeof shouldUseGrid;
 }>;
@@ -107,6 +105,12 @@ type WorkspaceInput = CreateInput &
     source: Exclude<ResolvedSource, { kind: "repository" }>;
   }>;
 
+/**
+ * Single-repo change creation. Routes the one repo's setup through the same
+ * seam as workspaces — grid when interactive, inline drain otherwise — with
+ * initialization handed to a detached worker and metadata/finalization deferred
+ * to onBeforeCompletionPrompt so both surfaces finalize identically.
+ */
 async function createWorktree(
   input: WorktreeInput,
   options: CreateOptions,
@@ -117,86 +121,7 @@ async function createWorktree(
   const repoRootDir = path.dirname(targetDir);
   await fs.mkdir(repoRootDir, { recursive: true });
 
-  const context = { repo, changeName, branchName, targetDir, repoRootDir };
-  const useGrid =
-    options.interactive && (options.shouldUseGrid ?? shouldUseGrid)(1);
-  const setupFailures = useGrid
-    ? await createWorktreeWithGrid(context, options)
-    : await createWorktreeFallback(context, options);
-
-  log.success(`Change ready: ${targetDir}`);
-  await reportShellCdTarget(targetDir, {
-    writeShellCdPath: options.writeShellCdPath,
-  });
-
-  return { targetDir, setupFailures };
-}
-
-type WorktreeContext = Readonly<{
-  repo: RepositorySource;
-  changeName: string;
-  branchName: string;
-  targetDir: string;
-  repoRootDir: string;
-}>;
-
-/**
- * Console fallback used outside a grid-capable TTY: create the worktree, write
- * metadata with the real lockfile state, and hand initialization to a detached
- * worker. Identical to the long-standing single-repo behavior.
- */
-async function createWorktreeFallback(
-  { repo, changeName, branchName, targetDir, repoRootDir }: WorktreeContext,
-  options: CreateOptions,
-): Promise<readonly RepoSetupFailureSummary[]> {
-  await (options.createSingleWorktree ?? createSingleWorktree)({
-    repo,
-    branchName,
-    targetDir,
-  });
-  const { config } = await loadWorkspaceConfig();
-  const restoreResult = await restoreNodeModules({
-    repo,
-    repoDir: targetDir,
-    config: config.cache?.nodeModules,
-  });
-  if (restoreResult.status === "warning") {
-    log.warn(restoreResult.warning);
-  }
-  await writeWorktreeMetadata(repoRootDir, {
-    featureName: changeName,
-    branchName,
-    repos: [{ ...repo, hasLockfile: await hasLockfile(targetDir) }],
-  });
-  await (options.initializeWorktreeSetup ?? initializeWorktreeSetup)({
-    repoRootDir,
-    changeName,
-    repo,
-  });
-  await (options.startRepoInitialization ?? startRepoInitialization)({
-    scope: worktreeInitializationScope({ repoRootDir, changeName }),
-    repo,
-  });
-  return [];
-}
-
-/**
- * Render a single-repo change through the same split-pane grid + confetti
- * completion modal used for workspaces. The worktree is created live inside the
- * pipeline; metadata and initialization state are written up front so the
- * pipeline can record git progress against existing state. Initialization is
- * handed to a detached worker (backgroundInitialization), and the grid returns
- * once the worktree is ready and the user acknowledges the completion modal.
- */
-async function createWorktreeWithGrid(
-  { repo, changeName, branchName, targetDir, repoRootDir }: WorktreeContext,
-  options: CreateOptions,
-): Promise<readonly RepoSetupFailureSummary[]> {
-  const scope = worktreeInitializationScope({
-    repoRootDir,
-    changeName,
-  });
-
+  const scope = worktreeInitializationScope({ repoRootDir, changeName });
   await writeWorktreeMetadata(repoRootDir, {
     featureName: changeName,
     branchName,
@@ -208,20 +133,25 @@ async function createWorktreeWithGrid(
     repo,
   });
 
-  const pipeline = runScopedRepoSetupPipeline({
-    repo,
-    scope,
-    rootDir: repoRootDir,
-    repoDir: targetDir,
-    branchName,
-    isNewWorkspace: true,
-    monitorBackground: true,
-  });
-
   const setupFailures = new Map<string, RepoSetupFailureSummary>();
-  await (options.renderPipelinesGrid ?? renderPipelinesGrid)({
-    pipelines: new Map([[repo.name, pipeline]]),
+  await presentPipelines({
+    pipelines: new Map([
+      [
+        repo.name,
+        (options.runScopedRepoSetupPipeline ?? runScopedRepoSetupPipeline)({
+          repo,
+          scope,
+          rootDir: repoRootDir,
+          repoDir: targetDir,
+          branchName,
+          isNewWorkspace: true,
+          monitorBackground: options.interactive,
+        }),
+      ],
+    ]),
     repoNames: [repo.name],
+    interactive: options.interactive,
+    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     workspacePath: targetDir,
     getLogPath: (repoName) =>
       getRepoSetupLogPath({
@@ -241,13 +171,35 @@ async function createWorktreeWithGrid(
         }),
       );
     },
+    onBeforeCompletionPrompt: async (results) => {
+      await writeWorktreeMetadata(repoRootDir, {
+        featureName: changeName,
+        branchName,
+        repos: [
+          {
+            ...repo,
+            hasLockfile: results.get(repo.name)?.hasLockfile ?? false,
+          },
+        ],
+      });
+    },
     completeOnWorktreesReady: true,
     backgroundInitialization: true,
+    ...(options.renderPipelinesGrid
+      ? { renderPipelinesGrid: options.renderPipelinesGrid }
+      : {}),
+    ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
   });
 
   const failures = [...setupFailures.values()];
   printRepoSetupFailures(failures, options.onEvent);
-  return failures;
+
+  log.success(`Change ready: ${targetDir}`);
+  await reportShellCdTarget(targetDir, {
+    writeShellCdPath: options.writeShellCdPath,
+  });
+
+  return { targetDir, setupFailures: failures };
 }
 
 async function createWorkspace(
@@ -258,7 +210,10 @@ async function createWorkspace(
   const groupName =
     source.kind === "template" ? source.groupName : ADHOC_WORKSPACE_GROUP;
   const workspaceDir = getWorkspacePath(directories, groupName, changeName);
-  const stampOptions = {
+
+  // One path: stampWorkspace renders the grid when interactive and drains to
+  // events otherwise, deferring finalization identically either way.
+  const result = await (options.stampWorkspace ?? stampWorkspace)({
     featureName: changeName,
     branchName,
     workspaceDir,
@@ -271,49 +226,21 @@ async function createWorkspace(
             : {}),
         }
       : {}),
+    interactive: options.interactive,
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-  };
-
-  const useGrid =
-    options.interactive &&
-    (options.shouldUseGrid ?? shouldUseGrid)(source.repos.length);
-
-  let setupFailures: readonly RepoSetupFailureSummary[] = [];
-  if (useGrid) {
-    const result = await (
-      options.stampWorkspaceInteractive ?? stampWorkspaceInteractive
-    )({
-      ...stampOptions,
-      renderPipelinesGrid: options.renderPipelinesGrid ?? renderPipelinesGrid,
-    });
-    setupFailures = result.setupFailures;
-    printRepoSetupFailures(result.setupFailures);
-  } else {
-    await (options.stampWorkspace ?? stampWorkspace)(stampOptions);
-  }
+    ...(options.renderPipelinesGrid
+      ? { renderPipelinesGrid: options.renderPipelinesGrid }
+      : {}),
+    ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
+  });
+  printRepoSetupFailures(result.setupFailures);
 
   log.success(`Change ready: ${workspaceDir}`);
   await reportShellCdTarget(workspaceDir, {
     writeShellCdPath: options.writeShellCdPath,
   });
 
-  return { targetDir: workspaceDir, setupFailures };
-}
-
-async function hasLockfile(repoDir: string): Promise<boolean> {
-  return (
-    (await fileExists(path.join(repoDir, "pnpm-lock.yaml"))) ||
-    (await fileExists(path.join(repoDir, "pnpm-lock.yml")))
-  );
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
+  return { targetDir: workspaceDir, setupFailures: result.setupFailures };
 }
 
 /**

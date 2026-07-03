@@ -1,32 +1,21 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { hasAny, pathExists } from "@wf-plugin/core";
-import { getCacheDir, loadWorkspaceConfig } from "../config.ts";
-import { restoreNodeModules } from "../node-modules-cache.ts";
-import { resolveMirrorDir } from "../repositories.ts";
+import { getCacheDir } from "../config.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
-import {
-  type InitializerState,
-  runInitializersGenerator,
-} from "../services/initializers/index.ts";
 import { isShellAutoCdEnabled } from "../shell.ts";
 import { materializeTemplateAgentsMd } from "../templates/agents-md.ts";
-import {
-  applyTemplateGenerator,
-  copyTemplateFiles,
-  type HookState,
-} from "../templates/apply.ts";
+import { copyTemplateFiles } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
-import { renderPipelinesGrid } from "../ui/grid-consumer.ts";
-import { ensureDir } from "../utils/fs.ts";
 import {
-  resolveContainedPath,
-  validateResourceName,
-} from "../utils/path-safety.ts";
-import type { TaskState } from "../utils/task-generator.ts";
-import { runParallel } from "../utils/task-generator.ts";
+  presentPipelines,
+  renderPipelinesGrid,
+  shouldUseGrid,
+} from "../ui/grid-consumer.ts";
+import { ensureDir } from "../utils/fs.ts";
+import { resolveContainedPath } from "../utils/path-safety.ts";
 import {
   finalizeWorkspaceInitialization,
   initializeWorkspaceInitialization,
@@ -47,13 +36,8 @@ import {
 import {
   type RepoPipelineOptions,
   type RepoPipelineState,
-  repoPipelineGenerator,
+  repoPipeline,
 } from "./pipeline.ts";
-import {
-  cleanupWorkspaceWorktreesGenerator,
-  ensureMirrorRepoGenerator,
-  ensureWorkingCopyGenerator,
-} from "./repository.ts";
 import {
   getRepoSetupLogPath,
   readRepoSetupLogExcerpt,
@@ -72,8 +56,11 @@ export type StampWorkspaceOptions = {
   repos: readonly RepositorySource[];
   templateId?: string;
   templateVariant?: string;
+  /** Render the setup grid when the terminal supports it (default false). */
+  interactive?: boolean;
   onEvent?: ServiceEventSink;
   renderPipelinesGrid?: typeof renderPipelinesGrid;
+  shouldUseGrid?: typeof shouldUseGrid;
 };
 
 export type PreparedRepo = {
@@ -87,7 +74,11 @@ export type AddReposOptions = {
   repos: readonly RepositorySource[];
   branchName: string;
   disabledInitializers?: boolean | string[];
+  /** Render the setup grid when the terminal supports it (default false). */
+  interactive?: boolean;
   onEvent?: ServiceEventSink;
+  renderPipelinesGrid?: typeof renderPipelinesGrid;
+  shouldUseGrid?: typeof shouldUseGrid;
 };
 
 export type AddReposResult = {
@@ -113,289 +104,11 @@ export type StampWorkspaceResult = {
 };
 
 /**
- * State emitted by the workspace stamping generator.
- */
-export type WorkspaceState =
-  | { phase: "init"; message: string }
-  | { phase: "git"; repo: string; step: "mirror" | "cleanup" | "worktree" }
-  | { phase: "git-complete"; repo: string }
-  | { phase: "initializers-start"; repoCount: number }
-  | { phase: "initializer"; state: InitializerState }
-  | { phase: "initializers-complete" }
-  | { phase: "hooks-start"; templateId: string }
-  | { phase: "hook"; hookState: HookState }
-  | { phase: "hooks-complete" }
-  | { phase: "finalize"; message: string }
-  | {
-      phase: "complete";
-      workspaceDir: string;
-      repos: readonly RepositorySource[];
-    };
-
-// ============================================================================
-// Generator-based workspace stamping
-// ============================================================================
-
-/**
- * Generator-based workspace stamping that yields state updates.
- * This allows the UI to have full visibility into the progress of each step.
- */
-export async function* stampWorkspaceGenerator({
-  featureName,
-  description,
-  branchName,
-  workspaceDir,
-  repos,
-  templateId,
-  templateVariant,
-}: StampWorkspaceOptions): AsyncGenerator<WorkspaceState> {
-  validateResourceName(featureName, "Workspace name");
-  if (repos.length === 0) {
-    throw new Error(
-      "stampWorkspaceGenerator requires at least one repository.",
-    );
-  }
-
-  // Check if workspace directory already exists and has contents
-  if (await pathExists(workspaceDir)) {
-    const contents = await fs.readdir(workspaceDir);
-    if (contents.length > 0) {
-      throw new Error(
-        `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
-      );
-    }
-  }
-
-  yield { phase: "init", message: "Setting up cache directory" };
-  const cacheDir = await ensureCacheDir();
-  const effectiveBranchName = branchName ?? featureName;
-
-  // Track if workspace is new (skip cleanup if so - no stale worktrees possible)
-  const isNewWorkspace = !(await pathExists(workspaceDir));
-  await ensureDir(workspaceDir);
-
-  await writeInitialWorkspaceMetadata({
-    workspaceDir,
-    featureName,
-    branchName: effectiveBranchName,
-    repos,
-    ...(description !== undefined ? { description } : {}),
-    ...(templateId !== undefined ? { templateId } : {}),
-    ...(templateVariant !== undefined ? { templateVariant } : {}),
-  });
-
-  yield { phase: "init", message: `Preparing workspace for "${featureName}"` };
-
-  // Start template loading early (runs in parallel with git operations)
-  const templatePromise = templateId
-    ? loadTemplate(
-        formatTemplateIdentifier({
-          parent: templateId,
-          variant: templateVariant,
-        }),
-      )
-    : null;
-
-  // Phase A: Unified parallel git operations per repo
-  // Each repo runs: mirror → cleanup (if needed) → worktree → lockfile check
-  // This overlaps I/O better than sequential phases
-  const preparedRepos: PreparedRepo[] = [];
-
-  // Build repo info map
-  const repoInfo = new Map(
-    await Promise.all(
-      repos.map(async (repo) => {
-        const repoName = validateRepositoryComponent(
-          repo.name,
-          "Repository name",
-        );
-        return [
-          repoName,
-          {
-            repo: { ...repo, name: repoName },
-            mirrorDir: await resolveMirrorDir(repo, cacheDir),
-            targetDir: resolveContainedPath(workspaceDir, repoName),
-          },
-        ] as const;
-      }),
-    ),
-  );
-
-  // Combined generator for all git operations per repo
-  type GitOpState = TaskState & {
-    step: "mirror" | "cleanup" | "worktree";
-    hasLockfile?: boolean;
-  };
-
-  async function* repoGitOperationsGenerator(
-    repoName: string,
-  ): AsyncGenerator<GitOpState> {
-    const info = repoInfo.get(repoName);
-    if (!info) return;
-
-    // Step 1: Mirror (fetch or clone)
-    for await (const state of ensureMirrorRepoGenerator(
-      info.repo,
-      info.mirrorDir,
-    )) {
-      yield { ...state, step: "mirror" as const };
-    }
-
-    // Step 2: Cleanup (skip for new workspaces - no stale worktrees possible)
-    if (!isNewWorkspace) {
-      for await (const state of cleanupWorkspaceWorktreesGenerator(
-        info.mirrorDir,
-        workspaceDir,
-      )) {
-        yield { ...state, step: "cleanup" as const };
-      }
-    }
-
-    // Step 3: Worktree creation
-    for await (const state of ensureWorkingCopyGenerator(
-      info.repo,
-      info.mirrorDir,
-      info.targetDir,
-      effectiveBranchName,
-    )) {
-      yield { ...state, step: "worktree" as const };
-    }
-
-    // Step 4: Check for lockfile (done here to avoid sequential loop later)
-    const hasLockfile = await hasAny(info.targetDir, [
-      "pnpm-lock.yaml",
-      "pnpm-lock.yml",
-    ]);
-
-    // Yield final state with lockfile info
-    yield {
-      status: "completed" as const,
-      step: "worktree" as const,
-      hasLockfile,
-    };
-  }
-
-  // Run all repos in parallel
-  const gitTasks = new Map(
-    repos.map((repo) => [repo.name, repoGitOperationsGenerator(repo.name)]),
-  );
-
-  for await (const { id, state } of runParallel(gitTasks)) {
-    yield { phase: "git", repo: id, step: state.step };
-
-    // Collect prepared repo info when worktree completes
-    if (state.status === "completed" && state.hasLockfile !== undefined) {
-      const info = repoInfo.get(id);
-      if (info) {
-        preparedRepos.push({
-          repo: info.repo,
-          targetDir: info.targetDir,
-          hasLockfile: state.hasLockfile,
-        });
-        await updatePreparedWorkspaceRepoMetadata({
-          workspaceDir,
-          branchName: effectiveBranchName,
-          repo: info.repo,
-          hasLockfile: state.hasLockfile,
-        });
-      }
-    }
-  }
-
-  // Mark all repos as git-complete
-  for (const repo of repos) {
-    yield { phase: "git-complete", repo: repo.name };
-  }
-
-  // Await template (should be ready by now, was loading in parallel)
-  const template = templatePromise ? await templatePromise : null;
-
-  if (template && templateId) {
-    await copyTemplateFiles(template, workspaceDir);
-    await materializeTemplateAgentsMd(template, workspaceDir);
-  }
-
-  // Phase B: Run initializers (package managers, vercel link, turbo link, etc.)
-  const contexts = preparedRepos.map((r) => ({
-    repoDir: r.targetDir,
-    workspaceDir,
-    repo: r.repo,
-  }));
-
-  const { config } = await loadWorkspaceConfig();
-  for (const context of contexts) {
-    const restoreResult = await restoreNodeModules({
-      repo: context.repo,
-      repoDir: context.repoDir,
-      config: config.cache?.nodeModules,
-      ...(template?.config.disableInitializers !== undefined
-        ? { disabledInitializers: template.config.disableInitializers }
-        : {}),
-    });
-    if (restoreResult.status === "restored") {
-      yield {
-        phase: "init",
-        message: `Restored pooled node_modules for ${context.repo.name}`,
-      };
-    } else if (restoreResult.status === "warning") {
-      yield { phase: "init", message: restoreResult.warning };
-    }
-  }
-
-  yield { phase: "initializers-start", repoCount: contexts.length };
-
-  for await (const state of runInitializersGenerator({
-    contexts,
-    ...(template?.config.disableInitializers !== undefined
-      ? { disabledInitializers: template.config.disableInitializers }
-      : {}),
-  })) {
-    yield { phase: "initializer", state };
-  }
-
-  yield { phase: "initializers-complete" };
-
-  // Phase C: Run template hooks
-  if (template && templateId) {
-    if (template.config.hooks && template.config.hooks.length > 0) {
-      yield { phase: "hooks-start", templateId };
-
-      for await (const hookState of applyTemplateGenerator({
-        template,
-        workspaceDir,
-        repoDirs: preparedRepos.map((r) => r.repo.name),
-      })) {
-        yield { phase: "hook", hookState };
-      }
-
-      yield { phase: "hooks-complete" };
-    }
-  }
-
-  // Phase D: Finalize
-  yield { phase: "finalize", message: "Writing workspace metadata" };
-  await writeWorkspaceMetadata(workspaceDir, {
-    featureName,
-    branchName: effectiveBranchName,
-    repos: preparedRepos.map((r) => ({
-      name: r.repo.name,
-      remote: r.repo.remote,
-      hasLockfile: r.hasLockfile,
-    })),
-    ...(description && { description }),
-    ...(templateId && { templateId }),
-    ...(templateVariant && { templateVariant }),
-  });
-
-  yield { phase: "finalize", message: "Writing VS Code workspace file" };
-  await writeVSCodeWorkspaceFile(workspaceDir, repos);
-
-  yield { phase: "complete", workspaceDir, repos };
-}
-
-/**
- * Run the workspace stamping with simple console logging.
- * This is for non-TUI usage.
+ * Stamp a multi-repo workspace: prepare each repo's worktree in parallel and
+ * present progress through the shared seam — the grid when the terminal supports
+ * it, inline events otherwise. Finalization (VS Code workspace file, mark-
+ * initializing, finalize) is deferred to onBeforeCompletionPrompt so it runs at
+ * the same point whichever surface rendered — no eager/deferred asymmetry.
  */
 export async function stampWorkspace(
   options: StampWorkspaceOptions,
@@ -408,6 +121,7 @@ export async function stampWorkspace(
     repos,
     templateId,
     templateVariant,
+    interactive = false,
     onEvent,
   } = options;
   if (repos.length === 0) {
@@ -490,181 +204,17 @@ export async function stampWorkspace(
         branchName: effectiveBranchName,
         isNewWorkspace,
         beforeInitializers,
-        ...(template?.config.disableInitializers !== undefined
-          ? { disabledInitializers: template.config.disableInitializers }
-          : {}),
-        monitorBackground: false,
+        monitorBackground: interactive,
         templateBarrier,
       }),
     ]),
   );
 
-  for await (const { id, state } of runParallel(pipelines)) {
-    if (state.phase === "git") {
-      if (state.status === "running" && state.message) {
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "info",
-          message: `${id}: ${state.step} - ${state.message}`,
-        });
-      } else if (state.status === "completed") {
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "success",
-          message: `${id}: ${state.step} complete`,
-        });
-      }
-    } else if (state.phase === "worktree-ready") {
-      emitServiceEvent(onEvent, {
-        type: "message",
-        level: "success",
-        message: `${id}: worktree ready`,
-      });
-    } else if (state.phase === "failed") {
-      setupFailures.set(
-        id,
-        await createRepoSetupFailureSummary({
-          workspaceDir,
-          repoName: id,
-          error: state.error,
-          ...(state.step ? { step: state.step } : {}),
-        }),
-      );
-      emitServiceEvent(onEvent, {
-        type: "message",
-        level: "error",
-        message: `${id}: ${state.error.message}`,
-      });
-    }
-  }
-
-  await writeVSCodeWorkspaceFile(
-    workspaceDir,
-    repos.filter((repo) => prepared.has(repo.name)),
-    onEvent ? { onEvent } : {},
-  );
-  await markWorkspaceInitializing(workspaceDir);
-  await finalizeWorkspaceInitialization(workspaceDir);
-
-  emitServiceEvent(onEvent, {
-    type: "message",
-    level: "success",
-    message: "Workspace created.",
-  });
-
-  return {
-    setupFailures: [...setupFailures.values()],
-    workspaceDir,
-    nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
-  };
-}
-
-export async function stampWorkspaceInteractive(
-  options: StampWorkspaceOptions,
-): Promise<StampWorkspaceResult> {
-  const {
-    featureName,
-    description,
-    branchName,
-    workspaceDir,
-    repos,
-    templateId,
-    templateVariant,
-  } = options;
-  if (repos.length === 0) {
-    throw new Error(
-      "stampWorkspaceInteractive requires at least one repository.",
-    );
-  }
-  if (await pathExists(workspaceDir)) {
-    const contents = await fs.readdir(workspaceDir);
-    if (contents.length > 0) {
-      throw new Error(
-        `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
-      );
-    }
-  }
-
-  await ensureCacheDir();
-  const isNewWorkspace = !(await pathExists(workspaceDir));
-  await ensureDir(workspaceDir);
-  const effectiveBranchName = branchName ?? featureName;
-  const template = templateId
-    ? await loadTemplate(
-        formatTemplateIdentifier({
-          parent: templateId,
-          variant: templateVariant,
-        }),
-      )
-    : null;
-
-  await writeInitialWorkspaceMetadata({
-    workspaceDir,
-    featureName,
-    branchName: effectiveBranchName,
-    repos,
-    ...(description !== undefined ? { description } : {}),
-    ...(templateId !== undefined ? { templateId } : {}),
-    ...(templateVariant !== undefined ? { templateVariant } : {}),
-  });
-  await initializeWorkspaceInitialization({ workspaceDir, repos });
-
-  const prepared = new Map<
-    string,
-    { repo: RepositorySource; hasLockfile: boolean }
-  >();
-  const setupFailures = new Map<string, RepoSetupFailureSummary>();
-  const templateBarrier =
-    template !== null
-      ? createTemplateCopyBarrier({
-          repoCount: repos.length,
-          copyTemplateFiles: async () => {
-            await copyTemplateFiles(template, workspaceDir);
-            await materializeTemplateAgentsMd(template, workspaceDir);
-          },
-        })
-      : null;
-  const beforeInitializers = async ({
-    repo,
-    repoDir,
-  }: {
-    repo: RepositorySource;
-    repoDir: string;
-  }): Promise<void> => {
-    const hasLockfile = await hasAny(repoDir, [
-      "pnpm-lock.yaml",
-      "pnpm-lock.yml",
-    ]);
-    await updatePreparedWorkspaceRepoMetadata({
-      workspaceDir,
-      branchName: effectiveBranchName,
-      repo,
-      hasLockfile,
-    });
-    prepared.set(repo.name, { repo, hasLockfile });
-    await templateBarrier?.waitForTemplateFiles();
-  };
-  const pipelines = new Map(
-    repos.map((repo) => [
-      repo.name,
-      createBackgroundRepoSetupPipeline({
-        repo,
-        workspaceDir,
-        branchName: effectiveBranchName,
-        isNewWorkspace,
-        beforeInitializers,
-        ...(template?.config.disableInitializers !== undefined
-          ? { disabledInitializers: template.config.disableInitializers }
-          : {}),
-        monitorBackground: true,
-        templateBarrier,
-      }),
-    ]),
-  );
-
-  await (options.renderPipelinesGrid ?? renderPipelinesGrid)({
+  await presentPipelines({
     pipelines,
     repoNames: repos.map((repo) => repo.name),
+    interactive,
+    ...(onEvent ? { onEvent } : {}),
     workspacePath: workspaceDir,
     getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
     onFailure: async (repoName, state) => {
@@ -679,16 +229,31 @@ export async function stampWorkspaceInteractive(
       );
     },
     onBeforeCompletionPrompt: async () => {
+      // Deferred to the same point for grid and drain. Suppress service events
+      // while the grid owns the screen; the drain is free to emit them.
       await writeVSCodeWorkspaceFile(
         workspaceDir,
         repos.filter((repo) => prepared.has(repo.name)),
+        !interactive && onEvent ? { onEvent } : {},
       );
       await markWorkspaceInitializing(workspaceDir);
       await finalizeWorkspaceInitialization(workspaceDir);
     },
     completeOnWorktreesReady: true,
     backgroundInitialization: true,
+    ...(options.renderPipelinesGrid
+      ? { renderPipelinesGrid: options.renderPipelinesGrid }
+      : {}),
+    ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
   });
+
+  if (!interactive) {
+    emitServiceEvent(onEvent, {
+      type: "message",
+      level: "success",
+      message: "Workspace created.",
+    });
+  }
 
   return {
     setupFailures: [...setupFailures.values()],
@@ -703,7 +268,6 @@ async function* createBackgroundRepoSetupPipeline({
   branchName,
   isNewWorkspace,
   beforeInitializers,
-  disabledInitializers,
   monitorBackground,
   templateBarrier,
 }: {
@@ -712,7 +276,6 @@ async function* createBackgroundRepoSetupPipeline({
   branchName: string;
   isNewWorkspace: boolean;
   beforeInitializers: NonNullable<RepoPipelineOptions["beforeInitializers"]>;
-  disabledInitializers?: boolean | string[];
   monitorBackground: boolean;
   templateBarrier: TemplateCopyBarrier | null;
 }): AsyncGenerator<RepoPipelineState> {
@@ -724,7 +287,6 @@ async function* createBackgroundRepoSetupPipeline({
     branchName,
     isNewWorkspace,
     beforeInitializers,
-    ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     monitorBackground,
     onFailed: () => templateBarrier?.markRepoFailed(),
   });
@@ -741,7 +303,6 @@ export type ScopedRepoSetupPipelineOptions = {
   branchName: string;
   isNewWorkspace: boolean;
   beforeInitializers?: RepoPipelineOptions["beforeInitializers"];
-  disabledInitializers?: boolean | string[];
   /** When true, watch the detached initializer and keep yielding its state. */
   monitorBackground: boolean;
   /** Invoked the first time the foreground git pipeline reports a failure. */
@@ -765,20 +326,18 @@ export async function* runScopedRepoSetupPipeline({
   branchName,
   isNewWorkspace,
   beforeInitializers,
-  disabledInitializers,
   monitorBackground,
   onFailed,
 }: ScopedRepoSetupPipelineOptions): AsyncGenerator<RepoPipelineState> {
   let markedFailed = false;
   const foreground = withRepoSetupLog(
-    repoPipelineGenerator({
+    repoPipeline({
       repo,
       workspaceDir: rootDir,
       repoDir,
       branchName,
       isNewWorkspace,
       ...(beforeInitializers ? { beforeInitializers } : {}),
-      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
       skipInitializers: true,
     }),
     {
@@ -838,7 +397,10 @@ export async function addReposToWorkspace({
   repos,
   branchName,
   disabledInitializers,
+  interactive = false,
   onEvent,
+  renderPipelinesGrid: renderGrid = renderPipelinesGrid,
+  shouldUseGrid: useGrid = shouldUseGrid,
 }: AddReposOptions): Promise<AddReposResult> {
   if (repos.length === 0) {
     throw new Error("addReposToWorkspace requires at least one repository.");
@@ -883,7 +445,7 @@ export async function addReposToWorkspace({
     repos.map((repo) => [
       repo.name,
       withRepoSetupLog(
-        repoPipelineGenerator({
+        repoPipeline({
           repo,
           workspaceDir,
           branchName,
@@ -901,89 +463,26 @@ export async function addReposToWorkspace({
     ]),
   );
 
-  const completed = new Map<string, { hasLockfile: boolean }>();
   const failures = new Map<string, Error>();
+  const repoNames = repos.map((repo) => repo.name);
 
-  for await (const { id, state } of runParallel(pipelines)) {
-    switch (state.phase) {
-      case "git":
-        if (state.status === "running" && state.message) {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "info",
-            message: `${id}: ${state.step} - ${state.message}`,
-          });
-        } else if (state.status === "retrying" && state.message) {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "warning",
-            message: `${id}: ${state.step} - ${state.message}`,
-          });
-        } else if (state.status === "completed") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "success",
-            message: `${id}: ${state.step} complete`,
-          });
-        } else if (state.status === "failed") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "error",
-            message: `${id}: ${state.step} failed`,
-          });
-        }
-        break;
-
-      case "initializer":
-        if (state.status === "running" && state.message) {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "info",
-            message: `${id}: ${state.name} - ${state.message}`,
-          });
-        } else if (state.status === "retrying" && state.message) {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "warning",
-            message: `${id}: ${state.name} - ${state.message}`,
-          });
-        } else if (state.status === "completed") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "success",
-            message: `${id}: ${state.name} complete`,
-          });
-        } else if (state.status === "failed") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "error",
-            message: `${id}: ${state.name} failed`,
-          });
-        }
-        break;
-
-      case "complete":
-        completed.set(id, { hasLockfile: state.hasLockfile });
-        break;
-
-      case "failed":
-        failures.set(id, state.error);
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "error",
-          message: `${id}: ${state.error.message}`,
-        });
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "error",
-          message: `${id}: setup log saved to ${await getRepoSetupLogPath({
-            workspaceDir,
-            repoName: id,
-          })}`,
-        });
-        break;
-    }
-  }
+  // Interactive terminals get the same setup grid as `wf new`; everything else
+  // (non-TTY, CI, WORKFOREST_NO_TUI, small terminal) drains to inline events.
+  // Both surfaces return the completed repos and route failures through
+  // `onFailure`, so the result contract is identical regardless of which ran.
+  const completed = await presentPipelines({
+    pipelines,
+    repoNames,
+    interactive,
+    workspacePath: workspaceDir,
+    getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
+    onFailure: (repoName, state) => {
+      failures.set(repoName, state.error);
+    },
+    renderPipelinesGrid: renderGrid,
+    shouldUseGrid: useGrid,
+    ...(onEvent ? { onEvent } : {}),
+  });
 
   const addedRepos = repos.filter((repo) => completed.has(repo.name));
 

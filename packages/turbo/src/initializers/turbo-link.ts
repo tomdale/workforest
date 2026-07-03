@@ -1,7 +1,7 @@
 import {
   canRunForegroundTask,
   runForegroundTask,
-  runCommandGenerator,
+  spawnCommand,
   type InitializerContext,
   type InitializerDefinition,
   type TaskState,
@@ -145,7 +145,7 @@ async function* runCommandWithResult(
 ): AsyncGenerator<TaskState, CommandResult, undefined> {
   const task = options.foreground
     ? runForegroundTask(command, args, { cwd })
-    : runCommandGenerator(command, args, { cwd });
+    : spawnCommand(command, args, { cwd });
 
   for await (const state of task) {
     if (state.status === "completed") {

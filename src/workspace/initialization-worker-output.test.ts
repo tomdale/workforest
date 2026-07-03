@@ -26,7 +26,7 @@ const initializerControl = vi.hoisted(() => ({
 }));
 
 vi.mock("../services/initializers/index.ts", () => ({
-  runSingleRepoInitializersGenerator:
+  runSingleRepoInitializers:
     async function* (): AsyncGenerator<SingleRepoInitializerState> {
       yield {
         phase: "running",

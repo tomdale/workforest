@@ -1245,6 +1245,7 @@ async function runReviewWorkspace(
     const workspace = await ensureReviewWorkspace({
       target,
       reviewsRoot,
+      interactive: !json && isInteractive(),
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
 
@@ -1273,6 +1274,7 @@ async function runReviewCheckout(
     const metadata = await createReviewWorktree({
       target,
       reviewsRoot,
+      interactive: !json && isInteractive(),
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
 
@@ -1469,6 +1471,7 @@ async function runTaskStart(
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun,
       force,
+      interactive: !json && isInteractive(),
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
         : {}),
@@ -1553,6 +1556,7 @@ async function runRepositoryTaskStart({
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun,
       force,
+      interactive: !json && isInteractive(),
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
 

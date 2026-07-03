@@ -6,7 +6,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { refreshAndMaterializeTemplateAgentsMd } from "../templates/agents-md.ts";
-import { applyTemplateGenerator } from "../templates/apply.ts";
+import { applyTemplate } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
@@ -26,10 +26,7 @@ import {
   updateWorkspaceRepo,
   updateWorktreeRepo,
 } from "./metadata.ts";
-import {
-  type RepoPipelineState,
-  repoInitializationGenerator,
-} from "./pipeline.ts";
+import { type RepoPipelineState, repoInitialization } from "./pipeline.ts";
 import { getRepoSetupLogPath, withRepoSetupLog } from "./setup-logs.ts";
 
 const WORKSPACE_STATE_FILENAME = "workspace.json";
@@ -546,7 +543,7 @@ export async function runRepoInitializationWorker({
     }
 
     const pipeline = withRepoSetupLog(
-      repoInitializationGenerator({
+      repoInitialization({
         repo,
         workspaceDir: rootDir,
         repoDir,
@@ -726,7 +723,7 @@ export async function finalizeWorkspaceInitialization(
       await fs.rm(hookLogPath, { force: true });
 
       try {
-        for await (const hookState of applyTemplateGenerator({
+        for await (const hookState of applyTemplate({
           template,
           workspaceDir: getInitializationRootDir(scope),
           repoDirs: states

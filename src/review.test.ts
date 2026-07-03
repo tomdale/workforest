@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,13 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const {
   runGitMock,
   runCommandMock,
-  ensureMirrorRepoGeneratorMock,
-  runSingleRepoInitializersGeneratorMock,
+  ensureMirrorRepoMock,
+  runSingleRepoInitializersMock,
 } = vi.hoisted(() => ({
   runGitMock: vi.fn(),
   runCommandMock: vi.fn(),
-  ensureMirrorRepoGeneratorMock: vi.fn(),
-  runSingleRepoInitializersGeneratorMock: vi.fn(),
+  ensureMirrorRepoMock: vi.fn(),
+  runSingleRepoInitializersMock: vi.fn(),
 }));
 
 const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
@@ -35,10 +35,10 @@ async function importReviewWithMocks(): Promise<typeof import("./review.ts")> {
     runCommand: runCommandMock,
   }));
   vi.doMock("./workspace/repository.ts", () => ({
-    ensureMirrorRepoGenerator: ensureMirrorRepoGeneratorMock,
+    ensureMirrorRepo: ensureMirrorRepoMock,
   }));
   vi.doMock("./services/initializers/index.ts", () => ({
-    runSingleRepoInitializersGenerator: runSingleRepoInitializersGeneratorMock,
+    runSingleRepoInitializers: runSingleRepoInitializersMock,
   }));
 
   return import("./review.ts");
@@ -53,8 +53,8 @@ afterEach(async () => {
   vi.unmock("./services/initializers/index.ts");
   runGitMock.mockReset();
   runCommandMock.mockReset();
-  ensureMirrorRepoGeneratorMock.mockReset();
-  runSingleRepoInitializersGeneratorMock.mockReset();
+  ensureMirrorRepoMock.mockReset();
+  runSingleRepoInitializersMock.mockReset();
 
   if (ORIGINAL_CACHE_DIR === undefined) {
     delete process.env["WORKFOREST_CACHE_DIR"];
@@ -160,12 +160,10 @@ describe("review worktrees", () => {
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
-    ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersGeneratorMock.mockImplementation(
-      async function* () {
-        yield { phase: "complete" };
-      },
-    );
+    ensureMirrorRepoMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersMock.mockImplementation(async function* () {
+      yield { phase: "complete" };
+    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
@@ -184,9 +182,9 @@ describe("review worktrees", () => {
     const repoDir = path.join(workspaceDir, "omniagent");
     expect(runGitMock).toHaveBeenCalledWith(
       ["worktree", "add", "--detach", repoDir, "origin/main"],
-      { cwd: path.join(cacheDir, "omniagent.git") },
+      { cwd: path.join(cacheDir, "omniagent.git"), timeout: 120_000 },
     );
-    expect(runSingleRepoInitializersGeneratorMock).toHaveBeenCalledWith({
+    expect(runSingleRepoInitializersMock).toHaveBeenCalledWith({
       context: {
         repo: {
           name: "omniagent",
@@ -219,12 +217,10 @@ describe("review worktrees", () => {
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
-    ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersGeneratorMock.mockImplementation(
-      async function* () {
-        yield { phase: "complete" };
-      },
-    );
+    ensureMirrorRepoMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersMock.mockImplementation(async function* () {
+      yield { phase: "complete" };
+    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
@@ -252,29 +248,20 @@ describe("review worktrees", () => {
     const targetDir = path.join(reviewsRoot, "omniagent", "pr-123");
     expect(runGitMock).toHaveBeenCalledWith(
       ["worktree", "add", "--detach", targetDir, "origin/main"],
-      { cwd: path.join(cacheDir, "omniagent.git") },
+      { cwd: path.join(cacheDir, "omniagent.git"), timeout: 120_000 },
     );
     expect(runCommandMock).toHaveBeenCalledWith(
       "gh",
       ["pr", "checkout", "123"],
       expect.objectContaining({ cwd: targetDir }),
     );
-    const checkoutOptions = runCommandMock.mock.calls[0]?.[2];
-    checkoutOptions?.onStdout?.("checkout output\n");
-    checkoutOptions?.onStderr?.("checkout warning\n");
-    expect(events).toContainEqual({
-      type: "output",
-      stream: "stdout",
-      data: "checkout output\n",
-    });
-    expect(events).toContainEqual({
-      type: "output",
-      stream: "stderr",
-      data: "checkout warning\n",
-    });
+    // The setup now renders through the shared pipeline seam; gh's raw stdout is
+    // no longer streamed as separate service-output events (progress is a grid
+    // pane / inline "Checking out PR #123" line, and gh failures surface via the
+    // thrown error). The command must still never write directly to the tty.
     expect(stdoutWrite).not.toHaveBeenCalled();
     expect(stderrWrite).not.toHaveBeenCalled();
-    expect(runSingleRepoInitializersGeneratorMock).toHaveBeenCalledWith({
+    expect(runSingleRepoInitializersMock).toHaveBeenCalledWith({
       context: {
         repo: {
           name: "omniagent",
@@ -322,17 +309,26 @@ describe("review worktrees", () => {
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
-    ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersGeneratorMock.mockImplementation(
-      async function* () {
-        yield { phase: "complete" };
-      },
-    );
+    ensureMirrorRepoMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersMock.mockImplementation(async function* () {
+      yield { phase: "complete" };
+    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
       if (args[0] === "for-each-ref")
         return { stdout: "refs/remotes/origin/main\n", stderr: "" };
+      if (args[0] === "worktree" && args[1] === "add") {
+        // Mirror real `git worktree add`: materialize the checkout with a valid
+        // gitlink so the failure-cleanup removes it (a broken link would prune).
+        const dir = args[3] ?? "";
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          path.join(dir, ".git"),
+          `gitdir: ${path.join(cacheDir, "omniagent.git")}\n`,
+        );
+        return { stdout: "", stderr: "" };
+      }
       return { stdout: "", stderr: "" };
     });
     runCommandMock.mockRejectedValue(new Error("checkout failed"));
@@ -362,12 +358,10 @@ describe("review worktrees", () => {
     process.env["WORKFOREST_CACHE_DIR"] = cacheDir;
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
-    ensureMirrorRepoGeneratorMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersGeneratorMock.mockImplementation(
-      async function* () {
-        yield { phase: "complete" };
-      },
-    );
+    ensureMirrorRepoMock.mockImplementation(async function* () {});
+    runSingleRepoInitializersMock.mockImplementation(async function* () {
+      yield { phase: "complete" };
+    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref") {
         return { stdout: "refs/heads/main\n", stderr: "" };

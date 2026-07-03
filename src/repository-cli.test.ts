@@ -10,6 +10,7 @@ import { executeCli } from "./cli.ts";
 
 const execFileAsync = promisify(execFile);
 const originalCacheDir = process.env["WORKFOREST_CACHE_DIR"];
+const originalConfigDir = process.env["WORKFOREST_CONFIG_DIR"];
 const tempDirs: string[] = [];
 
 type CliResult = {
@@ -58,6 +59,24 @@ async function createBareRemote(): Promise<string> {
   return remoteDir;
 }
 
+/**
+ * Point WORKFOREST_CONFIG_DIR at a scratch config whose managed base is an empty
+ * temp dir, and return that base. The managed-directory guard is a pure path
+ * check, so the base need not exist on disk — tests build paths relative to it.
+ */
+async function createManagedConfig(): Promise<string> {
+  const base = await mkdtemp(path.join(os.tmpdir(), "workforest-managed-"));
+  tempDirs.push(base);
+  const configDir = await mkdtemp(path.join(os.tmpdir(), "workforest-config-"));
+  tempDirs.push(configDir);
+  await writeFile(
+    path.join(configDir, "config.json"),
+    JSON.stringify({ directory: { base } }),
+  );
+  process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+  return base;
+}
+
 async function runCommand(argv: readonly string[]): Promise<CliResult> {
   let stdout = "";
   let stderr = "";
@@ -96,6 +115,11 @@ afterEach(async () => {
     delete process.env["WORKFOREST_CACHE_DIR"];
   } else {
     process.env["WORKFOREST_CACHE_DIR"] = originalCacheDir;
+  }
+  if (originalConfigDir === undefined) {
+    delete process.env["WORKFOREST_CONFIG_DIR"];
+  } else {
+    process.env["WORKFOREST_CONFIG_DIR"] = originalConfigDir;
   }
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
@@ -318,5 +342,65 @@ describe("cache commands", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Cached repository not found: missing");
     expect(result.stderr).not.toContain("at requireRepository");
+  });
+});
+
+describe("cache worktree commands", () => {
+  it("refuses raw worktree ops inside managed directories", async () => {
+    const cacheDir = await createCache();
+    await createMirror(
+      cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const base = await createManagedConfig();
+    const inside = path.join(base, "Repos", "front", "fix-auth");
+
+    const result = await runCommand([
+      "cache",
+      "worktree",
+      "add",
+      "vercel/front",
+      inside,
+      "fix-auth",
+    ]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "Refusing to run a raw cache worktree op inside a managed Workforest directory",
+    );
+  });
+
+  it("allows raw worktree ops outside managed directories", async () => {
+    const cacheDir = await createCache();
+    await createMirror(
+      cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    await createManagedConfig();
+    const outsideRoot = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-worktree-outside-"),
+    );
+    tempDirs.push(outsideRoot);
+    const outside = path.join(outsideRoot, "checkout");
+
+    const result = await runCommand([
+      "cache",
+      "worktree",
+      "add",
+      "vercel/front",
+      outside,
+    ]);
+
+    // The guard permits the path (it is outside every managed directory). The op
+    // then reaches git, which fails only because this throwaway mirror has no
+    // commits to branch from — the point is that this is *not* the guard's
+    // refusal (which would exit 2 with the message asserted above).
+    expect(result.exitCode).not.toBe(2);
+    expect(result.stderr).not.toContain(
+      "Refusing to run a raw cache worktree op",
+    );
   });
 });

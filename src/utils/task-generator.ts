@@ -35,10 +35,10 @@ const RESUME_QUEUED_OUTPUT_BYTES = MAX_QUEUED_OUTPUT_BYTES / 2;
 const activeCommandChildren = new Set<ChildProcess>();
 
 /**
- * Generator that spawns a command and yields state updates as it runs.
+ * Spawns a command and yields state updates as it runs.
  * Yields output chunks as they arrive from stdout/stderr.
  */
-export async function* runCommandGenerator(
+export async function* spawnCommand(
   command: string,
   args: string[],
   options: RunCommandOptions = {},

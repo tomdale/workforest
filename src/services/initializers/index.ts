@@ -473,7 +473,7 @@ async function loadInitializer(
   return { registryEntry: entry, initializer: exported };
 }
 
-export async function* runInitializersGenerator({
+export async function* runInitializers({
   contexts,
   disabledInitializers,
 }: RunInitializersOptions): AsyncGenerator<InitializerState> {
@@ -485,7 +485,7 @@ export async function* runInitializersGenerator({
   for (const context of contexts) {
     tasks.set(
       context.repo.name,
-      runSingleRepoInitializersGenerator({
+      runSingleRepoInitializers({
         context,
         ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
       }),
@@ -515,7 +515,7 @@ export type RunSingleRepoInitializersOptions = {
   disabledInitializers?: boolean | string[];
 };
 
-export async function* runSingleRepoInitializersGenerator({
+export async function* runSingleRepoInitializers({
   context,
   disabledInitializers,
 }: RunSingleRepoInitializersOptions): AsyncGenerator<SingleRepoInitializerState> {

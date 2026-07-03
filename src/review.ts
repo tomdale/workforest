@@ -4,10 +4,17 @@ import { pathExists } from "@wf-plugin/core";
 import { getCacheDir } from "./config.ts";
 import { resolveMirrorDir } from "./repositories.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
-import { emitServiceEvent, type ServiceEventSink } from "./services/events.ts";
-import { createDefaultBranchResolver, runGit } from "./services/git.ts";
-import { runSingleRepoInitializersGenerator } from "./services/initializers/index.ts";
+import type { ServiceEventSink } from "./services/events.ts";
+import { runSingleRepoInitializers } from "./services/initializers/index.ts";
+import {
+  addWorktree,
+  deleteBranchIfPossible,
+  getCurrentBranch,
+  isGitDirty,
+  removeWorktree,
+} from "./services/worktree.ts";
 import type { RepositorySource } from "./types.ts";
+import { presentPipelines } from "./ui/grid-consumer.ts";
 import { runCommand } from "./utils/exec.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
@@ -18,7 +25,12 @@ import {
   upsertReviewWorktree,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
-import { ensureMirrorRepoGenerator } from "./workspace/repository.ts";
+import {
+  mapInitializerStateToPipelineState,
+  mapTaskStateToPipelineState,
+  type RepoPipelineState,
+} from "./workspace/pipeline.ts";
+import { ensureMirrorRepo } from "./workspace/repository.ts";
 
 export type ReviewTarget = {
   owner: string;
@@ -41,12 +53,16 @@ export type ReviewListEntry = ReviewMetadata & {
 export type CreateReviewWorktreeOptions = {
   target: ReviewTarget;
   reviewsRoot: string;
+  /** Render the setup grid when the terminal supports it (default false). */
+  interactive?: boolean;
   onEvent?: ServiceEventSink;
 };
 
 export type EnsureReviewWorkspaceOptions = {
   target: ReviewRepoTarget;
   reviewsRoot: string;
+  /** Render the setup grid when the terminal supports it (default false). */
+  interactive?: boolean;
   onEvent?: ServiceEventSink;
 };
 
@@ -118,66 +134,69 @@ export function parseReviewRepoTarget(
 export async function createReviewWorktree({
   target,
   reviewsRoot,
+  interactive = false,
   onEvent,
 }: CreateReviewWorktreeOptions): Promise<ReviewMetadata> {
   validateReviewTarget(target);
   const repo = targetToRepoConfig(target);
-  const cacheDir = getCacheDir();
-  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
-  const workspace = await ensureReviewWorkspace({
-    target: { owner: target.owner, repo: target.repo },
-    reviewsRoot,
-    ...(onEvent ? { onEvent } : {}),
-  });
-  const repoReviewsDir = workspace.path;
+  const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
+  const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
+  const baseRepoDir = resolveContainedPath(workspaceDir, target.repo);
   const targetDir = getReviewWorktreePath(reviewsRoot, target);
 
+  await ensureDir(workspaceDir);
   if (await pathExists(targetDir)) {
     throw new Error(`Review worktree already exists: ${targetDir}`);
   }
 
-  const defaultBranch =
-    await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
-      mirrorDir,
-    );
-  await runGit(
-    ["worktree", "add", "--detach", targetDir, `origin/${defaultBranch}`],
-    {
-      cwd: mirrorDir,
-    },
-  );
+  // The whole checkout (base repo prep + PR worktree + `gh pr checkout` + repo
+  // setup) renders as one grid pane, or drains to inline events when not
+  // interactive. Metadata is written after setup succeeds.
+  let metadata: ReviewMetadata | undefined;
+  let failure: Error | undefined;
+  const pipelines = new Map([
+    [
+      repo.name,
+      reviewCheckoutSetupPipeline(
+        { target, repo, mirrorDir, workspaceDir, baseRepoDir, targetDir },
+        {
+          recordMetadata: (value) => {
+            metadata = value;
+          },
+          recordFailure: (error) => {
+            failure = error;
+          },
+        },
+      ),
+    ],
+  ]);
 
-  try {
-    await runCommand("gh", ["pr", "checkout", String(target.prNumber)], {
-      cwd: targetDir,
-      onStdout: (data) =>
-        emitServiceEvent(onEvent, { type: "output", stream: "stdout", data }),
-      onStderr: (data) =>
-        emitServiceEvent(onEvent, { type: "output", stream: "stderr", data }),
-    });
-  } catch (error) {
-    await cleanupFailedReviewWorktree(mirrorDir, targetDir);
-    throw error;
-  }
-
-  await runReviewInitializers({
-    repo,
-    repoDir: targetDir,
-    workspaceDir: repoReviewsDir,
+  await presentPipelines({
+    pipelines,
+    repoNames: [repo.name],
+    interactive,
     ...(onEvent ? { onEvent } : {}),
   });
 
-  const branch = await getCurrentBranch(targetDir);
-  const metadata: ReviewMetadata = {
-    ...target,
-    path: targetDir,
-    ...(branch ? { branch } : {}),
-    created_at: new Date().toISOString(),
-  };
-  await upsertReviewWorktree(repoReviewsDir, {
+  if (failure) {
+    await cleanupFailedReviewWorktree(mirrorDir, targetDir);
+    throw failure;
+  }
+  if (!metadata) {
+    throw new Error(
+      `Review checkout for ${target.repo}#${target.prNumber} did not complete.`,
+    );
+  }
+
+  await reconcileReviewWorkspaceMetadata(
+    workspaceDir,
+    { owner: target.owner, repo: target.repo },
+    repo,
+  );
+  await upsertReviewWorktree(workspaceDir, {
     pr_number: target.prNumber,
-    path: path.relative(repoReviewsDir, targetDir),
-    ...(branch ? { branch } : {}),
+    path: path.relative(workspaceDir, targetDir),
+    ...(metadata.branch ? { branch: metadata.branch } : {}),
     created_at: metadata.created_at,
   });
 
@@ -187,59 +206,75 @@ export async function createReviewWorktree({
 export async function ensureReviewWorkspace({
   target,
   reviewsRoot,
+  interactive = false,
   onEvent,
 }: EnsureReviewWorkspaceOptions): Promise<ReviewWorkspace> {
   validateReviewRepoTarget(target);
   const repo = targetToRepoConfig(target);
-  const cacheDir = getCacheDir();
-  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
+  const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
   const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
   const repoDir = resolveContainedPath(workspaceDir, target.repo);
 
   await ensureDir(workspaceDir);
 
-  for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
-    if (state.status === "log") {
-      emitServiceEvent(onEvent, {
-        type: "message",
-        level: state.level === "warn" ? "warning" : state.level,
-        message: state.message,
-      });
-    }
-  }
+  let failure: Error | undefined;
+  const pipelines = new Map([
+    [
+      repo.name,
+      reviewWorkspaceSetupPipeline(
+        { repo, mirrorDir, repoDir, workspaceDir },
+        {
+          recordFailure: (error) => {
+            failure = error;
+          },
+        },
+      ),
+    ],
+  ]);
+  await presentPipelines({
+    pipelines,
+    repoNames: [repo.name],
+    interactive,
+    ...(onEvent ? { onEvent } : {}),
+  });
+  if (failure) throw failure;
 
-  if (!(await pathExists(repoDir))) {
-    const defaultBranch =
-      await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
-        mirrorDir,
-      );
-    await runGit(
-      ["worktree", "add", "--detach", repoDir, `origin/${defaultBranch}`],
-      { cwd: mirrorDir },
-    );
+  await reconcileReviewWorkspaceMetadata(workspaceDir, target, repo);
 
-    await runReviewInitializers({
-      repo,
-      repoDir,
-      workspaceDir,
-      ...(onEvent ? { onEvent } : {}),
-    });
-  }
-
-  const existingMetadata = await readWorkspaceMetadata(workspaceDir);
-  const repoMetadata = {
-    name: repo.name,
-    remote: repo.remote,
-    hasLockfile: false,
+  return {
+    ...target,
+    path: workspaceDir,
+    repoDir,
   };
+}
+
+/**
+ * Write (or repair) the review workspace's `workspace.json` so it is typed as a
+ * review with the correct repo. Idempotent — a no-op when already consistent.
+ */
+async function reconcileReviewWorkspaceMetadata(
+  workspaceDir: string,
+  target: ReviewRepoTarget,
+  repo: RepositorySource,
+): Promise<void> {
+  const existingMetadata = await readWorkspaceMetadata(workspaceDir);
   if (!existingMetadata) {
     await writeWorkspaceMetadata(workspaceDir, {
       featureName: target.repo,
       type: "review",
       review: target,
-      repos: [repoMetadata],
+      repos: [
+        {
+          name: repo.name,
+          remote: repo.remote,
+          hasLockfile: false,
+        },
+      ],
     });
-  } else if (
+    return;
+  }
+
+  if (
     existingMetadata.workspace.type !== "review" ||
     existingMetadata.workspace.review?.owner !== target.owner ||
     existingMetadata.workspace.review?.repo !== target.repo ||
@@ -262,75 +297,167 @@ export async function ensureReviewWorkspace({
       ],
     });
   }
-
-  return {
-    ...target,
-    path: workspaceDir,
-    repoDir,
-  };
 }
 
-async function runReviewInitializers({
+/**
+ * Mirror → base detached checkout → repo setup, emitting {@link RepoPipelineState}
+ * so `wf review` renders the same grid as every other creation command. Shared by
+ * `open` (base workspace) and `checkout` (before the PR worktree).
+ */
+async function* reviewBaseSetupSteps({
+  repo,
+  mirrorDir,
+  repoDir,
+  workspaceDir,
+}: {
+  repo: RepositorySource;
+  mirrorDir: string;
+  repoDir: string;
+  workspaceDir: string;
+}): AsyncGenerator<RepoPipelineState> {
+  for await (const state of ensureMirrorRepo(repo, mirrorDir)) {
+    if (state.status === "failed") throw state.error;
+    const mapped = mapTaskStateToPipelineState(state, "mirror");
+    if (mapped) yield mapped;
+  }
+
+  if (!(await pathExists(repoDir))) {
+    for await (const state of addWorktree({
+      gitDir: mirrorDir,
+      targetDir: repoDir,
+      base: { defaultBranchOf: mirrorDir, fallback: "main" },
+      branch: { kind: "detach" },
+      onExistingDir: "reuse",
+    })) {
+      const mapped = mapTaskStateToPipelineState(state, "worktree");
+      if (mapped) yield mapped;
+    }
+
+    yield* reviewInitializerPipeline({ repo, repoDir, workspaceDir });
+  }
+}
+
+/** Repo setup initializers as pipeline states. Throws on a fatal initializer. */
+async function* reviewInitializerPipeline({
   repo,
   repoDir,
   workspaceDir,
-  onEvent,
 }: {
   repo: RepositorySource;
   repoDir: string;
   workspaceDir: string;
-  onEvent?: ServiceEventSink;
-}): Promise<void> {
-  for await (const state of runSingleRepoInitializersGenerator({
+}): AsyncGenerator<RepoPipelineState> {
+  for await (const state of runSingleRepoInitializers({
     context: { repo, repoDir, workspaceDir },
   })) {
-    switch (state.phase) {
-      case "detecting":
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "info",
-          message: "Detecting repo setup",
-        });
-        break;
-      case "running":
-        if (state.state.status === "log") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: state.state.level === "warn" ? "warning" : state.state.level,
-            message: state.state.message,
-          });
-        } else if (state.state.status === "running" && state.state.message) {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "info",
-            message: `${state.initializerName}: ${state.state.message}`,
-          });
-        } else if (state.state.status === "output") {
-          emitServiceEvent(onEvent, {
-            type: "output",
-            stream: "stdout",
-            data: state.state.data,
-          });
-        } else if (state.state.status === "skipped") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "info",
-            message: `${state.initializerName}: ${state.state.reason}`,
-          });
-        } else if (state.state.status === "failed") {
-          throw state.state.error;
-        }
-        break;
-      case "skipped":
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "info",
-          message: `${state.initializerId}: ${state.reason}`,
-        });
-        break;
-      case "complete":
-        break;
+    if (state.phase === "running" && state.state.status === "failed") {
+      throw state.state.error;
     }
+    const mapped = mapInitializerStateToPipelineState(state);
+    if (mapped) yield mapped;
+  }
+}
+
+/** `wf review open`: base workspace setup as a single grid pane. */
+async function* reviewWorkspaceSetupPipeline(
+  args: {
+    repo: RepositorySource;
+    mirrorDir: string;
+    repoDir: string;
+    workspaceDir: string;
+  },
+  { recordFailure }: { recordFailure: (error: Error) => void },
+): AsyncGenerator<RepoPipelineState> {
+  try {
+    yield* reviewBaseSetupSteps(args);
+    yield { phase: "complete", hasLockfile: false };
+  } catch (error) {
+    const normalized =
+      error instanceof Error ? error : new Error(String(error));
+    recordFailure(normalized);
+    yield { phase: "failed", error: normalized };
+  }
+}
+
+/**
+ * `wf review checkout`: base workspace prep (if needed) → PR worktree →
+ * `gh pr checkout` → repo setup, as one grid pane. Records the review metadata
+ * on success; the caller writes workspace/PR metadata and tears down on failure.
+ */
+async function* reviewCheckoutSetupPipeline(
+  {
+    target,
+    repo,
+    mirrorDir,
+    workspaceDir,
+    baseRepoDir,
+    targetDir,
+  }: {
+    target: ReviewTarget;
+    repo: RepositorySource;
+    mirrorDir: string;
+    workspaceDir: string;
+    baseRepoDir: string;
+    targetDir: string;
+  },
+  {
+    recordMetadata,
+    recordFailure,
+  }: {
+    recordMetadata: (metadata: ReviewMetadata) => void;
+    recordFailure: (error: Error) => void;
+  },
+): AsyncGenerator<RepoPipelineState> {
+  try {
+    yield* reviewBaseSetupSteps({
+      repo,
+      mirrorDir,
+      repoDir: baseRepoDir,
+      workspaceDir,
+    });
+
+    // Detached checkout of the trunk; `gh pr checkout` immediately moves it to
+    // the PR head (possibly a fork branch), which the shared primitive can't
+    // express.
+    for await (const state of addWorktree({
+      gitDir: mirrorDir,
+      targetDir,
+      base: { defaultBranchOf: mirrorDir, fallback: "main" },
+      branch: { kind: "detach" },
+    })) {
+      const mapped = mapTaskStateToPipelineState(state, "worktree");
+      if (mapped) yield mapped;
+    }
+
+    yield {
+      phase: "git",
+      step: "worktree",
+      status: "running",
+      message: `Checking out PR #${target.prNumber}`,
+    };
+    await runCommand("gh", ["pr", "checkout", String(target.prNumber)], {
+      cwd: targetDir,
+    });
+
+    yield* reviewInitializerPipeline({
+      repo,
+      repoDir: targetDir,
+      workspaceDir,
+    });
+
+    const branch = await getCurrentBranch(targetDir);
+    recordMetadata({
+      ...target,
+      path: targetDir,
+      ...(branch ? { branch } : {}),
+      created_at: new Date().toISOString(),
+    });
+    yield { phase: "complete", hasLockfile: false };
+  } catch (error) {
+    const normalized =
+      error instanceof Error ? error : new Error(String(error));
+    recordFailure(normalized);
+    yield { phase: "failed", error: normalized };
   }
 }
 
@@ -414,10 +541,14 @@ export async function removeReviewWorktree({
       );
     }
 
-    const removeArgs = ["worktree", "remove"];
-    if (force) removeArgs.push("--force");
-    removeArgs.push(targetDir);
-    await runGit(removeArgs, { cwd: mirrorDir, timeout: 30_000 });
+    for await (const _state of removeWorktree({
+      gitDir: mirrorDir,
+      worktreePath: targetDir,
+      force,
+      timeoutMs: 30_000,
+    })) {
+      // Drained; review worktree removal does not surface per-step progress.
+    }
   }
 
   if (branch) {
@@ -587,20 +718,17 @@ async function cleanupFailedReviewWorktree(
   targetDir: string,
 ): Promise<void> {
   try {
-    await runGit(["worktree", "remove", "--force", targetDir], {
-      cwd: mirrorDir,
-      timeout: 30_000,
-    });
+    for await (const _state of removeWorktree({
+      gitDir: mirrorDir,
+      worktreePath: targetDir,
+      force: true,
+      timeoutMs: 30_000,
+    })) {
+      // Drained; the original gh failure is preserved on error.
+    }
   } catch {
     // Preserve the original gh failure.
   }
-}
-
-async function getCurrentBranch(repoDir: string): Promise<string | undefined> {
-  const { stdout } = await runGit(["branch", "--show-current"], {
-    cwd: repoDir,
-  });
-  return stdout.trim() || undefined;
 }
 
 async function getCurrentBranchIfExists(
@@ -611,23 +739,6 @@ async function getCurrentBranchIfExists(
     return await getCurrentBranch(repoDir);
   } catch {
     return undefined;
-  }
-}
-
-async function isGitDirty(repoDir: string): Promise<boolean> {
-  const { stdout } = await runGit(["status", "--porcelain"], { cwd: repoDir });
-  return stdout.trim().length > 0;
-}
-
-async function deleteBranchIfPossible(
-  repoDir: string,
-  branch: string,
-  force: boolean,
-): Promise<void> {
-  try {
-    await runGit(["branch", force ? "-D" : "-d", branch], { cwd: repoDir });
-  } catch {
-    // The local branch may already be gone, or git may keep an unmerged branch.
   }
 }
 

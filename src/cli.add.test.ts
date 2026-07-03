@@ -108,6 +108,7 @@ describe("wf add", () => {
         },
       ],
       branchName: "tomdale/billing",
+      interactive: false,
     });
     expect(fixture.cdTargets).toEqual([comparableWorkspaceDir]);
   });
@@ -180,6 +181,7 @@ describe("wf add", () => {
         },
       ],
       branchName: "billing",
+      interactive: false,
     });
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
       workspace: {
@@ -250,6 +252,7 @@ describe("wf add", () => {
         },
       ],
       branchName: "billing",
+      interactive: false,
     });
   });
 

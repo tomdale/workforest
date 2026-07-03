@@ -398,7 +398,9 @@ wf cache doctor vercel/front --fix
 
 For basic Git worktree operations against an existing mirror, use the fixed
 worktree commands. They do not sync a missing mirror or apply Workforest setup,
-metadata, branch, or lifecycle rules; all registered Git worktrees are in scope:
+metadata, branch, or lifecycle rules, and they refuse a path inside a managed
+Workforest directory — use `wf new`, `wf add`, or `wf delete` for managed
+worktrees:
 
 ```sh
 wf cache worktree add vercel/front ~/Code/front-fix-auth tomdale/fix-auth
@@ -408,10 +410,11 @@ wf cache worktree move vercel/front ~/Code/front-fix-auth ~/Code/front-auth-fix
 wf cache worktree remove vercel/front ~/Code/front-auth-fix
 ```
 
-These commands accept no native Git flags. `add` creates a new branch from the
-mirror's current `HEAD`; omit the branch to let Git derive it from the
-destination directory name. `move` and `remove` retain Git's standard safety
-checks. Workforest's `--json` envelope is intentionally unavailable.
+These commands accept no native Git flags. `add` branches from the mirror's
+default branch (`origin/<default>`); with an explicit branch it creates that
+branch, and omitting the branch checks out a detached HEAD at `origin/<default>`.
+`move` and `remove` retain Git's standard safety checks. Workforest's `--json`
+envelope is intentionally unavailable.
 
 Preview unused mirror cleanup before deleting anything:
 

@@ -15,7 +15,7 @@ import {
   readWorkspaceMetadata,
   removeWorktreeMetadata,
 } from "./metadata.ts";
-import { cleanupWorkspaceWorktreesGenerator } from "./repository.ts";
+import { cleanupWorkspaceWorktrees } from "./repository.ts";
 
 /**
  * State emitted by the workspace cleanup generator.
@@ -259,7 +259,7 @@ export async function previewCleanup(
 /**
  * Generator-based workspace cleanup that yields state updates.
  */
-export async function* cleanupWorkspaceGenerator(
+export async function* streamWorkspaceCleanup(
   workspaceDir: string,
   options: CleanupOptions = {},
 ): AsyncGenerator<CleanupState> {
@@ -470,7 +470,7 @@ export async function* cleanupWorkspaceGenerator(
       let cleaned = false;
 
       try {
-        for await (const state of cleanupWorkspaceWorktreesGenerator(
+        for await (const state of cleanupWorkspaceWorktrees(
           mirrorDir,
           resolvedDir,
         )) {
@@ -568,7 +568,7 @@ export async function cleanupWorkspace(
 ): Promise<CleanupResult> {
   let result: CleanupResult | undefined;
 
-  for await (const state of cleanupWorkspaceGenerator(workspaceDir, options)) {
+  for await (const state of streamWorkspaceCleanup(workspaceDir, options)) {
     await onState?.(state);
     if (state.phase === "complete") {
       result = {
@@ -641,7 +641,7 @@ export async function cleanupWorktree({
       }
       let cleaned = false;
       try {
-        for await (const state of cleanupWorkspaceWorktreesGenerator(
+        for await (const state of cleanupWorkspaceWorktrees(
           mirrorDir,
           resolvedChangePath,
         )) {

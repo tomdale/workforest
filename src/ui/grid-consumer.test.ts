@@ -47,6 +47,7 @@ vi.mock("@unblessed/node", () => {
 
 import { Box, Screen, ScrollableBox } from "@unblessed/node";
 import stringWidth from "string-width";
+import type { ServiceEvent } from "../services/events.ts";
 import {
   createFullscreenKeypress,
   type FullscreenKeypress,
@@ -54,7 +55,9 @@ import {
 } from "../terminal/fullscreen-surface.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
 import {
+  drainPipelinesToConsole,
   getCompletionModalContent,
+  presentPipelines,
   renderPipelinesGrid,
   shouldUseGrid,
 } from "./grid-consumer.ts";
@@ -770,5 +773,121 @@ describe("completion modal content layout", () => {
         expect(visibleWidth(line)).toBeLessThanOrEqual(contentWidth);
       }
     }
+  });
+});
+
+// ─── drainPipelinesToConsole ────────────────────────────────────────────────
+
+describe("drainPipelinesToConsole", () => {
+  function collectMessages(): {
+    onEvent: (event: ServiceEvent) => void;
+    messages: { level: string; message: string }[];
+  } {
+    const messages: { level: string; message: string }[] = [];
+    return {
+      messages,
+      onEvent: (event) => {
+        if (event.type === "message") {
+          messages.push({ level: event.level, message: event.message });
+        }
+      },
+    };
+  }
+
+  it("records completed repos, announces readiness once, and surfaces failures with a log path", async () => {
+    const { onEvent, messages } = collectMessages();
+    const onFailure = vi.fn();
+
+    const okPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "running",
+        message: "Creating worktree",
+      };
+      yield { phase: "git", step: "worktree", status: "completed" };
+      // A repo can settle via worktree-ready then complete; readiness must be
+      // announced exactly once across both.
+      yield { phase: "worktree-ready", hasLockfile: true };
+      yield { phase: "complete", hasLockfile: true };
+    };
+    const failPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield {
+        phase: "failed",
+        step: "git:worktree",
+        error: new Error("boom"),
+      };
+    };
+
+    const completed = await drainPipelinesToConsole(
+      new Map([
+        ["ok", okPipeline()],
+        ["bad", failPipeline()],
+      ]),
+      {
+        onEvent,
+        onFailure,
+        getLogPath: async (repoName) => `/logs/${repoName}.log`,
+      },
+    );
+
+    expect(completed.get("ok")).toEqual({ hasLockfile: true });
+    expect(completed.has("bad")).toBe(false);
+
+    expect(messages.filter((m) => m.message === "ok: ready")).toHaveLength(1);
+    expect(messages).toContainEqual({
+      level: "info",
+      message: "ok: worktree - Creating worktree",
+    });
+    expect(messages).toContainEqual({
+      level: "success",
+      message: "ok: worktree complete",
+    });
+
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(messages).toContainEqual({ level: "error", message: "bad: boom" });
+    expect(messages).toContainEqual({
+      level: "error",
+      message: "bad: setup log saved to /logs/bad.log",
+    });
+  });
+});
+
+// ─── presentPipelines ───────────────────────────────────────────────────────
+
+describe("presentPipelines", () => {
+  it("renders the grid when interactive and the terminal supports it", async () => {
+    const renderGrid = vi.fn(
+      async () => new Map([["repo", { hasLockfile: true }]]),
+    ) as unknown as typeof renderPipelinesGrid;
+
+    const result = await presentPipelines({
+      pipelines: new Map(),
+      repoNames: ["repo"],
+      interactive: true,
+      shouldUseGrid: () => true,
+      renderPipelinesGrid: renderGrid,
+    });
+
+    expect(renderGrid).toHaveBeenCalledTimes(1);
+    expect(result.get("repo")).toEqual({ hasLockfile: true });
+  });
+
+  it("drains to console events when not interactive, even on a grid-capable terminal", async () => {
+    const renderGrid = vi.fn() as unknown as typeof renderPipelinesGrid;
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "complete", hasLockfile: false };
+    };
+
+    const result = await presentPipelines({
+      pipelines: new Map([["repo", pipeline()]]),
+      repoNames: ["repo"],
+      interactive: false,
+      shouldUseGrid: () => true,
+      renderPipelinesGrid: renderGrid,
+    });
+
+    expect(renderGrid).not.toHaveBeenCalled();
+    expect(result.get("repo")).toEqual({ hasLockfile: false });
   });
 });

@@ -6,10 +6,10 @@ export type RetryOptions = {
 };
 
 /**
- * Wraps a promise-returning function as a generator.
- * This is useful when you need to pass a simple async operation to withRetryGenerator.
+ * Wraps a promise-returning function as a single-step task generator, so a
+ * simple async operation can be passed to withRetry.
  */
-export function asGenerator<T>(
+export function asTask<T>(
   fn: () => Promise<T>,
 ): () => AsyncGenerator<TaskState, T, undefined> {
   return async function* () {
@@ -19,10 +19,10 @@ export function asGenerator<T>(
 }
 
 /**
- * Generator-based retry that yields log messages for retry warnings.
+ * Retries a task generator, yielding log messages on each retry warning.
  * Forwards all states from the task generator.
  */
-export async function* withRetryGenerator<T>(
+export async function* withRetry<T>(
   taskGen: () => AsyncGenerator<TaskState, T, undefined>,
   { attempts, label }: RetryOptions,
 ): AsyncGenerator<TaskState, T, undefined> {

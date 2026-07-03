@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   canRunForegroundTaskMock,
-  runCommandGeneratorMock,
+  spawnCommandMock,
   runForegroundTaskMock,
 } = vi.hoisted(() => ({
   canRunForegroundTaskMock: vi.fn(() => true),
-  runCommandGeneratorMock: vi.fn(),
+  spawnCommandMock: vi.fn(),
   runForegroundTaskMock: vi.fn(),
 }));
 
@@ -18,7 +18,7 @@ vi.mock("@wf-plugin/core", async () => {
   return {
     ...actual,
     canRunForegroundTask: canRunForegroundTaskMock,
-    runCommandGenerator: runCommandGeneratorMock,
+    spawnCommand: spawnCommandMock,
     runForegroundTask: runForegroundTaskMock,
   };
 });
@@ -56,7 +56,7 @@ beforeEach(() => {
 
 describe("turboLinkInitializer.execute", () => {
   it("runs turbo link with an inferred Vercel scope", async () => {
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         yield {
           status: "running" as const,
@@ -68,7 +68,7 @@ describe("turboLinkInitializer.execute", () => {
 
     const states = await collectStates(turboLinkInitializer.execute(context, {}));
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "turbo",
       ["link", "--yes", "--scope", "vercel"],
       { cwd: context.repoDir },
@@ -97,11 +97,11 @@ describe("turboLinkInitializer.execute", () => {
           'No Vercel team mapping configured for GitHub owner "SomeOwner".',
       },
     ]);
-    expect(runCommandGeneratorMock).not.toHaveBeenCalled();
+    expect(spawnCommandMock).not.toHaveBeenCalled();
   });
 
   it("infers the Vercel scope from a valid GitHub owner", async () => {
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         yield { status: "completed" as const };
       })(),
@@ -120,7 +120,7 @@ describe("turboLinkInitializer.execute", () => {
       ),
     );
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "turbo",
       ["link", "--yes", "--scope", "some-owner"],
       { cwd: context.repoDir },
@@ -128,7 +128,7 @@ describe("turboLinkInitializer.execute", () => {
   });
 
   it("uses repo-specific team overrides", async () => {
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         yield { status: "completed" as const };
       })(),
@@ -154,7 +154,7 @@ describe("turboLinkInitializer.execute", () => {
       ),
     );
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "turbo",
       ["link", "--yes", "--scope", "custom-team"],
       { cwd: context.repoDir },
@@ -163,7 +163,7 @@ describe("turboLinkInitializer.execute", () => {
 
   it("launches turbo login and retries when turbo link reports no user", async () => {
     let linkAttempts = 0;
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         linkAttempts += 1;
         yield {
@@ -188,7 +188,7 @@ describe("turboLinkInitializer.execute", () => {
     expect(runForegroundTaskMock).toHaveBeenCalledWith("turbo", ["login"], {
       cwd: context.repoDir,
     });
-    expect(runCommandGeneratorMock).toHaveBeenCalledTimes(2);
+    expect(spawnCommandMock).toHaveBeenCalledTimes(2);
     expect(states).toContainEqual({
       status: "retrying",
       reason: "Turbo link after Turborepo login",
@@ -199,7 +199,7 @@ describe("turboLinkInitializer.execute", () => {
 
   it("launches turbo login and retries when turbo link reports invalid auth", async () => {
     let linkAttempts = 0;
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         linkAttempts += 1;
         if (linkAttempts === 1) {
@@ -225,7 +225,7 @@ describe("turboLinkInitializer.execute", () => {
 
   it("skips auth-dependent link when running in the background", async () => {
     canRunForegroundTaskMock.mockReturnValue(false);
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         yield {
           status: "failed" as const,
@@ -249,7 +249,7 @@ describe("turboLinkInitializer.execute", () => {
   });
 
   it("preserves non-auth link failures", async () => {
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         yield {
           status: "failed" as const,

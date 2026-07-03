@@ -4,8 +4,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskState } from "@wf-plugin/core";
 
-const { runCommandGeneratorMock } = vi.hoisted(() => ({
-  runCommandGeneratorMock: vi.fn(),
+const { spawnCommandMock } = vi.hoisted(() => ({
+  spawnCommandMock: vi.fn(),
 }));
 
 vi.mock("@wf-plugin/core", async () => {
@@ -14,7 +14,7 @@ vi.mock("@wf-plugin/core", async () => {
 
   return {
     ...actual,
-    runCommandGenerator: runCommandGeneratorMock,
+    spawnCommand: spawnCommandMock,
   };
 });
 
@@ -58,7 +58,7 @@ describe("pnpmInstallInitializer", () => {
     const repoDir = await createRepoDir();
     const verboseOutput = "installing dependency\n".repeat(20_000);
 
-    runCommandGeneratorMock
+    spawnCommandMock
       .mockImplementationOnce(() =>
         taskStates([
           { status: "running", message: "pnpm install --frozen-lockfile" },
@@ -94,8 +94,8 @@ describe("pnpmInstallInitializer", () => {
       ),
     );
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledTimes(2);
-    expect(runCommandGeneratorMock.mock.calls[1]).toMatchObject([
+    expect(spawnCommandMock).toHaveBeenCalledTimes(2);
+    expect(spawnCommandMock.mock.calls[1]).toMatchObject([
       "pnpm",
       ["install"],
       { cwd: repoDir },
@@ -114,7 +114,7 @@ describe("pnpmInstallInitializer", () => {
     const repoDir = await createRepoDir();
     await mkdir(path.join(repoDir, "node_modules"));
 
-    runCommandGeneratorMock
+    spawnCommandMock
       .mockImplementationOnce(() =>
         taskStates([
           {

@@ -15,13 +15,10 @@ import { saveWorkspaceConfig } from "./config.ts";
 import { createTemplate, createTemplateVariant } from "./templates/index.ts";
 import { buildCreateInput } from "./workspace/create.ts";
 import {
-  type RepoInitializationState,
-  readRepoInitializationState,
-} from "./workspace/initialization.ts";
-import {
   readWorktreeMetadata,
   writeWorkspaceMetadata,
 } from "./workspace/metadata.ts";
+import type { RepoPipelineState } from "./workspace/pipeline.ts";
 
 const execFileAsync = promisify(execFile);
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
@@ -29,11 +26,8 @@ const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const ORIGINAL_XDG_CONFIG_HOME = process.env["XDG_CONFIG_HOME"];
 const ORIGINAL_CWD = process.cwd();
 const tempDirs: string[] = [];
-type CreateSingleWorktree = NonNullable<
-  RunNewCommandOptions["createSingleWorktree"]
->;
-type StartRepoInitialization = NonNullable<
-  RunNewCommandOptions["startRepoInitialization"]
+type RunScopedRepoSetupPipeline = NonNullable<
+  RunNewCommandOptions["runScopedRepoSetupPipeline"]
 >;
 type StampWorkspace = NonNullable<RunNewCommandOptions["stampWorkspace"]>;
 type RenderPipelinesGrid = NonNullable<
@@ -87,77 +81,44 @@ describe("parseNewOperands", () => {
 });
 
 describe("wf new", () => {
-  it("routes a single repository source to the repository change layout", async () => {
+  it("routes a single repository source through the repo setup pipeline", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
       fixture.cacheDir,
       "front.git",
       "git@github.com:vercel/front.git",
     );
-    const created = fakeCreateSingleWorktree();
-    const events: string[] = [];
-    created.mockImplementation(async (options) => {
-      events.push("create");
-      return {
-        repo: options.repo,
-        branchName: options.branchName,
-        targetDir: options.targetDir,
-      };
-    });
-    const started = vi.fn(
-      async (
-        options: Parameters<StartRepoInitialization>[0],
-      ): Promise<RepoInitializationState> => {
-        events.push("start");
-        const state = await readRepoInitializationState(
-          options.scope ?? "",
-          options.repo.name,
-        );
-        expect(state).toMatchObject({
-          repo: "front",
-          status: "pending",
-          attempt: 0,
-        });
-        if (!state) throw new Error("Expected initialization state");
-        return state;
-      },
-    );
+    const pipeline = fakeRepoSetupPipeline();
 
     await runNewCommand(invocation(["redesign-cli", "front"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
-      createSingleWorktree: created,
-      startRepoInitialization: started,
+      runScopedRepoSetupPipeline: pipeline,
     });
 
-    expect(events).toEqual(["create", "start"]);
-    expect(created).toHaveBeenCalledWith({
-      repo: {
-        name: "front",
-        remote: "git@github.com:vercel/front.git",
-      },
-      branchName: "tomdale/redesign-cli",
-      targetDir: path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
-    });
-    expect(started).toHaveBeenCalledWith({
-      scope: {
-        kind: "worktree",
-        repoRootDir: path.join(fixture.baseDir, "Repos", "front"),
-        changeName: "redesign-cli",
-      },
-      repo: {
-        name: "front",
-        remote: "git@github.com:vercel/front.git",
-      },
-    });
-    expect(fixture.cdTargets).toEqual([
-      path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
-    ]);
+    const repoRootDir = path.join(fixture.baseDir, "Repos", "front");
+    const targetDir = path.join(repoRootDir, "redesign-cli");
+    expect(pipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+        },
+        branchName: "tomdale/redesign-cli",
+        rootDir: repoRootDir,
+        repoDir: targetDir,
+        scope: {
+          kind: "worktree",
+          repoRootDir,
+          changeName: "redesign-cli",
+        },
+        isNewWorkspace: true,
+        monitorBackground: false,
+      }),
+    );
+    expect(fixture.cdTargets).toEqual([targetDir]);
     await expect(
-      readWorktreeMetadata(
-        path.join(fixture.baseDir, "Repos", "front"),
-        "redesign-cli",
-      ),
+      readWorktreeMetadata(repoRootDir, "redesign-cli"),
     ).resolves.toMatchObject({
       workspace: {
         feature_name: "redesign-cli",
@@ -180,7 +141,7 @@ describe("wf new", () => {
       "front.git",
       "git@github.com:vercel/front.git",
     );
-    const created = fakeCreateSingleWorktree();
+    const pipeline = fakeRepoSetupPipeline();
     const renderPipelinesGrid = vi.fn<RenderPipelinesGrid>(
       async () => new Map([["front", { hasLockfile: false }]]),
     );
@@ -188,15 +149,14 @@ describe("wf new", () => {
     await runNewCommand(invocation(["redesign-cli", "front"]), {
       interactive: true,
       writeShellCdPath: fixture.writeShellCdPath,
-      createSingleWorktree: created,
+      runScopedRepoSetupPipeline: pipeline,
       initializeWorktreeSetup: vi.fn(async () => undefined),
       shouldUseGrid: () => true,
       renderPipelinesGrid,
     });
 
-    // The grid renders the worktree pipeline itself, so the console-fallback
-    // single-worktree helper must not run.
-    expect(created).not.toHaveBeenCalled();
+    // Single-repo creation renders the worktree pipeline through the same grid
+    // seam as multi-repo, deferring finalization into onBeforeCompletionPrompt.
     expect(renderPipelinesGrid).toHaveBeenCalledTimes(1);
     const gridOptions = renderPipelinesGrid.mock.calls[0]?.[0];
     expect(gridOptions?.repoNames).toEqual(["front"]);
@@ -204,6 +164,11 @@ describe("wf new", () => {
     expect(gridOptions?.pipelines.has("front")).toBe(true);
     expect(gridOptions?.completeOnWorktreesReady).toBe(true);
     expect(gridOptions?.backgroundInitialization).toBe(true);
+    expect(typeof gridOptions?.onBeforeCompletionPrompt).toBe("function");
+    // The interactive grid watches the detached initializer itself.
+    expect(pipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ monitorBackground: true }),
+    );
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
     ]);
@@ -258,26 +223,27 @@ describe("wf new", () => {
       "front.git",
       "git@github.com:vercel/front.git",
     );
-    const created = fakeCreateSingleWorktree();
+    const pipeline = fakeRepoSetupPipeline();
 
     await runNewCommand(
       invocation(["fix-auth", "front"], { branch: "tomdale/custom" }),
       {
         interactive: false,
         writeShellCdPath: fixture.writeShellCdPath,
-        createSingleWorktree: created,
-        startRepoInitialization: fakeStartRepoInitialization(),
+        runScopedRepoSetupPipeline: pipeline,
       },
     );
 
-    expect(created).toHaveBeenCalledWith({
-      repo: {
-        name: "front",
-        remote: "git@github.com:vercel/front.git",
-      },
-      branchName: "tomdale/custom",
-      targetDir: path.join(fixture.baseDir, "Repos", "front", "fix-auth"),
-    });
+    expect(pipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+        },
+        branchName: "tomdale/custom",
+        repoDir: path.join(fixture.baseDir, "Repos", "front", "fix-auth"),
+      }),
+    );
     await expect(
       readWorktreeMetadata(
         path.join(fixture.baseDir, "Repos", "front"),
@@ -306,23 +272,24 @@ describe("wf new", () => {
     const repoRoot = path.join(fixture.baseDir, "Repos", "front");
     await mkdir(repoRoot, { recursive: true });
     process.chdir(repoRoot);
-    const created = fakeCreateSingleWorktree();
+    const pipeline = fakeRepoSetupPipeline();
 
     await runNewCommand(invocation(["follow-up"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
-      createSingleWorktree: created,
-      startRepoInitialization: fakeStartRepoInitialization(),
+      runScopedRepoSetupPipeline: pipeline,
     });
 
-    expect(created).toHaveBeenCalledWith({
-      repo: {
-        name: "front",
-        remote: "git@github.com:vercel/front.git",
-      },
-      branchName: "tomdale/follow-up",
-      targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
-    });
+    expect(pipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+        },
+        branchName: "tomdale/follow-up",
+        repoDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
+      }),
+    );
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Repos", "front", "follow-up"),
     ]);
@@ -348,6 +315,7 @@ describe("wf new", () => {
     });
 
     expect(stamped).toHaveBeenCalledWith({
+      interactive: false,
       featureName: "auth-fix",
       branchName: "agent/auth-fix",
       workspaceDir: path.join(
@@ -392,6 +360,7 @@ describe("wf new", () => {
     });
 
     expect(stamped).toHaveBeenCalledWith({
+      interactive: false,
       featureName: "auth-fix",
       branchName: "chat/auth-fix",
       workspaceDir: path.join(
@@ -434,6 +403,7 @@ describe("wf new", () => {
     );
 
     expect(stamped).toHaveBeenCalledWith({
+      interactive: false,
       featureName: "auth-fix",
       branchName: "tomdale/custom",
       workspaceDir: path.join(
@@ -473,6 +443,7 @@ describe("wf new", () => {
     });
 
     expect(stamped).toHaveBeenCalledWith({
+      interactive: false,
       featureName: "billing",
       branchName: "tomdale/billing",
       workspaceDir: path.join(
@@ -518,6 +489,7 @@ describe("wf new", () => {
     );
 
     expect(stamped).toHaveBeenCalledWith({
+      interactive: false,
       featureName: "billing",
       branchName: "tomdale/custom",
       workspaceDir: path.join(
@@ -555,19 +527,18 @@ describe("wf new", () => {
     );
     await mkdir(currentDir, { recursive: true });
     process.chdir(currentDir);
-    const created = fakeCreateSingleWorktree();
+    const pipeline = fakeRepoSetupPipeline();
 
     await runNewCommand(invocation(["follow-up"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
-      createSingleWorktree: created,
-      startRepoInitialization: fakeStartRepoInitialization(),
+      runScopedRepoSetupPipeline: pipeline,
     });
 
-    expect(created).toHaveBeenCalledWith(
+    expect(pipeline).toHaveBeenCalledWith(
       expect.objectContaining({
         branchName: "tomdale/follow-up",
-        targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
+        repoDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
       }),
     );
   });
@@ -582,35 +553,30 @@ describe("wf new", () => {
     const currentDir = path.join(fixture.baseDir, "Repos", "front");
     await mkdir(currentDir, { recursive: true });
     process.chdir(currentDir);
-    const created = fakeCreateSingleWorktree();
-    const started = fakeStartRepoInitialization();
+    const pipeline = fakeRepoSetupPipeline();
 
     await runNewCommand(invocation(["follow-up"]), {
       interactive: false,
       writeShellCdPath: fixture.writeShellCdPath,
-      createSingleWorktree: created,
-      startRepoInitialization: started,
+      runScopedRepoSetupPipeline: pipeline,
     });
 
-    expect(created).toHaveBeenCalledWith({
-      repo: {
-        name: "front",
-        remote: "git@github.com:vercel/front.git",
-      },
-      branchName: "tomdale/follow-up",
-      targetDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
-    });
-    expect(started).toHaveBeenCalledWith({
-      scope: {
-        kind: "worktree",
-        repoRootDir: currentDir,
-        changeName: "follow-up",
-      },
-      repo: {
-        name: "front",
-        remote: "git@github.com:vercel/front.git",
-      },
-    });
+    expect(pipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: {
+          name: "front",
+          remote: "git@github.com:vercel/front.git",
+        },
+        branchName: "tomdale/follow-up",
+        rootDir: currentDir,
+        repoDir: path.join(fixture.baseDir, "Repos", "front", "follow-up"),
+        scope: {
+          kind: "worktree",
+          repoRootDir: currentDir,
+          changeName: "follow-up",
+        },
+      }),
+    );
   });
 
   it("reuses the recorded repo set from the current _adhoc workspace", async () => {
@@ -641,6 +607,7 @@ describe("wf new", () => {
     });
 
     expect(stamped).toHaveBeenCalledWith({
+      interactive: false,
       featureName: "follow-up",
       branchName: "tomdale/follow-up",
       workspaceDir: path.join(
@@ -890,26 +857,22 @@ function metadataRepo(
   return { name, remote, hasLockfile: false };
 }
 
-function fakeCreateSingleWorktree() {
-  return vi.fn(async (options: Parameters<CreateSingleWorktree>[0]) => ({
-    repo: options.repo,
-    branchName: options.branchName,
-    targetDir: options.targetDir,
-  }));
+async function* repoSetupPipelineStates(
+  hasLockfile: boolean,
+): AsyncGenerator<RepoPipelineState> {
+  yield { phase: "worktree-ready", hasLockfile };
+  yield { phase: "complete", hasLockfile };
 }
 
-function fakeStartRepoInitialization() {
-  return vi.fn(
-    async (
-      options: Parameters<StartRepoInitialization>[0],
-    ): Promise<RepoInitializationState> => {
-      const state = await readRepoInitializationState(
-        options.scope ?? "",
-        options.repo.name,
-      );
-      if (!state) throw new Error("Expected initialization state");
-      return state;
-    },
+/**
+ * A stand-in for the single-repo setup pipeline that single-repo `wf new` routes
+ * through the shared {@link presentPipelines} seam. It records the options it was
+ * called with (so tests can assert repo/branch/scope/target wiring) and yields the
+ * worktree-ready + complete states the drain records to finalize metadata.
+ */
+function fakeRepoSetupPipeline(hasLockfile = false) {
+  return vi.fn((_options: Parameters<RunScopedRepoSetupPipeline>[0]) =>
+    repoSetupPipelineStates(hasLockfile),
   );
 }
 

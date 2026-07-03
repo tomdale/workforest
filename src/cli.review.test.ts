@@ -280,6 +280,7 @@ describe("wf review", () => {
     expect(ensureReviewWorkspaceMock).toHaveBeenCalledWith({
       reviewsRoot,
       target: { owner: "vercel", repo: "omniagent" },
+      interactive: false,
     });
     expect(createReviewWorktreeMock).not.toHaveBeenCalled();
   });

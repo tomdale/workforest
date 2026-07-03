@@ -4,8 +4,8 @@ import path from "node:path";
 import type { TaskState } from "@wf-plugin/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runCommandGeneratorMock } = vi.hoisted(() => ({
-  runCommandGeneratorMock: vi.fn(),
+const { spawnCommandMock } = vi.hoisted(() => ({
+  spawnCommandMock: vi.fn(),
 }));
 
 vi.mock("@wf-plugin/core", async () => {
@@ -14,14 +14,11 @@ vi.mock("@wf-plugin/core", async () => {
 
   return {
     ...actual,
-    runCommandGenerator: runCommandGeneratorMock,
+    spawnCommand: spawnCommandMock,
   };
 });
 
-import {
-  builtInInitializerIds,
-  runSingleRepoInitializersGenerator,
-} from "./index.ts";
+import { builtInInitializerIds, runSingleRepoInitializers } from "./index.ts";
 
 const tempDirs: string[] = [];
 
@@ -54,7 +51,7 @@ async function* taskStates(states: TaskState[]): AsyncGenerator<TaskState> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  runCommandGeneratorMock.mockImplementation(
+  spawnCommandMock.mockImplementation(
     (command: string, _args: string[], options: { cwd?: string }) =>
       (async function* () {
         if (command === "vercel" && options.cwd) {
@@ -92,7 +89,7 @@ describe("initializer runner", () => {
 
     await expect(
       collectStates(
-        runSingleRepoInitializersGenerator({
+        runSingleRepoInitializers({
           context: {
             repoDir,
             workspaceDir: path.dirname(repoDir),
@@ -111,7 +108,7 @@ describe("initializer runner", () => {
   it("supports disabling specific initializer ids", async () => {
     const repoDir = await createRepoDir({ "vercel.json": "{}\n" });
     const states = await collectStates(
-      runSingleRepoInitializersGenerator({
+      runSingleRepoInitializers({
         context: {
           repoDir,
           workspaceDir: path.dirname(repoDir),
@@ -126,7 +123,7 @@ describe("initializer runner", () => {
     );
 
     expect(states).toEqual([{ phase: "detecting" }, { phase: "complete" }]);
-    expect(runCommandGeneratorMock).not.toHaveBeenCalled();
+    expect(spawnCommandMock).not.toHaveBeenCalled();
   });
 
   it("keeps package-manager detection mutually exclusive", async () => {
@@ -135,12 +132,12 @@ describe("initializer runner", () => {
       "yarn.lock": "",
       "package-lock.json": "{}\n",
     });
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       taskStates([{ status: "completed" }]),
     );
 
     const states = await collectStates(
-      runSingleRepoInitializersGenerator({
+      runSingleRepoInitializers({
         context: {
           repoDir,
           workspaceDir: path.dirname(repoDir),
@@ -167,7 +164,7 @@ describe("initializer runner", () => {
     });
 
     const states = await collectStates(
-      runSingleRepoInitializersGenerator({
+      runSingleRepoInitializers({
         context: {
           repoDir,
           workspaceDir: path.dirname(repoDir),

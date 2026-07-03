@@ -174,7 +174,7 @@ async function readCheckedOutBranchRefs(
  * Clone a repository while yielding progress messages.
  * Tries GitHub CLI first, then falls back to git clone.
  */
-export async function* cloneRepositoryGenerator(
+export async function* cloneRepository(
   remote: string,
   targetDir: string,
   gitArgs: string[] = [],
@@ -217,7 +217,7 @@ export async function* cloneRepositoryGenerator(
  * This fixes the issue where git clone --bare creates local branches instead of remote-tracking refs.
  * Uses batched git update-ref --stdin for efficiency (single git call instead of 2N calls).
  */
-export async function* fixBareRepoRefsGenerator(
+export async function* fixBareRepoRefs(
   cwd: string,
 ): AsyncGenerator<TaskState, void, undefined> {
   // Get all refs in refs/heads/ with their SHA

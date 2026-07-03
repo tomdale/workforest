@@ -10,10 +10,7 @@ vi.mock("../utils/exec.ts", () => ({
   runCommandWithStdin: runCommandWithStdinMock,
 }));
 
-import {
-  createDefaultBranchResolver,
-  fixBareRepoRefsGenerator,
-} from "./git.ts";
+import { createDefaultBranchResolver, fixBareRepoRefs } from "./git.ts";
 
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const states: T[] = [];
@@ -27,7 +24,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("fixBareRepoRefsGenerator", () => {
+describe("fixBareRepoRefs", () => {
   it("updates remote refs without deleting a branch checked out by a linked worktree", async () => {
     runCommandMock
       .mockResolvedValueOnce({
@@ -52,9 +49,7 @@ describe("fixBareRepoRefsGenerator", () => {
       });
     runCommandWithStdinMock.mockResolvedValueOnce({ stdout: "", stderr: "" });
 
-    const states = await collectStates(
-      fixBareRepoRefsGenerator("/tmp/cache/front.git"),
-    );
+    const states = await collectStates(fixBareRepoRefs("/tmp/cache/front.git"));
 
     expect(states).toEqual([
       {

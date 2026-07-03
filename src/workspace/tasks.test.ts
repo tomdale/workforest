@@ -15,19 +15,17 @@ import {
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 
-const { runGitMock, runSingleRepoInitializersGeneratorMock } = vi.hoisted(
-  () => ({
-    runGitMock: vi.fn(),
-    runSingleRepoInitializersGeneratorMock: vi.fn(),
-  }),
-);
+const { runGitMock, runSingleRepoInitializersMock } = vi.hoisted(() => ({
+  runGitMock: vi.fn(),
+  runSingleRepoInitializersMock: vi.fn(),
+}));
 
 vi.mock("../services/git.ts", () => ({
   runGit: runGitMock,
 }));
 
 vi.mock("../services/initializers/index.ts", () => ({
-  runSingleRepoInitializersGenerator: runSingleRepoInitializersGeneratorMock,
+  runSingleRepoInitializers: runSingleRepoInitializersMock,
 }));
 
 const tempDirs: string[] = [];
@@ -51,10 +49,45 @@ async function createWorkspaceDir(): Promise<string> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  runSingleRepoInitializersGeneratorMock.mockImplementation(async function* () {
+  // Reset the git mock's implementation (not just its call log) so a routing
+  // impl from one test never leaks into a test that relies on a clean queue.
+  runGitMock.mockReset();
+  runSingleRepoInitializersMock.mockImplementation(async function* () {
     yield { phase: "complete" };
   });
 });
+
+/**
+ * Route the git mock for a task-creation flow. Task worktrees branch from the
+ * parent checkout's HEAD; the shared primitive additionally probes the parent
+ * branch (`show-ref`) and the git common dir (for the lock), so a routing mock
+ * is more robust than a positional `mockResolvedValueOnce` chain.
+ */
+function mockCreateTaskGit(
+  currentBranch: string,
+  { sha = "abc123", dirty = false }: { sha?: string; dirty?: boolean } = {},
+): void {
+  runGitMock.mockImplementation(async (args: string[]) => {
+    const [cmd] = args;
+    if (cmd === "branch" && args.includes("--show-current")) {
+      return { stdout: `${currentBranch}\n`, stderr: "" };
+    }
+    if (cmd === "rev-parse" && args.includes("--git-common-dir")) {
+      return { stdout: "", stderr: "" };
+    }
+    if (cmd === "rev-parse") {
+      return { stdout: `${sha}\n`, stderr: "" };
+    }
+    if (cmd === "status") {
+      return { stdout: dirty ? " M file.ts\n" : "", stderr: "" };
+    }
+    if (cmd === "show-ref") {
+      // Branch does not yet exist — the task branch is new.
+      throw new Error("missing branch");
+    }
+    return { stdout: "", stderr: "" };
+  });
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -67,12 +100,7 @@ describe("workspace tasks", () => {
     const workspaceDir = await createWorkspaceDir();
     const { createTasks } = await import("./tasks.ts");
 
-    runGitMock
-      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockRejectedValueOnce(new Error("missing branch"))
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+    mockCreateTaskGit("tomdale/my-feature");
 
     const result = await createTasks({
       workspaceDir,
@@ -102,7 +130,7 @@ describe("workspace tasks", () => {
         path.join(workspaceDir, "_tasks", "front", "fix-tests"),
         "HEAD",
       ],
-      { cwd: path.join(workspaceDir, "front") },
+      { cwd: path.join(workspaceDir, "front"), timeout: 120_000 },
     );
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
       tasks: [
@@ -123,12 +151,7 @@ describe("workspace tasks", () => {
     const workspaceDir = await createWorkspaceDir();
     const { createTasks } = await import("./tasks.ts");
 
-    runGitMock
-      .mockResolvedValueOnce({ stdout: "h/ai-alerts-follow-up\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockRejectedValueOnce(new Error("missing branch"))
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+    mockCreateTaskGit("h/ai-alerts-follow-up");
 
     const result = await createTasks({
       workspaceDir,
@@ -154,7 +177,7 @@ describe("workspace tasks", () => {
         path.join(workspaceDir, "_tasks", "front", "optional-corepack"),
         "HEAD",
       ],
-      { cwd: path.join(workspaceDir, "front") },
+      { cwd: path.join(workspaceDir, "front"), timeout: 120_000 },
     );
   });
 
@@ -240,22 +263,15 @@ describe("workspace tasks", () => {
     const workspaceDir = await createWorkspaceDir();
     const { createTasks } = await import("./tasks.ts");
 
-    runSingleRepoInitializersGeneratorMock.mockImplementation(
-      async function* () {
-        yield {
-          phase: "running",
-          initializerId: "pnpm-install",
-          initializerName: "pnpm install",
-          state: { status: "failed", error: new Error("install failed") },
-        };
-      },
-    );
-    runGitMock
-      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockRejectedValueOnce(new Error("missing branch"))
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+    runSingleRepoInitializersMock.mockImplementation(async function* () {
+      yield {
+        phase: "running",
+        initializerId: "pnpm-install",
+        initializerName: "pnpm install",
+        state: { status: "failed", error: new Error("install failed") },
+      };
+    });
+    mockCreateTaskGit("tomdale/my-feature");
 
     const result = await createTasks({
       workspaceDir,
@@ -291,6 +307,12 @@ describe("workspace tasks", () => {
     const workspaceDir = await createWorkspaceDir();
     const targetDir = path.join(workspaceDir, "_tasks", "front", "fix-tests");
     await mkdir(targetDir, { recursive: true });
+    // A valid gitlink so the shared removal treats it as a live worktree
+    // (a broken link would be pruned instead of removed).
+    await writeFile(
+      path.join(targetDir, ".git"),
+      `gitdir: ${path.join(workspaceDir, "front")}\n`,
+    );
     await appendTasks(workspaceDir, [
       {
         slug: "fix-tests",
@@ -416,12 +438,7 @@ describe("workspace tasks", () => {
     await mkdir(parentRepoDir, { recursive: true });
     const { createRepositoryTasks } = await import("./tasks.ts");
 
-    runGitMock
-      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockRejectedValueOnce(new Error("missing branch"))
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+    mockCreateTaskGit("tomdale/my-feature");
 
     const result = await createRepositoryTasks({
       parentRepoDir,
@@ -451,7 +468,7 @@ describe("workspace tasks", () => {
         path.join(repoRootDir, "_tasks", "my-feature", "fix-tests"),
         "HEAD",
       ],
-      { cwd: parentRepoDir },
+      { cwd: parentRepoDir, timeout: 120_000 },
     );
   });
 
@@ -498,6 +515,8 @@ describe("workspace tasks", () => {
     const parentRepoDir = path.join(repoRootDir, "my-feature");
     const taskDir = path.join(repoRootDir, "_tasks", "my-feature", "fix-tests");
     await mkdir(taskDir, { recursive: true });
+    // A valid gitlink so the shared removal treats it as a live worktree.
+    await writeFile(path.join(taskDir, ".git"), `gitdir: ${repoRootDir}\n`);
     const { deleteRepositoryTasks } = await import("./tasks.ts");
 
     runGitMock

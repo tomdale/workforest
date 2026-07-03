@@ -1125,7 +1125,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["cache", "worktree"],
             summary: "Manage worktrees in cached repositories",
             description:
-              "Runs a small fixed set of Git worktree operations against existing cached bare mirrors. These commands do not create or sync mirrors, write Workforest metadata, run setup or hooks, or filter Workforest-managed worktrees.",
+              "Runs a small fixed set of Git worktree operations against existing cached bare mirrors. These commands do not create or sync mirrors, write Workforest metadata, or run setup or hooks; they refuse a target inside a managed Workforest directory, steering you to `wf new`, `wf add`, or `wf delete` for managed worktrees.",
             help: nestedHelp("cache", "worktree"),
             children: [
               leaf({
@@ -1152,7 +1152,7 @@ export const commandRegistry: CommandRegistry = {
                 path: ["cache", "worktree", "add"],
                 summary: "Add a worktree on a new branch",
                 description:
-                  "Creates a worktree at the requested path on a new branch from the cached mirror's current HEAD. When branch is omitted, Git derives it from the destination directory name.",
+                  "Creates a worktree at the requested path, branching from the mirror's default branch (`origin/<default>`). With an explicit branch name it creates that new branch; when the branch is omitted the worktree is checked out in detached HEAD at `origin/<default>`.",
                 handler: "cache.worktree.add",
                 help: nestedHelp("cache", "worktree"),
                 operands: operands(
@@ -1167,7 +1167,7 @@ export const commandRegistry: CommandRegistry = {
                     command:
                       "wf cache worktree add vercel/front ~/Code/front-fix-auth",
                     description:
-                      "Let Git derive the new branch name from front-fix-auth.",
+                      "Check out a detached HEAD at the mirror's default branch (origin/<default>).",
                   },
                   {
                     command:

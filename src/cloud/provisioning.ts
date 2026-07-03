@@ -1,7 +1,8 @@
+import { OperationalError } from "../cli/errors.ts";
 import { log } from "../logger.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import type { RepositorySource, WorkspaceConfig } from "../types.ts";
-import { renderPipelinesGrid, shouldUseGrid } from "../ui/grid-consumer.ts";
+import { presentPipelines } from "../ui/grid-consumer.ts";
 import { runCommand } from "../utils/exec.ts";
 import type { CreateInput, ResolvedSource } from "../workspace/create.ts";
 import type { RepoPipelineState } from "../workspace/pipeline.ts";
@@ -24,6 +25,7 @@ import {
   type CredentialBrokering,
   createWorkspaceSandbox,
   forkWorkspaceSandbox,
+  type StreamCommand,
   streamCommand,
 } from "./vercel-sandbox.ts";
 import { httpsCloneUrl, resolveVercelTeam } from "./vercel-team.ts";
@@ -122,7 +124,7 @@ async function provisionCloud(
     const vercelTeam = resolveVercelTeam(repo.remote, options.config);
     pipelines.set(
       repo.name,
-      cloudRepoPipelineGenerator({
+      cloudRepoPipeline({
         sandbox,
         repo,
         branchName: input.branchName,
@@ -134,15 +136,91 @@ async function provisionCloud(
     );
   }
 
-  const repoNames = repos.map((repo) => repo.name);
-  const useGrid = options.interactive && shouldUseGrid(repoNames.length);
-  if (useGrid) {
-    await renderPipelinesGrid({ pipelines, repoNames });
-  } else {
-    await drainPipelinesToConsole(pipelines, options.onEvent);
+  // `presentPipelines` returns only the repos whose pipeline completed, so any
+  // repo absent from this map failed its git/install setup.
+  const completed = await presentPipelines({
+    pipelines,
+    repoNames: repos.map((repo) => repo.name),
+    interactive: options.interactive,
+    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+  });
+
+  await finalizeCloudProvisioning({
+    sandbox,
+    changeName: input.changeName,
+    ports,
+    repoNames: repos.map((repo) => repo.name),
+    completed,
+    onEvent: options.onEvent,
+  });
+}
+
+type FinalizeCloudParams = Readonly<{
+  sandbox: CloudSandbox;
+  changeName: string;
+  ports: readonly number[];
+  repoNames: readonly string[];
+  completed: ReadonlyMap<string, { hasLockfile: boolean }>;
+  onEvent: ServiceEventSink | undefined;
+}>;
+
+/**
+ * Decide a cloud run's outcome from the repos that actually completed, so a run
+ * is never reported as ready when it produced nothing usable.
+ *
+ * A persistent sandbox is billed for as long as it exists, so a run where
+ * *every* repo failed must not print "ready" over an orphaned box: tear it down
+ * (best-effort) and throw so the CLI exits non-zero. A partial failure still
+ * leaves a usable sandbox — report it ready, but call out which repos need
+ * attention rather than implying a clean run.
+ */
+export async function finalizeCloudProvisioning(
+  params: FinalizeCloudParams,
+): Promise<void> {
+  const { sandbox, changeName, ports, repoNames, completed, onEvent } = params;
+  const failedRepos = repoNames.filter((name) => !completed.has(name));
+
+  if (completed.size === 0) {
+    await teardownSandbox(sandbox, onEvent);
+    const noun = repoNames.length === 1 ? "repository" : "repositories";
+    throw new OperationalError(
+      `Cloud provisioning failed: all ${repoNames.length} ${noun} failed to set up in ${cloudSandboxName(changeName)}.`,
+    );
   }
 
-  reportReady(sandbox, input.changeName, ports, options.onEvent);
+  reportReady(sandbox, changeName, ports, onEvent);
+
+  if (failedRepos.length > 0) {
+    const failed = failedRepos.join(", ");
+    const message = `Some repositories failed to set up: ${failed}. The workspace is usable for the repositories that succeeded.`;
+    log.warn(message);
+    emitServiceEvent(onEvent, {
+      type: "message",
+      level: "warning",
+      message,
+    });
+  }
+}
+
+/**
+ * Best-effort teardown of a sandbox whose provisioning wholly failed. A teardown
+ * error must not mask the original failure, so it is surfaced as a warning
+ * rather than thrown.
+ */
+async function teardownSandbox(
+  sandbox: CloudSandbox,
+  onEvent: ServiceEventSink | undefined,
+): Promise<void> {
+  try {
+    await sandbox.delete();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    emitServiceEvent(onEvent, {
+      type: "message",
+      level: "warning",
+      message: `Failed to tear down cloud sandbox after provisioning failure: ${reason}`,
+    });
+  }
 }
 
 type AcquireParams = Readonly<{
@@ -203,20 +281,32 @@ type CloudRepoPipelineParams = Readonly<{
  * already exists in the sandbox (fetch + branch); a cold repo is cloned first.
  * Dependency install and `vercel env pull` map onto the initializer phase.
  */
-export async function* cloudRepoPipelineGenerator(
+export async function* cloudRepoPipeline(
   params: CloudRepoPipelineParams,
 ): AsyncGenerator<RepoPipelineState> {
   const { sandbox, repo, branchName, mode } = params;
   const repoDir = `${SANDBOX_WORKDIR}/${repo.name}`;
+  const cloneUrl = httpsCloneUrl(repo.remote);
 
   try {
+    // The configured default branch is only a guess (e.g. "main" for an
+    // org/repo slug); the remote's real default may differ. Detect it once from
+    // the remote HEAD — quietly, so the pane shows only the visible git steps —
+    // and branch from that. The local path self-corrects the same way via
+    // `detectDefaultBranch`.
+    const defaultBranch = await detectRemoteDefaultBranch(
+      sandbox,
+      cloneUrl,
+      "main",
+    );
+
     // Git phase: get the repo onto a fresh branch at latest default-branch HEAD.
     const gitCommands: { cmd: string; args: string[]; cwd: string }[] =
       mode === "cold"
         ? [
             {
               cmd: "git",
-              args: ["clone", httpsCloneUrl(repo.remote), repo.name],
+              args: ["clone", "--branch", defaultBranch, cloneUrl, repo.name],
               cwd: SANDBOX_WORKDIR,
             },
             { cmd: "git", args: ["checkout", "-B", branchName], cwd: repoDir },
@@ -224,17 +314,12 @@ export async function* cloudRepoPipelineGenerator(
         : [
             {
               cmd: "git",
-              args: ["fetch", "origin"],
+              args: ["fetch", "origin", defaultBranch],
               cwd: repoDir,
             },
             {
               cmd: "git",
-              args: ["remote", "set-head", "origin", "-a"],
-              cwd: repoDir,
-            },
-            {
-              cmd: "git",
-              args: ["checkout", "-B", branchName, "origin/HEAD"],
+              args: ["checkout", "-B", branchName, `origin/${defaultBranch}`],
               cwd: repoDir,
             },
           ];
@@ -369,6 +454,56 @@ async function* runStep(
   return null;
 }
 
+/** `ref: refs/heads/<name>\tHEAD` — the symref line `ls-remote --symref` prints. */
+const SYMREF_HEAD = /^ref:\s+refs\/heads\/(\S+)\s+HEAD/m;
+
+/**
+ * Detect a repo's real default branch by reading the remote HEAD symref, without
+ * needing a clone: `git ls-remote --symref <url> HEAD` prints a line like
+ * `ref: refs/heads/<name>\tHEAD`. The sandbox already has brokered network to
+ * origin, so this runs there.
+ *
+ * Detection is advisory, never fatal: a failed command, missing symref, or
+ * unparseable output all fall back to the configured branch so a flaky probe
+ * can't block provisioning.
+ */
+async function detectRemoteDefaultBranch(
+  sandbox: CloudSandbox,
+  cloneUrl: string,
+  fallback: string,
+): Promise<string> {
+  try {
+    const { exitCode, output } = await captureCommand(sandbox, {
+      cmd: "git",
+      args: ["ls-remote", "--symref", cloneUrl, "HEAD"],
+      cwd: SANDBOX_WORKDIR,
+    });
+    if (exitCode !== 0) return fallback;
+    return SYMREF_HEAD.exec(output)?.[1] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Run a sandbox command to completion, collecting its streamed output. Unlike
+ * {@link runToCompletion} (which discards output), this is used for quiet probes
+ * like `ls-remote` whose stdout must be parsed.
+ */
+async function captureCommand(
+  sandbox: CloudSandbox,
+  command: StreamCommand,
+): Promise<{ exitCode: number; output: string }> {
+  const stream = streamCommand(sandbox, command);
+  let output = "";
+  let next = await stream.next();
+  while (!next.done) {
+    output += next.value;
+    next = await stream.next();
+  }
+  return { exitCode: next.value, output };
+}
+
 async function repoHasLockfile(
   sandbox: CloudSandbox,
   repoDir: string,
@@ -383,31 +518,6 @@ async function repoHasLockfile(
     next = await stream.next();
   }
   return next.value === 0;
-}
-
-async function drainPipelinesToConsole(
-  pipelines: Map<string, AsyncGenerator<RepoPipelineState>>,
-  onEvent: ServiceEventSink | undefined,
-): Promise<void> {
-  await Promise.all(
-    [...pipelines].map(async ([name, generator]) => {
-      for await (const state of generator) {
-        if (state.phase === "failed") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "error",
-            message: `${name}: ${state.error.message}`,
-          });
-        } else if (state.phase === "complete") {
-          emitServiceEvent(onEvent, {
-            type: "message",
-            level: "success",
-            message: `${name}: ready`,
-          });
-        }
-      }
-    }),
-  );
 }
 
 function reportReady(

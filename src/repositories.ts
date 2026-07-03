@@ -5,10 +5,11 @@ import { pathExists } from "@wf-plugin/core";
 import { getCacheDir, reposFromSlugs } from "./config.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import { runGit } from "./services/git.ts";
+import { withGitWorktreeLock } from "./services/worktree.ts";
 import type { RepositorySource } from "./types.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
-import { ensureMirrorRepoGenerator } from "./workspace/repository.ts";
+import { ensureMirrorRepo } from "./workspace/repository.ts";
 
 export type CachedRepositoryHealth = "healthy" | "attention" | "invalid";
 
@@ -331,7 +332,7 @@ export async function addCachedRepository(
   await ensureDir(cacheDir);
   const mirrorDir = await resolveMirrorDir(repo, cacheDir);
 
-  for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
+  for await (const state of ensureMirrorRepo(repo, mirrorDir)) {
     if (state.status === "failed") {
       throw state.error;
     }
@@ -350,10 +351,7 @@ export async function updateCachedRepository(
   }
 
   const repo = cachedRepositoryToRepoConfig(repository);
-  for await (const state of ensureMirrorRepoGenerator(
-    repo,
-    repository.mirrorPath,
-  )) {
+  for await (const state of ensureMirrorRepo(repo, repository.mirrorPath)) {
     if (state.status === "failed") {
       throw state.error;
     }
@@ -371,7 +369,9 @@ export async function repairCachedRepository(
     );
   }
 
-  await runGit(["worktree", "prune"], { cwd: repository.mirrorPath });
+  await withGitWorktreeLock(repository.mirrorPath, () =>
+    runGit(["worktree", "prune"], { cwd: repository.mirrorPath }),
+  );
   await runGit(["fsck", "--connectivity-only"], {
     cwd: repository.mirrorPath,
   });

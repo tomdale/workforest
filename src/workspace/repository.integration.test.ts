@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { ensureMirrorRepoGenerator } from "./repository.ts";
+import { ensureMirrorRepo } from "./repository.ts";
 
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
@@ -61,7 +61,7 @@ afterEach(async () => {
   );
 });
 
-describe("ensureMirrorRepoGenerator", () => {
+describe("ensureMirrorRepo", () => {
   it("updates remote refs without damaging a linked worktree on main", async () => {
     const rootDir = await createTempDir("workforest-cache-update-");
     const sourceDir = path.join(rootDir, "source");
@@ -89,7 +89,7 @@ describe("ensureMirrorRepoGenerator", () => {
     await updateMain(sourceDir, originMain);
 
     const states = await collectStates(
-      ensureMirrorRepoGenerator(
+      ensureMirrorRepo(
         {
           name: "front",
           remote: sourceDir,

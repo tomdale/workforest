@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   canRunForegroundTaskMock,
-  runCommandGeneratorMock,
+  spawnCommandMock,
   runForegroundTaskMock,
 } = vi.hoisted(() => ({
   canRunForegroundTaskMock: vi.fn(() => true),
-  runCommandGeneratorMock: vi.fn(),
+  spawnCommandMock: vi.fn(),
   runForegroundTaskMock: vi.fn(),
 }));
 
@@ -20,7 +20,7 @@ vi.mock("@wf-plugin/core", async () => {
   return {
     ...actual,
     canRunForegroundTask: canRunForegroundTaskMock,
-    runCommandGenerator: runCommandGeneratorMock,
+    spawnCommand: spawnCommandMock,
     runForegroundTask: runForegroundTaskMock,
   };
 });
@@ -96,7 +96,7 @@ describe("vercelLinkInitializer.execute", () => {
         reason: "Vercel auto-link only supports GitHub repositories.",
       },
     ]);
-    expect(runCommandGeneratorMock).not.toHaveBeenCalled();
+    expect(spawnCommandMock).not.toHaveBeenCalled();
   });
 
   it("skips when the GitHub owner is not a valid Vercel scope", async () => {
@@ -126,7 +126,7 @@ describe("vercelLinkInitializer.execute", () => {
           'No Vercel team mapping configured for GitHub owner "SomeOwner".',
       },
     ]);
-    expect(runCommandGeneratorMock).not.toHaveBeenCalled();
+    expect(spawnCommandMock).not.toHaveBeenCalled();
   });
 
   it("runs repo-link with an inferred team and pulls env for linked repo projects", async () => {
@@ -134,7 +134,7 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[], options: { cwd?: string }) =>
         (async function* () {
           if (!options.cwd) {
@@ -175,17 +175,17 @@ describe("vercelLinkInitializer.execute", () => {
       ),
     );
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["link", "--yes", "--repo", "--scope", "vercel"],
       { cwd: repoDir },
     );
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["env", "pull", "--environment", "development", "--yes"],
       { cwd: path.join(repoDir, "apps/web") },
     );
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["env", "pull", "--environment", "development", "--yes"],
       { cwd: path.join(repoDir, "apps/docs") },
@@ -198,7 +198,7 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[], options: { cwd?: string }) =>
         (async function* () {
           if (!options.cwd) {
@@ -231,7 +231,7 @@ describe("vercelLinkInitializer.execute", () => {
       ),
     );
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["link", "--yes", "--repo", "--scope", "some-owner"],
       { cwd: repoDir },
@@ -245,7 +245,7 @@ describe("vercelLinkInitializer.execute", () => {
     let activeEnvPulls = 0;
     let maxActiveEnvPulls = 0;
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[], options: { cwd?: string }) =>
         (async function* () {
           if (!options.cwd) {
@@ -309,7 +309,7 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[]) =>
         (async function* () {
           yield {
@@ -335,7 +335,7 @@ describe("vercelLinkInitializer.execute", () => {
       ),
     );
 
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["env", "pull", "--environment", "development", "--yes"],
       { cwd: repoDir },
@@ -348,7 +348,7 @@ describe("vercelLinkInitializer.execute", () => {
       "vercel.json": "{}\n",
     });
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[]) =>
         (async function* () {
           yield {
@@ -386,12 +386,12 @@ describe("vercelLinkInitializer.execute", () => {
       expect.objectContaining({ status: "log", level: "warn" }),
     );
     expect(states.at(-1)).toEqual({ status: "completed" });
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["link", "--yes", "--repo", "--scope", "custom-team"],
       { cwd: repoDir },
     );
-    expect(runCommandGeneratorMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
       ["env", "pull", "--environment", "development", "--yes"],
       { cwd: repoDir },
@@ -405,7 +405,7 @@ describe("vercelLinkInitializer.execute", () => {
     });
     let whoamiAttempts = 0;
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[]) =>
         (async function* () {
           yield { status: "running" as const, message: `vercel ${args[0]}` };
@@ -441,13 +441,13 @@ describe("vercelLinkInitializer.execute", () => {
     expect(runForegroundTaskMock).toHaveBeenCalledWith("vercel", ["login"], {
       cwd: repoDir,
     });
-    expect(runCommandGeneratorMock).toHaveBeenNthCalledWith(
+    expect(spawnCommandMock).toHaveBeenNthCalledWith(
       1,
       "vercel",
       ["whoami", "--format", "json", "--non-interactive"],
       { cwd: repoDir },
     );
-    expect(runCommandGeneratorMock).toHaveBeenNthCalledWith(
+    expect(spawnCommandMock).toHaveBeenNthCalledWith(
       2,
       "vercel",
       ["whoami", "--format", "json", "--non-interactive"],
@@ -462,7 +462,7 @@ describe("vercelLinkInitializer.execute", () => {
   it("skips auth-dependent work when preflight auth is missing in the background", async () => {
     const repoDir = await createRepoDir({ "vercel.json": "{}\n" });
     canRunForegroundTaskMock.mockReturnValue(false);
-    runCommandGeneratorMock.mockImplementation(() =>
+    spawnCommandMock.mockImplementation(() =>
       (async function* () {
         yield {
           status: "failed" as const,
@@ -494,13 +494,13 @@ describe("vercelLinkInitializer.execute", () => {
       },
     ]);
     expect(runForegroundTaskMock).not.toHaveBeenCalled();
-    expect(runCommandGeneratorMock).toHaveBeenCalledTimes(1);
+    expect(spawnCommandMock).toHaveBeenCalledTimes(1);
   });
 
   it("preserves non-auth link failures", async () => {
     const repoDir = await createRepoDir({ "vercel.json": "{}\n" });
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[]) =>
         (async function* () {
           if (args[0] === "link") {
@@ -545,7 +545,7 @@ describe("vercelLinkInitializer.execute", () => {
     });
     let envAttempts = 0;
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[]) =>
         (async function* () {
           if (args[0] === "env") {
@@ -596,7 +596,7 @@ describe("vercelLinkInitializer.execute", () => {
     });
     canRunForegroundTaskMock.mockReturnValue(false);
 
-    runCommandGeneratorMock.mockImplementation(
+    spawnCommandMock.mockImplementation(
       (_command: string, args: string[]) =>
         (async function* () {
           if (args[0] === "env") {

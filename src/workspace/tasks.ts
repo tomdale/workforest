@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
 import {
@@ -9,25 +8,34 @@ import {
   rollbackPreservedNodeModules,
 } from "../node-modules-cache.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
-import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
+import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
 import {
-  runSingleRepoInitializersGenerator,
+  runSingleRepoInitializers,
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
+import {
+  addWorktree,
+  branchExists,
+  deleteBranchIfPossible,
+  isGitDirty,
+  removeWorktree,
+  requireCurrentBranch,
+  withGitWorktreeLock,
+} from "../services/worktree.ts";
 import type {
   RepositorySource,
   TaskMetadata,
   WorkspaceMetadata,
   WorkspaceRepoMetadata,
 } from "../types.ts";
+import { presentPipelines } from "../ui/grid-consumer.ts";
 import { buildBranchName } from "../utils/branch-prefix.ts";
 import {
   resolveContainedPath,
   validateResourceName,
 } from "../utils/path-safety.ts";
 import { isSlug } from "../utils/slug.ts";
-import { runParallel } from "../utils/task-generator.ts";
 import {
   appendTasks,
   getTaskSetupLogRelativePath,
@@ -36,15 +44,16 @@ import {
 } from "./metadata.ts";
 import { TASKS_DIRECTORY_NAME } from "./paths.ts";
 import {
+  mapInitializerStateToPipelineState,
+  mapTaskStateToPipelineState,
+  type RepoPipelineState,
+} from "./pipeline.ts";
+import {
   appendRepoSetupLog,
+  getRepoSetupLogPath,
   removeRepoSetupLog,
   startRepoSetupLog,
 } from "./setup-logs.ts";
-
-const GIT_WORKTREE_LOCK_FILENAME = "workforest-worktree.lock";
-const GIT_WORKTREE_LOCK_RETRY_MS = 20;
-const GIT_WORKTREE_LOCK_TIMEOUT_MS = 10_000;
-const GIT_WORKTREE_LOCK_STALE_MS = 30_000;
 
 export type TaskCreateResult = {
   slug: string;
@@ -69,6 +78,8 @@ export type CreateTasksOptions = {
   force?: boolean;
   dryRun?: boolean;
   disabledInitializers?: boolean | string[];
+  /** Render the setup grid when the terminal supports it (default false). */
+  interactive?: boolean;
   onEvent?: ServiceEventSink;
 };
 
@@ -104,6 +115,8 @@ export type CreateRepositoryTasksOptions = {
   force?: boolean;
   dryRun?: boolean;
   disabledInitializers?: boolean | string[];
+  /** Render the setup grid when the terminal supports it (default false). */
+  interactive?: boolean;
   onEvent?: ServiceEventSink;
 };
 
@@ -135,10 +148,6 @@ type RemoveRepositoryTasksInternalOptions = RepositoryTasksOptions & {
   dryRun: boolean;
 };
 
-type CreateTaskState =
-  | { phase: "complete"; result: TaskCreateResult }
-  | { phase: "failed"; slug: string; error: Error };
-
 export function workspaceRepoToRepoConfig(
   repo: WorkspaceRepoMetadata,
 ): RepositorySource {
@@ -157,6 +166,7 @@ export async function createTasks({
   force = false,
   dryRun = false,
   disabledInitializers,
+  interactive = false,
   onEvent,
 }: CreateTasksOptions): Promise<CreateTasksResult> {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
@@ -172,7 +182,7 @@ export async function createTasks({
 
   validateRequestedSlugs(slugs);
 
-  const baseBranch = await getCurrentBranch(resolvedSourceRepoDir);
+  const baseBranch = await requireCurrentBranch(resolvedSourceRepoDir);
   const baseSha = await getCurrentSha(resolvedSourceRepoDir);
 
   if (!dryRun && !force && (await isGitDirty(resolvedSourceRepoDir))) {
@@ -205,6 +215,8 @@ export async function createTasks({
   }
 
   const repoConfig = workspaceRepoToRepoConfig(parentRepo);
+  const createdBySlug = new Map<string, TaskCreateResult>();
+  const failureBySlug = new Map<string, Error>();
   const tasks = new Map(
     planned.map((entry) => [
       entry.slug,
@@ -214,22 +226,25 @@ export async function createTasks({
         repo: repoConfig,
         entry,
         ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
-        ...(onEvent ? { onEvent } : {}),
+        recordResult: (result) => createdBySlug.set(result.slug, result),
+        recordFailure: (slug, error) => failureBySlug.set(slug, error),
       }),
     ]),
   );
 
-  const created: TaskCreateResult[] = [];
-  const failures: TaskFailure[] = [];
+  await presentTaskPipelines({
+    pipelines: tasks,
+    interactive,
+    workspaceDir: resolvedWorkspaceDir,
+    parentRepoName,
+    ...(onEvent ? { onEvent } : {}),
+  });
 
-  for await (const { id, state } of runParallel(tasks)) {
-    if (state.phase === "complete") {
-      created.push(state.result);
-      continue;
-    }
-
-    failures.push({ slug: id, error: state.error });
-  }
+  const created = [...createdBySlug.values()];
+  const failures: TaskFailure[] = [...failureBySlug].map(([slug, error]) => ({
+    slug,
+    error,
+  }));
 
   if (created.length > 0) {
     const plannedBySlug = new Map(planned.map((entry) => [entry.slug, entry]));
@@ -261,6 +276,7 @@ export async function createRepositoryTasks({
   force = false,
   dryRun = false,
   disabledInitializers,
+  interactive = false,
   onEvent,
 }: CreateRepositoryTasksOptions): Promise<CreateTasksResult> {
   const resolvedParentRepoDir = path.resolve(parentRepoDir);
@@ -269,7 +285,7 @@ export async function createRepositoryTasks({
   const safeName = validateResourceName(changeName, "Name");
   validateRequestedSlugs(slugs);
 
-  const baseBranch = await getCurrentBranch(resolvedParentRepoDir);
+  const baseBranch = await requireCurrentBranch(resolvedParentRepoDir);
   const baseSha = await getCurrentSha(resolvedParentRepoDir);
 
   if (!dryRun && !force && (await isGitDirty(resolvedParentRepoDir))) {
@@ -302,6 +318,8 @@ export async function createRepositoryTasks({
     };
   }
 
+  const createdBySlug = new Map<string, TaskCreateResult>();
+  const failureBySlug = new Map<string, Error>();
   const tasks = new Map(
     planned.map((entry) => [
       entry.slug,
@@ -311,24 +329,59 @@ export async function createRepositoryTasks({
         repo,
         entry,
         ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
-        ...(onEvent ? { onEvent } : {}),
+        recordResult: (result) => createdBySlug.set(result.slug, result),
+        recordFailure: (slug, error) => failureBySlug.set(slug, error),
       }),
     ]),
   );
 
-  const created: TaskCreateResult[] = [];
-  const failures: TaskFailure[] = [];
+  await presentTaskPipelines({
+    pipelines: tasks,
+    interactive,
+    workspaceDir: repoRootDir,
+    parentRepoName: repoName,
+    ...(onEvent ? { onEvent } : {}),
+  });
 
-  for await (const { id, state } of runParallel(tasks)) {
-    if (state.phase === "complete") {
-      created.push(state.result);
-      continue;
-    }
-
-    failures.push({ slug: id, error: state.error });
-  }
+  const created = [...createdBySlug.values()];
+  const failures: TaskFailure[] = [...failureBySlug].map(([slug, error]) => ({
+    slug,
+    error,
+  }));
 
   return { created, failures };
+}
+
+/**
+ * Route task fan-out through the shared {@link presentPipelines} seam: the grid
+ * when interactive, else an inline event drain. Task results are captured
+ * out-of-band via the recordResult/recordFailure callbacks the pipelines were
+ * built with, so the completed-map presentPipelines returns is discarded here.
+ */
+async function presentTaskPipelines({
+  pipelines,
+  interactive,
+  workspaceDir,
+  parentRepoName,
+  onEvent,
+}: {
+  pipelines: Map<string, AsyncGenerator<RepoPipelineState>>;
+  interactive: boolean;
+  workspaceDir: string;
+  parentRepoName: string;
+  onEvent?: ServiceEventSink;
+}): Promise<void> {
+  await presentPipelines({
+    pipelines,
+    repoNames: [...pipelines.keys()],
+    interactive,
+    getLogPath: (slug) =>
+      getRepoSetupLogPath({
+        workspaceDir,
+        repoName: `${parentRepoName}-${slug}`,
+      }),
+    ...(onEvent ? { onEvent } : {}),
+  });
 }
 
 export async function listTasks(
@@ -378,7 +431,7 @@ export async function listRepositoryTasks({
     return [];
   }
 
-  const baseBranch = await getCurrentBranch(resolvedParentRepoDir).catch(
+  const baseBranch = await requireCurrentBranch(resolvedParentRepoDir).catch(
     () => "HEAD",
   );
   const baseSha = await getCurrentSha(resolvedParentRepoDir).catch(() => "");
@@ -393,7 +446,7 @@ export async function listRepositoryTasks({
       slug,
     );
     const branch =
-      (await getCurrentBranch(absolutePath).catch(() => "")) ||
+      (await requireCurrentBranch(absolutePath).catch(() => "")) ||
       buildTemporaryBranchName(baseBranch, slug, undefined);
 
     entries.push({
@@ -524,12 +577,17 @@ async function removeWorkspaceTasks({
         })
       : { status: "missing" as const };
 
-    const removeArgs = ["worktree", "remove"];
-    if (force) removeArgs.push("--force");
-    removeArgs.push(absolutePath);
     await withGitWorktreeLock(parentRepoDir, async () => {
       try {
-        await runGit(removeArgs, { cwd: parentRepoDir, timeout: 30_000 });
+        for await (const _state of removeWorktree({
+          gitDir: parentRepoDir,
+          worktreePath: absolutePath,
+          force,
+          lock: false,
+          timeoutMs: 30_000,
+        })) {
+          // Drained; task removal does not surface per-step progress.
+        }
       } catch (error) {
         await rollbackPreservedNodeModules(preserved);
         throw error;
@@ -626,15 +684,17 @@ async function removeRepositoryTasks({
         })
       : { status: "missing" as const };
 
-    const removeArgs = ["worktree", "remove"];
-    if (force) removeArgs.push("--force");
-    removeArgs.push(absolutePath);
     await withGitWorktreeLock(resolvedParentRepoDir, async () => {
       try {
-        await runGit(removeArgs, {
-          cwd: resolvedParentRepoDir,
-          timeout: 30_000,
-        });
+        for await (const _state of removeWorktree({
+          gitDir: resolvedParentRepoDir,
+          worktreePath: absolutePath,
+          force,
+          lock: false,
+          timeoutMs: 30_000,
+        })) {
+          // Drained; task removal does not surface per-step progress.
+        }
       } catch (error) {
         await rollbackPreservedNodeModules(preserved);
         throw error;
@@ -655,34 +715,47 @@ async function removeRepositoryTasks({
   return { removed };
 }
 
+/**
+ * Set up one task worktree, emitting {@link RepoPipelineState} so the same grid
+ * (and console drain) that renders `wf new` renders task fan-out too. The task
+ * result carries richer data than the pipeline state (setup status + log), so it
+ * is recorded through `recordResult`/`recordFailure` side channels rather than
+ * the generator's yielded states.
+ */
 async function* createAndSetupTask({
   workspaceDir,
   parentRepoDir,
   repo,
   entry,
   disabledInitializers,
-  onEvent,
+  recordResult,
+  recordFailure,
 }: {
   workspaceDir: string;
   parentRepoDir: string;
   repo: RepositorySource;
   entry: TaskMetadata;
   disabledInitializers?: boolean | string[];
-  onEvent?: ServiceEventSink;
-}): AsyncGenerator<CreateTaskState> {
+  recordResult: (result: TaskCreateResult) => void;
+  recordFailure: (slug: string, error: Error) => void;
+}): AsyncGenerator<RepoPipelineState> {
   const targetDir = resolveContainedPath(workspaceDir, entry.path);
 
   try {
-    emitServiceEvent(onEvent, {
-      type: "message",
-      level: "info",
-      message: `${entry.slug}: creating ${path.basename(targetDir)} on ${entry.branch}`,
-    });
-    await withGitWorktreeLock(parentRepoDir, () =>
-      runGit(["worktree", "add", "-b", entry.branch, targetDir, "HEAD"], {
-        cwd: parentRepoDir,
-      }),
-    );
+    // Task worktrees branch from the parent checkout's HEAD (the in-progress
+    // feature tip), not the mirror's default branch, so parallel agents build
+    // on committed progress. The lock is shared with every other worktree path.
+    for await (const state of addWorktree({
+      gitDir: parentRepoDir,
+      targetDir,
+      base: { ref: "HEAD" },
+      branch: { kind: "create", name: entry.branch },
+      label: `worktree:${entry.slug}`,
+    })) {
+      const mapped = mapTaskStateToPipelineState(state, "worktree");
+      if (mapped) yield mapped;
+    }
+
     const { config } = await loadWorkspaceConfig();
     const restoreResult = await restoreNodeModules({
       repo,
@@ -691,70 +764,69 @@ async function* createAndSetupTask({
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     });
     if (restoreResult.status === "restored") {
-      emitServiceEvent(onEvent, {
-        type: "message",
-        level: "info",
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "log",
         message: `${repo.name}-${entry.slug}: restored pooled node_modules`,
-      });
+      };
     } else if (restoreResult.status === "warning") {
-      emitServiceEvent(onEvent, {
-        type: "message",
-        level: "warning",
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "log",
         message: restoreResult.warning,
-      });
+      };
     }
 
-    const result = await runTaskInitializers({
+    const result = yield* runTaskInitializers({
       workspaceDir,
       repo,
       slug: entry.slug,
       targetDir,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
-      ...(onEvent ? { onEvent } : {}),
     });
 
-    yield {
-      phase: "complete",
-      result: {
-        slug: entry.slug,
-        parentRepo: entry.parent_repo,
-        path: targetDir,
-        branch: entry.branch,
-        setupStatus: result.status,
-        ...(result.logPath
-          ? {
-              setupLog: getTaskSetupLogRelativePath(
-                entry.parent_repo,
-                entry.slug,
-              ),
-            }
-          : {}),
-      },
-    };
-  } catch (error) {
-    yield {
-      phase: "failed",
+    recordResult({
       slug: entry.slug,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
+      parentRepo: entry.parent_repo,
+      path: targetDir,
+      branch: entry.branch,
+      setupStatus: result.status,
+      ...(result.logPath
+        ? {
+            setupLog: getTaskSetupLogRelativePath(
+              entry.parent_repo,
+              entry.slug,
+            ),
+          }
+        : {}),
+    });
+    yield { phase: "complete", hasLockfile: false };
+  } catch (error) {
+    const normalized =
+      error instanceof Error ? error : new Error(String(error));
+    recordFailure(entry.slug, normalized);
+    yield { phase: "failed", error: normalized };
   }
 }
 
-async function runTaskInitializers({
+async function* runTaskInitializers({
   workspaceDir,
   repo,
   slug,
   targetDir,
   disabledInitializers,
-  onEvent,
 }: {
   workspaceDir: string;
   repo: RepositorySource;
   slug: string;
   targetDir: string;
   disabledInitializers?: boolean | string[];
-  onEvent?: ServiceEventSink;
-}): Promise<{ status: "ready" | "failed"; logPath?: string }> {
+}): AsyncGenerator<
+  RepoPipelineState,
+  { status: "ready" | "failed"; logPath?: string }
+> {
   const logPath = await startRepoSetupLog({
     workspaceDir,
     repoName: `${repo.name}-${slug}`,
@@ -762,7 +834,7 @@ async function runTaskInitializers({
   });
   let failed = false;
 
-  for await (const state of runSingleRepoInitializersGenerator({
+  for await (const state of runSingleRepoInitializers({
     context: {
       repoDir: targetDir,
       workspaceDir,
@@ -772,29 +844,12 @@ async function runTaskInitializers({
   })) {
     await appendRepoSetupLog(logPath, formatInitializerState(state));
 
-    if (state.phase === "running") {
-      const task = state.state;
-      if (task.status === "running" && task.message) {
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "info",
-          message: `${repo.name}-${slug}: ${state.initializerName} - ${task.message}`,
-        });
-      } else if (task.status === "completed") {
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "success",
-          message: `${repo.name}-${slug}: ${state.initializerName} complete`,
-        });
-      } else if (task.status === "failed") {
-        failed = true;
-        emitServiceEvent(onEvent, {
-          type: "message",
-          level: "error",
-          message: `${repo.name}-${slug}: ${state.initializerName} failed`,
-        });
-      }
+    if (state.phase === "running" && state.state.status === "failed") {
+      failed = true;
     }
+
+    const mapped = mapInitializerStateToPipelineState(state);
+    if (mapped) yield mapped;
   }
 
   if (!failed) {
@@ -1092,95 +1147,9 @@ async function requireWorkspaceMetadata(
   return metadata;
 }
 
-async function getCurrentBranch(repoDir: string): Promise<string> {
-  const { stdout } = await runGit(["branch", "--show-current"], {
-    cwd: repoDir,
-  });
-  const branch = stdout.trim();
-  if (!branch) {
-    throw new Error(
-      `Primary repo at ${repoDir} is on a detached HEAD. Check out a branch before creating tasks.`,
-    );
-  }
-  return branch;
-}
-
 async function getCurrentSha(repoDir: string): Promise<string> {
   const { stdout } = await runGit(["rev-parse", "HEAD"], { cwd: repoDir });
   return stdout.trim();
-}
-
-async function isGitDirty(repoDir: string): Promise<boolean> {
-  const { stdout } = await runGit(["status", "--porcelain"], { cwd: repoDir });
-  return stdout.trim().length > 0;
-}
-
-async function withGitWorktreeLock<T>(
-  repoDir: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const { stdout } = await runGit(
-    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { cwd: repoDir },
-  );
-  const gitCommonDir = stdout.trim() || path.join(repoDir, ".git");
-
-  const lockPath = path.join(gitCommonDir, GIT_WORKTREE_LOCK_FILENAME);
-  await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  const deadline = Date.now() + GIT_WORKTREE_LOCK_TIMEOUT_MS;
-  let lockHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
-
-  while (!lockHandle) {
-    try {
-      lockHandle = await fs.open(lockPath, "wx");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw error;
-      }
-
-      if (await removeStaleGitWorktreeLock(lockPath)) continue;
-      if (Date.now() >= deadline) {
-        throw new Error(
-          `Timed out waiting for git worktree lock at ${lockPath}`,
-        );
-      }
-      await delay(GIT_WORKTREE_LOCK_RETRY_MS);
-    }
-  }
-
-  try {
-    return await operation();
-  } finally {
-    await lockHandle.close();
-    await fs.rm(lockPath, { force: true });
-  }
-}
-
-async function removeStaleGitWorktreeLock(lockPath: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(lockPath);
-    if (Date.now() - stat.mtimeMs <= GIT_WORKTREE_LOCK_STALE_MS) {
-      return false;
-    }
-    await fs.rm(lockPath, { force: true });
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return true;
-    }
-    throw error;
-  }
-}
-
-async function branchExists(repoDir: string, branch: string): Promise<boolean> {
-  try {
-    await runGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
-      cwd: repoDir,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function isTemporaryBranchMerged(
@@ -1210,17 +1179,5 @@ async function pruneStaleWorktree(parentRepoDir: string): Promise<void> {
     await runGit(["worktree", "prune"], { cwd: parentRepoDir });
   } catch {
     // Stale cleanup should be best-effort; metadata pruning is still useful.
-  }
-}
-
-async function deleteBranchIfPossible(
-  repoDir: string,
-  branch: string,
-  force: boolean,
-): Promise<void> {
-  try {
-    await runGit(["branch", force ? "-D" : "-d", branch], { cwd: repoDir });
-  } catch {
-    // The branch may already be gone, or a stale unmerged branch may be kept.
   }
 }

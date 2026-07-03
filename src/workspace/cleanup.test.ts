@@ -5,7 +5,7 @@ const {
   rmMock,
   statMock,
   ensureCacheDirMock,
-  cleanupWorkspaceWorktreesGeneratorMock,
+  cleanupWorkspaceWorktreesMock,
   pathExistsMock,
   readWorkspaceMetadataMock,
   removeWorktreeMetadataMock,
@@ -14,7 +14,7 @@ const {
   rmMock: vi.fn(),
   statMock: vi.fn(),
   ensureCacheDirMock: vi.fn(),
-  cleanupWorkspaceWorktreesGeneratorMock: vi.fn(),
+  cleanupWorkspaceWorktreesMock: vi.fn(),
   pathExistsMock: vi.fn(),
   readWorkspaceMetadataMock: vi.fn(),
   removeWorktreeMetadataMock: vi.fn(),
@@ -64,15 +64,15 @@ vi.mock("./metadata.ts", () => ({
 }));
 
 vi.mock("./repository.ts", () => ({
-  cleanupWorkspaceWorktreesGenerator: cleanupWorkspaceWorktreesGeneratorMock,
+  cleanupWorkspaceWorktrees: cleanupWorkspaceWorktreesMock,
 }));
 
 import {
   type CleanupState,
   cleanupWorkspace,
-  cleanupWorkspaceGenerator,
   cleanupWorktree,
   previewCleanup,
+  streamWorkspaceCleanup,
 } from "./cleanup.ts";
 
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
@@ -120,17 +120,15 @@ beforeEach(() => {
   removeWorktreeMetadataMock.mockResolvedValue(undefined);
 });
 
-describe("cleanupWorkspaceGenerator", () => {
+describe("streamWorkspaceCleanup", () => {
   it("does not mark a repo as complete when worktree cleanup throws", async () => {
-    cleanupWorkspaceWorktreesGeneratorMock.mockImplementation(
-      async function* () {
-        yield { status: "running", message: "Removing worktree" };
-        throw new Error("boom");
-      },
-    );
+    cleanupWorkspaceWorktreesMock.mockImplementation(async function* () {
+      yield { status: "running", message: "Removing worktree" };
+      throw new Error("boom");
+    });
 
     const states = await collectStates(
-      cleanupWorkspaceGenerator("/tmp/workspace/demo"),
+      streamWorkspaceCleanup("/tmp/workspace/demo"),
     );
 
     expect(states).toContainEqual({
@@ -209,7 +207,7 @@ describe("cleanupWorktree", () => {
       deletedBranches: [],
     });
 
-    expect(cleanupWorkspaceWorktreesGeneratorMock).not.toHaveBeenCalled();
+    expect(cleanupWorkspaceWorktreesMock).not.toHaveBeenCalled();
     expect(rmMock).toHaveBeenCalledTimes(1);
     expect(rmMock).toHaveBeenCalledWith("/tmp/repos/api/demo", {
       recursive: true,
@@ -255,7 +253,7 @@ describe("cleanupWorktree", () => {
       deletedBranches: [],
     });
 
-    expect(cleanupWorkspaceWorktreesGeneratorMock).not.toHaveBeenCalled();
+    expect(cleanupWorkspaceWorktreesMock).not.toHaveBeenCalled();
     expect(rmMock).not.toHaveBeenCalled();
     expect(removeWorktreeMetadataMock).not.toHaveBeenCalled();
     expect(states).toContainEqual({

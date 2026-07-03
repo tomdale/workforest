@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   getNodeVersionPrefix,
   pathExists,
-  runCommandGenerator,
+  spawnCommand,
   TailBuffer,
   type InitializerContext,
   type InitializerDefinition,
@@ -59,7 +59,7 @@ async function* execute(context: InitializerContext) {
     args = ["install", "--frozen-lockfile", "--prefer-offline"];
   }
 
-  const fastInstall = runCommandGenerator(command, args, { cwd: repoDir });
+  const fastInstall = spawnCommand(command, args, { cwd: repoDir });
 
   for await (const state of fastInstall) {
     if (state.status === "failed") {
@@ -92,7 +92,7 @@ async function* execute(context: InitializerContext) {
       args = ["install"];
     }
 
-    const fallbackInstall = runCommandGenerator(command, args, {
+    const fallbackInstall = spawnCommand(command, args, {
       cwd: repoDir,
     });
 

@@ -1,14 +1,15 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
+import { cloneRepository, fixBareRepoRefs, runGit } from "../services/git.ts";
 import {
-  cloneRepositoryGenerator,
-  createDefaultBranchResolver,
-  fixBareRepoRefsGenerator,
-  runGit,
-} from "../services/git.ts";
+  hasBrokenWorktreeLink,
+  isStaleWorktreeRemoveError,
+  pruneWorktreeMetadata,
+  withGitWorktreeLock,
+} from "../services/worktree.ts";
 import type { RepositorySource } from "../types.ts";
-import { asGenerator, withRetryGenerator } from "../utils/retry.ts";
+import { comparablePath } from "../utils/path-safety.ts";
+import { asTask, withRetry } from "../utils/retry.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 
 type WorktreeEntry = {
@@ -58,62 +59,8 @@ async function listWorktrees(mirrorDir: string): Promise<WorktreeEntry[]> {
   return parseWorktreeList(stdout);
 }
 
-async function hasBrokenWorktreeLink(worktreePath: string): Promise<boolean> {
-  const gitPath = path.join(worktreePath, ".git");
-  if (!(await pathExists(gitPath))) {
-    return true;
-  }
-
-  let contents: string;
-  try {
-    contents = await fs.readFile(gitPath, "utf8");
-  } catch {
-    return false;
-  }
-
-  const gitDirPrefix = "gitdir:";
-  if (!contents.startsWith(gitDirPrefix)) {
-    return false;
-  }
-
-  const gitDir = contents.slice(gitDirPrefix.length).trim();
-  if (!gitDir) {
-    return true;
-  }
-
-  const resolvedGitDir = path.isAbsolute(gitDir)
-    ? gitDir
-    : path.resolve(worktreePath, gitDir);
-
-  return !(await pathExists(resolvedGitDir));
-}
-
-function isStaleWorktreeRemoveError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-
-  return (
-    message.includes("is not a working tree") ||
-    (message.includes("cannot remove working tree") &&
-      message.includes(".git") &&
-      message.includes("does not exist"))
-  );
-}
-
-async function* pruneWorktreeMetadataGenerator(
-  mirrorDir: string,
-  worktreePath: string,
-): AsyncGenerator<TaskState, void, undefined> {
-  yield {
-    status: "log",
-    level: "warn",
-    message: `Stale worktree metadata for ${worktreePath}; pruning mirror metadata instead`,
-  };
-
-  await runGit(["worktree", "prune"], { cwd: mirrorDir });
-}
-
 /** Ensures a mirror repository exists and yields progress states. */
-export async function* ensureMirrorRepoGenerator(
+export async function* ensureMirrorRepo(
   repo: RepositorySource,
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
@@ -128,7 +75,7 @@ export async function* ensureMirrorRepoGenerator(
 
     // Clone using gh CLI (with git fallback) - handles SAML SSO auth
     const cloneGen = () =>
-      cloneRepositoryGenerator(
+      cloneRepository(
         repo.remote,
         mirrorDir,
         [
@@ -140,27 +87,27 @@ export async function* ensureMirrorRepoGenerator(
         {},
       );
 
-    yield* withRetryGenerator(cloneGen, {
+    yield* withRetry(cloneGen, {
       attempts: 3,
       label: `clone-pristine:${repo.name}`,
     });
 
     // Fix refs: move from refs/heads/* to refs/remotes/origin/*
     // This is needed because git clone --bare creates local branches
-    yield* fixBareRepoRefsGenerator(mirrorDir);
+    yield* fixBareRepoRefs(mirrorDir);
   } else {
-    yield* updatePristineRepoGenerator(repo, mirrorDir);
+    yield* updatePristineRepo(repo, mirrorDir);
   }
 
   // Prune stale worktree entries only if needed
-  yield* pruneStaleWorktreesIfNeededGenerator(mirrorDir);
+  yield* pruneStaleWorktreesIfNeeded(mirrorDir);
 }
 
 /**
  * Prune stale worktree entries only if there are any pointing to non-existent paths.
  * This avoids the overhead of running `git worktree prune` when it's not needed.
  */
-async function* pruneStaleWorktreesIfNeededGenerator(
+async function* pruneStaleWorktreesIfNeeded(
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
   const worktrees = await listWorktrees(mirrorDir);
@@ -182,125 +129,34 @@ async function* pruneStaleWorktreesIfNeededGenerator(
     level: "info",
     message: "Pruning stale worktrees",
   };
-  await runGit(["worktree", "prune"], { cwd: mirrorDir });
-}
-
-/** Ensures a working copy exists and yields progress states. */
-export async function* ensureWorkingCopyGenerator(
-  repo: RepositorySource,
-  mirrorDir: string,
-  targetDir: string,
-  branchName: string,
-): AsyncGenerator<TaskState, void, undefined> {
-  const workingCopyExists = await pathExists(targetDir);
-
-  if (workingCopyExists) {
-    yield {
-      status: "log",
-      level: "info",
-      message: `Reusing existing checkout for ${repo.name}`,
-    };
-    return;
-  }
-
-  const defaultBranch =
-    await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
-      mirrorDir,
-    );
-
-  yield {
-    status: "log",
-    level: "info",
-    message: `Creating worktree for ${repo.name} on branch "${branchName}" from origin/${defaultBranch}`,
-  };
-
-  // Wrap the git command in a generator for withRetryGenerator
-  const worktreeGen = asGenerator(() =>
-    runGit(
-      [
-        "worktree",
-        "add",
-        "-B",
-        branchName,
-        targetDir,
-        `origin/${defaultBranch}`,
-      ],
-      { cwd: mirrorDir },
-    ),
-  );
-
-  yield* withRetryGenerator(worktreeGen, {
-    attempts: 3,
-    label: `worktree:${repo.name}`,
-  });
-}
-
-async function branchExists(
-  mirrorDir: string,
-  branchName: string,
-): Promise<boolean> {
-  try {
-    await runGit(
-      ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`],
-      {
-        cwd: mirrorDir,
-      },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Create a new worktree and branch, failing instead of reusing existing state.
- */
-export async function* createWorkingCopyGenerator(
-  repo: RepositorySource,
-  mirrorDir: string,
-  targetDir: string,
-  branchName: string,
-): AsyncGenerator<TaskState, void, undefined> {
-  if (await pathExists(targetDir)) {
-    throw new Error(`Target directory already exists: ${targetDir}`);
-  }
-
-  if (await branchExists(mirrorDir, branchName)) {
-    throw new Error(`Branch already exists: ${branchName}`);
-  }
-
-  const defaultBranch =
-    await createDefaultBranchResolver().resolveBareMirrorDefaultBranch(
-      mirrorDir,
-    );
-
-  yield {
-    status: "log",
-    level: "info",
-    message: `Creating worktree for ${repo.name} on branch "${branchName}" from origin/${defaultBranch}`,
-  };
-
-  await runGit(
-    ["worktree", "add", "-b", branchName, targetDir, `origin/${defaultBranch}`],
-    { cwd: mirrorDir },
+  // Serialized: a mirror-wide prune reclaims worktree admin dirs for every
+  // workspace of this repo, so it must not race a concurrent `worktree add`
+  // from another process holding the same mirror.
+  await withGitWorktreeLock(mirrorDir, () =>
+    runGit(["worktree", "prune"], { cwd: mirrorDir }),
   );
 }
 
 /** Removes a workspace's linked worktrees and yields progress states. */
-export async function* cleanupWorkspaceWorktreesGenerator(
+export async function* cleanupWorkspaceWorktrees(
   mirrorDir: string,
   workspaceDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
-  const normalizedWorkspaceDir = path.resolve(workspaceDir);
+  // Compare via realpath so a symlinked workspace root still matches the
+  // worktree paths git records (which may be resolved differently).
+  const normalizedWorkspaceDir = await comparablePath(workspaceDir);
   const worktrees = await listWorktrees(mirrorDir);
 
-  const targets = worktrees.filter((worktree) => {
-    const normalizedWorktree = path.resolve(worktree.path);
-    return (
+  const targets: WorktreeEntry[] = [];
+  for (const worktree of worktrees) {
+    const normalizedWorktree = await comparablePath(worktree.path);
+    if (
       normalizedWorktree === normalizedWorkspaceDir ||
       normalizedWorktree.startsWith(`${normalizedWorkspaceDir}${path.sep}`)
-    );
-  });
+    ) {
+      targets.push(worktree);
+    }
+  }
 
   if (targets.length === 0) {
     return;
@@ -314,24 +170,24 @@ export async function* cleanupWorkspaceWorktreesGenerator(
 
   for (const target of targets) {
     if (target.prunable || (await hasBrokenWorktreeLink(target.path))) {
-      yield* pruneWorktreeMetadataGenerator(mirrorDir, target.path);
+      yield* pruneWorktreeMetadata(mirrorDir, target.path);
       continue;
     }
 
-    const removeGen = asGenerator(() =>
+    const removeGen = asTask(() =>
       runGit(["worktree", "remove", "--force", target.path], {
         cwd: mirrorDir,
       }),
     );
 
     try {
-      yield* withRetryGenerator(removeGen, {
+      yield* withRetry(removeGen, {
         attempts: 3,
         label: `worktree-remove:${path.basename(target.path)}`,
       });
     } catch (error) {
       if (isStaleWorktreeRemoveError(error)) {
-        yield* pruneWorktreeMetadataGenerator(mirrorDir, target.path);
+        yield* pruneWorktreeMetadata(mirrorDir, target.path);
         continue;
       }
 
@@ -341,9 +197,10 @@ export async function* cleanupWorkspaceWorktreesGenerator(
 }
 
 /**
- * Generator version of updatePristineRepo that yields log messages.
+ * Fetches the latest branches into the pristine bare mirror (with retry and
+ * case-conflict repair), yielding log messages as it runs.
  */
-async function* updatePristineRepoGenerator(
+async function* updatePristineRepo(
   repo: RepositorySource,
   mirrorDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
@@ -351,7 +208,7 @@ async function* updatePristineRepoGenerator(
   // --prune: Remove stale remote-tracking refs
   // Explicit refspec/refmap: ignore stale remote.origin.fetch settings that may
   // point remote branches at refs/heads/* in older bare caches.
-  const fetchGen = asGenerator(() =>
+  const fetchGen = asTask(() =>
     runGit(
       [
         "fetch",
@@ -366,31 +223,25 @@ async function* updatePristineRepoGenerator(
   );
 
   try {
-    yield* withRetryGenerator(fetchGen, {
+    yield* withRetry(fetchGen, {
       attempts: 3,
       label: `update-pristine:${repo.name}`,
     });
   } catch (error_) {
-    if (
-      yield* repairCaseConflictingRemoteRefGenerator(
-        mirrorDir,
-        repo.name,
-        error_,
-      )
-    ) {
+    if (yield* repairCaseConflictingRemoteRef(mirrorDir, repo.name, error_)) {
       try {
-        yield* withRetryGenerator(fetchGen, {
+        yield* withRetry(fetchGen, {
           attempts: 3,
           label: `update-pristine:${repo.name}`,
         });
         return;
       } catch (retryError) {
-        yield* warnPristineUpdateFailedGenerator(repo.name, retryError);
+        yield* warnPristineUpdateFailed(repo.name, retryError);
         return;
       }
     }
 
-    yield* warnPristineUpdateFailedGenerator(repo.name, error_);
+    yield* warnPristineUpdateFailed(repo.name, error_);
   }
 }
 
@@ -400,7 +251,7 @@ function getCannotLockRef(error: unknown): string | null {
   return match?.[1] ?? null;
 }
 
-async function* repairCaseConflictingRemoteRefGenerator(
+async function* repairCaseConflictingRemoteRef(
   mirrorDir: string,
   repoName: string,
   error: unknown,
@@ -436,7 +287,7 @@ async function* repairCaseConflictingRemoteRefGenerator(
   return true;
 }
 
-async function* warnPristineUpdateFailedGenerator(
+async function* warnPristineUpdateFailed(
   repoName: string,
   error: unknown,
 ): AsyncGenerator<TaskState, void, undefined> {

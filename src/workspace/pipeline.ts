@@ -5,17 +5,14 @@ import { restoreNodeModules } from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import {
-  runSingleRepoInitializersGenerator,
+  runSingleRepoInitializers,
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
+import { addWorktree } from "../services/worktree.ts";
 import type { RepositorySource } from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
-import {
-  cleanupWorkspaceWorktreesGenerator,
-  ensureMirrorRepoGenerator,
-  ensureWorkingCopyGenerator,
-} from "./repository.ts";
+import { cleanupWorkspaceWorktrees, ensureMirrorRepo } from "./repository.ts";
 
 /**
  * State emitted by a per-repo pipeline.
@@ -64,13 +61,13 @@ export type RepoInitializationOptions = {
 };
 
 /**
- * Generator that runs the full pipeline for a single repository.
+ * Runs the full pipeline for a single repository, yielding progress.
  * Stages: git (mirror → cleanup → worktree) → initializers (install → linking)
  *
  * This enables cross-phase parallelism: repo A can start initializers while
  * repo B is still doing git operations.
  */
-export async function* repoPipelineGenerator({
+export async function* repoPipeline({
   repo,
   workspaceDir,
   repoDir,
@@ -95,7 +92,7 @@ export async function* repoPipelineGenerator({
 
     // Step 1: Mirror (fetch or clone)
     currentStep = "git:mirror";
-    for await (const state of ensureMirrorRepoGenerator(repo, mirrorDir)) {
+    for await (const state of ensureMirrorRepo(repo, mirrorDir)) {
       const pipelineState = mapTaskStateToPipelineState(state, "mirror");
       if (pipelineState) yield pipelineState;
       if (state.status === "failed") {
@@ -107,7 +104,7 @@ export async function* repoPipelineGenerator({
     // Step 2: Cleanup stale worktrees (skip for new workspaces)
     if (!isNewWorkspace) {
       currentStep = "git:cleanup";
-      for await (const state of cleanupWorkspaceWorktreesGenerator(
+      for await (const state of cleanupWorkspaceWorktrees(
         mirrorDir,
         workspaceDir,
       )) {
@@ -120,14 +117,19 @@ export async function* repoPipelineGenerator({
       }
     }
 
-    // Step 3: Create worktree
+    // Step 3: Create worktree. `reset` + `reuse` preserves the long-standing
+    // idempotent behavior (re-running over an existing checkout is a no-op),
+    // while the primitive's guard refuses to reset a branch that carries
+    // commits not on the base.
     currentStep = "git:worktree";
-    for await (const state of ensureWorkingCopyGenerator(
-      repo,
-      mirrorDir,
+    for await (const state of addWorktree({
+      gitDir: mirrorDir,
       targetDir,
-      branchName,
-    )) {
+      base: { defaultBranchOf: mirrorDir, fallback: "main" },
+      branch: { kind: "reset", name: branchName },
+      onExistingDir: "reuse",
+      label: `worktree:${repo.name}`,
+    })) {
       const pipelineState = mapTaskStateToPipelineState(state, "worktree");
       if (pipelineState) yield pipelineState;
       if (state.status === "failed") {
@@ -181,7 +183,7 @@ export async function* repoPipelineGenerator({
       return;
     }
 
-    yield* repoInitializationGenerator({
+    yield* repoInitialization({
       repo,
       workspaceDir,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
@@ -201,7 +203,7 @@ export async function* repoPipelineGenerator({
  * This is intentionally independent from worktree creation so it can run in a
  * detached worker after the foreground command returns.
  */
-export async function* repoInitializationGenerator({
+export async function* repoInitialization({
   repo,
   workspaceDir,
   repoDir,
@@ -216,7 +218,7 @@ export async function* repoInitializationGenerator({
   let currentStep = "initializer:detection";
 
   try {
-    for await (const state of runSingleRepoInitializersGenerator({
+    for await (const state of runSingleRepoInitializers({
       context: { repoDir: resolvedRepoDir, workspaceDir, repo },
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     })) {
@@ -258,7 +260,7 @@ export async function* repoInitializationGenerator({
 /**
  * Map a TaskState from git operations to a RepoPipelineState.
  */
-function mapTaskStateToPipelineState(
+export function mapTaskStateToPipelineState(
   state: TaskState,
   step: "mirror" | "cleanup" | "worktree",
 ): RepoPipelineState | null {
@@ -318,7 +320,7 @@ function mapTaskStateToPipelineState(
 /**
  * Map a SingleRepoInitializerState to a RepoPipelineState.
  */
-function mapInitializerStateToPipelineState(
+export function mapInitializerStateToPipelineState(
   state: SingleRepoInitializerState,
 ): RepoPipelineState | null {
   switch (state.phase) {

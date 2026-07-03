@@ -4,10 +4,7 @@ import {
   assertContainedPathWithoutSymlinks,
   resolveContainedPath,
 } from "../utils/path-safety.ts";
-import {
-  runCommandGenerator,
-  type TaskGenerator,
-} from "../utils/task-generator.ts";
+import { spawnCommand, type TaskGenerator } from "../utils/task-generator.ts";
 
 /**
  * Generator-based hook execution.
@@ -51,7 +48,7 @@ export async function* runHook(
     args = ["-c", hook.run];
   }
 
-  const hookGen = runCommandGenerator(command, args, { cwd });
+  const hookGen = spawnCommand(command, args, { cwd });
 
   yield* hookGen;
 }
