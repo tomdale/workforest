@@ -14,6 +14,10 @@ import {
   renderPipelinesGrid,
   shouldUseGrid,
 } from "../ui/grid-consumer.ts";
+import {
+  type PresentRunOutcome,
+  presentRun,
+} from "../ui/setup-view/present.ts";
 import { ensureDir } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import {
@@ -66,8 +70,10 @@ export type StampWorkspaceOptions = {
   templateVariant?: string;
   /** Render the setup grid when the terminal supports it (default false). */
   interactive?: boolean;
+  /** Stream subprocess output in the console fallback. */
+  verbose?: boolean;
   onEvent?: ServiceEventSink;
-  renderPipelinesGrid?: typeof renderPipelinesGrid;
+  presentRun?: typeof presentRun;
   shouldUseGrid?: typeof shouldUseGrid;
 };
 
@@ -84,6 +90,8 @@ export type AddReposOptions = {
   disabledInitializers?: boolean | string[];
   /** Render the setup grid when the terminal supports it (default false). */
   interactive?: boolean;
+  /** Stream subprocess output in the console fallback. */
+  verbose?: boolean;
   onEvent?: ServiceEventSink;
   renderPipelinesGrid?: typeof renderPipelinesGrid;
   shouldUseGrid?: typeof shouldUseGrid;
@@ -109,6 +117,8 @@ export type StampWorkspaceResult = {
   setupFailures: readonly RepoSetupFailureSummary[];
   workspaceDir: string;
   nextSteps: readonly string[];
+  /** How the presentation ended; "cancelled" maps to exit code 130. */
+  outcome: PresentRunOutcome;
 };
 
 /**
@@ -240,6 +250,7 @@ export async function stampWorkspace(
       setupFailures: [],
       workspaceDir,
       nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
+      outcome: "ready",
     };
   }
 
@@ -252,21 +263,24 @@ export async function stampWorkspace(
         branchName: effectiveBranchName,
         isNewWorkspace,
         beforeInitializers,
-        monitorBackground: interactive,
         templateBarrier,
         session,
       }),
     ]),
   );
 
+  let outcome: PresentRunOutcome = "background";
   try {
-    await presentPipelines({
+    const presented = await (options.presentRun ?? presentRun)({
+      session,
+      scope,
       pipelines,
       repoNames: setupRepos.map((repo) => repo.name),
       interactive,
+      targetDir: workspaceDir,
       ...(onEvent ? { onEvent } : {}),
-      workspacePath: workspaceDir,
-      getLogPath: () => Promise.resolve(session.runDir),
+      ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
+      nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
       onFailure: (repoName, state) => {
         setupFailures.set(
           repoName,
@@ -279,8 +293,8 @@ export async function stampWorkspace(
         );
       },
       onBeforeCompletionPrompt: async () => {
-        // Deferred to the same point for grid and drain. Suppress service
-        // events while the grid owns the screen; the drain is free to emit
+        // Deferred to the same point for grid and console. Suppress service
+        // events while the grid owns the screen; the console is free to emit
         // them.
         await writeVSCodeWorkspaceFile(
           workspaceDir,
@@ -293,15 +307,14 @@ export async function stampWorkspace(
         });
         emitRunEndIfTerminal(session, finalState);
       },
-      completeOnWorktreesReady: true,
-      backgroundInitialization: true,
-      ...(options.renderPipelinesGrid
-        ? { renderPipelinesGrid: options.renderPipelinesGrid }
-        : {}),
+      // A cancelled repo never reaches the template barrier; balance its
+      // accounting so repos already waiting there are released.
+      onRepoCancelled: () => templateBarrier?.markRepoFailed(),
       ...(options.shouldUseGrid
         ? { shouldUseGrid: options.shouldUseGrid }
         : {}),
     });
+    outcome = presented.outcome;
   } finally {
     await session.close().catch(() => undefined);
   }
@@ -318,6 +331,7 @@ export async function stampWorkspace(
     setupFailures: [...setupFailures.values()],
     workspaceDir,
     nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
+    outcome,
   };
 }
 
@@ -390,7 +404,6 @@ async function* createBackgroundRepoSetupPipeline({
   branchName,
   isNewWorkspace,
   beforeInitializers,
-  monitorBackground,
   templateBarrier,
   session,
 }: {
@@ -399,7 +412,6 @@ async function* createBackgroundRepoSetupPipeline({
   branchName: string;
   isNewWorkspace: boolean;
   beforeInitializers: NonNullable<RepoPipelineOptions["beforeInitializers"]>;
-  monitorBackground: boolean;
   templateBarrier: TemplateCopyBarrier | null;
   session: RunSession;
 }): AsyncGenerator<RepoPipelineState> {
@@ -411,7 +423,9 @@ async function* createBackgroundRepoSetupPipeline({
     branchName,
     isNewWorkspace,
     beforeInitializers,
-    monitorBackground,
+    // The attached grid renders worker progress from the run's event stream,
+    // so the pipeline itself ends at handoff instead of tailing state files.
+    monitorBackground: false,
     onFailed: () => templateBarrier?.markRepoFailed(),
     session,
   });
@@ -551,6 +565,7 @@ export async function addReposToWorkspace({
   branchName,
   disabledInitializers,
   interactive = false,
+  verbose,
   onEvent,
   renderPipelinesGrid: renderGrid = renderPipelinesGrid,
   shouldUseGrid: useGrid = shouldUseGrid,
@@ -634,6 +649,7 @@ export async function addReposToWorkspace({
     },
     renderPipelinesGrid: renderGrid,
     shouldUseGrid: useGrid,
+    ...(verbose !== undefined ? { verbose } : {}),
     ...(onEvent ? { onEvent } : {}),
   });
 

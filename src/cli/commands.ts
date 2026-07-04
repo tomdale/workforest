@@ -236,6 +236,12 @@ const newCommand = leaf({
       undefined,
       "Provision the workspace on Vercel Sandbox instead of locally.",
     ),
+    booleanFlag(
+      "verbose",
+      "--verbose",
+      undefined,
+      "Stream subprocess output in the console fallback, prefixed per repository.",
+    ),
   ],
   operands: {
     variants: [
@@ -558,6 +564,12 @@ const addCommand = leaf({
       "--yes",
       undefined,
       "Confirm worktree promotion without prompting.",
+    ),
+    booleanFlag(
+      "verbose",
+      "--verbose",
+      undefined,
+      "Stream subprocess output in the console fallback, prefixed per repository.",
     ),
   ],
   examples: [

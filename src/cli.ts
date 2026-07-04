@@ -493,6 +493,7 @@ async function runEntryCommand(
   const { runEntry } = await import("./entry/surface.ts");
   const { buildCreateInput, create } = await import("./workspace/create.ts");
   const scope = await resolveCurrentScope();
+  let cancelled = false;
   await runEntry(mode, {
     ...(scope ? { scope } : {}),
     ...(options.initialName ? { initialName: options.initialName } : {}),
@@ -515,14 +516,15 @@ async function runEntryCommand(
         });
         return;
       }
-      await create(input, {
+      const result = await create(input, {
         interactive: true,
         onEvent: humanServiceEventSink,
         writeShellCdPath,
       });
+      cancelled = result.outcome === "cancelled";
     },
   });
-  return success();
+  return cancelled ? failure(130, { kind: "none" }) : success();
 }
 
 /**
@@ -1148,13 +1150,55 @@ async function runStatusCommand(
       );
     }
 
-    const { renderInitializationStatus } = await import(
-      "./ui/initialization-status.ts"
+    const scope = initializationScope(resolution.entry);
+    const { resolveRunDir, readRunManifest } = await import(
+      "./workspace/run-log/store.ts"
     );
-    await renderInitializationStatus(
-      initializationScope(resolution.entry),
-      status.initialization.repos.map((state) => state.repo),
+    const runDir = await resolveRunDir(scope, "last");
+    if (runDir === null) {
+      // Workspaces created before run logs existed have no event stream to
+      // watch; degrade to the wait-style line output.
+      return waitForInitializationResult(
+        waitForInitialization,
+        scope,
+        undefined,
+      );
+    }
+
+    const [{ renderSetupGrid }, { followRunEvents }, { printRunSummary }] =
+      await Promise.all([
+        import("./ui/setup-view/grid-view.ts"),
+        import("./workspace/run-log/reader.ts"),
+        import("./ui/setup-view/summary.ts"),
+      ]);
+    const { getInitializationRootDir } = await import(
+      "./workspace/initialization-scope.ts"
     );
+    const manifest = await readRunManifest(runDir);
+    const repoNames =
+      manifest && manifest.repos.length > 0
+        ? [...manifest.repos]
+        : status.initialization.repos.map((state) => state.repo);
+    const targetDir = getInitializationRootDir(scope);
+    const watched = await renderSetupGrid({
+      events: followRunEvents(runDir),
+      repoNames,
+      mode: "watch",
+      targetDir,
+    });
+    printRunSummary({
+      snapshot: watched.snapshot,
+      targetDir,
+      outcome:
+        watched.outcome === "ready"
+          ? "ready"
+          : watched.outcome === "failed"
+            ? "failed"
+            : watched.outcome === "cancelled"
+              ? "cancelled"
+              : "detached",
+      repoNames,
+    });
     return success();
   }
 

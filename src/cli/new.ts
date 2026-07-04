@@ -25,7 +25,7 @@ import {
   type WorkforestDirectories,
 } from "../workspace/paths.ts";
 import { OperationalError, UsageError } from "./errors.ts";
-import { success } from "./output.ts";
+import { failure, success } from "./output.ts";
 import type { CommandResult, ParsedInvocation } from "./types.ts";
 
 export type ParsedNewOperands = Readonly<{
@@ -83,7 +83,18 @@ export async function runNewCommand(
     return success();
   }
 
-  await create({ changeName, source, branchName, directories }, options);
+  const result = await create(
+    { changeName, source, branchName, directories },
+    {
+      ...options,
+      ...(invocation.flags["verbose"] === true ? { verbose: true } : {}),
+    },
+  );
+  if (result.outcome === "cancelled") {
+    // The setup summary already reached scrollback; only the exit code
+    // remains to report.
+    return failure(130, { kind: "none" });
+  }
   return success();
 }
 

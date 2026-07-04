@@ -130,6 +130,8 @@ export type RenderPipelinesGridOptions = {
   /** Cap on concurrently running pipelines; queued repos start as slots free. */
   maxConcurrent?: number;
   environment?: GridRenderEnvironment;
+  /** Environment for the pageable setup view used past nine repositories. */
+  setupViewEnvironment?: import("./setup-view/grid-view.ts").SetupViewEnvironment;
 };
 
 const DEFAULT_RENDER_INTERVAL_MS = 33;
@@ -257,9 +259,11 @@ function createDefaultEnvironment(): GridRenderEnvironment {
  * - Small terminals (< 60 cols or < 15 rows)
  * - CI environments
  * - When WORKFOREST_NO_TUI is set
+ *
+ * Repo count no longer matters: runs with more than nine repositories page
+ * through the grid instead of falling back to the spinner.
  */
-export function shouldUseGrid(repoCount?: number): boolean {
-  if (repoCount !== undefined && repoCount > MAX_GRID_REPOS) return false;
+export function shouldUseGrid(): boolean {
   if (!process.stdout.isTTY) return false;
   const { columns, rows } = process.stdout;
   if ((columns ?? 80) < 60 || (rows ?? 24) < 15) return false;
@@ -287,16 +291,31 @@ export async function renderPipelinesGrid({
   backgroundInitialization = false,
   maxConcurrent,
   environment = createDefaultEnvironment(),
+  setupViewEnvironment,
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
+  if (repoNames.length > MAX_GRID_REPOS) {
+    // More repos than one grid screen holds: render through the pageable
+    // event-native setup view instead of refusing.
+    const { renderPipelinesGridPaged } = await import("./setup-view/compat.ts");
+    return renderPipelinesGridPaged({
+      pipelines,
+      repoNames,
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
+      ...(onFailure !== undefined ? { onFailure } : {}),
+      ...(onBeforeCompletionPrompt !== undefined
+        ? { onBeforeCompletionPrompt }
+        : {}),
+      ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
+      ...(setupViewEnvironment !== undefined
+        ? { environment: setupViewEnvironment }
+        : {}),
+    });
+  }
+
   const renderIntervalMs =
     environment.renderIntervalMs ?? DEFAULT_RENDER_INTERVAL_MS;
   const finalHoldMs = environment.finalHoldMs ?? DEFAULT_FINAL_HOLD_MS;
   const { rows, cols } = calculateGridDimensions(repoNames.length);
-  if (repoNames.length > rows * cols) {
-    throw new Error(
-      `Grid can render ${rows * cols} repositories, received ${repoNames.length}.`,
-    );
-  }
 
   const screen = environment.createScreen();
   const grid = environment.createGrid({
@@ -642,6 +661,8 @@ export type DrainPipelinesToConsoleOptions = {
   ) => void | Promise<void>;
   /** Cap on concurrently running pipelines. */
   maxConcurrent?: number;
+  /** Stream subprocess output lines prefixed with the repo name. */
+  verbose?: boolean;
 };
 
 /**
@@ -660,9 +681,24 @@ export async function drainPipelinesToConsole(
     getLogPath,
     onBeforeCompletionPrompt,
     maxConcurrent,
+    verbose = false,
   }: DrainPipelinesToConsoleOptions = {},
 ): Promise<Map<string, { hasLockfile: boolean }>> {
   const completed = new Map<string, { hasLockfile: boolean }>();
+  const outputAdapters = new Map<string, CommandStreamAdapter>();
+
+  const emitVerboseOutput = (id: string, output: string): void => {
+    if (!verbose) return;
+    const adapter = getAdapter(outputAdapters, id);
+    for (const line of adapter.push("stdout", output)) {
+      if (line.line.trim().length === 0) continue;
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "info",
+        message: `${id} │ ${line.line}`,
+      });
+    }
+  };
 
   // A repo can settle successfully via `worktree-ready` (initialization moved to
   // the background) or `complete`; record the latest lockfile signal from either
@@ -684,9 +720,15 @@ export async function drainPipelinesToConsole(
   })) {
     switch (state.phase) {
       case "git":
+        if (state.status === "output" && state.output) {
+          emitVerboseOutput(id, state.output);
+        }
         emitPipelineProgress(onEvent, id, state.step, state);
         break;
       case "initializer":
+        if (state.status === "output" && state.output) {
+          emitVerboseOutput(id, state.output);
+        }
         emitPipelineProgress(onEvent, id, state.name, state);
         break;
       case "worktree-ready":
@@ -738,6 +780,8 @@ export type PresentPipelinesOptions = {
    * WORKFOREST_MAX_CONCURRENT when unset.
    */
   maxConcurrent?: number;
+  /** Stream subprocess output in the console fallback. */
+  verbose?: boolean;
   shouldUseGrid?: typeof shouldUseGrid;
   renderPipelinesGrid?: typeof renderPipelinesGrid;
 };
@@ -760,13 +804,14 @@ export async function presentPipelines({
   backgroundInitialization,
   onBeforeCompletionPrompt,
   maxConcurrent,
+  verbose,
   shouldUseGrid: useGrid = shouldUseGrid,
   renderPipelinesGrid: renderGrid = renderPipelinesGrid,
 }: PresentPipelinesOptions): Promise<Map<string, { hasLockfile: boolean }>> {
   const resolvedMaxConcurrent =
     maxConcurrent ?? (await resolveConfiguredMaxConcurrent());
 
-  if (interactive && useGrid(repoNames.length)) {
+  if (interactive && useGrid()) {
     return renderGrid({
       pipelines,
       repoNames,
@@ -794,6 +839,7 @@ export async function presentPipelines({
     ...(onBeforeCompletionPrompt !== undefined
       ? { onBeforeCompletionPrompt }
       : {}),
+    ...(verbose !== undefined ? { verbose } : {}),
   });
 }
 

@@ -390,6 +390,190 @@ export async function* hookStatesToEvents(
   }
 }
 
+export type PipelineEventBridge = {
+  convert(state: RepoPipelineState): RunEventBody[];
+};
+
+/**
+ * Compatibility bridge in the opposite direction of
+ * {@link createPipelineStateConverter}: lifts a legacy RepoPipelineState
+ * stream (tasks, review, cloud fan-outs) into run events so those surfaces
+ * can render through the event-native setup view. Stateful per repo: it
+ * tracks the open step so transitions become timed step-start/step-end pairs.
+ */
+export function createPipelineEventBridge(repo: string): PipelineEventBridge {
+  let current: { step: StepId; title: string } | null = null;
+  const startedTimes = new Map<StepId, number>();
+  let retryAttempts = 0;
+
+  const stepFor = (
+    state: Extract<RepoPipelineState, { phase: "git" | "initializer" }>,
+  ): { step: StepId; title: string } =>
+    state.phase === "git"
+      ? { step: `git:${state.step}`, title: state.step }
+      : { step: `task:${state.name}`, title: state.name };
+
+  const openStep = (target: {
+    step: StepId;
+    title: string;
+  }): RunEventBody[] => {
+    const events: RunEventBody[] = [];
+    if (current !== null && current.step !== target.step) {
+      events.push(...closeStep("ok"));
+    }
+    if (current === null || current.step !== target.step) {
+      current = target;
+      retryAttempts = 0;
+      startedTimes.set(target.step, Date.now());
+      events.push({
+        kind: "step-start",
+        repo,
+        step: target.step,
+        title: target.title,
+      });
+    }
+    return events;
+  };
+
+  const closeStep = (
+    outcome: StepOutcome,
+    extras: { error?: Error; reason?: string } = {},
+  ): RunEventBody[] => {
+    if (current === null) return [];
+    const { step } = current;
+    current = null;
+    const startedAt = startedTimes.get(step) ?? Date.now();
+    return [
+      {
+        kind: "step-end",
+        repo,
+        step,
+        outcome,
+        durationMs: Date.now() - startedAt,
+        ...(extras.error ? { error: toRunEventError(extras.error) } : {}),
+        ...(extras.reason !== undefined ? { reason: extras.reason } : {}),
+      },
+    ];
+  };
+
+  const convert = (state: RepoPipelineState): RunEventBody[] => {
+    switch (state.phase) {
+      case "git":
+      case "initializer": {
+        const target = stepFor(state);
+        switch (state.status) {
+          case "pending":
+            return [];
+          case "running": {
+            const events = openStep(target);
+            if (state.message) {
+              events.push({
+                kind: "step-log",
+                repo,
+                step: target.step,
+                level: "info",
+                message: state.message,
+              });
+            }
+            return events;
+          }
+          case "output": {
+            const events = openStep(target);
+            if (state.output !== undefined) {
+              events.push({
+                kind: "step-output",
+                repo,
+                step: target.step,
+                chunk: state.output,
+              });
+            }
+            return events;
+          }
+          case "log": {
+            const events = openStep(target);
+            if (state.message) {
+              events.push({
+                kind: "step-log",
+                repo,
+                step: target.step,
+                level: "info",
+                message: state.message,
+              });
+            }
+            return events;
+          }
+          case "retrying": {
+            const events = openStep(target);
+            retryAttempts += 1;
+            events.push({
+              kind: "step-retry",
+              repo,
+              step: target.step,
+              attempt: retryAttempts + 1,
+              reason: state.message ?? "Retrying",
+            });
+            return events;
+          }
+          case "completed":
+            return [...openStep(target), ...closeStep("ok")];
+          case "failed":
+            return [...openStep(target), ...closeStep("failed")];
+          case "skipped":
+            return [
+              ...openStep(target),
+              ...closeStep("skipped", {
+                ...(state.message !== undefined
+                  ? { reason: state.message }
+                  : {}),
+              }),
+            ];
+        }
+        break;
+      }
+      case "worktree-ready":
+        return [
+          ...closeStep("ok"),
+          { kind: "worktree-ready", repo, hasLockfile: state.hasLockfile },
+          {
+            kind: "repo-end",
+            repo,
+            outcome: "ready",
+            hasLockfile: state.hasLockfile,
+          },
+        ];
+      case "complete":
+        return [
+          ...closeStep("ok"),
+          {
+            kind: "repo-end",
+            repo,
+            outcome: "ready",
+            hasLockfile: state.hasLockfile,
+          },
+        ];
+      case "cancelled":
+        return [
+          ...closeStep("cancelled"),
+          { kind: "repo-end", repo, outcome: "cancelled" },
+        ];
+      case "failed":
+        return [
+          ...closeStep("failed", { error: state.error }),
+          {
+            kind: "repo-end",
+            repo,
+            outcome: "failed",
+            ...(state.step !== undefined ? { step: state.step } : {}),
+            error: toRunEventError(state.error),
+          },
+        ];
+    }
+    return [];
+  };
+
+  return { convert };
+}
+
 export type PipelineStateConverter = {
   convert(body: RunEventBody): RepoPipelineState[];
 };

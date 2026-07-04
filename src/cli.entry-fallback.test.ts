@@ -26,7 +26,13 @@ const buildCreateInputMock = vi.hoisted(() =>
     },
   })),
 );
-const createMock = vi.hoisted(() => vi.fn(async () => undefined));
+const createMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    targetDir: "/tmp/workforest/Repos/front/redesign-cli",
+    setupFailures: [],
+    outcome: "ready" as const,
+  })),
+);
 
 vi.mock("./entry/surface.ts", () => ({
   runEntry: runEntryMock,

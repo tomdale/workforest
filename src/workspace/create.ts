@@ -8,11 +8,11 @@ import type { ServiceEventSink } from "../services/events.ts";
 import { reportShellCdTarget } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
+import type { shouldUseGrid } from "../ui/grid-consumer.ts";
 import {
-  presentPipelines,
-  type renderPipelinesGrid,
-  type shouldUseGrid,
-} from "../ui/grid-consumer.ts";
+  type PresentRunOutcome,
+  presentRun,
+} from "../ui/setup-view/present.ts";
 import {
   buildBranchName,
   resolveBranchPrefix,
@@ -64,18 +64,22 @@ export type CreateInput = Readonly<{
 
 export type CreateOptions = Readonly<{
   interactive: boolean;
+  /** Stream subprocess output in the console fallback. */
+  verbose?: boolean;
   onEvent?: ServiceEventSink;
   writeShellCdPath: (targetDir: string) => Promise<void>;
   initializeWorktreeSetup?: typeof initializeWorktreeSetup;
   runScopedRepoSetupPipeline?: typeof runScopedRepoSetupPipeline;
   stampWorkspace?: typeof stampWorkspace;
-  renderPipelinesGrid?: typeof renderPipelinesGrid;
+  presentRun?: typeof presentRun;
   shouldUseGrid?: typeof shouldUseGrid;
 }>;
 
 export type CreateResult = Readonly<{
   targetDir: string;
   setupFailures: readonly RepoSetupFailureSummary[];
+  /** How the presentation ended; "cancelled" maps to exit code 130. */
+  outcome: PresentRunOutcome;
 }>;
 
 /**
@@ -140,8 +144,11 @@ async function createWorktree(
   });
 
   const setupFailures = new Map<string, RepoSetupFailureSummary>();
+  let outcome: PresentRunOutcome = "background";
   try {
-    await presentPipelines({
+    const presented = await (options.presentRun ?? presentRun)({
+      session,
+      scope,
       pipelines: new Map([
         [
           repo.name,
@@ -152,16 +159,19 @@ async function createWorktree(
             repoDir: targetDir,
             branchName,
             isNewWorkspace: true,
-            monitorBackground: options.interactive,
+            // The attached grid renders worker progress from the run's event
+            // stream; the pipeline ends at handoff.
+            monitorBackground: false,
             session,
           }),
         ],
       ]),
       repoNames: [repo.name],
       interactive: options.interactive,
+      targetDir,
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-      workspacePath: targetDir,
-      getLogPath: () => Promise.resolve(session.runDir),
+      ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
+      nextSteps: ["wf status --watch"],
       onFailure: (repoName, state) => {
         setupFailures.set(
           repoName,
@@ -185,28 +195,32 @@ async function createWorktree(
           ],
         });
       },
-      completeOnWorktreesReady: true,
-      backgroundInitialization: true,
-      ...(options.renderPipelinesGrid
-        ? { renderPipelinesGrid: options.renderPipelinesGrid }
-        : {}),
       ...(options.shouldUseGrid
         ? { shouldUseGrid: options.shouldUseGrid }
         : {}),
     });
+    outcome = presented.outcome;
   } finally {
     await session.close().catch(() => undefined);
   }
 
   const failures = [...setupFailures.values()];
-  printRepoSetupFailures(failures, options.onEvent);
+  if (outcome === "background") {
+    // Grid outcomes already printed the scrollback summary (failures
+    // included); the console path still reports them here.
+    printRepoSetupFailures(failures, options.onEvent);
+  }
+
+  if (outcome === "cancelled") {
+    return { targetDir, setupFailures: failures, outcome };
+  }
 
   log.success(`Change ready: ${targetDir}`);
   await reportShellCdTarget(targetDir, {
     writeShellCdPath: options.writeShellCdPath,
   });
 
-  return { targetDir, setupFailures: failures };
+  return { targetDir, setupFailures: failures, outcome };
 }
 
 async function createWorkspace(
@@ -234,20 +248,35 @@ async function createWorkspace(
         }
       : {}),
     interactive: options.interactive,
+    ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-    ...(options.renderPipelinesGrid
-      ? { renderPipelinesGrid: options.renderPipelinesGrid }
-      : {}),
+    ...(options.presentRun ? { presentRun: options.presentRun } : {}),
     ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
   });
-  printRepoSetupFailures(result.setupFailures, options.onEvent);
+  if (result.outcome === "background") {
+    // Grid outcomes already printed the scrollback summary (failures
+    // included); the console path still reports them here.
+    printRepoSetupFailures(result.setupFailures, options.onEvent);
+  }
+
+  if (result.outcome === "cancelled") {
+    return {
+      targetDir: workspaceDir,
+      setupFailures: result.setupFailures,
+      outcome: result.outcome,
+    };
+  }
 
   log.success(`Change ready: ${workspaceDir}`);
   await reportShellCdTarget(workspaceDir, {
     writeShellCdPath: options.writeShellCdPath,
   });
 
-  return { targetDir: workspaceDir, setupFailures: result.setupFailures };
+  return {
+    targetDir: workspaceDir,
+    setupFailures: result.setupFailures,
+    outcome: result.outcome,
+  };
 }
 
 /**

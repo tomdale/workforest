@@ -1093,6 +1093,35 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Best-effort cancellation for one repo's setup: marks any non-terminal
+ * state cancelled so finalization can complete. Unlike
+ * {@link cancelRepoInitializations} this never throws; it is used by the
+ * interactive grid's graceful cancel for repos that are still pending or
+ * mid-git in the foreground, where a hard error would strand the cancel.
+ */
+export async function cancelRepoSetup(
+  target: InitializationTarget,
+  repoName: string,
+): Promise<RepoInitializationState | null> {
+  const scope = normalizeInitializationTarget(target);
+  const now = new Date().toISOString();
+  try {
+    return await updateRepoInitializationState(scope, repoName, (current) => {
+      if (isTerminalRepoStatus(current.status)) return current;
+      return {
+        ...current,
+        status: "cancelled",
+        message: "Setup cancelled",
+        completed_at: now,
+        updated_at: now,
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function markRepoCancelled(
   target: InitializationTarget,
   repoName: string,

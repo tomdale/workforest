@@ -30,9 +30,7 @@ type RunScopedRepoSetupPipeline = NonNullable<
   RunNewCommandOptions["runScopedRepoSetupPipeline"]
 >;
 type StampWorkspace = NonNullable<RunNewCommandOptions["stampWorkspace"]>;
-type RenderPipelinesGrid = NonNullable<
-  RunNewCommandOptions["renderPipelinesGrid"]
->;
+type PresentRun = NonNullable<RunNewCommandOptions["presentRun"]>;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -134,7 +132,7 @@ describe("wf new", () => {
     });
   });
 
-  it("drives a single-repo interactive start through the grid pipeline", async () => {
+  it("drives a single-repo interactive start through the setup view", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
       fixture.cacheDir,
@@ -142,9 +140,7 @@ describe("wf new", () => {
       "git@github.com:vercel/front.git",
     );
     const pipeline = fakeRepoSetupPipeline();
-    const renderPipelinesGrid = vi.fn<RenderPipelinesGrid>(
-      async () => new Map([["front", { hasLockfile: false }]]),
-    );
+    const presentRun = fakePresentRun([["front", { hasLockfile: false }]]);
 
     await runNewCommand(invocation(["redesign-cli", "front"]), {
       interactive: true,
@@ -152,29 +148,34 @@ describe("wf new", () => {
       runScopedRepoSetupPipeline: pipeline,
       initializeWorktreeSetup: vi.fn(async () => undefined),
       shouldUseGrid: () => true,
-      renderPipelinesGrid,
+      presentRun,
     });
 
-    // Single-repo creation renders the worktree pipeline through the same grid
-    // seam as multi-repo, deferring finalization into onBeforeCompletionPrompt.
-    expect(renderPipelinesGrid).toHaveBeenCalledTimes(1);
-    const gridOptions = renderPipelinesGrid.mock.calls[0]?.[0];
-    expect(gridOptions?.repoNames).toEqual(["front"]);
-    expect(gridOptions?.pipelines.size).toBe(1);
-    expect(gridOptions?.pipelines.has("front")).toBe(true);
-    expect(gridOptions?.completeOnWorktreesReady).toBe(true);
-    expect(gridOptions?.backgroundInitialization).toBe(true);
-    expect(typeof gridOptions?.onBeforeCompletionPrompt).toBe("function");
-    // The interactive grid watches the detached initializer itself.
+    // Single-repo creation renders the worktree pipeline through the same
+    // session-native seam as multi-repo, deferring finalization into
+    // onBeforeCompletionPrompt.
+    expect(presentRun).toHaveBeenCalledTimes(1);
+    const presentOptions = presentRun.mock.calls[0]?.[0];
+    expect(presentOptions?.repoNames).toEqual(["front"]);
+    expect(presentOptions?.pipelines.size).toBe(1);
+    expect(presentOptions?.pipelines.has("front")).toBe(true);
+    expect(presentOptions?.interactive).toBe(true);
+    expect(presentOptions?.session).toBeDefined();
+    expect(presentOptions?.scope).toEqual(
+      expect.objectContaining({ kind: "worktree" }),
+    );
+    expect(typeof presentOptions?.onBeforeCompletionPrompt).toBe("function");
+    // The attached grid renders worker progress from the event stream; the
+    // pipeline itself ends at handoff.
     expect(pipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ monitorBackground: true }),
+      expect.objectContaining({ monitorBackground: false }),
     );
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Repos", "front", "redesign-cli"),
     ]);
   });
 
-  it("drives an interactive workspace start through the grid pipeline", async () => {
+  it("drives an interactive workspace start through the setup view", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
       fixture.cacheDir,
@@ -186,31 +187,28 @@ describe("wf new", () => {
       "api.git",
       "git@github.com:vercel/api.git",
     );
-    const renderPipelinesGrid = vi.fn<RenderPipelinesGrid>(
-      async () =>
-        new Map([
-          ["front", { hasLockfile: false }],
-          ["api", { hasLockfile: false }],
-        ]),
-    );
+    const presentRun = fakePresentRun([
+      ["front", { hasLockfile: false }],
+      ["api", { hasLockfile: false }],
+    ]);
 
     await runNewCommand(invocation(["billing", "front", "api"]), {
       interactive: true,
       writeShellCdPath: fixture.writeShellCdPath,
       shouldUseGrid: () => true,
-      renderPipelinesGrid,
+      presentRun,
     });
 
-    expect(renderPipelinesGrid).toHaveBeenCalledTimes(1);
-    const gridOptions = renderPipelinesGrid.mock.calls[0]?.[0];
-    expect(gridOptions?.repoNames).toEqual(["front", "api"]);
-    expect(gridOptions?.pipelines.size).toBe(2);
-    expect(gridOptions?.workspacePath).toBe(
+    expect(presentRun).toHaveBeenCalledTimes(1);
+    const presentOptions = presentRun.mock.calls[0]?.[0];
+    expect(presentOptions?.repoNames).toEqual(["front", "api"]);
+    expect(presentOptions?.pipelines.size).toBe(2);
+    expect(presentOptions?.targetDir).toBe(
       path.join(fixture.baseDir, "Workspaces", "_adhoc", "billing"),
     );
-    expect(gridOptions?.completeOnWorktreesReady).toBe(true);
-    expect(gridOptions?.backgroundInitialization).toBe(true);
-    expect(typeof gridOptions?.onBeforeCompletionPrompt).toBe("function");
+    expect(presentOptions?.interactive).toBe(true);
+    expect(presentOptions?.session).toBeDefined();
+    expect(typeof presentOptions?.onBeforeCompletionPrompt).toBe("function");
     expect(fixture.cdTargets).toEqual([
       path.join(fixture.baseDir, "Workspaces", "_adhoc", "billing"),
     ]);
@@ -881,6 +879,14 @@ function fakeStampWorkspace() {
     workspaceDir: options.workspaceDir,
     setupFailures: [],
     nextSteps: [],
+    outcome: "background" as const,
+  }));
+}
+
+function fakePresentRun(repoResults: [string, { hasLockfile: boolean }][]) {
+  return vi.fn(async (_options: Parameters<PresentRun>[0]) => ({
+    results: new Map(repoResults),
+    outcome: "ready" as const,
   }));
 }
 

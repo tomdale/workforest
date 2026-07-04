@@ -141,14 +141,9 @@ describe("shouldUseGrid", () => {
     expect(shouldUseGrid()).toBe(true);
   });
 
-  it("supports a single repository", () => {
-    stubTTY(true);
-    expect(shouldUseGrid(1)).toBe(true);
-  });
-
-  it("returns false when repo count exceeds grid capacity", () => {
+  it("no longer bails out on large repo counts (the grid pages instead)", () => {
     stubTTY(true, 220, 50);
-    expect(shouldUseGrid(10)).toBe(false);
+    expect(shouldUseGrid()).toBe(true);
   });
 });
 
@@ -709,31 +704,38 @@ describe("renderPipelinesGrid", () => {
     expect(grid.render).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects instead of silently dropping repos beyond grid capacity", async () => {
+  it("pages repos beyond grid capacity through the setup view instead of rejecting", async () => {
+    // The paged view completes through real (zero-delay) timers.
+    vi.useRealTimers();
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
       yield { phase: "complete", hasLockfile: true };
     };
     const repoNames = Array.from({ length: 10 }, (_, i) => `repo-${i}`);
 
-    await expect(
-      renderPipelinesGrid({
-        pipelines: new Map(repoNames.map((name) => [name, pipeline()])),
-        repoNames,
-        environment: {
-          createScreen: () => ({
-            key: vi.fn(),
-            once: vi.fn(),
-            destroy: vi.fn(),
+    const results = await renderPipelinesGrid({
+      pipelines: new Map(repoNames.map((name) => [name, pipeline()])),
+      repoNames,
+      setupViewEnvironment: {
+        createScreen: () => ({
+          onKeypress: vi.fn(),
+          render: vi.fn(),
+          destroy: vi.fn(),
+        }),
+        createGrid: () => ({
+          getPane: () => ({
+            setLabel: vi.fn(),
+            setContent: vi.fn(),
           }),
-          createGrid: () => ({
-            getPane: vi.fn(),
-            render: vi.fn(),
-            destroy: vi.fn(),
-          }),
-          finalHoldMs: 0,
-        },
-      }),
-    ).rejects.toThrow("Grid can render 9 repositories");
+          render: vi.fn(),
+          destroy: vi.fn(),
+        }),
+        renderIntervalMs: 0,
+        successHoldMs: 0,
+      },
+    });
+
+    expect(results.size).toBe(10);
+    expect(results.get("repo-9")).toEqual({ hasLockfile: true });
   });
 });
 

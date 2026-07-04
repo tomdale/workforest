@@ -89,8 +89,31 @@ wf new account-switching vercel/front vercel/api
 ```
 
 The command creates a directory such as `add-account-switching/`, adds a
-matching feature branch to each repository, and returns after the worktrees are
-available. Initializers and template hooks continue in background workers.
+matching feature branch to each repository, and hands installs and hooks to
+background workers.
+
+In an interactive terminal the setup grid stays attached through those
+installs and hooks until the workspace is fully ready. Each pane shows the
+repository's step checklist with live elapsed times above its streamed
+command output; the grid reflows on terminal resize and pages past nine
+repositories (`[` and `]`). While attached:
+
+- Arrows or `h`/`j`/`k`/`l` move focus, **Enter** zooms the focused pane to
+  the full screen, and **Esc** zooms back out.
+- **d** detaches: the command exits once the background workers are launched
+  and setup keeps running (follow it with `wf status --watch`).
+- **q** or **Ctrl-C** cancels gracefully: running commands are terminated,
+  queued and background work is marked cancelled, and the command exits with
+  code `130`. A second press forces an immediate exit.
+
+Every exit path prints a persistent summary to scrollback (per-repo outcomes
+and timings, failures with `wf init logs` pointers, next steps), so nothing is
+lost when the fullscreen view closes.
+
+Outside a terminal the command prints one line per step and returns after the
+worktrees are available while initialization continues in the background. Add
+`--verbose` to `wf new` or `wf add` to stream subprocess output inline,
+prefixed per repository.
 
 Run the command with just a name for the interactive creation flow:
 
@@ -176,10 +199,14 @@ wf status --wait --timeout 600
 ```
 
 Watch live repository setup and hook progress as a workspace initializes.
-Outside a terminal (CI, pipes), `--watch` degrades to the `--wait` behavior:
-one plain line per repository transition, blocking until initialization
-finishes. `--wait` is the scripting primitive; it exits `0` when ready, `1`
-on failure, `130` when cancelled, and `124` if `--timeout` elapses.
+`--watch` reattaches the same setup grid `wf new` uses, replaying the latest
+recorded run and tailing it live: step checklists with elapsed times, zoom,
+paging past nine repositories, and a scrollback summary when you quit.
+Outside a terminal (CI, pipes), and for workspaces created before run logs
+existed, `--watch` degrades to the `--wait` behavior: one plain line per
+repository transition, blocking until initialization finishes. `--wait` is
+the scripting primitive; it exits `0` when ready, `1` on failure, `130` when
+cancelled, and `124` if `--timeout` elapses.
 
 ### Inspect, Retry, And Cancel Setup
 

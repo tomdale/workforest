@@ -48,6 +48,8 @@ export type ParsedAddOperands = Readonly<
 
 export type RunAddCommandOptions = Readonly<{
   interactive: boolean;
+  /** Stream subprocess output in the console fallback. */
+  verbose?: boolean;
   onEvent?: ServiceEventSink;
   writeShellCdPath: (targetDir: string) => Promise<void>;
   confirm?: typeof promptConfirm;
@@ -72,6 +74,10 @@ export async function runAddCommand(
 ): Promise<CommandResult> {
   const parsed = parseAddOperands(invocation.beforeDoubleDash);
   const yes = invocation.flags["yes"] === true;
+  const effectiveOptions: RunAddCommandOptions =
+    invocation.flags["verbose"] === true
+      ? { ...options, verbose: true }
+      : options;
   const { config } = await loadWorkspaceConfig();
   const directories = resolveWorkforestDirectories(config);
   const context = resolveWorkforestContext(
@@ -86,7 +92,7 @@ export async function runAddCommand(
     (context.kind === "nested-task" && context.parentKind === "workspace")
   ) {
     const target = await resolveWorkspaceAddTarget(context, directories);
-    return addToWorkspace(parsed, target, options);
+    return addToWorkspace(parsed, target, effectiveOptions);
   }
 
   if (
@@ -110,7 +116,7 @@ export async function runAddCommand(
             ),
           };
     return promoteWorktree(parsed, target, directories, {
-      ...options,
+      ...effectiveOptions,
       yes,
     });
   }
@@ -177,6 +183,7 @@ async function addToWorkspace(
     repos,
     branchName,
     interactive: options.interactive,
+    ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
     ...(template?.config.disableInitializers !== undefined
       ? { disabledInitializers: template.config.disableInitializers }
       : {}),
@@ -304,6 +311,7 @@ async function promoteWorktree(
       repos: sourceRepos.repos,
       branchName,
       interactive: options.interactive,
+      ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     });
 

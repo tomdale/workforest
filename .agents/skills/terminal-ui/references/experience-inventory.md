@@ -24,10 +24,12 @@ Status values:
 
 | Experience | Entry point | Implementation | Status |
 | --- | --- | --- | --- |
-| Change entry surface (go to or create a change) | bare `wf` (go-or-create), `wf new` (create-only) | `src/change-entry/surface.ts` (Phase 1 name/existing-change omni-prompt → Phase 2 source accumulation), `src/terminal/fuzzy-list.ts`, `src/change-entry/{changes-data,sources-data}.ts`, hands off to the setup grid via `src/workspace/create-change.ts` | Audit needed |
-| Change start flow | `wf new <name> <source…>` setup output | `src/cli/start.ts` → `src/workspace/create-change.ts` | Canonical |
-| Parallel repository setup grid | `wf new`, `wf add`, task setup | `src/ui/grid-consumer.ts`, `src/ui/grid-layout.ts` | Canonical |
-| Background initialization status grid | `wf status --watch` inside a change | `src/ui/initialization-status.ts`, `src/ui/grid-layout.ts` | Canonical |
+| Entry surface (go to or create a worktree or workspace) | bare `wf` (go-or-create), `wf new` (create-only) | `src/entry/surface.ts` (Phase 1 name/existing omni-prompt → Phase 2 source accumulation), `src/terminal/fuzzy-list.ts`, hands off to the setup view via `src/workspace/create.ts` | Audit needed |
+| Creation flow | `wf new <name> <source…>` setup output | `src/cli/new.ts` → `src/workspace/create.ts` → `src/ui/setup-view/present.ts` | Canonical |
+| Parallel repository setup grid | `wf new`, `wf status --watch` | `src/ui/setup-view/{grid-view,model,pager}.ts`, `src/ui/grid-layout.ts`; renders from the run event log (`src/workspace/run-log/`) with pane zoom, paging, detach, and graceful cancel | Canonical |
+| Legacy pipeline grid (compat) | `wf add`, task setup, review, cloud | `src/ui/grid-consumer.ts` (>9 repos route through `src/ui/setup-view/compat.ts`) | Canonical |
+| Setup scrollback summary | Every setup grid or console exit path | `src/ui/setup-view/summary.ts` | Canonical |
+| Setup run log report | `wf init logs` | `src/workspace/run-log/render.ts` | Canonical |
 | Workspace completion modal and next steps | End of setup grid | `src/ui/grid-consumer.ts` | Canonical |
 | Template browser and manager | `wf template list|show|open` | Template command handlers in `src/cli.ts` | Canonical |
 | Template create/edit/copy forms | `wf template new|edit|copy` | Prompts in `src/cli.ts` | Canonical |
