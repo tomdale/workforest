@@ -1,11 +1,18 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "@wf-plugin/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   printRepoSetupFailures,
+  stampWorkspace,
   writeInitialWorkspaceMetadata,
 } from "./index.ts";
+import {
+  getInitializationDir,
+  initializeWorkspaceInitialization,
+  readWorkspaceInitializationState,
+} from "./initialization.ts";
 import {
   hasWorkspaceMetadata,
   readWorkspaceMetadata,
@@ -89,6 +96,104 @@ describe("workspace stamping output", () => {
         },
       ],
     });
+  });
+});
+
+describe("workspace resume", () => {
+  const repo = {
+    name: "front",
+    remote: "git@github.com:vercel/front.git",
+  };
+
+  async function seedExistingWorkspace(workspaceDir: string): Promise<void> {
+    await writeInitialWorkspaceMetadata({
+      workspaceDir,
+      featureName: "fix-auth",
+      branchName: "tomdale/fix-auth",
+      repos: [repo],
+    });
+    await initializeWorkspaceInitialization({ workspaceDir, repos: [repo] });
+  }
+
+  async function markRepoReady(
+    workspaceDir: string,
+    repoName: string,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const statePath = path.join(
+      getInitializationDir(workspaceDir),
+      "repos",
+      `${encodeURIComponent(repoName)}.json`,
+    );
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        version: 1,
+        repo: repoName,
+        status: "ready",
+        has_lockfile: true,
+        attempt: 1,
+        created_at: now,
+        updated_at: now,
+        completed_at: now,
+      })}\n`,
+      "utf8",
+    );
+  }
+
+  it("rejects a non-empty directory without workspace metadata", async () => {
+    const workspaceDir = await createTempDir();
+    await writeFile(path.join(workspaceDir, "stray.txt"), "not a workspace");
+
+    await expect(
+      stampWorkspace({
+        featureName: "fix-auth",
+        workspaceDir,
+        repos: [repo],
+      }),
+    ).rejects.toThrow(/already exists and is not empty/);
+  });
+
+  it("rejects resuming with a different repository set", async () => {
+    const workspaceDir = await createTempDir();
+    await seedExistingWorkspace(workspaceDir);
+
+    await expect(
+      stampWorkspace({
+        featureName: "fix-auth",
+        workspaceDir,
+        repos: [
+          repo,
+          { name: "docs", remote: "git@github.com:vercel/docs.git" },
+        ],
+      }),
+    ).rejects.toThrow(/different repository set/);
+  });
+
+  it("resumes a workspace whose repositories are already ready", async () => {
+    const workspaceDir = await createTempDir();
+    await seedExistingWorkspace(workspaceDir);
+    await mkdir(path.join(workspaceDir, repo.name), { recursive: true });
+    await markRepoReady(workspaceDir, repo.name);
+
+    const result = await stampWorkspace({
+      featureName: "fix-auth",
+      workspaceDir,
+      repos: [repo],
+    });
+
+    expect(result.setupFailures).toEqual([]);
+    await expect(
+      readWorkspaceInitializationState(workspaceDir),
+    ).resolves.toMatchObject({ status: "ready" });
+    await expect(
+      pathExists(
+        path.join(
+          workspaceDir,
+          `${path.basename(workspaceDir)}.code-workspace`,
+        ),
+      ),
+    ).resolves.toBe(true);
   });
 });
 

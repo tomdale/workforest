@@ -17,6 +17,7 @@ export const WORKFOREST_ENVIRONMENT_VARIABLES = {
   cacheDir: "WORKFOREST_CACHE_DIR",
   cdPathFile: "WORKFOREST_CD_PATH_FILE",
   configDir: "WORKFOREST_CONFIG_DIR",
+  maxConcurrent: "WORKFOREST_MAX_CONCURRENT",
   noTui: "WORKFOREST_NO_TUI",
   skillsDir: "WORKFOREST_SKILLS_DIR",
   timingFile: "WORKFOREST_TIMING_FILE",
@@ -76,6 +77,14 @@ export const ENVIRONMENT_VARIABLE_REGISTRY: readonly EnvironmentVariableDefiniti
         "Disables fullscreen and grid terminal interfaces and uses their non-TUI fallbacks.",
       defaultBehavior:
         "TUI surfaces are enabled when the terminal supports them and CI is not set.",
+    },
+    {
+      name: WORKFOREST_ENVIRONMENT_VARIABLES.maxConcurrent,
+      value: "non-negative integer",
+      audience: "user",
+      description:
+        "Caps how many repositories are set up concurrently, overriding setup.maxConcurrent in config. 0 removes the limit.",
+      defaultBehavior: "Uses setup.maxConcurrent from config, or 4.",
     },
     {
       name: WORKFOREST_ENVIRONMENT_VARIABLES.aiProvider,

@@ -48,7 +48,10 @@ export async function* runHook(
     args = ["-c", hook.run];
   }
 
-  const hookGen = spawnCommand(command, args, { cwd });
+  const hookGen = spawnCommand(command, args, {
+    cwd,
+    ...(hook.timeoutMs !== undefined ? { timeoutMs: hook.timeoutMs } : {}),
+  });
 
   yield* hookGen;
 }

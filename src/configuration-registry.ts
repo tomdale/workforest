@@ -3,6 +3,7 @@ import type {
   CacheConfig,
   CloudConfig,
   NodeModulesCacheConfig,
+  SetupConfig,
   VercelCloudConfig,
   VercelLinkConfig,
   VercelRepoOverride,
@@ -207,6 +208,28 @@ export const CONFIGURATION_REGISTRY: readonly ConfigurationFieldDefinition[] = [
     normalize: (value, pathLabel) => ({
       cache: normalizeCacheConfig(value, pathLabel),
     }),
+  },
+  {
+    key: "setup",
+    type: "object",
+    description: "Controls how workspace and worktree setup runs execute.",
+    defaultBehavior: "maxConcurrent is 4.",
+    example: {
+      maxConcurrent: 4,
+    },
+    children: [
+      {
+        key: "maxConcurrent",
+        type: "non-negative integer",
+        description:
+          "Maximum repositories set up concurrently (clones, checkouts, installs). 0 removes the limit. WORKFOREST_MAX_CONCURRENT overrides this per invocation.",
+        defaultBehavior: "4.",
+      },
+    ],
+    normalize: (value, pathLabel) => {
+      const setup = normalizeSetupConfig(value, pathLabel);
+      return setup ? { setup } : {};
+    },
   },
   {
     key: "ai",
@@ -431,6 +454,39 @@ function normalizeNodeModulesCacheConfig(
         `${pathLabel}.maxRetainedPerRepo`,
       ) ?? DEFAULT_WORKSPACE_CONFIG.cache.nodeModules.maxRetainedPerRepo,
   };
+}
+
+function normalizeSetupConfig(
+  value: unknown,
+  pathLabel: string,
+): SetupConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object.`);
+  }
+
+  const config = value as Record<string, unknown>;
+  const maxConcurrent = normalizeNonNegativeInteger(
+    config["maxConcurrent"],
+    `${pathLabel}.maxConcurrent`,
+  );
+
+  return maxConcurrent !== undefined ? { maxConcurrent } : {};
+}
+
+function normalizeNonNegativeInteger(
+  value: unknown,
+  pathLabel: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${pathLabel} must be a non-negative integer.`);
+  }
+  return value;
 }
 
 function normalizeVercelLinkConfig(

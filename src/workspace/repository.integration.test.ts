@@ -97,7 +97,13 @@ describe("ensureMirrorRepo", () => {
         mirrorDir,
       ),
     );
-    expect(states).toEqual([{ status: "running" }]);
+    // The fetch streams: a running state with the command line, progress
+    // output chunks, and no failure or warning states.
+    expect(states.length).toBeGreaterThan(0);
+    expect(states[0]).toMatchObject({ status: "running" });
+    for (const state of states) {
+      expect(["running", "output"]).toContain(state.status);
+    }
 
     await expect(
       git(["status", "--porcelain=v1", "--branch"], worktreeDir),

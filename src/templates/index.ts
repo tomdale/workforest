@@ -664,6 +664,18 @@ function isValidTemplateConfig(value: unknown): value is TemplateConfig {
         return false;
       }
 
+      // timeoutMs is an optional positive integer
+      if (hookObj["timeoutMs"] !== undefined) {
+        const timeoutMs = hookObj["timeoutMs"];
+        if (
+          typeof timeoutMs !== "number" ||
+          !Number.isInteger(timeoutMs) ||
+          timeoutMs <= 0
+        ) {
+          return false;
+        }
+      }
+
       // if is optional condition object
       if (hookObj["if"] !== undefined) {
         if (hookObj["if"] === null || typeof hookObj["if"] !== "object") {

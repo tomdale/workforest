@@ -21,8 +21,10 @@ import {
   finalizeWorkspaceInitialization,
   initializeWorkspaceInitialization,
   markWorkspaceInitializing,
+  readRepoInitializationState,
   recordRepoGitState,
   recordRepoSetupFailure,
+  resumeWorkspaceInitialization,
   startRepoInitialization,
   watchRepoInitialization,
   workspaceInitializationScope,
@@ -133,14 +135,7 @@ export async function stampWorkspace(
   if (repos.length === 0) {
     throw new Error("stampWorkspace requires at least one repository.");
   }
-  if (await pathExists(workspaceDir)) {
-    const contents = await fs.readdir(workspaceDir);
-    if (contents.length > 0) {
-      throw new Error(
-        `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
-      );
-    }
-  }
+  const resumePlan = await planWorkspaceResume(workspaceDir, repos);
 
   await ensureCacheDir();
   const isNewWorkspace = !(await pathExists(workspaceDir));
@@ -155,33 +150,44 @@ export async function stampWorkspace(
       )
     : null;
 
-  await writeInitialWorkspaceMetadata({
-    workspaceDir,
-    featureName,
-    branchName: effectiveBranchName,
-    repos,
-    ...(description !== undefined ? { description } : {}),
-    ...(templateId !== undefined ? { templateId } : {}),
-    ...(templateVariant !== undefined ? { templateVariant } : {}),
-  });
-  await initializeWorkspaceInitialization({ workspaceDir, repos });
+  const setupRepos = resumePlan ? resumePlan.rerunRepos : [...repos];
+  if (resumePlan) {
+    await resumeWorkspaceInitialization({
+      workspaceDir,
+      repos: resumePlan.rerunRepos,
+    });
+  } else {
+    await writeInitialWorkspaceMetadata({
+      workspaceDir,
+      featureName,
+      branchName: effectiveBranchName,
+      repos,
+      ...(description !== undefined ? { description } : {}),
+      ...(templateId !== undefined ? { templateId } : {}),
+      ...(templateVariant !== undefined ? { templateVariant } : {}),
+    });
+    await initializeWorkspaceInitialization({ workspaceDir, repos });
+  }
 
   const scope = workspaceInitializationScope(workspaceDir);
   const session = await createRunSession({
     scope,
-    command: "new",
-    repos: repos.map((repo) => repo.name),
+    command: resumePlan ? "resume" : "new",
+    repos: setupRepos.map((repo) => repo.name),
   });
 
   const prepared = new Map<
     string,
     { repo: RepositorySource; hasLockfile: boolean }
   >();
+  for (const untouched of resumePlan?.untouchedRepos ?? []) {
+    prepared.set(untouched.repo.name, untouched);
+  }
   const setupFailures = new Map<string, RepoSetupFailureSummary>();
   const templateBarrier =
     template !== null
       ? createTemplateCopyBarrier({
-          repoCount: repos.length,
+          repoCount: setupRepos.length,
           copyTemplateFiles: async () => {
             await copyTemplateFiles(template, workspaceDir);
             await materializeTemplateAgentsMd(template, workspaceDir);
@@ -208,8 +214,37 @@ export async function stampWorkspace(
     prepared.set(repo.name, { repo, hasLockfile });
     await templateBarrier?.waitForTemplateFiles();
   };
+  if (setupRepos.length === 0) {
+    // Resuming a workspace whose repos are all ready or actively
+    // initializing: nothing to run, just finalize and report.
+    try {
+      await writeVSCodeWorkspaceFile(
+        workspaceDir,
+        repos.filter((repo) => prepared.has(repo.name)),
+        onEvent ? { onEvent } : {},
+      );
+      await markWorkspaceInitializing(workspaceDir);
+      const finalState = await finalizeWorkspaceInitialization(workspaceDir, {
+        session,
+      });
+      emitRunEndIfTerminal(session, finalState);
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+    emitServiceEvent(onEvent, {
+      type: "message",
+      level: "success",
+      message: "All repositories are already set up.",
+    });
+    return {
+      setupFailures: [],
+      workspaceDir,
+      nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
+    };
+  }
+
   const pipelines = new Map(
-    repos.map((repo) => [
+    setupRepos.map((repo) => [
       repo.name,
       createBackgroundRepoSetupPipeline({
         repo,
@@ -227,7 +262,7 @@ export async function stampWorkspace(
   try {
     await presentPipelines({
       pipelines,
-      repoNames: repos.map((repo) => repo.name),
+      repoNames: setupRepos.map((repo) => repo.name),
       interactive,
       ...(onEvent ? { onEvent } : {}),
       workspacePath: workspaceDir,
@@ -284,6 +319,69 @@ export async function stampWorkspace(
     workspaceDir,
     nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
   };
+}
+
+type WorkspaceResumePlan = {
+  /** Repos whose setup runs (or runs again) in this invocation. */
+  rerunRepos: RepositorySource[];
+  /** Repos left alone: already ready, or actively initializing. */
+  untouchedRepos: { repo: RepositorySource; hasLockfile: boolean }[];
+};
+
+/**
+ * Decide whether stamping into `workspaceDir` starts fresh (null) or
+ * resumes an existing workspace. Resume requires matching workspace
+ * metadata with the same repository set; anything else is an error rather
+ * than a silent overwrite.
+ */
+async function planWorkspaceResume(
+  workspaceDir: string,
+  repos: readonly RepositorySource[],
+): Promise<WorkspaceResumePlan | null> {
+  if (!(await pathExists(workspaceDir))) return null;
+  const contents = await fs.readdir(workspaceDir);
+  if (contents.length === 0) return null;
+
+  const metadata = await readWorkspaceMetadata(workspaceDir);
+  if (!metadata) {
+    throw new Error(
+      `Directory already exists and is not empty: ${workspaceDir}\nUse a different name or remove the existing directory.`,
+    );
+  }
+
+  const existingRemotes = new Map(
+    metadata.repos.map((repo) => [repo.name, repo.remote]),
+  );
+  const sameRepoSet =
+    repos.length === existingRemotes.size &&
+    repos.every((repo) => existingRemotes.get(repo.name) === repo.remote);
+  if (!sameRepoSet) {
+    throw new Error(
+      `Workspace already exists with a different repository set: ${workspaceDir}\nRe-run with the same repositories to resume setup, extend it with "wf add", or remove it with "wf delete".`,
+    );
+  }
+
+  const scope = workspaceInitializationScope(workspaceDir);
+  const hasLockfileByName = new Map(
+    metadata.repos.map((repo) => [repo.name, repo.has_lockfile ?? false]),
+  );
+  const plan: WorkspaceResumePlan = { rerunRepos: [], untouchedRepos: [] };
+  for (const repo of repos) {
+    const state = await readRepoInitializationState(scope, repo.name);
+    if (
+      state?.status === "ready" ||
+      state?.status === "queued" ||
+      state?.status === "running"
+    ) {
+      plan.untouchedRepos.push({
+        repo,
+        hasLockfile: hasLockfileByName.get(repo.name) ?? false,
+      });
+    } else {
+      plan.rerunRepos.push(repo);
+    }
+  }
+  return plan;
 }
 
 async function* createBackgroundRepoSetupPipeline({

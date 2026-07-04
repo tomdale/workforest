@@ -30,6 +30,7 @@ import {
 } from "../terminal/render-model.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
 import { runParallel } from "../utils/task-generator.ts";
+import { resolveConfiguredMaxConcurrent } from "../workspace/setup-limits.ts";
 
 /** Pane status glyphs, resolved from the active theme's semantic symbols. */
 function statusIcons(): {
@@ -126,6 +127,8 @@ export type RenderPipelinesGridOptions = {
   ) => void | Promise<void>;
   completeOnWorktreesReady?: boolean;
   backgroundInitialization?: boolean;
+  /** Cap on concurrently running pipelines; queued repos start as slots free. */
+  maxConcurrent?: number;
   environment?: GridRenderEnvironment;
 };
 
@@ -282,6 +285,7 @@ export async function renderPipelinesGrid({
   onBeforeCompletionPrompt,
   completeOnWorktreesReady = false,
   backgroundInitialization = false,
+  maxConcurrent,
   environment = createDefaultEnvironment(),
 }: RenderPipelinesGridOptions): Promise<Map<string, { hasLockfile: boolean }>> {
   const renderIntervalMs =
@@ -424,7 +428,9 @@ export async function renderPipelinesGrid({
       }
     };
 
-    const updates = runParallel(pipelines)[Symbol.asyncIterator]();
+    const updates = runParallel(pipelines, {
+      ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
+    })[Symbol.asyncIterator]();
     let nextUpdate = updates.next();
 
     while (true) {
@@ -634,6 +640,8 @@ export type DrainPipelinesToConsoleOptions = {
   onBeforeCompletionPrompt?: (
     repoResults: Map<string, { hasLockfile: boolean }>,
   ) => void | Promise<void>;
+  /** Cap on concurrently running pipelines. */
+  maxConcurrent?: number;
 };
 
 /**
@@ -651,6 +659,7 @@ export async function drainPipelinesToConsole(
     onFailure,
     getLogPath,
     onBeforeCompletionPrompt,
+    maxConcurrent,
   }: DrainPipelinesToConsoleOptions = {},
 ): Promise<Map<string, { hasLockfile: boolean }>> {
   const completed = new Map<string, { hasLockfile: boolean }>();
@@ -670,7 +679,9 @@ export async function drainPipelinesToConsole(
     }
   };
 
-  for await (const { id, state } of runParallel(pipelines)) {
+  for await (const { id, state } of runParallel(pipelines, {
+    ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
+  })) {
     switch (state.phase) {
       case "git":
         emitPipelineProgress(onEvent, id, state.step, state);
@@ -722,6 +733,11 @@ export type PresentPipelinesOptions = {
   onBeforeCompletionPrompt?: (
     repoResults: Map<string, { hasLockfile: boolean }>,
   ) => void | Promise<void>;
+  /**
+   * Cap on concurrently running pipelines. Resolved from config and
+   * WORKFOREST_MAX_CONCURRENT when unset.
+   */
+  maxConcurrent?: number;
   shouldUseGrid?: typeof shouldUseGrid;
   renderPipelinesGrid?: typeof renderPipelinesGrid;
 };
@@ -743,13 +759,18 @@ export async function presentPipelines({
   completeOnWorktreesReady,
   backgroundInitialization,
   onBeforeCompletionPrompt,
+  maxConcurrent,
   shouldUseGrid: useGrid = shouldUseGrid,
   renderPipelinesGrid: renderGrid = renderPipelinesGrid,
 }: PresentPipelinesOptions): Promise<Map<string, { hasLockfile: boolean }>> {
+  const resolvedMaxConcurrent =
+    maxConcurrent ?? (await resolveConfiguredMaxConcurrent());
+
   if (interactive && useGrid(repoNames.length)) {
     return renderGrid({
       pipelines,
       repoNames,
+      maxConcurrent: resolvedMaxConcurrent,
       ...(workspacePath !== undefined ? { workspacePath } : {}),
       ...(getLogPath !== undefined ? { getLogPath } : {}),
       ...(onFailure !== undefined ? { onFailure } : {}),
@@ -766,6 +787,7 @@ export async function presentPipelines({
   }
 
   return drainPipelinesToConsole(pipelines, {
+    maxConcurrent: resolvedMaxConcurrent,
     ...(onEvent !== undefined ? { onEvent } : {}),
     ...(onFailure !== undefined ? { onFailure } : {}),
     ...(getLogPath !== undefined ? { getLogPath } : {}),

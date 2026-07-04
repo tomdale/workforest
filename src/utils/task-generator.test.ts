@@ -79,6 +79,63 @@ describe("spawnCommand", () => {
     expect(failedState?.error.message).not.toContain("early-marker");
     expect(failedState?.error.message).toContain("late-marker");
   });
+
+  it("terminates commands that exceed the overall timeout", async () => {
+    const states = await collectStates(
+      spawnCommand(process.execPath, ["-e", "setTimeout(() => {}, 60_000);"], {
+        timeoutMs: 150,
+      }),
+    );
+
+    expect(states.at(-1)).toMatchObject({
+      status: "failed",
+      error: expect.objectContaining({
+        message: expect.stringContaining("timed out after 150ms"),
+      }),
+    });
+  });
+
+  it("terminates commands that go silent past the inactivity timeout", async () => {
+    const states = await collectStates(
+      spawnCommand(
+        process.execPath,
+        [
+          "-e",
+          "process.stdout.write('started'); setTimeout(() => {}, 60_000);",
+        ],
+        { inactivityTimeoutMs: 150 },
+      ),
+    );
+
+    expect(states.some((state) => state.status === "output")).toBe(true);
+    expect(states.at(-1)).toMatchObject({
+      status: "failed",
+      error: expect.objectContaining({
+        message: expect.stringContaining("produced no output for 150ms"),
+      }),
+    });
+  });
+
+  it("does not trip the inactivity timeout while output flows", async () => {
+    const states = await collectStates(
+      spawnCommand(
+        process.execPath,
+        [
+          "-e",
+          [
+            "let ticks = 0;",
+            "const timer = setInterval(() => {",
+            "  process.stdout.write('tick');",
+            "  if (++ticks === 5) { clearInterval(timer); }",
+            "}, 60);",
+          ].join("\n"),
+        ],
+        { inactivityTimeoutMs: 250 },
+      ),
+    );
+
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
 });
 
 describe("runParallel", () => {

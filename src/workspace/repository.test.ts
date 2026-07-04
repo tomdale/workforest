@@ -3,17 +3,30 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runGitMock } = vi.hoisted(() => ({
+const { runGitMock, streamGitMock } = vi.hoisted(() => ({
   runGitMock: vi.fn(),
+  streamGitMock: vi.fn(),
 }));
 
-vi.mock("../services/git.ts", () => ({
-  cloneRepository: vi.fn(),
-  fixBareRepoRefs: vi.fn(),
-  runGit: runGitMock,
-}));
+vi.mock("../services/git.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/git.ts")>();
+  return {
+    ...actual,
+    cloneRepository: vi.fn(),
+    fixBareRepoRefs: vi.fn(),
+    runGit: runGitMock,
+    streamGit: streamGitMock,
+  };
+});
 
+import type { TaskState } from "../utils/task-generator.ts";
 import { cleanupWorkspaceWorktrees, ensureMirrorRepo } from "./repository.ts";
+
+function taskStates(...states: TaskState[]): () => AsyncGenerator<TaskState> {
+  return async function* () {
+    yield* states;
+  };
+}
 
 const tempDirs: string[] = [];
 
@@ -173,14 +186,13 @@ describe("ensureMirrorRepo", () => {
   it("fetches remote branches into remote-tracking refs explicitly", async () => {
     const mirrorDir = await createTempDir("workforest-front.git-");
 
-    runGitMock
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockResolvedValueOnce({
-        stdout: `worktree ${mirrorDir}
+    streamGitMock.mockImplementation(taskStates({ status: "completed" }));
+    runGitMock.mockResolvedValueOnce({
+      stdout: `worktree ${mirrorDir}
 bare
 `,
-        stderr: "",
-      });
+      stderr: "",
+    });
 
     await collectStates(
       ensureMirrorRepo(
@@ -192,17 +204,22 @@ bare
       ),
     );
 
-    expect(runGitMock).toHaveBeenNthCalledWith(
+    expect(streamGitMock).toHaveBeenNthCalledWith(
       1,
       [
         "fetch",
+        "--progress",
         "--prune",
         "--no-tags",
         "--refmap=",
         "origin",
         "+refs/heads/*:refs/remotes/origin/*",
       ],
-      { cwd: mirrorDir },
+      {
+        cwd: mirrorDir,
+        timeoutMs: expect.any(Number),
+        inactivityTimeoutMs: expect.any(Number),
+      },
     );
   });
 
@@ -212,16 +229,25 @@ bare
       "git fetch exited with code 1\nerror: could not delete references: cannot lock ref 'refs/remotes/origin/test-branch': Unable to create '/tmp/front.git/refs/remotes/origin/test-branch.lock': File exists.",
     );
 
+    // Three failing fetch attempts, then a clean fetch after the repair.
+    streamGitMock
+      .mockImplementationOnce(
+        taskStates({ status: "failed", error: lockError }),
+      )
+      .mockImplementationOnce(
+        taskStates({ status: "failed", error: lockError }),
+      )
+      .mockImplementationOnce(
+        taskStates({ status: "failed", error: lockError }),
+      )
+      .mockImplementationOnce(taskStates({ status: "completed" }));
+
     runGitMock
-      .mockRejectedValueOnce(lockError)
-      .mockRejectedValueOnce(lockError)
-      .mockRejectedValueOnce(lockError)
       .mockResolvedValueOnce({
         stdout:
           "refs/remotes/origin/Test-Branch\nrefs/remotes/origin/test-branch\n",
         stderr: "",
       })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
       .mockResolvedValueOnce({ stdout: "", stderr: "" })
       .mockResolvedValueOnce({ stdout: "", stderr: "" })
       .mockResolvedValueOnce({
@@ -248,31 +274,20 @@ bare
         "Repairing case-conflicting cached refs for front: refs/remotes/origin/Test-Branch, refs/remotes/origin/test-branch",
     });
     expect(runGitMock).toHaveBeenNthCalledWith(
-      4,
+      1,
       ["for-each-ref", "--format=%(refname)", "refs/remotes"],
       { cwd: mirrorDir },
     );
     expect(runGitMock).toHaveBeenNthCalledWith(
-      5,
+      2,
       ["update-ref", "-d", "refs/remotes/origin/Test-Branch"],
       { cwd: mirrorDir },
     );
     expect(runGitMock).toHaveBeenNthCalledWith(
-      6,
+      3,
       ["update-ref", "-d", "refs/remotes/origin/test-branch"],
       { cwd: mirrorDir },
     );
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      7,
-      [
-        "fetch",
-        "--prune",
-        "--no-tags",
-        "--refmap=",
-        "origin",
-        "+refs/heads/*:refs/remotes/origin/*",
-      ],
-      { cwd: mirrorDir },
-    );
+    expect(streamGitMock).toHaveBeenCalledTimes(4);
   });
 });

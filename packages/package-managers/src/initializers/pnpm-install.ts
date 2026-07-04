@@ -13,6 +13,14 @@ import {
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
 const LOCKFILE_HASH_FILE = ".pnpm-lockfile-hash";
 const INSTALL_OUTPUT_TAIL_CHARS = 16_384;
+/** Very large monorepos can take a while, but not forever. */
+const INSTALL_TIMEOUT_MS = 30 * 60 * 1000;
+/** pnpm reports progress continuously; silence means a stalled install. */
+const INSTALL_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const INSTALL_LIMITS = {
+  timeoutMs: INSTALL_TIMEOUT_MS,
+  inactivityTimeoutMs: INSTALL_INACTIVITY_TIMEOUT_MS,
+};
 
 function isFrozenLockfileError(error: Error, output: string): boolean {
   const combined = `${error.message} ${output}`;
@@ -59,7 +67,10 @@ async function* execute(context: InitializerContext) {
     args = ["install", "--frozen-lockfile", "--prefer-offline"];
   }
 
-  const fastInstall = spawnCommand(command, args, { cwd: repoDir });
+  const fastInstall = spawnCommand(command, args, {
+    cwd: repoDir,
+    ...INSTALL_LIMITS,
+  });
 
   for await (const state of fastInstall) {
     if (state.status === "failed") {
@@ -94,6 +105,7 @@ async function* execute(context: InitializerContext) {
 
     const fallbackInstall = spawnCommand(command, args, {
       cwd: repoDir,
+      ...INSTALL_LIMITS,
     });
 
     let fallbackFailed = false;

@@ -70,10 +70,16 @@ export type CloudConfig = {
   vercel?: VercelCloudConfig;
 };
 
+export type SetupConfig = {
+  /** Repositories set up concurrently during workspace creation. 0 = unlimited. */
+  maxConcurrent?: number;
+};
+
 export type WorkspaceConfig = {
   directory?: WorkforestDirectoryConfig;
   branchPrefix?: string;
   cache?: CacheConfig;
+  setup?: SetupConfig;
   vercelLink?: VercelLinkConfig;
   ai?: AiConfig;
   cloud?: CloudConfig;
@@ -131,6 +137,8 @@ export type Hook = {
   in?: string | string[];
   if?: { fileExists?: string };
   continueOnError?: boolean;
+  /** Fail the hook command if it runs longer than this. Unlimited when unset. */
+  timeoutMs?: number;
 };
 
 export type RunCommandOptions = {

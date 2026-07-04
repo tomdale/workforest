@@ -178,6 +178,44 @@ export async function initializeWorktreeSetup({
   });
 }
 
+/**
+ * Prepare an existing workspace for a resumed setup run: the workspace goes
+ * back to "creating" and only the named repos are reset to pending. Repos
+ * that are already ready or actively initializing keep their state.
+ */
+export async function resumeWorkspaceInitialization({
+  workspaceDir,
+  repos,
+}: {
+  workspaceDir: string;
+  repos: readonly RepositorySource[];
+}): Promise<void> {
+  const scope = workspaceInitializationScope(workspaceDir);
+  await fs.mkdir(getInitializationDir(scope), { recursive: true });
+  const now = new Date().toISOString();
+
+  await writeWorkspaceInitializationState(scope, {
+    version: 1,
+    status: "creating",
+    message: "Resuming repository worktrees",
+    updated_at: now,
+  });
+
+  for (const repo of repos) {
+    const existing = await readJsonFile<RepoInitializationState>(
+      getRepoStatePath(scope, repo.name),
+    );
+    await writeRepoInitializationState(scope, {
+      version: 1,
+      repo: repo.name,
+      status: "pending",
+      attempt: existing?.attempt ?? 0,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    });
+  }
+}
+
 async function initializeScopedInitialization({
   scope,
   repos,

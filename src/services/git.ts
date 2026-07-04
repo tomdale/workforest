@@ -1,13 +1,31 @@
 import { promises as fs } from "node:fs";
+import { pathExists } from "@wf-plugin/core";
 import type { RunCommandOptions } from "../types.ts";
 import { runCommand, runCommandWithStdin } from "../utils/exec.ts";
-import type { TaskState } from "../utils/task-generator.ts";
+import {
+  type RunCommandOptions as StreamCommandOptions,
+  spawnCommand,
+  type TaskGenerator,
+  type TaskState,
+} from "../utils/task-generator.ts";
 
 export function runGit(
   args: string[],
   options: RunCommandOptions = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return runCommand("git", args, options);
+}
+
+/**
+ * Run git streaming its output as task states. Use for long network
+ * operations (clone, fetch) so progress reaches the UI and inactivity
+ * timeouts can detect stalled transfers; git writes progress to stderr.
+ */
+export function streamGit(
+  args: string[],
+  options: StreamCommandOptions = {},
+): TaskGenerator {
+  return spawnCommand("git", args, options);
 }
 
 export function runGitWithStdin(
@@ -139,8 +157,6 @@ async function verifyDefaultBranchRef(
   }
 }
 
-type CloneResult = { stdout: string; stderr: string };
-
 function parseCheckedOutBranchRefs(worktreeList: string): Set<string> {
   const branches = new Set<string>();
 
@@ -171,35 +187,40 @@ async function readCheckedOutBranchRefs(
 }
 
 /**
- * Clone a repository while yielding progress messages.
- * Tries GitHub CLI first, then falls back to git clone.
+ * Clone a repository, streaming progress output as it arrives.
+ * Tries GitHub CLI first (handles SAML SSO auth), then falls back to git.
  */
 export async function* cloneRepository(
   remote: string,
   targetDir: string,
   gitArgs: string[] = [],
-  options: RunCommandOptions = {},
-): AsyncGenerator<TaskState, CloneResult, undefined> {
+  options: StreamCommandOptions = {},
+): TaskGenerator {
   const githubSlug = getGitHubSlug(remote);
+  const existedBefore = await pathExists(targetDir);
 
   if (githubSlug) {
-    try {
-      yield {
-        status: "log",
-        level: "info",
-        message: `Attempting to clone ${githubSlug} using GitHub CLI`,
-      };
-      const args = ["repo", "clone", githubSlug, targetDir];
-      if (gitArgs.length > 0) {
-        args.push("--", ...gitArgs);
-      }
-      return await runCommand("gh", args, options);
-    } catch {
-      yield {
-        status: "log",
-        level: "info",
-        message: `GitHub CLI not available or failed. Falling back to git clone for ${githubSlug}`,
-      };
+    yield {
+      status: "log",
+      level: "info",
+      message: `Attempting to clone ${githubSlug} using GitHub CLI`,
+    };
+    const args = ["repo", "clone", githubSlug, targetDir];
+    if (gitArgs.length > 0) {
+      args.push("--", ...gitArgs);
+    }
+
+    const ghFailure = yield* forwardSubtask(spawnCommand("gh", args, options));
+    if (!ghFailure) return;
+
+    yield {
+      status: "log",
+      level: "info",
+      message: `GitHub CLI not available or failed. Falling back to git clone for ${githubSlug}`,
+    };
+    // A partial gh clone would make git refuse the destination.
+    if (!existedBefore) {
+      await fs.rm(targetDir, { recursive: true, force: true });
     }
   } else {
     yield {
@@ -209,7 +230,33 @@ export async function* cloneRepository(
     };
   }
 
-  return await runGit(["clone", ...gitArgs, remote, targetDir], options);
+  const cloneFailure = yield* forwardSubtask(
+    streamGit(["clone", "--progress", ...gitArgs, remote, targetDir], options),
+  );
+  if (cloneFailure) {
+    yield { status: "failed", error: cloneFailure };
+  }
+}
+
+/**
+ * Forward a subtask's streaming states within a larger composite task:
+ * output and logs pass through, but the subtask's terminal states are
+ * captured (failures returned as a value, completion swallowed) so they do
+ * not end the composite task early.
+ */
+export async function* forwardSubtask(
+  task: TaskGenerator,
+): AsyncGenerator<TaskState, Error | null, undefined> {
+  for await (const state of task) {
+    if (state.status === "failed") {
+      return state.error;
+    }
+    if (state.status === "completed" || state.status === "pending") {
+      continue;
+    }
+    yield state;
+  }
+  return null;
 }
 
 /**

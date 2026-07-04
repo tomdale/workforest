@@ -1,6 +1,14 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
-import { cloneRepository, fixBareRepoRefs, runGit } from "../services/git.ts";
+import { getCacheDir } from "../config.ts";
+import {
+  cloneRepository,
+  fixBareRepoRefs,
+  forwardSubtask,
+  runGit,
+  streamGit,
+} from "../services/git.ts";
 import {
   hasBrokenWorktreeLink,
   isStaleWorktreeRemoveError,
@@ -8,9 +16,15 @@ import {
   withGitWorktreeLock,
 } from "../services/worktree.ts";
 import type { RepositorySource } from "../types.ts";
-import { comparablePath } from "../utils/path-safety.ts";
+import { comparablePath, resolveContainedPath } from "../utils/path-safety.ts";
 import { asTask, withRetry } from "../utils/retry.ts";
 import type { TaskState } from "../utils/task-generator.ts";
+import {
+  GIT_CLONE_INACTIVITY_TIMEOUT_MS,
+  GIT_CLONE_TIMEOUT_MS,
+  GIT_FETCH_INACTIVITY_TIMEOUT_MS,
+  GIT_FETCH_TIMEOUT_MS,
+} from "./setup-limits.ts";
 
 type WorktreeEntry = {
   path: string;
@@ -84,12 +98,18 @@ export async function* ensureMirrorRepo(
           "--config",
           "remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*",
         ],
-        {},
+        {
+          timeoutMs: GIT_CLONE_TIMEOUT_MS,
+          inactivityTimeoutMs: GIT_CLONE_INACTIVITY_TIMEOUT_MS,
+        },
       );
 
     yield* withRetry(cloneGen, {
       attempts: 3,
       label: `clone-pristine:${repo.name}`,
+      // A failed attempt can leave a partial clone that would make the next
+      // attempt fail on "destination path already exists".
+      onRetry: () => removePartialMirror(mirrorDir),
     });
 
     // Fix refs: move from refs/heads/* to refs/remotes/origin/*
@@ -197,8 +217,22 @@ export async function* cleanupWorkspaceWorktrees(
 }
 
 /**
+ * Delete a partially created mirror between clone attempts. Guarded to the
+ * cache directory so a bad path can never escape it.
+ */
+async function removePartialMirror(mirrorDir: string): Promise<void> {
+  const cacheDir = getCacheDir();
+  const contained = resolveContainedPath(
+    cacheDir,
+    path.relative(cacheDir, mirrorDir),
+  );
+  await fs.rm(contained, { recursive: true, force: true });
+}
+
+/**
  * Fetches the latest branches into the pristine bare mirror (with retry and
- * case-conflict repair), yielding log messages as it runs.
+ * case-conflict repair), streaming progress as it runs. A persistent fetch
+ * failure downgrades to a warning: the cached snapshot still works.
  */
 async function* updatePristineRepo(
   repo: RepositorySource,
@@ -208,41 +242,55 @@ async function* updatePristineRepo(
   // --prune: Remove stale remote-tracking refs
   // Explicit refspec/refmap: ignore stale remote.origin.fetch settings that may
   // point remote branches at refs/heads/* in older bare caches.
-  const fetchGen = asTask(() =>
-    runGit(
+  const fetchGen = () =>
+    streamGit(
       [
         "fetch",
+        "--progress",
         "--prune",
         "--no-tags",
         "--refmap=",
         "origin",
         "+refs/heads/*:refs/remotes/origin/*",
       ],
-      { cwd: mirrorDir },
-    ),
-  );
+      {
+        cwd: mirrorDir,
+        timeoutMs: GIT_FETCH_TIMEOUT_MS,
+        inactivityTimeoutMs: GIT_FETCH_INACTIVITY_TIMEOUT_MS,
+      },
+    );
+  const attemptFetch = () =>
+    forwardSubtask(
+      withRetry(fetchGen, {
+        attempts: 3,
+        label: `update-pristine:${repo.name}`,
+      }),
+    );
 
+  let failure: Error | null;
   try {
-    yield* withRetry(fetchGen, {
-      attempts: 3,
-      label: `update-pristine:${repo.name}`,
-    });
+    failure = yield* attemptFetch();
   } catch (error_) {
-    if (yield* repairCaseConflictingRemoteRef(mirrorDir, repo.name, error_)) {
-      try {
-        yield* withRetry(fetchGen, {
-          attempts: 3,
-          label: `update-pristine:${repo.name}`,
-        });
-        return;
-      } catch (retryError) {
-        yield* warnPristineUpdateFailed(repo.name, retryError);
-        return;
-      }
-    }
-
-    yield* warnPristineUpdateFailed(repo.name, error_);
+    failure = error_ instanceof Error ? error_ : new Error(String(error_));
   }
+  if (!failure) return;
+
+  if (yield* repairCaseConflictingRemoteRef(mirrorDir, repo.name, failure)) {
+    let retryFailure: Error | null;
+    try {
+      retryFailure = yield* attemptFetch();
+    } catch (retryError) {
+      retryFailure =
+        retryError instanceof Error
+          ? retryError
+          : new Error(String(retryError));
+    }
+    if (!retryFailure) return;
+    yield* warnPristineUpdateFailed(repo.name, retryFailure);
+    return;
+  }
+
+  yield* warnPristineUpdateFailed(repo.name, failure);
 }
 
 function getCannotLockRef(error: unknown): string | null {
