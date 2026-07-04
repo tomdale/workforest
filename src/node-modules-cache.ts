@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -13,6 +14,51 @@ const METADATA_FILENAME = "metadata.json";
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
 const LOCKFILE_HASH_MARKER = ".pnpm-lockfile-hash";
 const DEFAULT_MAX_RETAINED_PER_REPO = 3;
+const BACKGROUND_SIZE_SCRIPT = `
+const fs = require("node:fs/promises");
+const path = require("node:path");
+
+async function pathExists(target) {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readDirectorySize(directory) {
+  let total = 0;
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      total += await readDirectorySize(entryPath);
+    } else if (entry.isFile()) {
+      total += (await fs.stat(entryPath)).size;
+    }
+  }
+  return total;
+}
+
+async function main() {
+  const entryPath = process.argv[1];
+  if (!entryPath) return;
+  const metadataPath = path.join(entryPath, "metadata.json");
+  const nodeModulesPath = path.join(entryPath, "node_modules");
+  if (!(await pathExists(metadataPath)) || !(await pathExists(nodeModulesPath))) {
+    return;
+  }
+  const sizeBytes = await readDirectorySize(nodeModulesPath);
+  const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8"));
+  metadata.sizeBytes = sizeBytes;
+  const tempPath = path.join(entryPath, ".metadata.json.tmp-" + process.pid);
+  await fs.writeFile(tempPath, JSON.stringify(metadata, null, 2) + "\\n", "utf8");
+  await fs.rename(tempPath, metadataPath);
+}
+
+main().catch(() => {});
+`;
 
 export type NormalizedNodeModulesCacheConfig = Readonly<{
   enabled: boolean;
@@ -122,7 +168,7 @@ export async function preserveNodeModules({
     },
     cachedAt: new Date().toISOString(),
     sourcePath: nodeModulesPath,
-    sizeBytes: await readDirectorySize(nodeModulesPath),
+    sizeBytes: null,
   };
 
   try {
@@ -134,6 +180,7 @@ export async function preserveNodeModules({
       nodeModulesPath: pooledNodeModulesPath,
       metadata,
     };
+    scheduleNodeModulesSizeUpdate(entryPath);
     await pruneNodeModulesCache(repo, normalizedConfig.maxRetainedPerRepo);
     return { status: "preserved", entry };
   } catch (error) {
@@ -325,6 +372,23 @@ async function writeMetadata(
   );
 }
 
+function scheduleNodeModulesSizeUpdate(entryPath: string): void {
+  try {
+    const child = spawn(
+      process.execPath,
+      ["-e", BACKGROUND_SIZE_SCRIPT, entryPath],
+      {
+        detached: true,
+        stdio: "ignore",
+      },
+    );
+    child.unref();
+  } catch {
+    // Size accounting is best-effort; preserve/restore correctness does not
+    // depend on this metadata being filled in synchronously.
+  }
+}
+
 async function isEligiblePnpmInstall(repoDir: string): Promise<boolean> {
   return (
     (await hasAny(repoDir, PNPM_LOCK_FILES)) &&
@@ -362,24 +426,6 @@ function totalSize(entries: readonly NodeModulesCacheEntry[]): number | null {
   return known.length === 0 && entries.length > 0
     ? null
     : known.reduce((total, size) => total + size, 0);
-}
-
-async function readDirectorySize(directory: string): Promise<number | null> {
-  try {
-    let total = 0;
-    const entries = await fs.readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        total += (await readDirectorySize(entryPath)) ?? 0;
-      } else if (entry.isFile()) {
-        total += (await fs.stat(entryPath)).size;
-      }
-    }
-    return total;
-  } catch {
-    return null;
-  }
 }
 
 function errorMessage(error: unknown): string {

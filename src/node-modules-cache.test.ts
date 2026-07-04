@@ -45,6 +45,21 @@ async function createPnpmRepo(root: string, name: string): Promise<string> {
   return repoDir;
 }
 
+async function waitForSizedEntry(): Promise<number | null> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const entry = (await listNodeModulesCacheEntries())[0];
+    if (
+      entry?.metadata.sizeBytes !== null &&
+      entry?.metadata.sizeBytes !== undefined
+    ) {
+      return entry.metadata.sizeBytes;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
+}
+
 afterEach(async () => {
   if (ORIGINAL_CACHE_DIR === undefined) {
     delete process.env["WORKFOREST_CACHE_DIR"];
@@ -88,6 +103,21 @@ describe("node_modules cache", () => {
     expect(entries[0]?.metadata.sourcePath).toBe(
       path.join(first, "node_modules"),
     );
+  });
+
+  it("sizes preserved installs in the background", async () => {
+    const root = await createTempRoot("workforest-node-modules-");
+    process.env["WORKFOREST_CACHE_DIR"] = path.join(root, "cache");
+    const repoDir = await createPnpmRepo(root, "repo");
+
+    const result = await preserveNodeModules({ repo, repoDir });
+
+    expect(result).toMatchObject({ status: "preserved" });
+    if (result.status !== "preserved") {
+      throw new Error(`Expected preserve to succeed, got ${result.status}`);
+    }
+    expect(result.entry.metadata.sizeBytes).toBe(null);
+    await expect(waitForSizedEntry()).resolves.toBeGreaterThan(0);
   });
 
   it("skips installs without the pnpm lockfile hash marker", async () => {
