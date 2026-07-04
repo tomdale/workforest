@@ -172,10 +172,35 @@ output. Add `--json` for the complete machine-readable status.
 
 ```sh
 wf status --watch
+wf status --wait --timeout 600
 ```
 
 Watch live repository setup and hook progress as a workspace initializes.
-Detailed repository logs live under `.workforest/logs/`.
+Outside a terminal (CI, pipes), `--watch` degrades to the `--wait` behavior:
+one plain line per repository transition, blocking until initialization
+finishes. `--wait` is the scripting primitive; it exits `0` when ready, `1`
+on failure, `130` when cancelled, and `124` if `--timeout` elapses.
+
+### Inspect, Retry, And Cancel Setup
+
+```sh
+wf init logs                 # render the latest setup run
+wf init logs --list          # list retained runs and their outcomes
+wf init logs --repo api --step init:pnpm-install
+wf init logs --follow        # tail a run in progress
+wf init retry                # relaunch failed repositories and follow them
+wf init cancel               # stop in-flight background initializers
+```
+
+Every setup run is recorded as a structured event log under
+`.workforest/initialization/runs/<run-id>/`, kept for successful runs too
+(the newest five runs, up to fourteen days). `wf init logs` renders each
+step per repository with durations, retries, and the captured command
+output, so a finished setup stays inspectable after the fact.
+
+Re-running `wf new` with the same name and repositories resumes an
+interrupted workspace: repositories that are already ready are left alone
+and only the unfinished ones run again.
 
 ### Delete A Workspace
 
@@ -457,7 +482,8 @@ Templates can disable all initializers or selected initializer IDs:
 ```
 
 Hooks run after repository initializers. Each hook supports `name`, `run`,
-optional `in`, optional `if`, and optional `continueOnError`.
+optional `in`, optional `if`, optional `continueOnError`, and optional
+`timeoutMs` (fail the hook if it runs longer than this).
 
 ## Configuration
 
@@ -472,6 +498,11 @@ Global settings live in `~/.workforest/config.json` by default:
     "reviews": "Reviews"
   },
   "branchPrefix": "feature/",
+  "setup": {
+    // Repositories set up concurrently (clones, checkouts, installs).
+    // 0 removes the limit; WORKFOREST_MAX_CONCURRENT overrides per run.
+    "maxConcurrent": 4
+  },
   "vercelLink": {
     "teamByGitHubOwner": {
       "vercel": "vercel"
@@ -511,9 +542,13 @@ This is a workflow map rather than an exhaustive flag reference:
 wf new                 Create a worktree or workspace
 wf switch              Open or search for a worktree or workspace
 wf list                List worktrees and workspaces
-wf status              Inspect status or background setup
+wf status              Inspect status or background setup (--wait to block)
 wf add                 Add repositories to the current worktree or workspace
 wf delete              Delete a worktree or workspace (verified; --force to abandon)
+
+wf init logs           Render or tail recorded setup run logs
+wf init retry          Retry failed repository setup
+wf init cancel         Cancel in-flight background setup
 
 wf task new            Create nested task worktrees
 wf task list           List task worktrees
@@ -562,8 +597,9 @@ ssh -T git@github.com
 
 ### Workspace Setup Fails
 
-Run `wf status --watch` inside the worktree or workspace and inspect
-`.workforest/logs/<repo>.log`.
+Run `wf init logs` inside the worktree or workspace to see every setup step
+with its captured output, then `wf init retry` to relaunch the failed
+repositories. `wf status --watch` follows setup that is still running.
 
 ### Cache Health Fails
 

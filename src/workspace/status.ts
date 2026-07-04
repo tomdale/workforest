@@ -108,6 +108,10 @@ export type RepoSetupSummary = Readonly<{
     | "failed"
     | "cancelled"
     | "unknown";
+  /** The step in flight or at fault, e.g. "initializer:pnpm install". */
+  step?: string;
+  /** The last progress message the initializer recorded. */
+  message?: string;
   error?: string;
   logPath?: string;
 }>;
@@ -421,10 +425,15 @@ function worktreeSpans(
     case "pending":
     case "queued":
       return [terminalSpan("queued", { role: "muted" })];
-    case "git":
-      return [terminalSpan("cloning…", { role: "muted" })];
-    case "running":
-      return [terminalSpan("installing…", { role: "accent" })];
+    case "git": {
+      const step = gitStepLabel(repo.setup.step);
+      return [terminalSpan(truncate(`${step}…`, available), { role: "muted" })];
+    }
+    case "running": {
+      const step = initializerStepLabel(repo.setup.step);
+      const text = step ? `installing: ${step}…` : "installing…";
+      return [terminalSpan(truncate(text, available), { role: "accent" })];
+    }
     case "cancelled":
       return [terminalSpan("cancelled", { role: "muted" })];
     default:
@@ -849,6 +858,8 @@ function summarizeSetup(
 
   return {
     status: state.status,
+    ...(state.step ? { step: state.step } : {}),
+    ...(state.message ? { message: state.message } : {}),
     ...(state.error ? { error: state.error } : {}),
     ...(setupLogPath ? { logPath: setupLogPath } : {}),
   };
@@ -916,6 +927,79 @@ function formatIntegration(value: boolean | null): string | null {
 
 function formatSetup(setup: RepoSetupSummary): string {
   return `setup ${setup.status}`;
+}
+
+function gitStepLabel(step: string | undefined): string {
+  switch (step) {
+    case "cleanup":
+      return "cleaning up";
+    case "worktree":
+      return "checking out";
+    default:
+      return "cloning";
+  }
+}
+
+function initializerStepLabel(step: string | undefined): string | null {
+  if (!step?.startsWith("initializer:")) return null;
+  const name = step.slice("initializer:".length);
+  if (!name || name === "queued" || name === "detection") return null;
+  return name;
+}
+
+/**
+ * Block until a worktree or workspace's initialization reaches a terminal
+ * state, emitting one line per repo status transition. Safe without a TTY;
+ * this is the scripting primitive behind `wf status --wait`.
+ */
+export async function waitForInitialization(
+  scope: InitializationScope,
+  {
+    timeoutMs,
+    pollIntervalMs = 500,
+    onLine,
+  }: {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+    onLine?: (line: string) => void;
+  } = {},
+): Promise<"ready" | "failed" | "cancelled" | "timeout"> {
+  const deadline = timeoutMs !== undefined ? Date.now() + timeoutMs : null;
+  const lastByRepo = new Map<string, string>();
+
+  while (true) {
+    await finalizeWorkspaceInitialization(scope).catch(() => undefined);
+    const [workspace, repos] = await Promise.all([
+      readWorkspaceInitializationState(scope),
+      readRepoInitializationStates(scope),
+    ]);
+
+    for (const repo of repos) {
+      const detail =
+        repo.status === "running" && repo.step
+          ? `${repo.status} (${repo.step})`
+          : repo.status;
+      const line = `${repo.repo}: ${detail}`;
+      if (lastByRepo.get(repo.repo) !== line) {
+        lastByRepo.set(repo.repo, line);
+        onLine?.(line);
+      }
+    }
+
+    if (
+      workspace?.status === "ready" ||
+      workspace?.status === "failed" ||
+      workspace?.status === "cancelled"
+    ) {
+      return workspace.status;
+    }
+
+    if (deadline !== null && Date.now() >= deadline) {
+      return "timeout";
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
 }
 
 function setupDetails(setup: RepoSetupSummary): StatusDetail[] {

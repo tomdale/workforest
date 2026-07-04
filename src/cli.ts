@@ -13,6 +13,7 @@ import {
   applyExitCode,
   errorResult,
   failure,
+  humanOutput,
   jsonSuccess,
   renderCommandResult,
   reportOutput,
@@ -422,6 +423,16 @@ async function runInvocation(
 
   if (invocation.command.leaf.handler.startsWith("task.")) {
     return runTaskInvocation(invocation);
+  }
+
+  if (invocation.command.leaf.handler.startsWith("init.")) {
+    return runTypedCommand(async () => {
+      const { runInitInvocation } = await import("./cli/init.ts");
+      return runInitInvocation(invocation, {
+        interactive: isInteractive(),
+        onEvent: humanServiceEventSink,
+      });
+    });
   }
 
   throw new Error(
@@ -1044,6 +1055,24 @@ async function runStatusCommand(
   ) {
     throw new UsageError('Flag "--watch" cannot be combined with "--json".');
   }
+  if (
+    booleanInvocationFlag(invocation, "wait") &&
+    booleanInvocationFlag(invocation, "json")
+  ) {
+    throw new UsageError('Flag "--wait" cannot be combined with "--json".');
+  }
+  if (
+    booleanInvocationFlag(invocation, "wait") &&
+    booleanInvocationFlag(invocation, "watch")
+  ) {
+    throw new UsageError('Flag "--wait" cannot be combined with "--watch".');
+  }
+  if (
+    stringInvocationFlag(invocation, "timeout") !== undefined &&
+    !booleanInvocationFlag(invocation, "wait")
+  ) {
+    throw new UsageError('Flag "--timeout" requires "--wait".');
+  }
 
   const { config } = await loadWorkspaceConfig();
   const selector = invocation.beforeDoubleDash[0];
@@ -1073,10 +1102,30 @@ async function runStatusCommand(
     );
   }
 
-  const { buildStatus, initializationScope, renderStatus } = await import(
-    "./workspace/status.ts"
-  );
+  const {
+    buildStatus,
+    initializationScope,
+    renderStatus,
+    waitForInitialization,
+  } = await import("./workspace/status.ts");
   const status = await buildStatus(resolution.entry);
+
+  if (booleanInvocationFlag(invocation, "wait")) {
+    if (!status.initialization || status.initialization.repos.length === 0) {
+      return success(
+        reportOutput(
+          renderStatus(status, {
+            note: "No initialization is recorded for this worktree or workspace; nothing to wait for.",
+          }),
+        ),
+      );
+    }
+    return waitForInitializationResult(
+      waitForInitialization,
+      initializationScope(resolution.entry),
+      stringInvocationFlag(invocation, "timeout"),
+    );
+  }
 
   if (booleanInvocationFlag(invocation, "watch")) {
     if (!status.initialization || status.initialization.repos.length === 0) {
@@ -1090,12 +1139,12 @@ async function runStatusCommand(
     }
 
     if (!isInteractive()) {
-      return success(
-        reportOutput(
-          renderStatus(status, {
-            note: "Initialization watcher requires an interactive terminal; showing the static report.",
-          }),
-        ),
+      // Without a terminal the watcher cannot render; degrade to the
+      // scripting behavior of --wait so callers still block until done.
+      return waitForInitializationResult(
+        waitForInitialization,
+        initializationScope(resolution.entry),
+        undefined,
       );
     }
 
@@ -1112,6 +1161,52 @@ async function runStatusCommand(
   return booleanInvocationFlag(invocation, "json")
     ? jsonSuccess(status)
     : success(reportOutput(renderStatus(status)));
+}
+
+/**
+ * Drive waitForInitialization for `wf status --wait` (and non-TTY --watch):
+ * one plain line per repo transition, terminal state mapped to exit codes
+ * scripts can branch on (0 ready, 1 failed, 130 cancelled, 124 timeout).
+ */
+async function waitForInitializationResult(
+  waitForInitialization: typeof import("./workspace/status.ts")["waitForInitialization"],
+  scope: import("./workspace/initialization-scope.ts").InitializationScope,
+  timeoutSeconds: string | undefined,
+): Promise<CommandResult> {
+  let timeoutMs: number | undefined;
+  if (timeoutSeconds !== undefined) {
+    const parsed = Number.parseInt(timeoutSeconds, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new UsageError('Flag "--timeout" must be a positive integer.');
+    }
+    timeoutMs = parsed * 1000;
+  }
+
+  const outcome = await waitForInitialization(scope, {
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    onLine: (line) => process.stdout.write(`${line}\n`),
+  });
+
+  switch (outcome) {
+    case "ready":
+      return success(humanOutput("ready"));
+    case "failed":
+      return failure(
+        1,
+        humanOutput("failed. Inspect with: wf init logs", {
+          stream: "stderr",
+        }),
+      );
+    case "cancelled":
+      return failure(130, humanOutput("cancelled", { stream: "stderr" }));
+    case "timeout":
+      return failure(
+        124,
+        humanOutput("Timed out waiting for initialization.", {
+          stream: "stderr",
+        }),
+      );
+  }
 }
 
 async function runTaskStartInvocation(

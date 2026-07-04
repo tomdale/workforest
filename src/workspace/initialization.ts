@@ -681,6 +681,7 @@ export async function retryRepoInitializations(
   target: InitializationTarget,
   repoNames: readonly string[],
   launchWorker: WorkerLaunch = launchDetachedWorker,
+  options: { setupRunId?: string } = {},
 ): Promise<RepoInitializationState[]> {
   const scope = normalizeInitializationTarget(target);
   const metadata = await readInitializationMetadata(scope);
@@ -715,6 +716,9 @@ export async function retryRepoInitializations(
             name: repoMetadata.name,
             remote: repoMetadata.remote,
           },
+          ...(options.setupRunId !== undefined
+            ? { setupRunId: options.setupRunId }
+            : {}),
         },
         launchWorker,
       ),

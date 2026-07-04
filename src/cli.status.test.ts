@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import stripAnsi from "strip-ansi";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderCommandResult } from "./cli/output.ts";
 import { executeCli } from "./cli.ts";
 import { loadWorkspaceConfig } from "./config.ts";
@@ -161,7 +161,51 @@ describe("wf status", () => {
     );
   });
 
-  it("shows a static report for watch outside an interactive terminal", async () => {
+  it("waits and exits zero once initialization is ready", async () => {
+    await createStatusFixture({
+      repoInitializations: [
+        {
+          version: 1,
+          repo: "api",
+          status: "ready",
+          attempt: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const stdoutLines: string[] = [];
+    const stdoutWrite = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk) => {
+        stdoutLines.push(String(chunk));
+        return true;
+      });
+
+    try {
+      const result = await executeCli([
+        "status",
+        "vercel-agent/auth-fix",
+        "--wait",
+      ]);
+      const rendered = renderResult(result);
+
+      expect(result.exitCode, rendered.stderr).toBe(0);
+      expect(stdoutLines.join("")).toContain("api: ready");
+    } finally {
+      stdoutWrite.mockRestore();
+    }
+  });
+
+  it("rejects --timeout without --wait", async () => {
+    await createStatusFixture();
+
+    const result = await executeCli(["status", "--timeout", "5"]);
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("waits for a terminal state for watch outside an interactive terminal", async () => {
     await createStatusFixture({
       repoInitializations: [
         {
@@ -180,19 +224,30 @@ describe("wf status", () => {
       ],
     });
 
-    const result = await executeCli([
-      "status",
-      "vercel-agent/auth-fix",
-      "--watch",
-    ]);
-    const rendered = renderResult(result);
+    // The recorded worker pid is dead, so the state self-heals to failed and
+    // the non-TTY watch resolves immediately with the failure exit code.
+    const stdoutLines: string[] = [];
+    const stdoutWrite = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk) => {
+        stdoutLines.push(String(chunk));
+        return true;
+      });
 
-    expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
-    expect(rendered.stdout).toContain("api");
-    expect(rendered.stdout).toContain("setup failed");
-    expect(rendered.stdout).toContain(
-      "Initialization watcher requires an interactive terminal; showing the static report.",
-    );
+    try {
+      const result = await executeCli([
+        "status",
+        "vercel-agent/auth-fix",
+        "--watch",
+      ]);
+      const rendered = renderResult(result);
+
+      expect(result.exitCode).toBe(1);
+      expect(stdoutLines.join("")).toContain("api: failed");
+      expect(rendered.stderr).toContain("wf init logs");
+    } finally {
+      stdoutWrite.mockRestore();
+    }
   });
 
   it("reports ambiguous bare selectors", async () => {

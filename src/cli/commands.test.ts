@@ -17,6 +17,7 @@ describe("commandRegistry", () => {
       add: null,
       switch: null,
       delete: null,
+      init: ["logs", "retry", "cancel"],
       ai: ["status"],
       migrate: ["workspaces"],
       task: ["new", "list", "delete"],

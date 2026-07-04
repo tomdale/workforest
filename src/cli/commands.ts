@@ -391,6 +391,15 @@ const statusCommand = leaf({
       undefined,
       "Open the initialization watcher for the selected entry when setup state exists.",
     ),
+    booleanFlag(
+      "wait",
+      "--wait",
+      undefined,
+      "Block until initialization reaches a terminal state, printing one line per transition. Exits 0 when ready, 1 on failure, 130 when cancelled, 124 on timeout.",
+    ),
+    stringFlag("timeout", "--timeout", "seconds", {
+      description: "Give up waiting after this many seconds (with --wait).",
+    }),
   ],
   examples: [
     {
@@ -402,11 +411,130 @@ const statusCommand = leaf({
       description: "Show a worktree by selector.",
     },
     {
+      command: "wf status --wait --timeout 600",
+      description: "Block a script until initialization completes.",
+    },
+    {
       command: "wf status vercel-agent/auth-fix --json",
       description: "Print a workspace status as JSON.",
     },
   ],
   outputModes: ["report", "json"],
+});
+
+const initSelectorOperands = operands(
+  0,
+  1,
+  "selector",
+  undefined,
+  "Selector as <group>/<name>, or a bare name when unique. Defaults to the current worktree or workspace.",
+);
+
+const initLogsCommand = leaf({
+  name: "logs",
+  path: ["init", "logs"],
+  summary: "Show setup run logs",
+  description:
+    "Renders the recorded event log of a setup run: every step per repository with durations, retries, and captured command output. Logs are kept for successful runs too, so completed setups stay inspectable.",
+  handler: "init.logs",
+  help: nestedHelp("init", "logs"),
+  operands: initSelectorOperands,
+  flags: [
+    stringFlag("repo", "--repo", "repo", {
+      description: "Show only this repository's steps.",
+    }),
+    stringFlag("step", "--step", "step", {
+      description: "Show only one step, e.g. git:mirror or init:pnpm-install.",
+    }),
+    stringFlag("run", "--run", "run", {
+      description:
+        "Run id or unique prefix to render. Defaults to the latest run.",
+    }),
+    booleanFlag(
+      "list",
+      "--list",
+      undefined,
+      "List recorded runs instead of rendering one.",
+    ),
+    booleanFlag(
+      "follow",
+      "--follow",
+      undefined,
+      "Tail the run, printing one line per event until it ends.",
+    ),
+    booleanFlag(
+      "json",
+      "--json",
+      undefined,
+      "Emit the merged run events as a JSON envelope.",
+    ),
+  ],
+  examples: [
+    {
+      command: "wf init logs",
+      description: "Render the latest setup run for the current change.",
+    },
+    {
+      command: "wf init logs --repo api --step init:pnpm-install",
+      description: "Show one repository's install output.",
+    },
+    {
+      command: "wf init logs --list",
+      description: "List the retained runs with their outcomes.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
+const initRetryCommand = leaf({
+  name: "retry",
+  path: ["init", "retry"],
+  summary: "Retry failed repository setup",
+  description:
+    "Relaunches initialization for failed or cancelled repositories and follows their progress until they finish. Records a new setup run.",
+  handler: "init.retry",
+  help: nestedHelp("init", "retry"),
+  operands: initSelectorOperands,
+  flags: [
+    stringFlag("repo", "--repo", "repo", {
+      description: "Retry only this repository.",
+    }),
+  ],
+  examples: [
+    {
+      command: "wf init retry",
+      description: "Retry every failed repository in the current change.",
+    },
+    {
+      command: "wf init retry --repo api",
+      description: "Retry one repository.",
+    },
+  ],
+  tty: optionalTerminal,
+  supportsJson: false,
+});
+
+const initCancelCommand = leaf({
+  name: "cancel",
+  path: ["init", "cancel"],
+  summary: "Cancel running repository setup",
+  description:
+    "Stops queued or running background initializers for the selected worktree or workspace. Cancelled repositories can be retried with wf init retry.",
+  handler: "init.cancel",
+  help: nestedHelp("init", "cancel"),
+  operands: initSelectorOperands,
+  flags: [
+    stringFlag("repo", "--repo", "repo", {
+      description: "Cancel only this repository.",
+    }),
+  ],
+  examples: [
+    {
+      command: "wf init cancel",
+      description: "Cancel all in-flight initialization.",
+    },
+  ],
+  supportsJson: false,
 });
 
 const addCommand = leaf({
@@ -602,6 +730,15 @@ export const commandRegistry: CommandRegistry = {
       addCommand,
       switchCommand,
       deleteCommand,
+      group({
+        name: "init",
+        path: ["init"],
+        summary: "Inspect and control repository setup",
+        description:
+          "Work with the initialization lifecycle of a worktree or workspace: read recorded setup run logs, retry failed repositories, and cancel in-flight background initializers.",
+        help: { kind: "command", command: "init" },
+        children: [initLogsCommand, initRetryCommand, initCancelCommand],
+      }),
       group({
         name: "ai",
         path: ["ai"],

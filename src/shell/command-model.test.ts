@@ -14,6 +14,7 @@ describe("shell command model", () => {
       "add",
       "switch",
       "delete",
+      "init",
       "ai",
       "migrate",
       "task",
