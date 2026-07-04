@@ -300,10 +300,56 @@ export function buildStatusLine(input: StatusLineInput): string {
   } else {
     hints.push("[q] quit");
   }
+  hints.push("[?] help");
 
   return renderLine([
     terminalSpan(parts.join(" · "), { role: "muted" }),
     terminalSpan("  ", { role: "muted" }),
     terminalSpan(hints.join(" "), { role: "dim" }),
   ]);
+}
+
+export type HelpLinesInput = Readonly<{
+  mode: SetupViewMode;
+  canDetach: boolean;
+}>;
+
+/**
+ * The `?` overlay's full keymap, one rendered line per binding. The status
+ * line only has room for the mode's primary hints; this is the complete
+ * reference for everything the grid responds to.
+ */
+export function buildHelpLines(input: HelpLinesInput): string[] {
+  const bindings: [key: string, action: string][] = [
+    ["arrows / hjkl", "move focus between panes"],
+    ["enter", "zoom the focused pane"],
+    ["esc", "close zoom (or this help)"],
+    ["[ and ]", "previous / next page"],
+  ];
+  if (input.mode === "until-ready") {
+    if (input.canDetach) {
+      bindings.push(["d", "detach; setup continues in the background"]);
+    }
+    bindings.push(["q / ctrl-c", "cancel setup (press twice to force)"]);
+  } else {
+    bindings.push(["q / esc", "quit watching; setup keeps running"]);
+  }
+  bindings.push(["?", "toggle this help"]);
+
+  const keyWidth = Math.max(...bindings.map(([key]) => key.length));
+  const lines = bindings.map(([key, action]) =>
+    renderLine([
+      terminalSpan(key.padEnd(keyWidth + 2), { role: "accent" }),
+      terminalSpan(action, {}),
+    ]),
+  );
+  lines.push("");
+  lines.push(
+    renderLine([
+      terminalSpan("press any key to close", {
+        role: "muted",
+      }),
+    ]),
+  );
+  return lines;
 }

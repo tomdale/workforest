@@ -715,23 +715,43 @@ describe("renderPipelinesGrid", () => {
     const results = await renderPipelinesGrid({
       pipelines: new Map(repoNames.map((name) => [name, pipeline()])),
       repoNames,
-      setupViewEnvironment: {
-        createScreen: () => ({
-          onKeypress: vi.fn(),
-          render: vi.fn(),
-          destroy: vi.fn(),
-        }),
-        createGrid: () => ({
-          getPane: () => ({
-            setLabel: vi.fn(),
-            setContent: vi.fn(),
+      setupViewEnvironment: (() => {
+        let keypress:
+          | ((
+              ch: string | undefined,
+              key: { name?: string } | undefined,
+            ) => void)
+          | null = null;
+        return {
+          createScreen: () => ({
+            onKeypress: (
+              handler: (
+                ch: string | undefined,
+                key: { name?: string } | undefined,
+              ) => void,
+            ) => {
+              keypress = handler;
+            },
+            render: vi.fn(),
+            destroy: vi.fn(),
           }),
-          render: vi.fn(),
-          destroy: vi.fn(),
-        }),
-        renderIntervalMs: 0,
-        successHoldMs: 0,
-      },
+          createGrid: () => ({
+            getPane: () => ({
+              setLabel: vi.fn(),
+              setContent: vi.fn(),
+            }),
+            render: vi.fn(),
+            destroy: vi.fn(),
+          }),
+          // The completion modal waits for a keypress; acknowledge it as soon
+          // as it appears so the paged run resolves.
+          createCompletionModal: () => {
+            queueMicrotask(() => keypress?.(undefined, { name: "x" }));
+            return { destroy: vi.fn() };
+          },
+          renderIntervalMs: 0,
+        };
+      })(),
     });
 
     expect(results.size).toBe(10);

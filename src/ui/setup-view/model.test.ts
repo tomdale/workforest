@@ -5,6 +5,7 @@ import type {
   StepSnapshot,
 } from "../../workspace/run-log/reducer.ts";
 import {
+  buildHelpLines,
   buildStatusLine,
   formatElapsed,
   paneLabel,
@@ -229,6 +230,7 @@ describe("buildStatusLine", () => {
     expect(line).toContain("[enter] zoom");
     expect(line).toContain("[d] detach");
     expect(line).toContain("[q] cancel");
+    expect(line).toContain("[?] help");
     expect(line).not.toContain("page");
   });
 
@@ -284,6 +286,30 @@ describe("buildStatusLine", () => {
       }),
     );
     expect(line).toContain("[esc] back");
+    expect(line).toContain("[?] help");
     expect(line).not.toContain("[enter] zoom");
+  });
+});
+
+describe("buildHelpLines", () => {
+  it("lists the full keymap for an attached run", () => {
+    const text = buildHelpLines({ mode: "until-ready", canDetach: true })
+      .map(stripTags)
+      .join("\n");
+    expect(text).toContain("move focus between panes");
+    expect(text).toContain("zoom the focused pane");
+    expect(text).toContain("previous / next page");
+    expect(text).toContain("detach; setup continues in the background");
+    expect(text).toContain("cancel setup");
+    expect(text).toContain("press any key to close");
+  });
+
+  it("swaps cancel for quit in watch mode and hides detach when unavailable", () => {
+    const text = buildHelpLines({ mode: "watch", canDetach: false })
+      .map(stripTags)
+      .join("\n");
+    expect(text).toContain("quit watching; setup keeps running");
+    expect(text).not.toContain("detach");
+    expect(text).not.toContain("cancel setup");
   });
 });

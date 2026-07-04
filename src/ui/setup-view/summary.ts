@@ -159,6 +159,11 @@ export function formatRunSummary(input: RunSummaryInput): string {
   lines.push({ spans: [] });
 
   const nameWidth = Math.max(...repoNames.map((name) => name.length), 4);
+  // When every repo landed ready the glyph already says so; a column of
+  // identical "ready" labels is noise. Mixed outcomes keep the label column.
+  const allReady = repoNames.every(
+    (name) => snapshot.repos.get(name)?.status === "ready",
+  );
   const failures: RepoRunSnapshot[] = [];
   for (const name of repoNames) {
     const repo = snapshot.repos.get(name);
@@ -171,7 +176,7 @@ export function formatRunSummary(input: RunSummaryInput): string {
         literalSpan("  "),
         terminalSpan(`${glyph} `, { role }),
         terminalSpan(name.padEnd(nameWidth + 2), {}),
-        terminalSpan(label.padEnd(13), { role }),
+        ...(allReady ? [] : [terminalSpan(label.padEnd(13), { role })]),
         ...(duration !== null
           ? [terminalSpan(formatElapsed(duration), { role: "muted" })]
           : []),

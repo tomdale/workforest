@@ -55,11 +55,31 @@ describe("formatRunSummary", () => {
     expect(summary).toContain("Setup complete in 1:42");
     expect(summary).toContain("/ws/billing");
     expect(summary).toContain("front");
-    expect(summary).toContain("ready");
+    // Every repo landed ready, so the redundant label column is dropped and
+    // the glyph carries the outcome.
+    expect(summary).not.toContain("ready");
     // Total repo duration is the sum of its step durations.
     expect(summary).toContain("32.1s");
     expect(summary).toContain("Next steps");
     expect(summary).toContain("wf status --watch");
+  });
+
+  it("keeps outcome labels when outcomes are mixed", () => {
+    const summary = formatRunSummary({
+      snapshot: snapshot({
+        outcome: "failed",
+        repos: new Map([
+          ["front", repo()],
+          ["api", repo({ repo: "api", status: "failed", error: "boom" })],
+        ]),
+      }),
+      targetDir: "/ws/billing",
+      outcome: "failed",
+      nowMs: 102_000,
+    });
+
+    expect(summary).toContain("ready");
+    expect(summary).toContain("failed");
   });
 
   it("lists failures with wf init logs pointers", () => {

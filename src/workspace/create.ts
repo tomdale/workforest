@@ -5,7 +5,7 @@ import { loadWorkspaceConfig } from "../config.ts";
 import { log } from "../logger.ts";
 import { resolveRepositorySpecifiers } from "../repository-specifiers.ts";
 import type { ServiceEventSink } from "../services/events.ts";
-import { reportShellCdTarget } from "../shell.ts";
+import { isShellAutoCdEnabled, reportShellCdTarget } from "../shell.ts";
 import { loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
 import type { shouldUseGrid } from "../ui/grid-consumer.ts";
@@ -171,7 +171,7 @@ async function createWorktree(
       targetDir,
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
       ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
-      nextSteps: ["wf status --watch"],
+      nextSteps: isShellAutoCdEnabled() ? [] : [`cd ${targetDir}`],
       onFailure: (repoName, state) => {
         setupFailures.set(
           repoName,
@@ -205,22 +205,52 @@ async function createWorktree(
   }
 
   const failures = [...setupFailures.values()];
-  if (outcome === "background") {
-    // Grid outcomes already printed the scrollback summary (failures
-    // included); the console path still reports them here.
-    printRepoSetupFailures(failures, options.onEvent);
-  }
-
-  if (outcome === "cancelled") {
-    return { targetDir, setupFailures: failures, outcome };
-  }
-
-  log.success(`Change ready: ${targetDir}`);
-  await reportShellCdTarget(targetDir, {
-    writeShellCdPath: options.writeShellCdPath,
+  await reportCreateOutcome({
+    targetDir,
+    outcome,
+    setupFailures: failures,
+    options,
   });
-
   return { targetDir, setupFailures: failures, outcome };
+}
+
+/**
+ * Post-presentation reporting shared by worktree and workspace creation.
+ * The grid's scrollback summary is the single completion report for grid
+ * outcomes: repeating "Change ready" and "Run: cd" under it just restates the
+ * same path, so grid runs only hand the shell its cd target silently. The
+ * console path never printed a summary and keeps its ready line and cd hint.
+ */
+async function reportCreateOutcome({
+  targetDir,
+  outcome,
+  setupFailures,
+  options,
+}: {
+  targetDir: string;
+  outcome: PresentRunOutcome;
+  setupFailures: readonly RepoSetupFailureSummary[];
+  options: CreateOptions;
+}): Promise<void> {
+  switch (outcome) {
+    case "background":
+      printRepoSetupFailures(setupFailures, options.onEvent);
+      log.success(`Change ready: ${targetDir}`);
+      await reportShellCdTarget(targetDir, {
+        writeShellCdPath: options.writeShellCdPath,
+      });
+      return;
+    case "ready":
+    case "detached":
+      await reportShellCdTarget(targetDir, {
+        mode: "silent",
+        writeShellCdPath: options.writeShellCdPath,
+      });
+      return;
+    case "failed":
+    case "cancelled":
+      return;
+  }
 }
 
 async function createWorkspace(
@@ -253,23 +283,11 @@ async function createWorkspace(
     ...(options.presentRun ? { presentRun: options.presentRun } : {}),
     ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
   });
-  if (result.outcome === "background") {
-    // Grid outcomes already printed the scrollback summary (failures
-    // included); the console path still reports them here.
-    printRepoSetupFailures(result.setupFailures, options.onEvent);
-  }
-
-  if (result.outcome === "cancelled") {
-    return {
-      targetDir: workspaceDir,
-      setupFailures: result.setupFailures,
-      outcome: result.outcome,
-    };
-  }
-
-  log.success(`Change ready: ${workspaceDir}`);
-  await reportShellCdTarget(workspaceDir, {
-    writeShellCdPath: options.writeShellCdPath,
+  await reportCreateOutcome({
+    targetDir: workspaceDir,
+    outcome: result.outcome,
+    setupFailures: result.setupFailures,
+    options,
   });
 
   return {

@@ -95,8 +95,11 @@ background workers.
 In an interactive terminal the setup grid stays attached through those
 installs and hooks until the workspace is fully ready. Each pane shows the
 repository's step checklist with live elapsed times above its streamed
-command output; the grid reflows on terminal resize and pages past nine
-repositories (`[` and `]`). While attached:
+command output. The grid sizes itself to the terminal: it fits as many panes
+as the window holds, reflows on resize, and pages through the rest (`[` and
+`]`) when repositories overflow. The status line lists the active
+keybindings, and **?** opens a help overlay with the full keymap. While
+attached:
 
 - Arrows or `h`/`j`/`k`/`l` move focus, **Enter** zooms the focused pane to
   the full screen, and **Esc** zooms back out.
@@ -106,9 +109,11 @@ repositories (`[` and `]`). While attached:
   queued and background work is marked cancelled, and the command exits with
   code `130`. A second press forces an immediate exit.
 
-Every exit path prints a persistent summary to scrollback (per-repo outcomes
-and timings, failures with `wf init logs` pointers, next steps), so nothing is
-lost when the fullscreen view closes.
+When the run finishes, the completion view (celebration on success, failure
+panes on error) stays on screen until you press a key. Every exit path then
+prints one persistent summary to scrollback: per-repo timings, failures with
+`wf init logs` pointers, and next steps. A fully attended run that fails
+exits with code `1`.
 
 Outside a terminal the command prints one line per step and returns after the
 worktrees are available while initialization continues in the background. Add
@@ -201,7 +206,8 @@ wf status --wait --timeout 600
 Watch live repository setup and hook progress as a workspace initializes.
 `--watch` reattaches the same setup grid `wf new` uses, replaying the latest
 recorded run and tailing it live: step checklists with elapsed times, zoom,
-paging past nine repositories, and a scrollback summary when you quit.
+paging when repositories overflow the window, and a scrollback summary when
+you quit.
 Outside a terminal (CI, pipes), and for workspaces created before run logs
 existed, `--watch` degrades to the `--wait` behavior: one plain line per
 repository transition, blocking until initialization finishes. `--wait` is

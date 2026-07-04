@@ -494,6 +494,7 @@ async function runEntryCommand(
   const { buildCreateInput, create } = await import("./workspace/create.ts");
   const scope = await resolveCurrentScope();
   let cancelled = false;
+  let failed = false;
   await runEntry(mode, {
     ...(scope ? { scope } : {}),
     ...(options.initialName ? { initialName: options.initialName } : {}),
@@ -522,9 +523,12 @@ async function runEntryCommand(
         writeShellCdPath,
       });
       cancelled = result.outcome === "cancelled";
+      failed = result.outcome === "failed";
     },
   });
-  return cancelled ? failure(130, { kind: "none" }) : success();
+  if (cancelled) return failure(130, { kind: "none" });
+  if (failed) return failure(1, { kind: "none" });
+  return success();
 }
 
 /**

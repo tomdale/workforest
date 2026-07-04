@@ -39,9 +39,14 @@ async function createFixture(): Promise<{
 }
 
 function passiveEnvironment(): SetupViewEnvironment {
+  let keypress:
+    | ((ch: string | undefined, key: { name?: string } | undefined) => void)
+    | null = null;
   return {
     createScreen: () => ({
-      onKeypress: vi.fn(),
+      onKeypress: (handler) => {
+        keypress = handler;
+      },
       render: vi.fn(),
       destroy: vi.fn(),
     }),
@@ -53,8 +58,13 @@ function passiveEnvironment(): SetupViewEnvironment {
       render: vi.fn(),
       destroy: vi.fn(),
     }),
+    // The completion modal stays up until a keypress; acknowledge it as soon
+    // as it appears so tests resolve.
+    createCompletionModal: () => {
+      queueMicrotask(() => keypress?.(undefined, { name: "x" }));
+      return { destroy: vi.fn() };
+    },
     renderIntervalMs: 0,
-    successHoldMs: 0,
   };
 }
 

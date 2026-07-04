@@ -81,7 +81,13 @@ export function isShellAutoCdEnabled(): boolean {
   return Boolean(process.env[WORKFOREST_CD_PATH_ENV]);
 }
 
-export type ShellCdReportMode = "auto" | "manual";
+/**
+ * How a command reports its cd target: "auto" writes the shell wrapper's
+ * auto-cd path and prints the manual hint only when the wrapper is absent;
+ * "manual" only prints the hint; "silent" only writes the path, for surfaces
+ * that already show the cd hint themselves (the setup run summary).
+ */
+export type ShellCdReportMode = "auto" | "manual" | "silent";
 
 export type ShellCdReporter = (targetDir: string) => Promise<void>;
 
@@ -100,7 +106,7 @@ export async function reportShellCdTarget(
   }
 
   await (options.writeShellCdPath ?? writeShellCdPath)(targetDir);
-  if (!isShellAutoCdEnabled()) {
+  if (mode === "auto" && !isShellAutoCdEnabled()) {
     log.info(`Run: cd ${compactHomePath(targetDir)}`);
   }
 }

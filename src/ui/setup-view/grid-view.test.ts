@@ -77,21 +77,30 @@ type MockGrid = SetupGridLike & {
   reflowCalls: number;
 };
 
-function createMockEnvironment(): {
+function createMockEnvironment(
+  // 100×26 holds a 3×3 of minimum panes, mirroring the old fixed capacity.
+  viewport: { width: number; height: number } = { width: 100, height: 26 },
+): {
   environment: SetupViewEnvironment;
   grids: MockGrid[];
   statusContents: string[];
   completionCalls: SetupCompletionModalOptions[];
+  helpCalls: string[][];
+  helpDestroys: number;
   press: (name: string, key?: Partial<SetupKeyEvent>) => void;
-  resize: () => void;
+  pressChar: (ch: string) => void;
+  resize: (next?: { width: number; height: number }) => void;
 } {
   let keypressHandler:
     | ((ch: string | undefined, key: SetupKeyEvent | undefined) => void)
     | null = null;
   let resizeHandler: (() => void) | null = null;
+  let size = viewport;
   const grids: MockGrid[] = [];
   const statusContents: string[] = [];
   const completionCalls: SetupCompletionModalOptions[] = [];
+  const helpCalls: string[][] = [];
+  const helpState = { destroys: 0 };
 
   const makePane = (): MockPane => {
     const pane: MockPane = {
@@ -114,6 +123,7 @@ function createMockEnvironment(): {
       onResize: (handler) => {
         resizeHandler = handler;
       },
+      getSize: () => size,
       render: vi.fn(),
       destroy: vi.fn(),
     }),
@@ -158,8 +168,15 @@ function createMockEnvironment(): {
       completionCalls.push(options);
       return { destroy: vi.fn() };
     },
+    createHelpOverlay: ({ lines }) => {
+      helpCalls.push([...lines]);
+      return {
+        destroy: () => {
+          helpState.destroys += 1;
+        },
+      };
+    },
     renderIntervalMs: 0,
-    successHoldMs: 0,
   };
 
   return {
@@ -167,10 +184,18 @@ function createMockEnvironment(): {
     grids,
     statusContents,
     completionCalls,
+    helpCalls,
+    get helpDestroys() {
+      return helpState.destroys;
+    },
     press: (name, key = {}) => {
       keypressHandler?.(undefined, { name, ...key });
     },
-    resize: () => {
+    pressChar: (ch) => {
+      keypressHandler?.(ch, undefined);
+    },
+    resize: (next) => {
+      if (next) size = next;
       resizeHandler?.();
     },
   };
@@ -181,7 +206,7 @@ function tick(): Promise<void> {
 }
 
 describe("renderSetupGrid", () => {
-  it("renders checklists from the event stream and auto-exits on success", async () => {
+  it("renders checklists and keeps the success modal up until a keypress", async () => {
     const { events, push } = createEventSource();
     const mock = createMockEnvironment();
 
@@ -217,6 +242,20 @@ describe("renderSetupGrid", () => {
     push({ kind: "repo-end", repo: "api", outcome: "ready" });
     push({ kind: "run-end", outcome: "ready", durationMs: 10_000 });
 
+    // The celebration is never auto-dismissed: the grid stays up until the
+    // user acknowledges it.
+    let resolved = false;
+    void promise.then(() => {
+      resolved = true;
+    });
+    await tick();
+    await tick();
+    expect(resolved).toBe(false);
+    expect(mock.completionCalls).toHaveLength(1);
+    expect(mock.completionCalls[0]?.completedCount).toBe(2);
+    expect(mock.completionCalls[0]?.failures).toEqual([]);
+
+    mock.press("x");
     const result = await promise;
     expect(result.outcome).toBe("ready");
 
@@ -224,9 +263,6 @@ describe("renderSetupGrid", () => {
     const frontPane = grid?.panes.get(0);
     expect(frontPane?.labels.map(stripTags).join("\n")).toContain("front");
     expect(frontPane?.contents.map(stripTags).join("\n")).toContain("mirror");
-    expect(mock.completionCalls).toHaveLength(1);
-    expect(mock.completionCalls[0]?.completedCount).toBe(2);
-    expect(mock.completionCalls[0]?.failures).toEqual([]);
   });
 
   it("keeps the grid up on failure until a keypress", async () => {
@@ -445,6 +481,89 @@ describe("renderSetupGrid", () => {
     mock.press("escape");
     expect(grid?.zoomCalls.at(-1)).toBeNull();
 
+    close();
+    await promise;
+  });
+
+  it("fits every pane on one page when the terminal is large enough", async () => {
+    const { events, push, close } = createEventSource();
+    // 200×41 holds a 6×5 of minimum panes, so 12 repos need no paging.
+    const mock = createMockEnvironment({ width: 200, height: 41 });
+    const repoNames = Array.from({ length: 12 }, (_, i) => `repo-${i}`);
+
+    const promise = renderSetupGrid({
+      events,
+      repoNames,
+      mode: "watch",
+      environment: mock.environment,
+    });
+    push({
+      kind: "run-start",
+      command: "new",
+      repos: repoNames,
+      scope: "workspace",
+      pid: 1,
+    });
+    await tick();
+
+    const grid = mock.grids[0];
+    expect(grid?.rows).toBe(3);
+    expect(grid?.cols).toBe(4);
+    expect(grid?.panes.get(11)?.labels.map(stripTags).at(-1)).toContain(
+      "repo-11",
+    );
+    expect(
+      mock.statusContents.map(stripTags).some((line) => line.includes("page")),
+    ).toBe(false);
+
+    close();
+    await promise;
+  });
+
+  it("opens the help overlay on ? and swallows the dismissing key", async () => {
+    const { events, push, close } = createEventSource();
+    const mock = createMockEnvironment();
+    const onCancelRequest = vi.fn();
+
+    const promise = renderSetupGrid({
+      events,
+      repoNames: ["front"],
+      mode: "until-ready",
+      onCancelRequest,
+      environment: mock.environment,
+    });
+    push({
+      kind: "run-start",
+      command: "new",
+      repos: ["front"],
+      scope: "workspace",
+      pid: 1,
+    });
+    await tick();
+
+    expect(
+      mock.statusContents
+        .map(stripTags)
+        .some((line) => line.includes("[?] help")),
+    ).toBe(true);
+
+    mock.pressChar("?");
+    expect(mock.helpCalls).toHaveLength(1);
+    const helpText = mock.helpCalls[0]?.map(stripTags).join("\n") ?? "";
+    expect(helpText).toContain("zoom");
+    expect(helpText).toContain("detach");
+    expect(helpText).toContain("cancel");
+
+    // Any key closes the overlay without acting: "q" here must not cancel.
+    mock.press("q");
+    expect(mock.helpDestroys).toBe(1);
+    expect(onCancelRequest).not.toHaveBeenCalled();
+
+    // With the overlay closed, "q" acts again.
+    mock.press("q");
+    expect(onCancelRequest).toHaveBeenCalledTimes(1);
+
+    push({ kind: "run-end", outcome: "failed", durationMs: 1_000 });
     close();
     await promise;
   });

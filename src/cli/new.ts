@@ -95,6 +95,11 @@ export async function runNewCommand(
     // remains to report.
     return failure(130, { kind: "none" });
   }
+  if (result.outcome === "failed") {
+    // Attached runs know the terminal outcome; the summary already explained
+    // the failure and pointed at wf init logs / retry.
+    return failure(1, { kind: "none" });
+  }
   return success();
 }
 

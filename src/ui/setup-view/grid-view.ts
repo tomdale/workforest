@@ -10,6 +10,7 @@
  * vitest-testable without a TTY.
  */
 
+import { Box } from "@unblessed/node";
 import {
   createFullscreenScreen,
   createFullscreenStage,
@@ -28,8 +29,9 @@ import {
   createDefaultCompletionModal,
   type GridScreenLike,
 } from "../grid-consumer.ts";
-import { calculateGridDimensions, GridLayout } from "../grid-layout.ts";
+import { GridLayout } from "../grid-layout.ts";
 import {
+  buildHelpLines,
   buildStatusLine,
   paneLabel,
   renderPaneLines,
@@ -38,7 +40,8 @@ import {
   workspacePaneSnapshot,
 } from "./model.ts";
 import {
-  PANE_CAPACITY,
+  computeGridCapacity,
+  fitGridDimensions,
   panePriorityForStatus,
   selectVisiblePanes,
 } from "./pager.ts";
@@ -67,6 +70,8 @@ export interface SetupScreenLike {
     handler: (ch: string | undefined, key: SetupKeyEvent | undefined) => void,
   ): void;
   onResize?(handler: () => void): void;
+  /** Terminal size in cells; drives pane capacity and grid shape. */
+  getSize?(): { width: number; height: number };
   render(): void;
   destroy(): void;
 }
@@ -94,6 +99,10 @@ export interface SetupCompletionModalLike {
   destroy(): void;
 }
 
+export interface SetupHelpOverlayLike {
+  destroy(): void;
+}
+
 export interface SetupViewEnvironment {
   createScreen(): SetupScreenLike;
   createGrid(options: {
@@ -105,9 +114,10 @@ export interface SetupViewEnvironment {
   createCompletionModal?(
     options: SetupCompletionModalOptions,
   ): SetupCompletionModalLike;
+  createHelpOverlay?(options: {
+    lines: readonly string[];
+  }): SetupHelpOverlayLike;
   renderIntervalMs?: number;
-  /** How long the success celebration holds before the grid auto-exits. */
-  successHoldMs?: number;
   now?(): number;
 }
 
@@ -142,8 +152,10 @@ export type SetupGridResult = Readonly<{
 }>;
 
 const DEFAULT_RENDER_INTERVAL_MS = 33;
-const DEFAULT_SUCCESS_HOLD_MS = 1_200;
 const ELAPSED_TICK_MS = 1_000;
+
+/** Sizing fallback for environments that expose no terminal size. */
+const DEFAULT_VIEWPORT = { width: 120, height: 40 } as const;
 
 /**
  * Render a setup run until it reaches a terminal state (or the user detaches,
@@ -158,7 +170,6 @@ export async function renderSetupGrid(
   const now = environment.now ?? Date.now;
   const renderIntervalMs =
     environment.renderIntervalMs ?? DEFAULT_RENDER_INTERVAL_MS;
-  const successHoldMs = environment.successHoldMs ?? DEFAULT_SUCCESS_HOLD_MS;
   const mode = options.mode;
   const canDetach = mode === "until-ready" && (options.canDetach ?? true);
   const forceExit =
@@ -169,7 +180,10 @@ export async function renderSetupGrid(
 
   const reducer = createRunReducer();
   const screen = environment.createScreen();
-  const statusLine = environment.createStatusLine?.({ screen }) ?? null;
+  // Created lazily on the first frame, after the grid: terminal surfaces
+  // paint in creation order, so a status line created before the grid's
+  // full-screen backdrop would be buried under it.
+  let statusLine: SetupStatusLineLike | null = null;
 
   let grid: SetupGridLike | null = null;
   let gridShape: { rows: number; cols: number } | null = null;
@@ -182,6 +196,25 @@ export async function renderSetupGrid(
   let cancelRequested = false;
   let lastVisible: string[] = [];
   let lastPageCount = 1;
+  let helpOverlay: SetupHelpOverlayLike | null = null;
+
+  const closeHelp = (): void => {
+    helpOverlay?.destroy();
+    helpOverlay = null;
+  };
+
+  const toggleHelp = (): void => {
+    if (helpOverlay) {
+      closeHelp();
+      screen.render();
+      return;
+    }
+    helpOverlay =
+      environment.createHelpOverlay?.({
+        lines: buildHelpLines({ mode, canDetach }),
+      }) ?? null;
+    if (helpOverlay) screen.render();
+  };
 
   let destroyed = false;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -222,8 +255,7 @@ export async function renderSetupGrid(
     return names;
   };
 
-  const ensureGrid = (visibleCount: number): SetupGridLike => {
-    const dims = calculateGridDimensions(Math.max(visibleCount, 1));
+  const ensureGrid = (dims: { rows: number; cols: number }): SetupGridLike => {
     if (
       grid &&
       gridShape &&
@@ -249,20 +281,26 @@ export async function renderSetupGrid(
     const nowMs = now();
     const snapshot = reducer.snapshot();
     const order = paneOrderOf(snapshot);
+    const bounds = computeGridCapacity(screen.getSize?.() ?? DEFAULT_VIEWPORT);
     const selection = selectVisiblePanes({
       order,
       priorityOf: (name) =>
         panePriorityForStatus(paneSnapshotOf(snapshot, name).status),
       page,
-      capacity: PANE_CAPACITY,
+      capacity: bounds.capacity,
     });
     page = selection.page;
 
     let visible: readonly string[];
     let pageCount: number;
-    if (zoomedPane !== null && lastVisible.includes(zoomedPane)) {
+    if (
+      zoomedPane !== null &&
+      lastVisible.includes(zoomedPane) &&
+      lastVisible.length <= bounds.capacity
+    ) {
       // Freeze the pane assignment while zoomed so priority reshuffles do
-      // not swap the pane out from under the user.
+      // not swap the pane out from under the user. A resize that shrinks
+      // capacity below the frozen set drops the freeze so panes always fit.
       visible = lastVisible;
       pageCount = lastPageCount;
     } else {
@@ -276,7 +314,10 @@ export async function renderSetupGrid(
     }
     focusIndex = Math.min(focusIndex, Math.max(visible.length - 1, 0));
 
-    const activeGrid = ensureGrid(visible.length);
+    const activeGrid = ensureGrid(
+      fitGridDimensions(Math.max(visible.length, 1), bounds),
+    );
+    statusLine ??= environment.createStatusLine?.({ screen }) ?? null;
     const zoomIndex = zoomedPane !== null ? visible.indexOf(zoomedPane) : -1;
     activeGrid.setZoomedPane?.(zoomIndex >= 0 ? zoomIndex : null);
     for (let index = 0; index < gridSlots; index += 1) {
@@ -349,6 +390,9 @@ export async function renderSetupGrid(
     key: SetupKeyEvent | undefined,
   ): string | null => {
     if (key?.ctrl && key.name === "c") return "ctrl-c";
+    // "?" arrives as the character of a shifted "/" keypress, so the char is
+    // the reliable signal rather than the key name.
+    if (ch === "?") return "?";
     const name = key?.name ?? ch;
     if (name === "return" || name === "linefeed") return "enter";
     return name ?? null;
@@ -364,7 +408,19 @@ export async function renderSetupGrid(
     }
 
     const name = keyNameOf(ch, key);
+
+    if (helpOverlay && name !== "?") {
+      // Any key dismisses the help overlay; the keypress is consumed so a
+      // stray "q" while reading the keymap cannot cancel the run.
+      closeHelp();
+      screen.render();
+      return;
+    }
+
     switch (name) {
+      case "?":
+        toggleHelp();
+        break;
       case "left":
       case "h":
         moveFocus(-1);
@@ -442,9 +498,6 @@ export async function renderSetupGrid(
       ackResolve = resolve;
     });
 
-  const sleep = (ms: number): Promise<void> =>
-    new Promise((resolve) => setTimeout(resolve, ms));
-
   const failuresOf = (snapshot: RunSnapshot): SetupFailureSummary[] =>
     [...snapshot.repos.values()]
       .filter((repo) => repo.status === "failed")
@@ -455,6 +508,7 @@ export async function renderSetupGrid(
       }));
 
   const showCompletionModal = (snapshot: RunSnapshot): void => {
+    closeHelp();
     const failures = failuresOf(snapshot);
     modal =
       environment.createCompletionModal?.({
@@ -481,6 +535,7 @@ export async function renderSetupGrid(
       renderTimer = null;
     }
     if (ticker) clearInterval(ticker);
+    closeHelp();
     modal?.destroy();
     modal = null;
     statusLine?.destroy();
@@ -534,14 +589,9 @@ export async function renderSetupGrid(
       return { outcome, snapshot };
     }
 
-    if (outcome === "ready") {
-      showCompletionModal(snapshot);
-      // Bounded celebration: auto-exit after the hold; any keypress skips it.
-      await Promise.race([sleep(successHoldMs), waitForKeypress()]);
-      return { outcome, snapshot };
-    }
-
-    // Failure: keep the grid up so panes stay readable until a keypress.
+    // Terminal state: keep the grid and completion modal up until the user
+    // dismisses them, so both the celebration and failure panes stay readable
+    // for as long as anyone wants to look.
     showCompletionModal(snapshot);
     await Promise.race([waitForKeypress(), finished]);
     return { outcome, snapshot };
@@ -578,6 +628,15 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
   const background = toBlessed(theme.chrome.background);
 
   let rawScreen: FullscreenScreen | null = null;
+  let stage: Box | null = null;
+
+  const axis = (
+    value: number | string | undefined,
+    fallback: number,
+  ): number =>
+    Number.isFinite(Number(value)) && Number(value) > 0
+      ? Math.floor(Number(value))
+      : fallback;
 
   return {
     createScreen(): SetupScreenLike {
@@ -595,6 +654,10 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
         onResize: (handler) => {
           screen.on("resize", handler);
         },
+        getSize: () => ({
+          width: axis(screen.width, DEFAULT_VIEWPORT.width),
+          height: axis(screen.height, DEFAULT_VIEWPORT.height),
+        }),
         render: () => screen.render(),
         destroy: () => screen.destroy(),
       };
@@ -604,7 +667,11 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
       if (!screen) {
         throw new Error("createGrid called before createScreen.");
       }
-      const stage = createFullscreenStage(screen, fullTerminalViewport);
+      // One stage for the whole run, shared across grid reshapes. A fresh
+      // stage per grid would stack a new full-screen backdrop over surfaces
+      // created earlier (the status line), burying them; the shared stage is
+      // torn down with the screen.
+      stage ??= createFullscreenStage(screen, fullTerminalViewport);
       const grid = new GridLayout({
         screen,
         parent: stage,
@@ -625,10 +692,7 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
         setVisiblePane: (index) => grid.setVisiblePane(index),
         hidePane: (index) => grid.hidePane(index),
         render: () => screen.render(),
-        destroy: () => {
-          grid.destroy();
-          stage.destroy();
-        },
+        destroy: () => grid.destroy(),
       };
     },
     createStatusLine(): SetupStatusLineLike {
@@ -661,7 +725,52 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
         })),
       });
     },
+    createHelpOverlay({ lines }): SetupHelpOverlayLike {
+      const screen = rawScreen;
+      if (!screen) {
+        throw new Error("createHelpOverlay called before createScreen.");
+      }
+      const stripTags = (value: string): string =>
+        value.replace(/\{[^}]*\}/g, "");
+      const contentWidth = Math.max(
+        ...lines.map((line) => stripTags(line).length),
+        10,
+      );
+      const width = Math.min(
+        contentWidth + 6,
+        Math.max(axis(screen.width, DEFAULT_VIEWPORT.width) - 4, 20),
+      );
+      const height = Math.min(
+        lines.length + 2,
+        Math.max(axis(screen.height, DEFAULT_VIEWPORT.height) - 2, 5),
+      );
+      const box = new Box({
+        parent: screen,
+        top: Math.max(
+          Math.floor(
+            (axis(screen.height, DEFAULT_VIEWPORT.height) - height) / 2,
+          ),
+          0,
+        ),
+        left: Math.max(
+          Math.floor((axis(screen.width, DEFAULT_VIEWPORT.width) - width) / 2),
+          0,
+        ),
+        width,
+        height,
+        tags: true,
+        wrap: false,
+        border: { type: "line", style: "round" },
+        padding: { top: 0, bottom: 0, left: 2, right: 2 },
+        content: lines.join("\n"),
+        style: {
+          fg: toBlessed(theme.palette.primary),
+          bg: background,
+          border: { fg: focus, bg: background },
+        },
+      });
+      return { destroy: () => box.destroy() };
+    },
     renderIntervalMs: DEFAULT_RENDER_INTERVAL_MS,
-    successHoldMs: DEFAULT_SUCCESS_HOLD_MS,
   };
 }

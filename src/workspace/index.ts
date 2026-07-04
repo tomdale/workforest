@@ -116,7 +116,6 @@ export type RepoSetupFailureSummary = {
 export type StampWorkspaceResult = {
   setupFailures: readonly RepoSetupFailureSummary[];
   workspaceDir: string;
-  nextSteps: readonly string[];
   /** How the presentation ended; "cancelled" maps to exit code 130. */
   outcome: PresentRunOutcome;
 };
@@ -249,8 +248,9 @@ export async function stampWorkspace(
     return {
       setupFailures: [],
       workspaceDir,
-      nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
-      outcome: "ready",
+      // Nothing was presented, so report through the console contract: the
+      // caller prints the ready line and shell handoff itself.
+      outcome: "background",
     };
   }
 
@@ -280,7 +280,7 @@ export async function stampWorkspace(
       targetDir: workspaceDir,
       ...(onEvent ? { onEvent } : {}),
       ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
-      nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
+      nextSteps: getNextSteps(workspaceDir),
       onFailure: (repoName, state) => {
         setupFailures.set(
           repoName,
@@ -330,7 +330,6 @@ export async function stampWorkspace(
   return {
     setupFailures: [...setupFailures.values()],
     workspaceDir,
-    nextSteps: [...getNextSteps(workspaceDir), "wf status --watch"],
     outcome,
   };
 }

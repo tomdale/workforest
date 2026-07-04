@@ -1,13 +1,59 @@
 /**
- * Pane paging for setup grids with more repositories than the grid can show
- * at once. Selection is pure: given the pane order, a priority classifier,
- * and the requested page, it returns the panes to show and the page count.
+ * Pane capacity and paging for setup grids. Capacity is derived from the
+ * terminal size (how many minimum-sized panes fit) instead of a fixed cap, and
+ * runs with more repositories than fit page through explicit pages. Everything
+ * here is pure: viewport in, layout out.
  */
 
 import type { RepoRunStatus } from "../../workspace/run-log/reducer.ts";
 
-/** The grid never shows more than a 3×3 of panes at once. */
-export const PANE_CAPACITY = 9;
+/**
+ * The narrowest pane that still shows a readable checklist row like
+ * "✔ pnpm install (retry 2) 12.3s" inside its border.
+ */
+export const MIN_PANE_WIDTH = 30;
+
+/** The shortest pane that fits a border, label, and a few checklist rows. */
+export const MIN_PANE_HEIGHT = 8;
+
+export type GridViewport = Readonly<{ width: number; height: number }>;
+
+export type GridCapacity = Readonly<{
+  capacity: number;
+  maxRows: number;
+  maxCols: number;
+}>;
+
+/**
+ * How many minimum-sized panes the terminal holds at once. One row is
+ * reserved for the status line; every axis keeps at least one pane so tiny
+ * terminals degrade to a single pane rather than zero.
+ */
+export function computeGridCapacity(viewport: GridViewport): GridCapacity {
+  const usableHeight = Math.max(viewport.height - 1, 1);
+  const maxCols = Math.max(Math.floor(viewport.width / MIN_PANE_WIDTH), 1);
+  const maxRows = Math.max(Math.floor(usableHeight / MIN_PANE_HEIGHT), 1);
+  return { capacity: maxRows * maxCols, maxRows, maxCols };
+}
+
+/**
+ * Choose a near-square grid shape for `count` panes within the viewport's
+ * row/column bounds, preferring wider-than-tall layouts (terminal cells are
+ * taller than they are wide, so extra columns cost less than extra rows).
+ */
+export function fitGridDimensions(
+  count: number,
+  bounds: Pick<GridCapacity, "maxRows" | "maxCols">,
+): { rows: number; cols: number } {
+  const panes = Math.max(count, 1);
+  let cols = Math.min(Math.ceil(Math.sqrt(panes)), bounds.maxCols, panes);
+  let rows = Math.ceil(panes / cols);
+  if (rows > bounds.maxRows) {
+    cols = Math.min(Math.ceil(panes / bounds.maxRows), bounds.maxCols);
+    rows = Math.min(Math.ceil(panes / cols), bounds.maxRows);
+  }
+  return { rows, cols };
+}
 
 /**
  * Attention priority for pane selection when repos overflow the grid:
@@ -44,7 +90,8 @@ export type SelectVisiblePanesInput = Readonly<{
   priorityOf: (name: string) => PanePriority;
   /** Requested page; clamped into range. */
   page: number;
-  capacity?: number;
+  /** How many panes fit at once; see {@link computeGridCapacity}. */
+  capacity: number;
 }>;
 
 export type SelectVisiblePanesResult = Readonly<{
@@ -62,7 +109,7 @@ export type SelectVisiblePanesResult = Readonly<{
 export function selectVisiblePanes(
   input: SelectVisiblePanesInput,
 ): SelectVisiblePanesResult {
-  const capacity = Math.max(1, input.capacity ?? PANE_CAPACITY);
+  const capacity = Math.max(1, input.capacity);
   const order = [...input.order];
 
   if (order.length <= capacity) {
