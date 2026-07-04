@@ -17,6 +17,7 @@ import {
 import { ensureDir } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import {
+  emitRunEndIfTerminal,
   finalizeWorkspaceInitialization,
   initializeWorkspaceInitialization,
   markWorkspaceInitializing,
@@ -37,8 +38,13 @@ import {
   type RepoPipelineOptions,
   type RepoPipelineState,
   repoPipeline,
+  repoSetupEvents,
 } from "./pipeline.ts";
+import { toRunEventError } from "./run-log/events.ts";
+import { createPipelineStateConverter } from "./run-log/instrument.ts";
+import { createRunSession, type RunSession } from "./run-log/session.ts";
 import {
+  DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS,
   getRepoSetupLogPath,
   readRepoSetupLogExcerpt,
   withRepoSetupLog,
@@ -160,6 +166,13 @@ export async function stampWorkspace(
   });
   await initializeWorkspaceInitialization({ workspaceDir, repos });
 
+  const scope = workspaceInitializationScope(workspaceDir);
+  const session = await createRunSession({
+    scope,
+    command: "new",
+    repos: repos.map((repo) => repo.name),
+  });
+
   const prepared = new Map<
     string,
     { repo: RepositorySource; hasLockfile: boolean }
@@ -206,46 +219,57 @@ export async function stampWorkspace(
         beforeInitializers,
         monitorBackground: interactive,
         templateBarrier,
+        session,
       }),
     ]),
   );
 
-  await presentPipelines({
-    pipelines,
-    repoNames: repos.map((repo) => repo.name),
-    interactive,
-    ...(onEvent ? { onEvent } : {}),
-    workspacePath: workspaceDir,
-    getLogPath: (repoName) => getRepoSetupLogPath({ workspaceDir, repoName }),
-    onFailure: async (repoName, state) => {
-      setupFailures.set(
-        repoName,
-        await createRepoSetupFailureSummary({
-          workspaceDir,
+  try {
+    await presentPipelines({
+      pipelines,
+      repoNames: repos.map((repo) => repo.name),
+      interactive,
+      ...(onEvent ? { onEvent } : {}),
+      workspacePath: workspaceDir,
+      getLogPath: () => Promise.resolve(session.runDir),
+      onFailure: (repoName, state) => {
+        setupFailures.set(
           repoName,
-          error: state.error,
-          ...(state.step ? { step: state.step } : {}),
-        }),
-      );
-    },
-    onBeforeCompletionPrompt: async () => {
-      // Deferred to the same point for grid and drain. Suppress service events
-      // while the grid owns the screen; the drain is free to emit them.
-      await writeVSCodeWorkspaceFile(
-        workspaceDir,
-        repos.filter((repo) => prepared.has(repo.name)),
-        !interactive && onEvent ? { onEvent } : {},
-      );
-      await markWorkspaceInitializing(workspaceDir);
-      await finalizeWorkspaceInitialization(workspaceDir);
-    },
-    completeOnWorktreesReady: true,
-    backgroundInitialization: true,
-    ...(options.renderPipelinesGrid
-      ? { renderPipelinesGrid: options.renderPipelinesGrid }
-      : {}),
-    ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
-  });
+          createRunFailureSummary({
+            session,
+            repoName,
+            error: state.error,
+            ...(state.step ? { step: state.step } : {}),
+          }),
+        );
+      },
+      onBeforeCompletionPrompt: async () => {
+        // Deferred to the same point for grid and drain. Suppress service
+        // events while the grid owns the screen; the drain is free to emit
+        // them.
+        await writeVSCodeWorkspaceFile(
+          workspaceDir,
+          repos.filter((repo) => prepared.has(repo.name)),
+          !interactive && onEvent ? { onEvent } : {},
+        );
+        await markWorkspaceInitializing(workspaceDir);
+        const finalState = await finalizeWorkspaceInitialization(workspaceDir, {
+          session,
+        });
+        emitRunEndIfTerminal(session, finalState);
+      },
+      completeOnWorktreesReady: true,
+      backgroundInitialization: true,
+      ...(options.renderPipelinesGrid
+        ? { renderPipelinesGrid: options.renderPipelinesGrid }
+        : {}),
+      ...(options.shouldUseGrid
+        ? { shouldUseGrid: options.shouldUseGrid }
+        : {}),
+    });
+  } finally {
+    await session.close().catch(() => undefined);
+  }
 
   if (!interactive) {
     emitServiceEvent(onEvent, {
@@ -270,6 +294,7 @@ async function* createBackgroundRepoSetupPipeline({
   beforeInitializers,
   monitorBackground,
   templateBarrier,
+  session,
 }: {
   repo: RepositorySource;
   workspaceDir: string;
@@ -278,6 +303,7 @@ async function* createBackgroundRepoSetupPipeline({
   beforeInitializers: NonNullable<RepoPipelineOptions["beforeInitializers"]>;
   monitorBackground: boolean;
   templateBarrier: TemplateCopyBarrier | null;
+  session: RunSession;
 }): AsyncGenerator<RepoPipelineState> {
   yield* runScopedRepoSetupPipeline({
     repo,
@@ -289,6 +315,7 @@ async function* createBackgroundRepoSetupPipeline({
     beforeInitializers,
     monitorBackground,
     onFailed: () => templateBarrier?.markRepoFailed(),
+    session,
   });
 }
 
@@ -307,12 +334,15 @@ export type ScopedRepoSetupPipelineOptions = {
   monitorBackground: boolean;
   /** Invoked the first time the foreground git pipeline reports a failure. */
   onFailed?: () => void;
+  /** Run session this repo's setup events are recorded to. */
+  session: RunSession;
 };
 
 /**
  * Drive the foreground portion of a single repository's setup (mirror →
- * worktree), record its progress against an initialization scope, hand
- * initialization off to a detached worker, and optionally watch that worker.
+ * worktree), record its events against the run session and its state against
+ * an initialization scope, hand initialization off to a detached worker, and
+ * optionally watch that worker.
  *
  * This is the shared primitive behind both workspace stamping and single-repo
  * change creation, so the two surfaces present identical pipeline state through
@@ -328,10 +358,12 @@ export async function* runScopedRepoSetupPipeline({
   beforeInitializers,
   monitorBackground,
   onFailed,
+  session,
 }: ScopedRepoSetupPipelineOptions): AsyncGenerator<RepoPipelineState> {
   let markedFailed = false;
-  const foreground = withRepoSetupLog(
-    repoPipeline({
+  const converter = createPipelineStateConverter();
+  const events = session.record(
+    repoSetupEvents({
       repo,
       workspaceDir: rootDir,
       repoDir,
@@ -340,55 +372,78 @@ export async function* runScopedRepoSetupPipeline({
       ...(beforeInitializers ? { beforeInitializers } : {}),
       skipInitializers: true,
     }),
-    {
-      workspaceDir: rootDir,
-      repoName: repo.name,
-      repoDir,
-      initializationScope: scope,
-    },
   );
 
-  for await (const state of foreground) {
-    if (state.phase === "git") {
-      await recordRepoGitState(scope, repo.name, state);
-      yield state;
-      continue;
-    }
+  for await (const event of events) {
+    if (event.kind === "worktree-ready") {
+      yield { phase: "worktree-ready", hasLockfile: event.hasLockfile };
 
-    if (state.phase === "failed") {
-      if (!markedFailed) {
-        markedFailed = true;
-        onFailed?.();
+      try {
+        const queued = await startRepoInitialization({
+          scope,
+          repo,
+          setupRunId: session.runId,
+        });
+        session.emit({
+          kind: "repo-handoff",
+          repo: repo.name,
+          workerPid: queued.pid ?? 0,
+        });
+      } catch (error) {
+        const launchError =
+          error instanceof Error ? error : new Error(String(error));
+        session.emit({
+          kind: "repo-end",
+          repo: repo.name,
+          outcome: "failed",
+          step: "initializer:launch",
+          error: toRunEventError(launchError),
+        });
+        yield {
+          phase: "failed",
+          step: "initializer:launch",
+          error: launchError,
+        };
+        const finalState = await finalizeWorkspaceInitialization(scope, {
+          session,
+        });
+        emitRunEndIfTerminal(session, finalState);
+        return;
       }
-      await recordRepoSetupFailure(scope, repo.name, state.error, state.step);
-      await finalizeWorkspaceInitialization(scope);
-      yield state;
+
+      if (monitorBackground) {
+        yield* watchRepoInitialization({ scope, repoName: repo.name });
+      }
       return;
     }
 
-    if (state.phase !== "complete") {
+    for (const state of converter.convert(event)) {
+      if (state.phase === "git") {
+        // Output chunks stream through the run log; the derived snapshot
+        // only tracks step transitions.
+        if (state.status !== "output") {
+          await recordRepoGitState(scope, repo.name, state);
+        }
+        yield state;
+        continue;
+      }
+
+      if (state.phase === "failed") {
+        if (!markedFailed) {
+          markedFailed = true;
+          onFailed?.();
+        }
+        await recordRepoSetupFailure(scope, repo.name, state.error, state.step);
+        const finalState = await finalizeWorkspaceInitialization(scope, {
+          session,
+        });
+        emitRunEndIfTerminal(session, finalState);
+        yield state;
+        return;
+      }
+
       yield state;
-      continue;
     }
-
-    yield { phase: "worktree-ready", hasLockfile: state.hasLockfile };
-
-    try {
-      await startRepoInitialization({ scope, repo });
-    } catch (error) {
-      yield {
-        phase: "failed",
-        step: "initializer:launch",
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-      await finalizeWorkspaceInitialization(scope);
-      return;
-    }
-
-    if (monitorBackground) {
-      yield* watchRepoInitialization({ scope, repoName: repo.name });
-    }
-    return;
   }
 }
 
@@ -619,6 +674,37 @@ export async function createRepoSetupFailureSummary({
     ...(step ? { step } : {}),
     message: truncateForDisplay(error.message, 500),
     logPath,
+    ...(logExcerpt ? { logExcerpt } : {}),
+  };
+}
+
+/**
+ * Build a failure summary from the run session's reduced snapshot: the
+ * repo's recent output tail plus a pointer at the persisted run log.
+ */
+export function createRunFailureSummary({
+  session,
+  repoName,
+  error,
+  step,
+}: {
+  session: RunSession;
+  repoName: string;
+  error: Error;
+  step?: string;
+}): RepoSetupFailureSummary {
+  const tail = session.snapshot().repos.get(repoName)?.tail ?? [];
+  const excerpt = tail.join("\n").trim();
+  const logExcerpt =
+    excerpt.length > DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS
+      ? `[log truncated to last ${DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS} characters]\n${excerpt.slice(-DEFAULT_REPO_SETUP_LOG_EXCERPT_CHARS)}`
+      : excerpt;
+
+  return {
+    repoName,
+    ...(step ? { step } : {}),
+    message: truncateForDisplay(error.message, 500),
+    logPath: session.runDir,
     ...(logExcerpt ? { logExcerpt } : {}),
   };
 }

@@ -186,20 +186,15 @@ export async function* withRepoSetupLog(
 ): AsyncGenerator<RepoPipelineState> {
   const logPath = await startRepoSetupLog(options);
   const logWriter = new RepoSetupLogWriter(logPath);
-  let shouldKeepLog = false;
 
+  // Logs are kept for successful runs too, so setup output stays
+  // inspectable after the fact. Each run rewrites the file from scratch.
   try {
     for await (const state of pipeline) {
       await logWriter.write(formatState(state));
-
-      if (state.phase === "failed") {
-        shouldKeepLog = true;
-      }
-
       yield state;
     }
   } catch (error) {
-    shouldKeepLog = true;
     const setupError =
       error instanceof Error ? error : new Error(String(error));
     await logWriter.write(
@@ -208,13 +203,6 @@ export async function* withRepoSetupLog(
     yield { phase: "failed", error: setupError, step: "repo pipeline" };
   } finally {
     await logWriter.close();
-    if (!shouldKeepLog) {
-      await removeRepoSetupLog(
-        options.workspaceDir,
-        logPath,
-        options.initializationScope,
-      );
-    }
   }
 }
 

@@ -26,7 +26,15 @@ import {
   updateWorkspaceRepo,
   updateWorktreeRepo,
 } from "./metadata.ts";
-import { type RepoPipelineState, repoInitialization } from "./pipeline.ts";
+import {
+  type RepoPipelineState,
+  repoInitializationEvents,
+} from "./pipeline.ts";
+import {
+  createPipelineStateConverter,
+  hookStatesToEvents,
+} from "./run-log/instrument.ts";
+import { openWorkerRunSession, type RunSession } from "./run-log/session.ts";
 import { getRepoSetupLogPath, withRepoSetupLog } from "./setup-logs.ts";
 
 const WORKSPACE_STATE_FILENAME = "workspace.json";
@@ -93,12 +101,15 @@ export type StartRepoInitializationOptions = {
   scope?: InitializationScope;
   repo: RepositorySource;
   disabledInitializers?: boolean | string[];
+  /** The setup run this launch belongs to; the worker appends events to it. */
+  setupRunId?: string;
 };
 
 type WorkerLaunch = (options: {
   scope: InitializationScope;
   repoName: string;
   runId: string;
+  setupRunId?: string | undefined;
 }) => Promise<number>;
 
 export function buildRepoInitializerWorkerEnvironment({
@@ -106,12 +117,14 @@ export function buildRepoInitializerWorkerEnvironment({
   workspaceDir,
   repoName,
   runId,
+  setupRunId,
   environment = process.env,
 }: {
   scope?: InitializationScope;
   workspaceDir?: string;
   repoName: string;
   runId: string;
+  setupRunId?: string | undefined;
   environment?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   const scope = resolveInitializationScope({
@@ -131,6 +144,7 @@ export function buildRepoInitializerWorkerEnvironment({
         }),
     WORKFOREST_WORKER_REPO: repoName,
     WORKFOREST_WORKER_RUN_ID: runId,
+    ...(setupRunId ? { WORKFOREST_RUN_ID: setupRunId } : {}),
   };
 }
 
@@ -421,6 +435,7 @@ export async function startRepoInitialization(
       scope,
       repoName: options.repo.name,
       runId,
+      setupRunId: options.setupRunId,
     });
 
     return updateRepoInitializationState(scope, options.repo.name, (current) =>
@@ -450,11 +465,13 @@ export async function runRepoInitializationWorker({
   scope: explicitScope,
   repoName,
   runId,
+  setupRunId,
 }: {
   workspaceDir?: string;
   scope?: InitializationScope;
   repoName: string;
   runId: string;
+  setupRunId?: string | undefined;
 }): Promise<void> {
   const scope = resolveInitializationScope({
     workspaceDir,
@@ -480,6 +497,11 @@ export async function runRepoInitializationWorker({
         }),
       )
     : null;
+  const session = await openWorkerRunSession({
+    scope,
+    repoName,
+    runId: setupRunId,
+  });
   let stopping = false;
   let checkingCancellation = false;
 
@@ -488,7 +510,12 @@ export async function runRepoInitializationWorker({
     stopping = true;
     await terminateRunningCommands();
     await markRepoCancelled(scope, repoName, runId);
-    await finalizeWorkspaceInitialization(scope);
+    session.emit({ kind: "repo-end", repo: repoName, outcome: "cancelled" });
+    const finalState = await finalizeWorkspaceInitialization(scope, {
+      session,
+    });
+    emitRunEndIfTerminal(session, finalState);
+    await session.close().catch(() => undefined);
     process.exit(0);
   };
   const onSignal = (): void => {
@@ -538,12 +565,16 @@ export async function runRepoInitializationWorker({
     );
 
     if (started.run_id !== runId || started.status === "cancelled") {
-      await finalizeWorkspaceInitialization(scope);
+      await finalizeWorkspaceInitialization(scope, { session });
       return;
     }
 
-    const pipeline = withRepoSetupLog(
-      repoInitialization({
+    // The canonical record is the event stream; the legacy state view is
+    // derived from it, so the setup log and persisted snapshots can never
+    // drift from what the run log says happened.
+    const converter = createPipelineStateConverter();
+    const events = session.record(
+      repoInitializationEvents({
         repo,
         workspaceDir: rootDir,
         repoDir,
@@ -551,24 +582,35 @@ export async function runRepoInitializationWorker({
           ? { disabledInitializers: template.config.disableInitializers }
           : {}),
       }),
-      {
-        workspaceDir: rootDir,
-        initializationScope: scope,
-        repoName,
-        repoDir,
-      },
     );
+    const legacyStates =
+      (async function* (): AsyncGenerator<RepoPipelineState> {
+        for await (const event of events) {
+          if (stopping) return;
+          yield* converter.convert(event);
+        }
+      })();
+    const pipeline = withRepoSetupLog(legacyStates, {
+      workspaceDir: rootDir,
+      initializationScope: scope,
+      repoName,
+      repoDir,
+    });
 
     for await (const state of pipeline) {
       if (stopping) return;
       await recordWorkerPipelineState(scope, repo, runId, state);
     }
 
-    await finalizeWorkspaceInitialization(scope);
+    const finalState = await finalizeWorkspaceInitialization(scope, {
+      session,
+    });
+    emitRunEndIfTerminal(session, finalState);
   } finally {
     clearInterval(cancellationTimer);
     process.off("SIGTERM", onSignal);
     process.off("SIGINT", onSignal);
+    await session.close().catch(() => undefined);
   }
 }
 
@@ -644,18 +686,27 @@ export async function retryRepoInitializations(
   return results;
 }
 
+/**
+ * Once every repo is terminal, run workspace-level finishing work (AGENTS.md
+ * refresh, template hooks) and write the terminal workspace state. Any
+ * process may call this; the finalize lock makes exactly one perform the
+ * transition. Returns the terminal state when this call performed it, null
+ * when finalization was not yet possible or already done. When a `session`
+ * is provided, workspace-level steps are recorded to the run log.
+ */
 export async function finalizeWorkspaceInitialization(
   target: InitializationTarget,
-): Promise<void> {
+  { session }: { session?: RunSession } = {},
+): Promise<WorkspaceInitializationState | null> {
   const scope = normalizeInitializationTarget(target);
-  await withExclusiveLock(getFinalizeLockPath(scope), async () => {
+  return withExclusiveLock(getFinalizeLockPath(scope), async () => {
     const workspaceState = await readWorkspaceInitializationState(scope);
     if (
       workspaceState?.status === "ready" ||
       workspaceState?.status === "failed" ||
       workspaceState?.status === "cancelled"
     ) {
-      return;
+      return null;
     }
 
     const states = await readRepoInitializationStates(scope);
@@ -663,11 +714,11 @@ export async function finalizeWorkspaceInitialization(
       states.length === 0 ||
       states.some((state) => !isTerminalRepoStatus(state.status))
     ) {
-      return;
+      return null;
     }
 
     const metadata = await readInitializationMetadata(scope);
-    if (!metadata) return;
+    if (!metadata) return null;
 
     const warnings: string[] = [];
     const failedRepos = states.filter((state) => state.status === "failed");
@@ -690,6 +741,13 @@ export async function finalizeWorkspaceInitialization(
         updated_at: new Date().toISOString(),
       }));
 
+      const agentsMdStartedAt = Date.now();
+      session?.emit({
+        kind: "step-start",
+        repo: null,
+        step: AGENTS_MD_STEP_ID,
+        title: "AGENTS.md",
+      });
       try {
         await refreshAndMaterializeTemplateAgentsMd(
           template,
@@ -701,13 +759,35 @@ export async function finalizeWorkspaceInitialization(
           {
             onWarning: (message) => {
               warnings.push(message);
+              session?.emit({
+                kind: "step-log",
+                repo: null,
+                step: AGENTS_MD_STEP_ID,
+                level: "warn",
+                message,
+              });
             },
           },
         );
+        session?.emit({
+          kind: "step-end",
+          repo: null,
+          step: AGENTS_MD_STEP_ID,
+          outcome: "ok",
+          durationMs: Date.now() - agentsMdStartedAt,
+        });
       } catch (error) {
         warnings.push(
           `Could not materialize AGENTS.md guidance: ${formatError(error)}`,
         );
+        session?.emit({
+          kind: "step-end",
+          repo: null,
+          step: AGENTS_MD_STEP_ID,
+          outcome: "failed",
+          durationMs: Date.now() - agentsMdStartedAt,
+          error: { message: formatError(error) },
+        });
       }
     }
 
@@ -719,53 +799,33 @@ export async function finalizeWorkspaceInitialization(
         updated_at: new Date().toISOString(),
       }));
 
-      const hookLogPath = path.join(getInitializationDir(scope), "hooks.log");
-      await fs.rm(hookLogPath, { force: true });
-
       try {
-        for await (const hookState of applyTemplate({
-          template,
-          workspaceDir: getInitializationRootDir(scope),
-          repoDirs: states
-            .filter((state) => state.status === "ready")
-            .map((state) => state.repo),
-        })) {
-          if (hookState.phase === "hook-start") {
+        const hookEvents = hookStatesToEvents(
+          applyTemplate({
+            template,
+            workspaceDir: getInitializationRootDir(scope),
+            repoDirs: states
+              .filter((state) => state.status === "ready")
+              .map((state) => state.repo),
+          }),
+        );
+        for await (const event of hookEvents) {
+          session?.emit(event);
+          if (event.kind === "step-start") {
             await updateWorkspaceInitializationState(scope, (current) => ({
               ...current,
-              current_hook: hookState.hookName,
-              message: `Running hook: ${hookState.hookName}`,
+              current_hook: event.title,
+              message: `Running hook: ${event.title}`,
               updated_at: new Date().toISOString(),
             }));
-            await fs.appendFile(
-              hookLogPath,
-              `[hook:${hookState.hookName}] started\n`,
-              "utf8",
-            );
-          } else if (hookState.phase === "hook") {
-            const task = hookState.state;
-            if (task.status === "output") {
-              await fs.appendFile(hookLogPath, task.data, "utf8");
-            } else if (task.status === "log" && task.level === "warn") {
-              warnings.push(task.message);
-              await fs.appendFile(
-                hookLogPath,
-                `[warning] ${task.message}\n`,
-                "utf8",
-              );
-            } else if (task.status === "failed") {
-              await fs.appendFile(
-                hookLogPath,
-                `[failed] ${task.error.message}\n`,
-                "utf8",
-              );
-            }
+          } else if (event.kind === "step-log" && event.level === "warn") {
+            warnings.push(event.message);
           }
         }
       } catch (error) {
         const hookError =
           error instanceof Error ? error : new Error(String(error));
-        await writeWorkspaceInitializationState(scope, {
+        const failedState: WorkspaceInitializationState = {
           version: 1,
           status: "failed",
           message: "Workspace hook failed",
@@ -773,8 +833,9 @@ export async function finalizeWorkspaceInitialization(
           ...(warnings.length > 0 ? { warnings } : {}),
           updated_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
-        });
-        return;
+        };
+        await writeWorkspaceInitializationState(scope, failedState);
+        return failedState;
       }
     }
 
@@ -792,14 +853,41 @@ export async function finalizeWorkspaceInitialization(
           ? `${failedRepos.length} repository initializer${failedRepos.length === 1 ? "" : "s"} failed`
           : `${cancelledRepos.length} repository initializer${cancelledRepos.length === 1 ? "" : "s"} cancelled`;
 
-    await writeWorkspaceInitializationState(scope, {
+    const finalState: WorkspaceInitializationState = {
       version: 1,
       status,
       message,
       ...(warnings.length > 0 ? { warnings } : {}),
       updated_at: now,
       completed_at: now,
-    });
+    };
+    await writeWorkspaceInitializationState(scope, finalState);
+    return finalState;
+  });
+}
+
+const AGENTS_MD_STEP_ID = "setup:agents-md";
+
+/**
+ * Record the run's terminal event when a finalize call actually performed
+ * the transition (its return is non-null exactly once per run).
+ */
+export function emitRunEndIfTerminal(
+  session: RunSession,
+  finalState: WorkspaceInitializationState | null,
+): void {
+  if (!finalState) return;
+  if (
+    finalState.status !== "ready" &&
+    finalState.status !== "failed" &&
+    finalState.status !== "cancelled"
+  ) {
+    return;
+  }
+  session.emit({
+    kind: "run-end",
+    outcome: finalState.status,
+    durationMs: Date.now() - session.startedAtMs,
   });
 }
 
@@ -843,10 +931,12 @@ async function launchDetachedWorker({
   scope,
   repoName,
   runId,
+  setupRunId,
 }: {
   scope: InitializationScope;
   repoName: string;
   runId: string;
+  setupRunId?: string | undefined;
 }): Promise<number> {
   const entrypoint = process.argv[1];
   if (!entrypoint) {
@@ -861,6 +951,7 @@ async function launchDetachedWorker({
       scope,
       repoName,
       runId,
+      setupRunId,
     }),
   });
 

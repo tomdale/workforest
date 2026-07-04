@@ -107,7 +107,7 @@ describe("repo setup logs", () => {
     expect(log).toContain("setup failed");
   });
 
-  it("removes the per-repo log when setup succeeds", async () => {
+  it("keeps the per-repo log when setup succeeds", async () => {
     const workspaceDir = await createWorkspaceDir();
 
     const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
@@ -132,10 +132,11 @@ describe("repo setup logs", () => {
       workspaceDir,
       repoName: "front",
     });
+    const log = await readFile(logPath, "utf8");
 
-    await expect(readFile(logPath, "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    expect(log).toContain("repo: front");
+    expect(log).toContain("Creating worktree");
+    expect(log).toContain("[complete] hasLockfile=true");
   });
 
   it("converts thrown setup errors into failed states and keeps the log", async () => {

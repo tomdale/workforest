@@ -13,6 +13,18 @@ import type { RepositorySource } from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import { cleanupWorkspaceWorktrees, ensureMirrorRepo } from "./repository.ts";
+import {
+  GIT_STEP_IDS,
+  PREFLIGHT_STEP_ID,
+  type RunEventBody,
+  type StepId,
+  toRunEventError,
+} from "./run-log/events.ts";
+import {
+  createPipelineStateConverter,
+  initializerStatesToEvents,
+  taskToEvents,
+} from "./run-log/instrument.ts";
 
 /**
  * State emitted by a per-repo pipeline.
@@ -61,13 +73,15 @@ export type RepoInitializationOptions = {
 };
 
 /**
- * Runs the full pipeline for a single repository, yielding progress.
- * Stages: git (mirror → cleanup → worktree) → initializers (install → linking)
+ * Event-native pipeline for a single repository's setup: git phase (mirror →
+ * cleanup → worktree), pooled node_modules restore, pre-initializer
+ * preparation, then either a `worktree-ready` handoff (skipInitializers) or
+ * the inline initializer phase ending in `repo-end`.
  *
- * This enables cross-phase parallelism: repo A can start initializers while
- * repo B is still doing git operations.
+ * Total by construction: failures become events, never throws, so callers
+ * running many of these in parallel need no per-repo error handling.
  */
-export async function* repoPipeline({
+export async function* repoSetupEvents({
   repo,
   workspaceDir,
   repoDir,
@@ -76,73 +90,61 @@ export async function* repoPipeline({
   disabledInitializers,
   skipInitializers,
   beforeInitializers,
-}: RepoPipelineOptions): AsyncGenerator<RepoPipelineState> {
+}: RepoPipelineOptions): AsyncGenerator<RunEventBody> {
   const repoName = validateRepositoryComponent(repo.name, "Repository name");
-  const cacheDir = getCacheDir();
-  const mirrorDir = await resolveMirrorDir(repo, cacheDir);
-  const targetDir = repoDir
-    ? path.resolve(repoDir)
-    : resolveContainedPath(workspaceDir, repoName);
-  let currentStep = "starting setup";
+  yield { kind: "repo-start", repo: repoName };
 
+  let failStep: StepId = "setup:start";
   try {
-    // ─────────────────────────────────────────────────────────────────────────
-    // Git Phase: mirror → cleanup → worktree
-    // ─────────────────────────────────────────────────────────────────────────
+    const cacheDir = getCacheDir();
+    const mirrorDir = await resolveMirrorDir(repo, cacheDir);
+    const targetDir = repoDir
+      ? path.resolve(repoDir)
+      : resolveContainedPath(workspaceDir, repoName);
 
-    // Step 1: Mirror (fetch or clone)
-    currentStep = "git:mirror";
-    for await (const state of ensureMirrorRepo(repo, mirrorDir)) {
-      const pipelineState = mapTaskStateToPipelineState(state, "mirror");
-      if (pipelineState) yield pipelineState;
-      if (state.status === "failed") {
-        yield { phase: "failed", error: state.error, step: currentStep };
-        return;
-      }
+    failStep = GIT_STEP_IDS.mirror;
+    const mirror = yield* taskToEvents(ensureMirrorRepo(repo, mirrorDir), {
+      repo: repoName,
+      step: GIT_STEP_IDS.mirror,
+      title: "mirror",
+    });
+    if (mirror.outcome === "failed") {
+      yield repoFailure(repoName, GIT_STEP_IDS.mirror, mirror.error);
+      return;
     }
 
-    // Step 2: Cleanup stale worktrees (skip for new workspaces)
     if (!isNewWorkspace) {
-      currentStep = "git:cleanup";
-      for await (const state of cleanupWorkspaceWorktrees(
-        mirrorDir,
-        workspaceDir,
-      )) {
-        const pipelineState = mapTaskStateToPipelineState(state, "cleanup");
-        if (pipelineState) yield pipelineState;
-        if (state.status === "failed") {
-          yield { phase: "failed", error: state.error, step: currentStep };
-          return;
-        }
-      }
-    }
-
-    // Step 3: Create worktree. `reset` + `reuse` preserves the long-standing
-    // idempotent behavior (re-running over an existing checkout is a no-op),
-    // while the primitive's guard refuses to reset a branch that carries
-    // commits not on the base.
-    currentStep = "git:worktree";
-    for await (const state of addWorktree({
-      gitDir: mirrorDir,
-      targetDir,
-      base: { defaultBranchOf: mirrorDir, fallback: "main" },
-      branch: { kind: "reset", name: branchName },
-      onExistingDir: "reuse",
-      label: `worktree:${repo.name}`,
-    })) {
-      const pipelineState = mapTaskStateToPipelineState(state, "worktree");
-      if (pipelineState) yield pipelineState;
-      if (state.status === "failed") {
-        yield { phase: "failed", error: state.error, step: currentStep };
+      failStep = GIT_STEP_IDS.cleanup;
+      const cleanup = yield* taskToEvents(
+        cleanupWorkspaceWorktrees(mirrorDir, workspaceDir),
+        { repo: repoName, step: GIT_STEP_IDS.cleanup, title: "cleanup" },
+      );
+      if (cleanup.outcome === "failed") {
+        yield repoFailure(repoName, GIT_STEP_IDS.cleanup, cleanup.error);
         return;
       }
     }
 
-    const context = {
-      repoDir: targetDir,
-      workspaceDir,
-      repo,
-    };
+    failStep = GIT_STEP_IDS.worktree;
+    const worktree = yield* taskToEvents(
+      addWorktree({
+        gitDir: mirrorDir,
+        targetDir,
+        base: { defaultBranchOf: mirrorDir, fallback: "main" },
+        // `reset` + `reuse` preserves the long-standing idempotent behavior
+        // (re-running over an existing checkout is a no-op), while the
+        // primitive's guard refuses to reset a branch that carries commits
+        // not on the base.
+        branch: { kind: "reset", name: branchName },
+        onExistingDir: "reuse",
+        label: `worktree:${repo.name}`,
+      }),
+      { repo: repoName, step: GIT_STEP_IDS.worktree, title: "worktree" },
+    );
+    if (worktree.outcome === "failed") {
+      yield repoFailure(repoName, GIT_STEP_IDS.worktree, worktree.error);
+      return;
+    }
 
     const { config } = await loadWorkspaceConfig();
     const restoreResult = await restoreNodeModules({
@@ -153,107 +155,137 @@ export async function* repoPipeline({
     });
     if (restoreResult.status === "restored") {
       yield {
-        phase: "git",
-        step: "worktree",
-        status: "log",
+        kind: "step-log",
+        repo: repoName,
+        step: GIT_STEP_IDS.worktree,
+        level: "info",
         message: `Restored pooled node_modules for ${repo.name}`,
       };
     } else if (restoreResult.status === "warning") {
       yield {
-        phase: "git",
-        step: "worktree",
-        status: "log",
+        kind: "step-log",
+        repo: repoName,
+        step: GIT_STEP_IDS.worktree,
+        level: "warn",
         message: restoreResult.warning,
       };
     }
 
     if (beforeInitializers) {
-      currentStep = "initializer:preflight";
-      await beforeInitializers(context);
+      failStep = PREFLIGHT_STEP_ID;
+      await beforeInitializers({ repo, repoDir: targetDir, workspaceDir });
     }
 
     if (skipInitializers) {
-      currentStep = "detect lockfile";
+      failStep = "setup:lockfile";
       const hasLockfile = await hasAny(targetDir, [
         "pnpm-lock.yaml",
         "pnpm-lock.yml",
       ]);
-
-      yield { phase: "complete", hasLockfile };
+      yield { kind: "worktree-ready", repo: repoName, hasLockfile };
       return;
     }
 
-    yield* repoInitialization({
+    yield* repoInitializationEvents({
       repo,
       workspaceDir,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     });
   } catch (error) {
-    yield {
-      phase: "failed",
-      error: error instanceof Error ? error : new Error(String(error)),
-      step: currentStep,
-    };
+    yield repoFailure(
+      repoName,
+      failStep,
+      error instanceof Error ? error : new Error(String(error)),
+    );
   }
 }
 
 /**
- * Run only the initializer portion of a repository pipeline.
- *
- * This is intentionally independent from worktree creation so it can run in a
- * detached worker after the foreground command returns.
+ * Event-native initializer phase for a single repository. Intentionally
+ * independent from worktree creation so it can run in a detached worker
+ * after the foreground command returns. Total: never throws.
  */
-export async function* repoInitialization({
+export async function* repoInitializationEvents({
   repo,
   workspaceDir,
   repoDir,
   disabledInitializers,
-}: RepoInitializationOptions): AsyncGenerator<RepoPipelineState> {
+}: RepoInitializationOptions): AsyncGenerator<RunEventBody> {
+  const repoName = validateRepositoryComponent(repo.name, "Repository name");
   const resolvedRepoDir = repoDir
     ? path.resolve(repoDir)
-    : resolveContainedPath(
-        workspaceDir,
-        validateRepositoryComponent(repo.name, "Repository name"),
-      );
-  let currentStep = "initializer:detection";
+    : resolveContainedPath(workspaceDir, repoName);
 
   try {
-    for await (const state of runSingleRepoInitializers({
-      context: { repoDir: resolvedRepoDir, workspaceDir, repo },
-      ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
-    })) {
-      if (state.phase === "running") {
-        currentStep = `initializer:${state.initializerName}`;
-      } else if (state.phase === "detecting") {
-        currentStep = "initializer:detection";
-      }
-
-      const pipelineState = mapInitializerStateToPipelineState(state);
-      if (pipelineState) yield pipelineState;
-
-      if (state.phase === "running" && state.state.status === "failed") {
-        yield {
-          phase: "failed",
-          error: state.state.error,
-          step: currentStep,
-        };
-        return;
-      }
+    const result = yield* initializerStatesToEvents(
+      runSingleRepoInitializers({
+        context: { repoDir: resolvedRepoDir, workspaceDir, repo },
+        ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
+      }),
+      repoName,
+    );
+    if (result.outcome === "failed") {
+      yield repoFailure(repoName, result.step, result.error);
+      return;
     }
 
-    currentStep = "detect lockfile";
     const hasLockfile = await hasAny(resolvedRepoDir, [
       "pnpm-lock.yaml",
       "pnpm-lock.yml",
     ]);
-
-    yield { phase: "complete", hasLockfile };
+    yield { kind: "repo-end", repo: repoName, outcome: "ready", hasLockfile };
   } catch (error) {
-    yield {
-      phase: "failed",
-      error: error instanceof Error ? error : new Error(String(error)),
-      step: currentStep,
-    };
+    yield repoFailure(
+      repoName,
+      "setup:lockfile",
+      error instanceof Error ? error : new Error(String(error)),
+    );
+  }
+}
+
+function repoFailure(
+  repo: string,
+  step: StepId,
+  error: Error | undefined,
+): RunEventBody {
+  return {
+    kind: "repo-end",
+    repo,
+    outcome: "failed",
+    step,
+    error: toRunEventError(error ?? new Error("Repository setup failed.")),
+  };
+}
+
+/**
+ * Runs the full pipeline for a single repository, yielding progress.
+ * Stages: git (mirror → cleanup → worktree) → initializers (install → linking)
+ *
+ * Legacy-state view over {@link repoSetupEvents} for surfaces that still
+ * consume RepoPipelineState.
+ */
+export async function* repoPipeline(
+  options: RepoPipelineOptions,
+): AsyncGenerator<RepoPipelineState> {
+  yield* eventsToStates(repoSetupEvents(options));
+}
+
+/**
+ * Run only the initializer portion of a repository pipeline, as legacy
+ * states. See {@link repoInitializationEvents}.
+ */
+export async function* repoInitialization(
+  options: RepoInitializationOptions,
+): AsyncGenerator<RepoPipelineState> {
+  yield* eventsToStates(repoInitializationEvents(options));
+}
+
+async function* eventsToStates(
+  events: AsyncGenerator<RunEventBody>,
+): AsyncGenerator<RepoPipelineState> {
+  const converter = createPipelineStateConverter();
+  for await (const event of events) {
+    yield* converter.convert(event);
   }
 }
 

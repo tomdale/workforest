@@ -24,9 +24,12 @@ import {
   retryRepoInitializations,
   runRepoInitializationWorker,
   startRepoInitialization,
+  workspaceInitializationScope,
   worktreeInitializationScope,
 } from "./initialization.ts";
 import { writeWorkspaceMetadata } from "./metadata.ts";
+import { readRunEvents } from "./run-log/reader.ts";
+import { createRunSession } from "./run-log/session.ts";
 
 const tempDirs: string[] = [];
 const originalXdgConfigHome = process.env["XDG_CONFIG_HOME"];
@@ -121,6 +124,50 @@ describe("background repository initialization", () => {
     ).resolves.toMatchObject({
       status: "ready",
     });
+  });
+
+  it("records worker events into the foreground setup run", async () => {
+    const workspaceDir = await createWorkspace();
+    const session = await createRunSession({
+      scope: workspaceInitializationScope(workspaceDir),
+      command: "new",
+      repos: [repo.name],
+    });
+
+    let capturedSetupRunId: string | undefined;
+    const queued = await startRepoInitialization(
+      { workspaceDir, repo, setupRunId: session.runId },
+      async ({ setupRunId }) => {
+        capturedSetupRunId = setupRunId;
+        return process.pid;
+      },
+    );
+    session.emit({
+      kind: "repo-handoff",
+      repo: repo.name,
+      workerPid: process.pid,
+    });
+    await session.close();
+
+    expect(capturedSetupRunId).toBe(session.runId);
+
+    await runRepoInitializationWorker({
+      workspaceDir,
+      repoName: repo.name,
+      runId: queued.run_id ?? "",
+      setupRunId: session.runId,
+    });
+
+    const events = await readRunEvents(session.runDir);
+    const sources = new Set(events.map((event) => event.src));
+    expect(sources).toContain("cli");
+    expect(sources).toContain(`worker:${repo.name}`);
+    expect(
+      events.some(
+        (event) => event.kind === "repo-end" && event.outcome === "ready",
+      ),
+    ).toBe(true);
+    expect(events.at(-1)).toMatchObject({ kind: "run-end", outcome: "ready" });
   });
 
   it("refreshes template AGENTS.md guidance from the background initializer finalizer", async () => {

@@ -635,6 +635,7 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
   const workerScope = process.env["WORKFOREST_WORKER_SCOPE"] ?? "workspace";
   const repoName = process.env["WORKFOREST_WORKER_REPO"];
   const runId = process.env["WORKFOREST_WORKER_RUN_ID"];
+  const setupRunId = process.env["WORKFOREST_RUN_ID"];
   if (!repoName || !runId) {
     throw new OperationalError(
       "Repository initialization worker requires WORKFOREST_WORKER_REPO and WORKFOREST_WORKER_RUN_ID.",
@@ -657,7 +658,12 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
         );
 
   try {
-    await runRepoInitializationWorker({ scope, repoName, runId });
+    await runRepoInitializationWorker({
+      scope,
+      repoName,
+      runId,
+      ...(setupRunId ? { setupRunId } : {}),
+    });
     return success();
   } catch (error) {
     throw new OperationalError(getErrorMessage(error), { cause: error });

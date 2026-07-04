@@ -19,7 +19,7 @@ import {
 } from "../utils/branch-prefix.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
-  createRepoSetupFailureSummary,
+  createRunFailureSummary,
   printRepoSetupFailures,
   type RepoSetupFailureSummary,
   runScopedRepoSetupPipeline,
@@ -37,7 +37,7 @@ import {
   resolveWorkforestDirectories,
   type WorkforestDirectories,
 } from "./paths.ts";
-import { getRepoSetupLogPath } from "./setup-logs.ts";
+import { createRunSession } from "./run-log/session.ts";
 
 /**
  * A start source that has already been resolved to concrete repositories.
@@ -133,63 +133,70 @@ async function createWorktree(
     repo,
   });
 
-  const setupFailures = new Map<string, RepoSetupFailureSummary>();
-  await presentPipelines({
-    pipelines: new Map([
-      [
-        repo.name,
-        (options.runScopedRepoSetupPipeline ?? runScopedRepoSetupPipeline)({
-          repo,
-          scope,
-          rootDir: repoRootDir,
-          repoDir: targetDir,
-          branchName,
-          isNewWorkspace: true,
-          monitorBackground: options.interactive,
-        }),
-      ],
-    ]),
-    repoNames: [repo.name],
-    interactive: options.interactive,
-    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-    workspacePath: targetDir,
-    getLogPath: (repoName) =>
-      getRepoSetupLogPath({
-        workspaceDir: repoRootDir,
-        repoName,
-        initializationScope: scope,
-      }),
-    onFailure: async (repoName, state) => {
-      setupFailures.set(
-        repoName,
-        await createRepoSetupFailureSummary({
-          workspaceDir: repoRootDir,
-          repoName,
-          error: state.error,
-          ...(state.step ? { step: state.step } : {}),
-          initializationScope: scope,
-        }),
-      );
-    },
-    onBeforeCompletionPrompt: async (results) => {
-      await writeWorktreeMetadata(repoRootDir, {
-        featureName: changeName,
-        branchName,
-        repos: [
-          {
-            ...repo,
-            hasLockfile: results.get(repo.name)?.hasLockfile ?? false,
-          },
-        ],
-      });
-    },
-    completeOnWorktreesReady: true,
-    backgroundInitialization: true,
-    ...(options.renderPipelinesGrid
-      ? { renderPipelinesGrid: options.renderPipelinesGrid }
-      : {}),
-    ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
+  const session = await createRunSession({
+    scope,
+    command: "new",
+    repos: [repo.name],
   });
+
+  const setupFailures = new Map<string, RepoSetupFailureSummary>();
+  try {
+    await presentPipelines({
+      pipelines: new Map([
+        [
+          repo.name,
+          (options.runScopedRepoSetupPipeline ?? runScopedRepoSetupPipeline)({
+            repo,
+            scope,
+            rootDir: repoRootDir,
+            repoDir: targetDir,
+            branchName,
+            isNewWorkspace: true,
+            monitorBackground: options.interactive,
+            session,
+          }),
+        ],
+      ]),
+      repoNames: [repo.name],
+      interactive: options.interactive,
+      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+      workspacePath: targetDir,
+      getLogPath: () => Promise.resolve(session.runDir),
+      onFailure: (repoName, state) => {
+        setupFailures.set(
+          repoName,
+          createRunFailureSummary({
+            session,
+            repoName,
+            error: state.error,
+            ...(state.step ? { step: state.step } : {}),
+          }),
+        );
+      },
+      onBeforeCompletionPrompt: async (results) => {
+        await writeWorktreeMetadata(repoRootDir, {
+          featureName: changeName,
+          branchName,
+          repos: [
+            {
+              ...repo,
+              hasLockfile: results.get(repo.name)?.hasLockfile ?? false,
+            },
+          ],
+        });
+      },
+      completeOnWorktreesReady: true,
+      backgroundInitialization: true,
+      ...(options.renderPipelinesGrid
+        ? { renderPipelinesGrid: options.renderPipelinesGrid }
+        : {}),
+      ...(options.shouldUseGrid
+        ? { shouldUseGrid: options.shouldUseGrid }
+        : {}),
+    });
+  } finally {
+    await session.close().catch(() => undefined);
+  }
 
   const failures = [...setupFailures.values()];
   printRepoSetupFailures(failures, options.onEvent);
@@ -233,7 +240,7 @@ async function createWorkspace(
       : {}),
     ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
   });
-  printRepoSetupFailures(result.setupFailures);
+  printRepoSetupFailures(result.setupFailures, options.onEvent);
 
   log.success(`Change ready: ${workspaceDir}`);
   await reportShellCdTarget(workspaceDir, {
