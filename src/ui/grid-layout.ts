@@ -1,4 +1,5 @@
 import { Box, type Screen, ScrollableBox } from "@unblessed/node";
+import { type BorderRect, composeBorderCanvas } from "./border-canvas.ts";
 
 type GridParent = Screen | Box;
 
@@ -14,6 +15,9 @@ export interface GridLayoutOptions {
   borderColor?: string;
   focusBorderColor?: string;
   backgroundColor?: string;
+  /** Default and focused fg for pane content text. Omit to leave content fg untouched (legacy callers). */
+  contentColor?: string;
+  focusContentColor?: string;
   maxLinesPerPane?: number;
 }
 
@@ -36,10 +40,15 @@ export type GridCellBounds = {
   height: number;
 };
 
+type LabelBounds = { top: number; left: number; width: number };
+
 /**
- * A grid layout of independently framed panes. Cell bounds are recomputed on
- * {@link reflow} so terminal resizes reshape every pane, and panes can be
- * hidden or zoomed (one pane taking the whole frame) for paging and focus.
+ * A grid layout of panes sharing one border canvas, tmux style: neighboring
+ * panes draw a single gridline instead of each framing itself, so adjoining
+ * borders merge into proper junctions instead of doubling up. Cell bounds are
+ * recomputed on {@link reflow} so terminal resizes reshape every pane, and
+ * panes can be hidden or zoomed (one pane taking the whole frame) for paging
+ * and focus.
  */
 export class GridLayout {
   private screen: Screen;
@@ -50,6 +59,8 @@ export class GridLayout {
   private borderColor: string;
   private focusBorderColor: string;
   private backgroundColor: string | undefined;
+  private contentColor: string | undefined;
+  private focusContentColor: string | undefined;
   private maxLinesPerPane: number;
 
   private layout: {
@@ -65,6 +76,17 @@ export class GridLayout {
   private frameWidth: number;
   private frameHeight: number;
 
+  // Gridline positions, canvas-relative: gx has cols+1 entries, gy has rows+1.
+  // Neighboring cells share the gridline at their common index, which is what
+  // lets the canvas draw one line instead of two.
+  private gx: number[] = [];
+  private gy: number[] = [];
+
+  // The shared border layer. Created before any pane's content/label boxes
+  // so those paint above it; every gridline, corner, and junction lives here
+  // instead of in per-pane borders.
+  private canvasBox: Box;
+
   private zoomedIndex: number | null = null;
   private hiddenPanes = new Set<number>();
 
@@ -76,6 +98,8 @@ export class GridLayout {
     this.borderColor = options.borderColor ?? "yellow";
     this.focusBorderColor = options.focusBorderColor ?? this.borderColor;
     this.backgroundColor = options.backgroundColor;
+    this.contentColor = options.contentColor;
+    this.focusContentColor = options.focusContentColor;
     this.maxLinesPerPane = options.maxLinesPerPane ?? 200;
     this.layout = {
       top: options.top ?? 0,
@@ -89,8 +113,24 @@ export class GridLayout {
     this.frameLeft = left;
     this.frameWidth = width;
     this.frameHeight = height;
+    this.computeGridlines();
+
+    this.canvasBox = new Box({
+      parent: this.parent,
+      top: this.frameTop,
+      left: this.frameLeft,
+      width: this.frameWidth,
+      height: this.frameHeight,
+      tags: true,
+      wrap: false,
+      style: {
+        fg: this.borderColor,
+        ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
+      },
+    });
 
     this.createPanes();
+    this.recomposeCanvas();
   }
 
   private resolveFrame(): GridCellBounds {
@@ -130,49 +170,88 @@ export class GridLayout {
     return Number.parseInt(value, 10);
   }
 
+  /**
+   * Gridlines split the frame into `cols`/`rows` even-ish spans, rounding
+   * independently at each line so neighboring cells always meet exactly
+   * (no gaps or overlaps from compounding rounding error).
+   */
+  private computeGridlines(): void {
+    this.gx = GridLayout.divisions(this.cols, this.frameWidth);
+    this.gy = GridLayout.divisions(this.rows, this.frameHeight);
+  }
+
+  private static divisions(count: number, span: number): number[] {
+    const lines: number[] = [];
+    for (let i = 0; i <= count; i++) {
+      lines.push(Math.round((i * (span - 1)) / count));
+    }
+    return lines;
+  }
+
+  /** Canvas-relative border rect for a grid cell, edges shared with neighbors. */
+  private borderRectFor(row: number, col: number): BorderRect {
+    const left = this.gx[col] ?? 0;
+    const right = this.gx[col + 1] ?? left;
+    const top = this.gy[row] ?? 0;
+    const bottom = this.gy[row + 1] ?? top;
+    return { top, left, width: right - left + 1, height: bottom - top + 1 };
+  }
+
+  /**
+   * A border rect always encloses its content one cell in from each edge, so
+   * the parent-relative content and label placement follow directly from the
+   * rect: this is the one place that arithmetic lives, for both grid cells
+   * and the full-frame zoom rect.
+   */
+  private paneBoundsFrom(rect: BorderRect): {
+    content: GridCellBounds;
+    label: LabelBounds;
+  } {
+    const content: GridCellBounds = {
+      top: this.frameTop + rect.top + 1,
+      left: this.frameLeft + rect.left + 1,
+      width: Math.max(rect.width - 2, 1),
+      height: Math.max(rect.height - 2, 1),
+    };
+    const label: LabelBounds = {
+      top: this.frameTop + rect.top,
+      left: this.frameLeft + rect.left + 1,
+      width: content.width,
+    };
+    return { content, label };
+  }
+
+  private zoomBorderRect(): BorderRect {
+    return {
+      top: 0,
+      left: 0,
+      width: this.frameWidth,
+      height: this.frameHeight,
+    };
+  }
+
   private createPanes(): void {
     for (let i = 0; i < this.rows * this.cols; i++) {
       const row = Math.floor(i / this.cols);
       const col = i % this.cols;
-
-      const bounds = this.getCellBounds(row, col);
-      const frame = new Box({
-        parent: this.parent,
-        top: bounds.top,
-        left: bounds.left,
-        width: bounds.width,
-        height: bounds.height,
-        tags: true,
-        wrap: false,
-        border: { type: "line", style: "round" },
-        style: {
-          fg: this.borderColor,
-          ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
-          border: {
-            fg: this.borderColor,
-            ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
-          },
-        },
-      });
+      const { content, label } = this.paneBoundsFrom(
+        this.borderRectFor(row, col),
+      );
 
       const box = new ScrollableBox({
         parent: this.parent,
-        top: bounds.top + 1,
-        left: bounds.left + 1,
-        width: Math.max(bounds.width - 2, 1),
-        height: Math.max(bounds.height - 2, 1),
+        top: content.top,
+        left: content.left,
+        width: content.width,
+        height: content.height,
         tags: true,
         keys: true,
         vi: true,
         mouse: true,
         alwaysScroll: true,
         style: {
+          ...(this.contentColor ? { fg: this.contentColor } : {}),
           ...(this.backgroundColor ? { bg: this.backgroundColor } : {}),
-        },
-        scrollbar: {
-          ch: " ",
-          track: { bg: this.backgroundColor ?? "black" },
-          style: { inverse: true },
         },
       });
 
@@ -189,7 +268,6 @@ export class GridLayout {
       );
 
       const pane = new GridPaneImpl({
-        frame,
         box,
         row,
         col,
@@ -198,25 +276,15 @@ export class GridLayout {
         borderColor: this.borderColor,
         focusBorderColor: this.focusBorderColor,
         backgroundColor: this.backgroundColor,
-        bounds,
+        contentColor: this.contentColor,
+        focusContentColor: this.focusContentColor,
+        onFocusChange: () => this.recomposeCanvas(),
+        content,
+        label,
       });
 
       this.panes.push(pane);
     }
-  }
-
-  private getCellBounds(row: number, col: number): GridCellBounds {
-    const leftOffset = Math.floor((col * this.frameWidth) / this.cols);
-    const rightOffset = Math.floor(((col + 1) * this.frameWidth) / this.cols);
-    const topOffset = Math.floor((row * this.frameHeight) / this.rows);
-    const bottomOffset = Math.floor(((row + 1) * this.frameHeight) / this.rows);
-
-    return {
-      top: this.frameTop + topOffset,
-      left: this.frameLeft + leftOffset,
-      width: Math.max(rightOffset - leftOffset, 3),
-      height: Math.max(bottomOffset - topOffset, 3),
-    };
   }
 
   /**
@@ -229,6 +297,13 @@ export class GridLayout {
     this.frameLeft = left;
     this.frameWidth = width;
     this.frameHeight = height;
+    this.computeGridlines();
+
+    this.canvasBox.top = this.frameTop;
+    this.canvasBox.left = this.frameLeft;
+    this.canvasBox.width = this.frameWidth;
+    this.canvasBox.height = this.frameHeight;
+
     this.applyLayout();
   }
 
@@ -246,28 +321,31 @@ export class GridLayout {
   setVisiblePane(index: number): void {
     this.hiddenPanes.delete(index);
     const pane = this.panes[index];
-    if (!pane || this.zoomedIndex !== null) return;
-    pane.setBounds(this.getCellBounds(pane.row, pane.col));
-    pane.setVisible(true);
+    if (pane && this.zoomedIndex === null) {
+      const { content, label } = this.paneBoundsFrom(
+        this.borderRectFor(pane.row, pane.col),
+      );
+      pane.setBounds(content, label);
+      pane.setVisible(true);
+    }
+    this.recomposeCanvas();
   }
 
   /** Hide a pane (paging past it, or unused grid slots). */
   hidePane(index: number): void {
     this.hiddenPanes.add(index);
-    if (this.zoomedIndex !== null) return;
-    this.panes[index]?.setVisible(false);
+    if (this.zoomedIndex === null) {
+      this.panes[index]?.setVisible(false);
+    }
+    this.recomposeCanvas();
   }
 
   private applyLayout(): void {
     this.panes.forEach((pane, index) => {
       if (this.zoomedIndex !== null) {
         if (index === this.zoomedIndex) {
-          pane.setBounds({
-            top: this.frameTop,
-            left: this.frameLeft,
-            width: Math.max(this.frameWidth, 3),
-            height: Math.max(this.frameHeight, 3),
-          });
+          const { content, label } = this.paneBoundsFrom(this.zoomBorderRect());
+          pane.setBounds(content, label);
           pane.setVisible(true);
         } else {
           pane.setVisible(false);
@@ -275,9 +353,47 @@ export class GridLayout {
         return;
       }
 
-      pane.setBounds(this.getCellBounds(pane.row, pane.col));
+      const { content, label } = this.paneBoundsFrom(
+        this.borderRectFor(pane.row, pane.col),
+      );
+      pane.setBounds(content, label);
       pane.setVisible(!this.hiddenPanes.has(index));
     });
+    this.recomposeCanvas();
+  }
+
+  /**
+   * Rebuild the shared border layer from whichever rects are currently
+   * showing: one full-frame rect while zoomed, otherwise one rect per
+   * non-hidden pane. composeBorderCanvas merges shared edges into junctions
+   * and colors a focused pane's outline, so this is the only place that
+   * needs to know which panes are focused or visible.
+   */
+  private recomposeCanvas(): void {
+    let rects: { rect: BorderRect; focused: boolean }[];
+    if (this.zoomedIndex !== null) {
+      const zoomed = this.panes[this.zoomedIndex];
+      rects = zoomed
+        ? [{ rect: this.zoomBorderRect(), focused: zoomed.isFocused() }]
+        : [];
+    } else {
+      rects = this.panes
+        .filter((_pane, index) => !this.hiddenPanes.has(index))
+        .map((pane) => ({
+          rect: this.borderRectFor(pane.row, pane.col),
+          focused: pane.isFocused(),
+        }));
+    }
+
+    this.canvasBox.setContent(
+      composeBorderCanvas({
+        width: this.frameWidth,
+        height: this.frameHeight,
+        rects,
+        baseColor: this.borderColor,
+        focusColor: this.focusBorderColor,
+      }).join("\n"),
+    );
   }
 
   getPane(index: number): GridPane | undefined {
@@ -304,6 +420,7 @@ export class GridLayout {
     for (const pane of this.panes) {
       pane.destroy();
     }
+    this.canvasBox.destroy();
   }
 }
 
@@ -311,7 +428,6 @@ export class GridLayout {
  * Internal implementation of GridPane with line buffering.
  */
 class GridPaneImpl implements GridPane {
-  private frame: Box;
   private box: ScrollableBox;
   private lines: string[] = [];
   private content = "";
@@ -320,12 +436,17 @@ class GridPaneImpl implements GridPane {
   private borderColor: string;
   private focusBorderColor: string;
   private backgroundColor: string | undefined;
+  private contentColor: string | undefined;
+  private focusContentColor: string | undefined;
+  private onFocusChange: () => void;
   private labelBox: Box | null = null;
   private currentLabel: string | null = null;
   private focused = false;
   private visible = true;
   private visibleLineBudget: number;
-  private labelWidth: number;
+  // Content and label width always match (the label overlays the pane's top
+  // gridline), so one field serves both.
+  private contentWidth: number;
   private labelTop: number;
   private labelLeft: number;
 
@@ -333,7 +454,6 @@ class GridPaneImpl implements GridPane {
   col: number;
 
   constructor({
-    frame,
     box,
     row,
     col,
@@ -342,9 +462,12 @@ class GridPaneImpl implements GridPane {
     borderColor,
     focusBorderColor,
     backgroundColor,
-    bounds,
+    contentColor,
+    focusContentColor,
+    onFocusChange,
+    content,
+    label,
   }: {
-    frame: Box;
     box: ScrollableBox;
     row: number;
     col: number;
@@ -353,9 +476,12 @@ class GridPaneImpl implements GridPane {
     borderColor: string;
     focusBorderColor: string;
     backgroundColor: string | undefined;
-    bounds: GridCellBounds;
+    contentColor: string | undefined;
+    focusContentColor: string | undefined;
+    onFocusChange: () => void;
+    content: GridCellBounds;
+    label: LabelBounds;
   }) {
-    this.frame = frame;
     this.box = box;
     this.row = row;
     this.col = col;
@@ -364,10 +490,13 @@ class GridPaneImpl implements GridPane {
     this.borderColor = borderColor;
     this.focusBorderColor = focusBorderColor;
     this.backgroundColor = backgroundColor;
-    this.visibleLineBudget = Math.max(bounds.height - 2, 1);
-    this.labelWidth = Math.max(bounds.width - 2, 1);
-    this.labelTop = bounds.top;
-    this.labelLeft = bounds.left + 1;
+    this.contentColor = contentColor;
+    this.focusContentColor = focusContentColor;
+    this.onFocusChange = onFocusChange;
+    this.visibleLineBudget = content.height;
+    this.contentWidth = content.width;
+    this.labelTop = label.top;
+    this.labelLeft = label.left;
   }
 
   setLabel(label: string): void {
@@ -381,7 +510,7 @@ class GridPaneImpl implements GridPane {
         parent: this.labelParent,
         top: this.labelTop,
         left: this.labelLeft,
-        width: this.labelWidth,
+        width: this.contentWidth,
         height: 1,
         tags: true,
         style: {
@@ -433,11 +562,22 @@ class GridPaneImpl implements GridPane {
   setFocused(focused: boolean): void {
     if (this.focused === focused) return;
     this.focused = focused;
-    const color = this.activeBorderColor();
-    const style = this.frame.style;
-    style.fg = color;
-    if (style.border) style.border.fg = color;
-    if (this.labelBox) this.labelBox.style.fg = color;
+    if (this.labelBox) this.labelBox.style.fg = this.activeBorderColor();
+    // Only touch content fg when the caller opted in: legacy callers that
+    // omit both colors must see zero content-color change on focus.
+    const resolvedFg = focused
+      ? (this.focusContentColor ?? this.contentColor)
+      : (this.contentColor ?? this.focusContentColor);
+    if (resolvedFg !== undefined) {
+      this.box.style.fg = resolvedFg;
+    }
+    // The border canvas colors a focused pane's outline, so a focus change
+    // has to trigger a recompose even though this pane owns no border itself.
+    this.onFocusChange();
+  }
+
+  isFocused(): boolean {
+    return this.focused;
   }
 
   getLineCount(): number {
@@ -446,32 +586,27 @@ class GridPaneImpl implements GridPane {
 
   getContentSize(): { width: number; height: number } {
     return {
-      width: this.labelWidth,
+      width: this.contentWidth,
       height: this.visibleLineBudget,
     };
   }
 
-  /** Move and resize the pane's frame, content box, and label together. */
-  setBounds(bounds: GridCellBounds): void {
-    this.frame.top = bounds.top;
-    this.frame.left = bounds.left;
-    this.frame.width = bounds.width;
-    this.frame.height = bounds.height;
+  /** Move and resize the pane's content box and label together. */
+  setBounds(content: GridCellBounds, label: LabelBounds): void {
+    this.box.top = content.top;
+    this.box.left = content.left;
+    this.box.width = content.width;
+    this.box.height = content.height;
 
-    this.box.top = bounds.top + 1;
-    this.box.left = bounds.left + 1;
-    this.box.width = Math.max(bounds.width - 2, 1);
-    this.box.height = Math.max(bounds.height - 2, 1);
-
-    this.visibleLineBudget = Math.max(bounds.height - 2, 1);
-    this.labelWidth = Math.max(bounds.width - 2, 1);
-    this.labelTop = bounds.top;
-    this.labelLeft = bounds.left + 1;
+    this.visibleLineBudget = content.height;
+    this.contentWidth = content.width;
+    this.labelTop = label.top;
+    this.labelLeft = label.left;
 
     if (this.labelBox) {
       this.labelBox.top = this.labelTop;
       this.labelBox.left = this.labelLeft;
-      this.labelBox.width = this.labelWidth;
+      this.labelBox.width = this.contentWidth;
       if (this.currentLabel !== null) {
         this.labelBox.setContent(this.formatLabelContent(this.currentLabel));
       }
@@ -482,11 +617,9 @@ class GridPaneImpl implements GridPane {
     if (this.visible === visible) return;
     this.visible = visible;
     if (visible) {
-      this.frame.show();
       this.box.show();
       this.labelBox?.show();
     } else {
-      this.frame.hide();
       this.box.hide();
       this.labelBox?.hide();
     }
@@ -497,7 +630,6 @@ class GridPaneImpl implements GridPane {
       this.labelBox.destroy();
     }
     this.box.destroy();
-    this.frame.destroy();
   }
 
   private activeBorderColor(): string {
@@ -517,11 +649,11 @@ class GridPaneImpl implements GridPane {
   }
 
   private formatLabelContent(label: string): string {
-    const maxLabelWidth = Math.max(this.labelWidth - 4, 1);
+    const maxLabelWidth = Math.max(this.contentWidth - 4, 1);
     const truncatedLabel = this.truncateToVisualWidth(label, maxLabelWidth);
     const labelVisualWidth = this.getVisualLength(truncatedLabel);
     const content = `─ ${truncatedLabel} `;
-    const remaining = Math.max(this.labelWidth - (labelVisualWidth + 3), 0);
+    const remaining = Math.max(this.contentWidth - (labelVisualWidth + 3), 0);
     return `${content}${"─".repeat(remaining)}`;
   }
 

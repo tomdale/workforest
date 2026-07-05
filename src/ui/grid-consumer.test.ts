@@ -542,14 +542,17 @@ describe("renderPipelinesGrid", () => {
           call[0]?.width === 220 &&
           call[0]?.height === 49,
       );
+    // The grid frame is the shared border canvas: a borderless Box whose
+    // line-art (with junctions) arrives as tagged content, not a native
+    // blessed border. Glyph correctness is covered by grid-layout tests.
     expect(gridFrameCall?.[0]).toEqual(
       expect.objectContaining({
-        border: { type: "line", style: "round" },
-        style: expect.objectContaining({
-          border: expect.objectContaining({ fg: "red", bg: "#121416" }),
-        }),
+        tags: true,
+        wrap: false,
+        style: expect.objectContaining({ fg: "red", bg: "#121416" }),
       }),
     );
+    expect(gridFrameCall?.[0]).not.toHaveProperty("border");
     expect(String(modalCall?.[0]?.content)).toContain("{bold}repo{/bold}");
     expect(String(modalCall?.[0]?.content)).toContain(
       "{bold}press any key{/bold}",
