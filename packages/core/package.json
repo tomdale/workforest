@@ -11,13 +11,16 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsdown src/index.ts",
     "prepare": "tsdown src/index.ts",
     "prepack": "tsdown src/index.ts"
   },
   "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.12",
     "semver": "^7.7.3"
   },
   "devDependencies": {

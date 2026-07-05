@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   getNodeVersionPrefix,
   pathExists,
+  sanitizeOutputForMessage,
   spawnCommand,
   TailBuffer,
   type InitializerContext,
@@ -23,7 +24,9 @@ const INSTALL_LIMITS = {
 };
 
 function isFrozenLockfileError(error: Error, output: string): boolean {
-  const combined = `${error.message} ${output}`;
+  // Under a pty, pnpm colors its output, so the markers below can arrive
+  // wrapped in ANSI codes that would otherwise break a plain substring match.
+  const combined = sanitizeOutputForMessage(`${error.message} ${output}`);
   return (
     combined.includes("ERR_PNPM_OUTDATED_LOCKFILE") ||
     combined.includes('Cannot install with "frozen-lockfile"') ||
@@ -69,6 +72,7 @@ async function* execute(context: InitializerContext) {
 
   const fastInstall = spawnCommand(command, args, {
     cwd: repoDir,
+    pty: true,
     ...INSTALL_LIMITS,
   });
 
@@ -105,6 +109,7 @@ async function* execute(context: InitializerContext) {
 
     const fallbackInstall = spawnCommand(command, args, {
       cwd: repoDir,
+      pty: true,
       ...INSTALL_LIMITS,
     });
 

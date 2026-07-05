@@ -133,8 +133,14 @@ export async function preparePackedPackage(): Promise<PackedPackageFixture> {
     );
     await writeFile(
       path.join(consumerDir, "pnpm-workspace.yaml"),
+      // The consumer has no lockfile, so `--offline` resolution picks the
+      // newest version the store's metadata cache knows about; any registry
+      // metadata refresh on this machine can then select a version whose
+      // tarball was never downloaded. Pin loose ranges to the versions the
+      // repo lockfile already guarantees are in the store.
       renderConsumerWorkspaceConfig({
         ...packedDependencies,
+        "@vercel/sandbox": "2.2.1",
         semver: "7.7.3",
       }),
     );

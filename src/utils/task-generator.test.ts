@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { TaskState } from "./task-generator.ts";
-import { runParallel, spawnCommand } from "./task-generator.ts";
+import type { SpawnedCommandHandle, TaskState } from "./task-generator.ts";
+import {
+  runParallel,
+  spawnCommand,
+  terminateRunningCommands,
+} from "./task-generator.ts";
 
 async function collectStates(
   generator: AsyncGenerator<TaskState>,
@@ -135,6 +139,42 @@ describe("spawnCommand", () => {
     );
 
     expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("invokes onSpawn with a usable handle", async () => {
+    const handles: SpawnedCommandHandle[] = [];
+
+    const states = await collectStates(
+      spawnCommand(process.execPath, ["-e", "process.exit(0)"], {
+        onSpawn: (handle) => handles.push(handle),
+      }),
+    );
+
+    expect(states.at(-1)).toEqual({ status: "completed" });
+    expect(handles).toHaveLength(1);
+    expect(typeof handles[0]?.pid).toBe("number");
+    await expect(handles[0]?.wait()).resolves.toBeUndefined();
+  });
+
+  it("terminateRunningCommands stops a long-running child", async () => {
+    const states: TaskState[] = [];
+    const generator = spawnCommand(process.execPath, [
+      "-e",
+      "setTimeout(() => {}, 60_000);",
+    ]);
+
+    const consumed = (async () => {
+      for await (const state of generator) {
+        states.push(state);
+      }
+    })();
+
+    // Give the child a moment to actually start before terminating it.
+    await sleep(50);
+    await terminateRunningCommands();
+    await consumed;
+
+    expect(states.at(-1)?.status).toBe("failed");
   });
 });
 

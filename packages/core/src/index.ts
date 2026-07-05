@@ -135,12 +135,30 @@ export type AiProviderDefinition = {
   ): Promise<AiProviderClient> | AiProviderClient;
 };
 
+export type SpawnedCommandHandle = {
+  pid: number | undefined;
+  // Only the signals the termination path actually sends. Deliberately not
+  // NodeJS.Signals: this type lands in the published declarations, which
+  // must typecheck for consumers that do not install @types/node.
+  kill(signal?: "SIGTERM" | "SIGKILL" | "SIGINT"): void;
+  wait(): Promise<void>;
+};
+
 export type RunCommandOptions = {
   cwd?: string;
   /** Fail the command if it runs longer than this in total. */
   timeoutMs?: number;
   /** Fail the command if it produces no output for this long. */
   inactivityTimeoutMs?: number;
+  /**
+   * Run the child under a pseudo-terminal so it sees a TTY (color, live
+   * redrawing progress) instead of the plain pipes most CLIs fall back to
+   * when they detect a non-interactive stdout. Falls back to pipes
+   * automatically if PTY allocation fails for any reason.
+   */
+  pty?: boolean;
+  /** Called once the child has started, with a handle to kill or await it. */
+  onSpawn?: (handle: SpawnedCommandHandle) => void;
 };
 
 type CommandExit =
@@ -157,10 +175,39 @@ type QueuedOutput = {
   bytes: number;
 };
 
-const MAX_STDERR_CHARS = 4096;
+const MAX_OUTPUT_TAIL_CHARS = 4096;
 const MAX_QUEUED_OUTPUT_BYTES = 1024 * 1024;
 const RESUME_QUEUED_OUTPUT_BYTES = MAX_QUEUED_OUTPUT_BYTES / 2;
 const TIMEOUT_FORCE_KILL_DELAY_MS = 5_000;
+
+type NodePtyModule = typeof import("@lydell/node-pty");
+
+// Importing the native PTY binding is comparatively expensive, and its
+// availability can't change over the life of the process, so the (possibly
+// failed) import is cached and shared across every spawnCommand call.
+let ptyModulePromise: Promise<NodePtyModule | null> | undefined;
+
+function loadPtyModule(): Promise<NodePtyModule | null> {
+  if (!ptyModulePromise) {
+    ptyModulePromise = import("@lydell/node-pty").catch(() => null);
+  }
+  return ptyModulePromise;
+}
+
+function shouldUsePty(options: RunCommandOptions): boolean {
+  return options.pty === true && process.env["WORKFOREST_NO_PTY"] !== "1";
+}
+
+/**
+ * node-pty forwards TERM from `env` when present, which would leak the
+ * caller's real terminal identity into the child. `name` below is the
+ * intended source of TERM for a pty child, so strip any inherited value.
+ */
+function buildPtyEnv(cwd: string | undefined): SpawnEnvironment {
+  const baseEnv: SpawnEnvironment = createSpawnEnv(cwd) ?? { ...process.env };
+  const { TERM: _inheritedTerm, ...envWithoutTerm } = baseEnv;
+  return envWithoutTerm;
+}
 
 export async function* spawnCommand(
   command: string,
@@ -169,29 +216,29 @@ export async function* spawnCommand(
 ): TaskGenerator {
   yield { status: "running", message: `${command} ${args.join(" ")}` };
 
-  const child = spawn(command, args, {
-    cwd: options.cwd,
-    env: createSpawnEnv(options.cwd),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
   const outputQueue: QueuedOutput[] = [];
   let queuedBytes = 0;
   let streamsPaused = false;
   let wakeOutputConsumer: (() => void) | undefined;
-  const stderrTail = new TailBuffer(MAX_STDERR_CHARS);
+  const outputTail = new TailBuffer(MAX_OUTPUT_TAIL_CHARS);
 
   let killedBy: CommandKill | null = null;
   let overallTimer: ReturnType<typeof setTimeout> | undefined;
   let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // Assigned once we know whether the child ended up on a pty or a pipe, so
+  // the rest of this function doesn't need to care which one it got.
+  let killChild: (signal: NodeJS.Signals) => void = () => {};
+  let pauseChildOutput: () => void = () => {};
+  let resumeChildOutput: () => void = () => {};
+
   const killForLimit = (kill: CommandKill): void => {
     if (killedBy) return;
     killedBy = kill;
-    child.kill("SIGTERM");
+    killChild("SIGTERM");
     forceKillTimer = setTimeout(
-      () => child.kill("SIGKILL"),
+      () => killChild("SIGKILL"),
       TIMEOUT_FORCE_KILL_DELAY_MS,
     );
     forceKillTimer.unref();
@@ -212,19 +259,6 @@ export async function* spawnCommand(
     inactivityTimer.unref();
   };
 
-  if (options.timeoutMs) {
-    const limitMs = options.timeoutMs;
-    overallTimer = setTimeout(
-      () => killForLimit({ kind: "timeout", limitMs }),
-      limitMs,
-    );
-    overallTimer.unref();
-  }
-  resetInactivityTimer();
-
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-
   function wakeConsumer(): void {
     wakeOutputConsumer?.();
     wakeOutputConsumer = undefined;
@@ -235,8 +269,7 @@ export async function* spawnCommand(
       return;
     }
 
-    child.stdout.pause();
-    child.stderr.pause();
+    pauseChildOutput();
     streamsPaused = true;
   }
 
@@ -245,8 +278,7 @@ export async function* spawnCommand(
       return;
     }
 
-    child.stdout.resume();
-    child.stderr.resume();
+    resumeChildOutput();
     streamsPaused = false;
   }
 
@@ -259,23 +291,122 @@ export async function* spawnCommand(
     wakeConsumer();
   }
 
-  child.stdout.on("data", enqueueOutput);
-
-  child.stderr.on("data", (chunk: string) => {
-    stderrTail.append(chunk);
-    enqueueOutput(chunk);
-  });
-
   let exitResult: CommandExit | undefined;
+  let settleExit: (exit: CommandExit) => void = () => {};
   const exitPromise = new Promise<CommandExit>((resolve) => {
-    child.on("error", (error) => resolve({ type: "error", error }));
-    child.on("close", (code) => resolve({ type: "close", code }));
+    settleExit = resolve;
   }).then((exit) => {
     clearTimers();
     exitResult = exit;
     wakeConsumer();
     return exit;
   });
+
+  function spawnWithPipes(): void {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: createSpawnEnv(options.cwd),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    killChild = (signal) => {
+      child.kill(signal);
+    };
+    pauseChildOutput = () => {
+      child.stdout.pause();
+      child.stderr.pause();
+    };
+    resumeChildOutput = () => {
+      child.stdout.resume();
+      child.stderr.resume();
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+
+    child.stdout.on("data", enqueueOutput);
+    child.stderr.on("data", (chunk: string) => {
+      outputTail.append(chunk);
+      enqueueOutput(chunk);
+    });
+
+    child.on("error", (error) => settleExit({ type: "error", error }));
+    child.on("close", (code) => settleExit({ type: "close", code }));
+
+    options.onSpawn?.({
+      pid: child.pid,
+      kill: (signal) => {
+        child.kill(signal);
+      },
+      wait: () => exitPromise.then(() => undefined),
+    });
+  }
+
+  async function trySpawnWithPty(): Promise<boolean> {
+    const ptyMod = await loadPtyModule();
+    if (!ptyMod) {
+      return false;
+    }
+
+    try {
+      const ptyProcess = ptyMod.spawn(command, args, {
+        name: "xterm-256color",
+        cols: 80,
+        rows: 24,
+        ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+        env: buildPtyEnv(options.cwd),
+      });
+
+      killChild = (signal) => {
+        ptyProcess.kill(signal);
+      };
+      pauseChildOutput = () => {
+        if (typeof ptyProcess.pause === "function") {
+          ptyProcess.pause();
+        }
+      };
+      resumeChildOutput = () => {
+        if (typeof ptyProcess.resume === "function") {
+          ptyProcess.resume();
+        }
+      };
+
+      ptyProcess.onData((chunk) => {
+        outputTail.append(chunk);
+        enqueueOutput(chunk);
+      });
+      ptyProcess.onExit(({ exitCode }) => {
+        settleExit({ type: "close", code: exitCode });
+      });
+
+      options.onSpawn?.({
+        pid: ptyProcess.pid,
+        kill: (signal) => {
+          ptyProcess.kill(signal);
+        },
+        wait: () => exitPromise.then(() => undefined),
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const usedPty = shouldUsePty(options) && (await trySpawnWithPty());
+  if (!usedPty) {
+    spawnWithPipes();
+  }
+
+  if (options.timeoutMs) {
+    const limitMs = options.timeoutMs;
+    overallTimer = setTimeout(
+      () => killForLimit({ kind: "timeout", limitMs }),
+      limitMs,
+    );
+    overallTimer.unref();
+  }
+  resetInactivityTimer();
 
   function* drainOutput(): Generator<TaskState> {
     let chunk = outputQueue.shift();
@@ -312,7 +443,7 @@ export async function* spawnCommand(
         yield {
           status: "failed",
           error: new Error(
-            formatKillMessage(command, args, killedBy, stderrTail.toString()),
+            formatKillMessage(command, args, killedBy, outputTail.toString()),
           ),
         };
       } else if (exitResult.type === "error") {
@@ -326,7 +457,7 @@ export async function* spawnCommand(
         yield {
           status: "failed",
           error: new Error(
-            `${command} ${args.join(" ")} exited with code ${exitResult.code}. ${stderrTail.toString()}`,
+            `${command} ${args.join(" ")} exited with code ${exitResult.code}. ${sanitizeOutputForMessage(outputTail.toString())}`,
           ),
         };
       }
@@ -337,18 +468,39 @@ export async function* spawnCommand(
   }
 }
 
+const ANSI_OSC_PATTERN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const ANSI_CSI_PATTERN = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+const ANSI_ESCAPE_PATTERN = /\x1b/g;
+const CONTROL_CHAR_PATTERN = /[\x00-\x09\x0b-\x1f\x7f]/g;
+
+/**
+ * Escape sequences read as color in a live terminal but as noise once they
+ * land in a plain-text failure message, so strip them at the point output
+ * becomes part of an Error rather than a rendered stream. Applies to both
+ * pipe and pty output since either can carry ANSI (colored CLI output
+ * arrives uncolored over a pipe, but child processes may still emit control
+ * sequences deliberately, e.g. progress bars).
+ */
+export function sanitizeOutputForMessage(value: string): string {
+  return value
+    .replace(ANSI_OSC_PATTERN, "")
+    .replace(ANSI_CSI_PATTERN, "")
+    .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(CONTROL_CHAR_PATTERN, "");
+}
+
 function formatKillMessage(
   command: string,
   args: string[],
   kill: CommandKill,
-  stderrTail: string,
+  outputTail: string,
 ): string {
   const commandLine = `${command} ${args.join(" ")}`.trim();
   const cause =
     kill.kind === "timeout"
       ? `timed out after ${kill.limitMs}ms`
       : `produced no output for ${kill.limitMs}ms`;
-  const tail = stderrTail.trim();
+  const tail = sanitizeOutputForMessage(outputTail).trim();
   return `${commandLine} ${cause} and was terminated.${tail ? ` ${tail}` : ""}`;
 }
 

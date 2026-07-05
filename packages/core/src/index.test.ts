@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   canRunForegroundTask,
   runForegroundTask,
+  spawnCommand,
+  type SpawnedCommandHandle,
   type TaskState,
 } from "./index.ts";
 
@@ -30,7 +32,18 @@ afterEach(() => {
   }
   restoreTtyProperties();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
+
+function outputOf(states: TaskState[]): string {
+  return states
+    .filter(
+      (state): state is Extract<TaskState, { status: "output" }> =>
+        state.status === "output",
+    )
+    .map((state) => state.data)
+    .join("");
+}
 
 describe("canRunForegroundTask", () => {
   it("requires terminal stdio and no background worker marker", () => {
@@ -102,5 +115,118 @@ describe("runForegroundTask", () => {
         message: expect.stringContaining("exited with code 7"),
       }),
     });
+  });
+});
+
+describe("spawnCommand", () => {
+  it("invokes onSpawn with a usable handle in pipe mode", async () => {
+    const handles: SpawnedCommandHandle[] = [];
+
+    const states = await collectStates(
+      spawnCommand(process.execPath, ["-e", "process.exit(0)"], {
+        cwd: process.cwd(),
+        onSpawn: (handle) => handles.push(handle),
+      }),
+    );
+
+    expect(states.at(-1)).toEqual({ status: "completed" });
+    expect(handles).toHaveLength(1);
+    expect(typeof handles[0]?.pid).toBe("number");
+    await expect(handles[0]?.wait()).resolves.toBeUndefined();
+  });
+
+  it("forces the pipe path when WORKFOREST_NO_PTY=1 even with pty requested", async () => {
+    vi.stubEnv("WORKFOREST_NO_PTY", "1");
+
+    const states = await collectStates(
+      spawnCommand(
+        process.execPath,
+        ["-e", "process.stdout.write(String(Boolean(process.stdout.isTTY)))"],
+        { cwd: process.cwd(), pty: true },
+      ),
+    );
+
+    expect(outputOf(states)).toBe("false");
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+});
+
+describe("spawnCommand PTY mode", () => {
+  let ptyAvailable = false;
+
+  beforeAll(async () => {
+    try {
+      const ptyMod = await import("@lydell/node-pty");
+      await new Promise<void>((resolve, reject) => {
+        const probe = ptyMod.spawn("/bin/echo", ["ok"], {
+          name: "xterm-256color",
+          cols: 80,
+          rows: 24,
+        });
+        const timeout = setTimeout(
+          () => reject(new Error("pty probe timed out")),
+          2_000,
+        );
+        timeout.unref();
+        probe.onExit(() => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+      ptyAvailable = true;
+    } catch {
+      ptyAvailable = false;
+    }
+  });
+
+  it("gives the child a real TTY", async (ctx) => {
+    ctx.skip(!ptyAvailable, "PTY allocation unavailable in this environment");
+
+    const states = await collectStates(
+      spawnCommand(
+        process.execPath,
+        ["-e", "process.stdout.write(String(Boolean(process.stdout.isTTY)))"],
+        { cwd: process.cwd(), pty: true },
+      ),
+    );
+
+    expect(outputOf(states)).toContain("true");
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("merges stderr into the same output stream", async (ctx) => {
+    ctx.skip(!ptyAvailable, "PTY allocation unavailable in this environment");
+
+    const states = await collectStates(
+      spawnCommand(
+        process.execPath,
+        ["-e", "process.stderr.write('stderr-marker')"],
+        { cwd: process.cwd(), pty: true },
+      ),
+    );
+
+    expect(outputOf(states)).toContain("stderr-marker");
+  });
+
+  it("strips ANSI codes from a failure message even when the child colored its output", async (ctx) => {
+    ctx.skip(!ptyAvailable, "PTY allocation unavailable in this environment");
+
+    const states = await collectStates(
+      spawnCommand(
+        process.execPath,
+        [
+          "-e",
+          "process.stderr.write('\\u001b[31mboom\\u001b[0m'); process.exit(1);",
+        ],
+        { cwd: process.cwd(), pty: true },
+      ),
+    );
+
+    const failure = states.at(-1);
+    expect(failure).toMatchObject({ status: "failed" });
+    const message = failure?.status === "failed" ? failure.error.message : "";
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting the ANSI escape is gone
+    expect(message).not.toMatch(/\x1b/);
+    expect(message).toContain("boom");
   });
 });
