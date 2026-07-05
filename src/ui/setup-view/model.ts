@@ -4,6 +4,7 @@
  * every rendering concern is vitest-testable without a TTY.
  */
 
+import { truncateAnsi } from "../../terminal/ansi-text.ts";
 import {
   renderTerminalLineBlessed,
   type TerminalLineInput,
@@ -66,12 +67,6 @@ function stepElapsed(step: StepSnapshot, nowMs: number): string | null {
   return null;
 }
 
-function truncatePlain(value: string, width: number): string {
-  if (width <= 0) return "";
-  if (value.length <= width) return value;
-  return `${value.slice(0, Math.max(width - 1, 0))}…`;
-}
-
 function stepRow(step: StepSnapshot, width: number, nowMs: number): string {
   const { glyph, role } = stepGlyph(step.status);
   const elapsed = stepElapsed(step, nowMs);
@@ -81,7 +76,7 @@ function stepRow(step: StepSnapshot, width: number, nowMs: number): string {
   return renderLine([
     terminalSpan(glyph, { role }),
     " ",
-    terminalSpan(truncatePlain(step.title, titleWidth), {
+    terminalSpan(truncateAnsi(step.title, titleWidth), {
       role: step.status === "pending" ? "muted" : "primary",
     }),
     ...(attempt ? [terminalSpan(attempt, { role: "warning" })] : []),
@@ -99,6 +94,16 @@ export function renderPaneLines(
   repo: RepoRunSnapshot,
   size: PaneSize,
   nowMs: number,
+  /**
+   * Live emulator-rendered screen lines for this pane (from
+   * `TerminalTailStore`), preferred over `repo.tail` when non-null and
+   * non-empty. `repo.tail` is the reducer's plain normalized tail (the
+   * canonical text also used for logs and the scrollback summary);
+   * `styledTail` is the current @xterm/headless screen contents, carrying
+   * real SGR codes so the pane looks like what the child process actually
+   * drew (progress bars, colored output, cursor-addressed redraws resolved).
+   */
+  styledTail?: readonly string[] | null,
 ): string[] {
   const width = Math.max(size.width, 8);
   const height = Math.max(size.height, 1);
@@ -132,25 +137,27 @@ export function renderPaneLines(
   if (repo.error && lines.length < height) {
     lines.push(
       renderLine([
-        terminalSpan(truncatePlain(`Error: ${repo.error}`, width), {
+        terminalSpan(truncateAnsi(`Error: ${repo.error}`, width), {
           role: "error",
         }),
       ]),
     );
   }
 
+  const tailLines =
+    styledTail && styledTail.length > 0 ? styledTail : repo.tail;
   const remaining = height - lines.length;
-  if (remaining >= 2 && repo.tail.length > 0) {
+  if (remaining >= 2 && tailLines.length > 0) {
     lines.push(
       renderLine([terminalSpan("─".repeat(width), { role: "muted" })]),
     );
     const tailBudget = remaining - 1;
-    for (const tailLine of repo.tail.slice(-tailBudget)) {
-      lines.push(
-        renderLine([
-          terminalSpan(truncatePlain(tailLine, width), { role: "dim" }),
-        ]),
-      );
+    for (const tailLine of tailLines.slice(-tailBudget)) {
+      // No role here (unlike the other spans in this file): the content box
+      // that renders tail lines flips its own default fg between dim and the
+      // focus color, and the SGR-styled tail needs to carry its own colors
+      // through untouched rather than being forced dim.
+      lines.push(renderLine([terminalSpan(truncateAnsi(tailLine, width))]));
     }
   }
 

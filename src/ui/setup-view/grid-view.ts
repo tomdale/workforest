@@ -45,6 +45,7 @@ import {
   panePriorityForStatus,
   selectVisiblePanes,
 } from "./pager.ts";
+import { TerminalTailStore } from "./terminal-tail.ts";
 
 export type SetupKeyEvent = Readonly<{ name?: string; ctrl?: boolean }>;
 
@@ -179,6 +180,10 @@ export async function renderSetupGrid(
     });
 
   const reducer = createRunReducer();
+  // Replays the same events through a headless VT100 emulator so panes can
+  // render the live styled screen instead of the reducer's plain tail; see
+  // TerminalTailStore's own doc comment for why a second pass is needed.
+  const tailStore = new TerminalTailStore();
   const screen = environment.createScreen();
   // Created lazily on the first frame, after the grid: terminal surfaces
   // paint in creation order, so a status line created before the grid's
@@ -197,10 +202,27 @@ export async function renderSetupGrid(
   let lastVisible: string[] = [];
   let lastPageCount = 1;
   let helpOverlay: SetupHelpOverlayLike | null = null;
+  // Set once the run reaches a terminal state and the completion modal is
+  // about to swallow every key. Guards renderFrame from recreating a status
+  // line the modal has already made moot (see its destroy below).
+  let terminalStateReached = false;
 
   const closeHelp = (): void => {
     helpOverlay?.destroy();
     helpOverlay = null;
+  };
+
+  // A named closure rather than an inline `statusLine?.destroy()` at the
+  // call site: TS narrows a closured `let` that only nested functions
+  // reassign down to the type of its last direct assignment in the reading
+  // scope, which for `statusLine` is the initial `null` — so the outer scope
+  // sees it as exactly `null` (not `SetupStatusLineLike | null`) after
+  // renderFrame's lazy creation has run, and `.destroy()` fails to typecheck.
+  // Reading it from its own closure, like `destroy()` already does, sidesteps
+  // that by using the declared type instead.
+  const hideStatusLine = (): void => {
+    statusLine?.destroy();
+    statusLine = null;
   };
 
   const toggleHelp = (): void => {
@@ -317,7 +339,12 @@ export async function renderSetupGrid(
     const activeGrid = ensureGrid(
       fitGridDimensions(Math.max(visible.length, 1), bounds),
     );
-    statusLine ??= environment.createStatusLine?.({ screen }) ?? null;
+    // Once the completion modal is up it swallows every key, so recreating
+    // the status line (e.g. on a resize) would show hints and a ticking
+    // elapsed time that nothing can act on.
+    if (!terminalStateReached) {
+      statusLine ??= environment.createStatusLine?.({ screen }) ?? null;
+    }
     const zoomIndex = zoomedPane !== null ? visible.indexOf(zoomedPane) : -1;
     activeGrid.setZoomedPane?.(zoomIndex >= 0 ? zoomIndex : null);
     for (let index = 0; index < gridSlots; index += 1) {
@@ -334,23 +361,32 @@ export async function renderSetupGrid(
       const paneSnapshot = paneSnapshotOf(snapshot, name);
       pane.setLabel(paneLabel(paneSnapshot, nowMs));
       const size = pane.getContentSize?.() ?? { width: 60, height: 12 };
-      pane.setContent(renderPaneLines(paneSnapshot, size, nowMs).join("\n"));
+      pane.setContent(
+        renderPaneLines(
+          paneSnapshot,
+          size,
+          nowMs,
+          tailStore.linesFor(name),
+        ).join("\n"),
+      );
       pane.setFocused?.(index === focusIndex && visible.length > 1);
     });
 
-    statusLine?.setContent(
-      buildStatusLine({
-        snapshot,
-        repoNames: options.repoNames,
-        page,
-        pageCount,
-        zoomed: zoomedPane !== null,
-        mode,
-        canDetach,
-        cancelRequested,
-        nowMs,
-      }),
-    );
+    if (!terminalStateReached) {
+      statusLine?.setContent(
+        buildStatusLine({
+          snapshot,
+          repoNames: options.repoNames,
+          page,
+          pageCount,
+          zoomed: zoomedPane !== null,
+          mode,
+          canDetach,
+          cancelRequested,
+          nowMs,
+        }),
+      );
+    }
 
     activeGrid.render();
   };
@@ -371,6 +407,8 @@ export async function renderSetupGrid(
 
   // Live elapsed times tick even when no events arrive. Disabled alongside
   // render throttling (renderIntervalMs <= 0) so tests stay deterministic.
+  // Cleared early once the run hits a terminal state: the completion modal
+  // freezes the display and nothing should keep ticking behind it.
   const ticker =
     renderIntervalMs > 0
       ? setInterval(() => {
@@ -542,6 +580,7 @@ export async function renderSetupGrid(
     grid?.destroy();
     grid = null;
     screen.destroy();
+    tailStore.dispose();
     void Promise.resolve(options.events.return(undefined)).catch(
       () => undefined,
     );
@@ -551,6 +590,7 @@ export async function renderSetupGrid(
   const pump = (async (): Promise<void> => {
     for await (const event of options.events) {
       reducer.apply(event);
+      await tailStore.apply(event);
       scheduleRender();
       if (event.kind === "run-end") {
         runEnded = true;
@@ -581,6 +621,9 @@ export async function renderSetupGrid(
       clearTimeout(renderTimer);
       renderTimer = null;
     }
+    // Drain any writes still parsing so the last frame reflects fully
+    // processed output rather than whatever had landed mid-chunk.
+    await tailStore.flush();
     renderFrame();
     const snapshot = reducer.snapshot();
     const outcome = resolveOutcome(snapshot, cancelRequested, runEnded);
@@ -591,7 +634,12 @@ export async function renderSetupGrid(
 
     // Terminal state: keep the grid and completion modal up until the user
     // dismisses them, so both the celebration and failure panes stay readable
-    // for as long as anyone wants to look.
+    // for as long as anyone wants to look. The modal swallows every key from
+    // here on, so the status line's hints and ticking elapsed time would be
+    // dead and misleading if left running behind it.
+    terminalStateReached = true;
+    if (ticker) clearInterval(ticker);
+    hideStatusLine();
     showCompletionModal(snapshot);
     await Promise.race([waitForKeypress(), finished]);
     return { outcome, snapshot };
@@ -684,6 +732,8 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
         borderColor: border,
         focusBorderColor: focus,
         backgroundColor: background,
+        contentColor: toBlessed(theme.palette.dim),
+        focusContentColor: toBlessed(theme.palette.focus),
       });
       return {
         getPane: (index) => grid.getPane(index),

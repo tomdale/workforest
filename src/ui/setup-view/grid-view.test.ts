@@ -301,6 +301,68 @@ describe("renderSetupGrid", () => {
     expect(result.outcome).toBe("failed");
   });
 
+  it("hides the status line at a terminal state, before the acknowledging keypress", async () => {
+    const { events, push } = createEventSource();
+    const mock = createMockEnvironment();
+    const originalCreateStatusLine = mock.environment.createStatusLine;
+    if (!originalCreateStatusLine) {
+      throw new Error(
+        "expected the mock environment to provide createStatusLine",
+      );
+    }
+    let createStatusLineCalls = 0;
+    let destroyCalls = 0;
+    mock.environment.createStatusLine = (options) => {
+      createStatusLineCalls += 1;
+      const real = originalCreateStatusLine(options);
+      return {
+        setContent: real.setContent,
+        destroy: () => {
+          destroyCalls += 1;
+          real.destroy();
+        },
+      };
+    };
+
+    const promise = renderSetupGrid({
+      events,
+      repoNames: ["front"],
+      mode: "until-ready",
+      environment: mock.environment,
+    });
+    push({
+      kind: "run-start",
+      command: "new",
+      repos: ["front"],
+      scope: "workspace",
+      pid: 1,
+    });
+    await tick();
+    expect(createStatusLineCalls).toBe(1);
+
+    push({ kind: "repo-end", repo: "front", outcome: "ready" });
+    push({ kind: "run-end", outcome: "ready", durationMs: 1_000 });
+    await tick();
+    await tick();
+
+    // Terminal state: the modal is about to swallow every key, so the status
+    // line (its hints, its ticking elapsed time) is torn down rather than
+    // left running dead behind it.
+    expect(mock.completionCalls).toHaveLength(1);
+    expect(destroyCalls).toBe(1);
+    const statusContentsAtTerminal = mock.statusContents.length;
+
+    // A resize while the modal is up must not resurrect the status line.
+    mock.resize({ width: 90, height: 24 });
+    expect(createStatusLineCalls).toBe(1);
+    expect(mock.statusContents.length).toBe(statusContentsAtTerminal);
+
+    // The keypress still resolves the grid as normal.
+    mock.press("x");
+    const result = await promise;
+    expect(result.outcome).toBe("ready");
+  });
+
   it("detaches on d without waiting for run-end", async () => {
     const { events, push } = createEventSource();
     const mock = createMockEnvironment();
@@ -592,6 +654,44 @@ describe("renderSetupGrid", () => {
     expect(mock.grids[0]?.reflowCalls).toBe(before + 1);
 
     close();
+    await promise;
+  });
+
+  it("renders panes from the emulator-styled tail instead of the plain tail", async () => {
+    const { events, push } = createEventSource();
+    const mock = createMockEnvironment();
+
+    const promise = renderSetupGrid({
+      events,
+      repoNames: ["front"],
+      mode: "until-ready",
+      environment: mock.environment,
+    });
+    push({
+      kind: "run-start",
+      command: "new",
+      repos: ["front"],
+      scope: "workspace",
+      pid: 1,
+    });
+    push({
+      kind: "step-output",
+      repo: "front",
+      step: "init:pnpm-install",
+      chunk: "\x1b[32mok\x1b[0m done\r\n",
+    });
+    push({ kind: "run-end", outcome: "ready", durationMs: 1_000 });
+    await tick();
+    await tick();
+
+    const grid = mock.grids[0];
+    const frontPane = grid?.panes.get(0);
+    const rendered = frontPane?.contents.join("\n") ?? "";
+    expect(rendered).toContain("ok");
+    expect(rendered).toContain("done");
+    expect(rendered).toContain("\x1b[32m");
+
+    mock.press("x");
     await promise;
   });
 });

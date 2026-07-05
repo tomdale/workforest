@@ -1,3 +1,4 @@
+import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
 import type {
   RepoRunSnapshot,
@@ -137,6 +138,86 @@ describe("renderPaneLines", () => {
     expect(lines.some((line) => line.startsWith("─"))).toBe(true);
     expect(lines.at(-1)).toBe("four");
     expect(lines.length).toBeLessThanOrEqual(6);
+  });
+
+  it("renders tail lines at exactly the pane content width", () => {
+    // The pane content width here is `size.width` itself (renderPaneLines
+    // truncates tail lines to the full pane width); the content ScrollableBox
+    // that actually displays them is one column narrower, which is a
+    // separate concern owned by grid-layout.ts.
+    const width = 20;
+    const exact = "x".repeat(width);
+    const overflow = "x".repeat(width + 1);
+
+    const exactLines = renderPaneLines(
+      repo({ tail: [exact] }),
+      { width, height: 4 },
+      0,
+    ).map(stripTags);
+    expect(exactLines.at(-1)).toBe(exact);
+    expect(exactLines.at(-1)?.endsWith("…")).toBe(false);
+
+    const overflowLines = renderPaneLines(
+      repo({ tail: [overflow] }),
+      { width, height: 4 },
+      0,
+    ).map(stripTags);
+    const last = overflowLines.at(-1) ?? "";
+    expect(last.endsWith("…")).toBe(true);
+    expect(stringWidth(last)).toBe(width);
+  });
+
+  it("prefers styledTail over repo.tail when non-empty", () => {
+    const lines = renderPaneLines(
+      repo({ tail: ["from reducer"] }),
+      { width: 40, height: 6 },
+      0,
+      ["from emulator"],
+    ).map(stripTags);
+
+    expect(lines.some((line) => line.includes("from emulator"))).toBe(true);
+    expect(lines.some((line) => line.includes("from reducer"))).toBe(false);
+  });
+
+  it("carries SGR codes from styledTail through into the rendered string", () => {
+    const lines = renderPaneLines(
+      repo({ tail: [] }),
+      { width: 40, height: 6 },
+      0,
+      ["\x1b[32mok\x1b[0m"],
+    );
+
+    expect(lines.some((line) => line.includes("\x1b[32m"))).toBe(true);
+  });
+
+  it("escapes a literal brace in styledTail instead of parsing it as a tag", () => {
+    const lines = renderPaneLines(
+      repo({ tail: [] }),
+      { width: 40, height: 6 },
+      0,
+      ["{not a tag}"],
+    );
+
+    expect(lines.some((line) => line.includes("{open}"))).toBe(true);
+    expect(lines.some((line) => line.includes("{close}"))).toBe(true);
+  });
+
+  it("falls back to repo.tail when styledTail is null or empty", () => {
+    const nullTail = renderPaneLines(
+      repo({ tail: ["from reducer"] }),
+      { width: 40, height: 6 },
+      0,
+      null,
+    ).map(stripTags);
+    expect(nullTail.some((line) => line.includes("from reducer"))).toBe(true);
+
+    const emptyTail = renderPaneLines(
+      repo({ tail: ["from reducer"] }),
+      { width: 40, height: 6 },
+      0,
+      [],
+    ).map(stripTags);
+    expect(emptyTail.some((line) => line.includes("from reducer"))).toBe(true);
   });
 
   it("never exceeds the pane height", () => {
