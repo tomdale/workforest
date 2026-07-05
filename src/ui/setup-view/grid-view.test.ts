@@ -89,6 +89,8 @@ function createMockEnvironment(
   helpDestroys: number;
   press: (name: string, key?: Partial<SetupKeyEvent>) => void;
   pressChar: (ch: string) => void;
+  /** Deliver a raw (ch, key) pair exactly as @unblessed would. */
+  pressRaw: (ch: string | undefined, key: SetupKeyEvent | undefined) => void;
   resize: (next?: { width: number; height: number }) => void;
 } {
   let keypressHandler:
@@ -193,6 +195,9 @@ function createMockEnvironment(
     },
     pressChar: (ch) => {
       keypressHandler?.(ch, undefined);
+    },
+    pressRaw: (ch, key) => {
+      keypressHandler?.(ch, key);
     },
     resize: (next) => {
       if (next) size = next;
@@ -547,6 +552,43 @@ describe("renderSetupGrid", () => {
     mock.press("enter");
     expect(grid?.zoomCalls.at(-1)).toBe(1);
     mock.press("enter");
+    expect(grid?.zoomCalls.at(-1)).toBeNull();
+
+    close();
+    await promise;
+  });
+
+  it("treats @unblessed's double Enter emission as one toggle", async () => {
+    const { events, push, close } = createEventSource();
+    const mock = createMockEnvironment();
+
+    const promise = renderSetupGrid({
+      events,
+      repoNames: ["front", "api"],
+      mode: "watch",
+      environment: mock.environment,
+    });
+    push({
+      kind: "run-start",
+      command: "new",
+      repos: ["front", "api"],
+      scope: "workspace",
+      pid: 1,
+    });
+    await tick();
+
+    // One physical Enter press arrives as two keypress events: first
+    // {name: "enter"}, then {name: "return"}, both with ch "\r". Only one
+    // may act, or the zoom toggle cancels itself out.
+    const pressPhysicalEnter = (): void => {
+      mock.pressRaw("\r", { name: "enter" });
+      mock.pressRaw("\r", { name: "return" });
+    };
+
+    const grid = mock.grids[0];
+    pressPhysicalEnter();
+    expect(grid?.zoomCalls.at(-1)).toBe(0);
+    pressPhysicalEnter();
     expect(grid?.zoomCalls.at(-1)).toBeNull();
 
     close();

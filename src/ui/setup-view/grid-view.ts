@@ -431,6 +431,12 @@ export async function renderSetupGrid(
     // "?" arrives as the character of a shifted "/" keypress, so the char is
     // the reliable signal rather than the key name.
     if (ch === "?") return "?";
+    // @unblessed emits two keypress events for one physical Enter (\r):
+    // first {name: "enter"}, then {name: "return"}. Honoring both would
+    // double-fire any non-idempotent binding (the zoom toggle cancels itself
+    // out), so the duplicate "enter"-named event is dropped here and only
+    // "return"/"linefeed" map to enter.
+    if (key?.name === "enter" && ch === "\r") return null;
     const name = key?.name ?? ch;
     if (name === "return" || name === "linefeed") return "enter";
     return name ?? null;
@@ -446,6 +452,10 @@ export async function renderSetupGrid(
     }
 
     const name = keyNameOf(ch, key);
+    // A null name is either an unmapped key or the duplicate half of
+    // @unblessed's double Enter emission; treating it as inert keeps it from
+    // consuming the help overlay's close-on-any-key.
+    if (name === null) return;
 
     if (helpOverlay && name !== "?") {
       // Any key dismisses the help overlay; the keypress is consumed so a
