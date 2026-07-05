@@ -94,7 +94,7 @@ describe("terminal render model", () => {
       "stderr: {red-fg}child{/red-fg}",
     );
     expect(renderTerminalDocBlessed(doc)).toContain(
-      "\\{red-fg\\}child\\{/red-fg\\}",
+      "{open}red-fg{close}child{open}/red-fg{close}",
     );
   });
 

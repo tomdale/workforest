@@ -28,14 +28,14 @@ describe("CommandStreamAdapter", () => {
 
     expect(
       adapter.push("stdout", "\x1B[31m{red}\x1B[0m\x1B]0;title\x07\x00\n"),
-    ).toEqual([{ source: "stdout", line: "\\{red\\}" }]);
+    ).toEqual([{ source: "stdout", line: "{open}red{close}" }]);
   });
 });
 
 describe("escapeBlessedTags", () => {
-  it("escapes braces", () => {
+  it("escapes braces with the {open}/{close} tokens @unblessed substitutes", () => {
     expect(escapeBlessedTags("{bold}repo{/bold}")).toBe(
-      "\\{bold\\}repo\\{/bold\\}",
+      "{open}bold{close}repo{open}/bold{close}",
     );
   });
 });

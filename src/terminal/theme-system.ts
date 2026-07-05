@@ -237,11 +237,15 @@ const DEFAULT_SYMBOLS: ThemeSymbols = {
   checkOn: "◼",
   checkOff: "◻",
   info: "●",
-  success: "✔︎",
+  // U+2713, not U+2714: @unblessed's width table treats U+2714 (and its
+  // variation-selector form) as double-width while real terminals render it
+  // single-width, desyncing the renderer's screen model one column for the
+  // rest of the row. U+2713 is single-width in both.
+  success: "✓",
   warning: "▲",
   error: "✗",
   statusRunning: "↻", // ⟳
-  statusComplete: "✔︎",
+  statusComplete: "✓",
   statusFailed: "✗",
   statusPending: "○",
   statusCancelled: "⊘",

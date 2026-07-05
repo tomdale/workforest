@@ -278,5 +278,11 @@ function backgroundNamedStyler(
 }
 
 function escapeBlessedText(value: string): string {
-  return value.replace(/[{}]/g, (char) => (char === "{" ? "\\{" : "\\}"));
+  // @unblessed's tag parser has no backslash-escaping; the canonical way to
+  // get a literal brace past it is the {open}/{close} token pair (see
+  // helpers.escape in @unblessed/core), which it substitutes back to "{"/"}"
+  // after parsing tags.
+  return value.replace(/[{}]/g, (char) =>
+    char === "{" ? "{open}" : "{close}",
+  );
 }
