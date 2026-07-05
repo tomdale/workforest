@@ -106,8 +106,8 @@ output render highlighted (white); unfocused panes show dim output. The status
 line lists active keybindings, and **?** opens a help overlay with the full
 keymap. While attached:
 
-- Arrows or `h`/`j`/`k`/`l` move focus, and **z** toggles zoom on the focused
-  pane to the full screen (**Enter** also zooms, and **Esc** zooms back out).
+- Arrows or `h`/`j`/`k`/`l` move focus, and **z** or **Enter** toggles zoom on
+  the focused pane to the full screen (**Esc** also zooms back out).
 - **d** detaches: the command exits once the background workers are launched
   and setup keeps running (follow it with `wf status --watch`).
 - **q** or **Ctrl-C** cancels gracefully: running commands are terminated,

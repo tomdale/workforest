@@ -476,11 +476,6 @@ export async function renderSetupGrid(
         moveFocus(gridShape?.cols ?? 1);
         break;
       case "enter":
-        if (zoomedPane === null) {
-          zoomedPane = lastVisible[focusIndex] ?? null;
-          scheduleRender();
-        }
-        break;
       case "z":
         zoomedPane =
           zoomedPane === null ? (lastVisible[focusIndex] ?? null) : null;

@@ -543,6 +543,12 @@ describe("renderSetupGrid", () => {
     mock.press("escape");
     expect(grid?.zoomCalls.at(-1)).toBeNull();
 
+    // Enter toggles like z: a second press while zoomed restores the grid.
+    mock.press("enter");
+    expect(grid?.zoomCalls.at(-1)).toBe(1);
+    mock.press("enter");
+    expect(grid?.zoomCalls.at(-1)).toBeNull();
+
     close();
     await promise;
   });
