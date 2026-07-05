@@ -18,6 +18,7 @@ import type { StatusTone } from "../terminal/status-indicator.ts";
 import { padRight } from "../terminal/text.ts";
 import { terminalSymbol } from "../terminal/theme.ts";
 import type { WorkspaceConfig, WorkspaceMetadata } from "../types.ts";
+import { compactHome } from "../utils/display-path.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import { listWorktreeMetadata, readWorkspaceMetadata } from "./metadata.ts";
 import {

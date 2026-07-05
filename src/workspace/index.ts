@@ -18,6 +18,7 @@ import {
   type PresentRunOutcome,
   presentRun,
 } from "../ui/setup-view/present.ts";
+import { compactHome } from "../utils/display-path.ts";
 import { ensureDir } from "../utils/fs.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import {
@@ -933,7 +934,7 @@ function getNextSteps(workspaceDir: string): string[] {
     return [`code ${vscodePath}`];
   }
 
-  return [`cd ${workspaceDir}`, `code ${vscodePath}`];
+  return [`cd ${compactHome(workspaceDir)}`, `code ${vscodePath}`];
 }
 
 export async function writeVSCodeWorkspaceFile(

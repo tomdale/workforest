@@ -1,13 +1,13 @@
 import { loadWorkspaceConfig } from "../config.ts";
 import { type Scope, sortEntriesByRecency } from "../entry/entries-data.ts";
 import { reportShellCdTarget } from "../shell.ts";
-import { compactHomePath } from "../terminal/paths.ts";
 import {
   CancelError,
   cancel,
   type PromptFuzzySelectOptions,
   promptFuzzySelect,
 } from "../ui/prompts/index.ts";
+import { compactHome } from "../utils/display-path.ts";
 import {
   collectInventory,
   type InventoryEntry,
@@ -155,8 +155,8 @@ async function runDefaultSwitchSurface(
 function switchCandidateDescription(entry: InventoryEntry): string {
   const searchText =
     entry.type === "worktree"
-      ? `${entry.repository} ${compactHomePath(entry.path)}`
-      : `${entry.repos.join(", ")} ${compactHomePath(entry.path)}`;
+      ? `${entry.repository} ${compactHome(entry.path)}`
+      : `${entry.repos.join(", ")} ${compactHome(entry.path)}`;
   return [
     entry.type === "worktree" ? "repository" : entry.groupName,
     entry.changeName,

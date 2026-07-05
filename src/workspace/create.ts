@@ -17,6 +17,7 @@ import {
   buildBranchName,
   resolveBranchPrefix,
 } from "../utils/branch-prefix.ts";
+import { compactHome } from "../utils/display-path.ts";
 import { validateResourceName } from "../utils/path-safety.ts";
 import {
   createRunFailureSummary,
@@ -171,7 +172,7 @@ async function createWorktree(
       targetDir,
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
       ...(options.verbose !== undefined ? { verbose: options.verbose } : {}),
-      nextSteps: isShellAutoCdEnabled() ? [] : [`cd ${targetDir}`],
+      nextSteps: isShellAutoCdEnabled() ? [] : [`cd ${compactHome(targetDir)}`],
       onFailure: (repoName, state) => {
         setupFailures.set(
           repoName,
@@ -235,7 +236,7 @@ async function reportCreateOutcome({
   switch (outcome) {
     case "background":
       printRepoSetupFailures(setupFailures, options.onEvent);
-      log.success(`Change ready: ${targetDir}`);
+      log.success(`Change ready: ${compactHome(targetDir)}`);
       await reportShellCdTarget(targetDir, {
         writeShellCdPath: options.writeShellCdPath,
       });

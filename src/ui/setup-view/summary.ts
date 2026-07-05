@@ -12,6 +12,7 @@ import {
   terminalSpan,
 } from "../../terminal/render-model.ts";
 import { terminalSymbol } from "../../terminal/theme.ts";
+import { compactHome } from "../../utils/display-path.ts";
 import type {
   RepoRunSnapshot,
   RunSnapshot,
@@ -154,7 +155,10 @@ export function formatRunSummary(input: RunSummaryInput): string {
   const lines: TerminalLine[] = [];
   lines.push(summaryHeading(input, nowMs));
   lines.push({
-    spans: [literalSpan("  "), terminalSpan(targetDir, { role: "primary" })],
+    spans: [
+      literalSpan("  "),
+      terminalSpan(compactHome(targetDir), { role: "primary" }),
+    ],
   });
   lines.push({ spans: [] });
 

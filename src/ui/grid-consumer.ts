@@ -29,6 +29,7 @@ import {
   terminalSpan,
 } from "../terminal/render-model.ts";
 import { activeTheme, toBlessed } from "../terminal/theme-system.ts";
+import { compactHome } from "../utils/display-path.ts";
 import { runParallel } from "../utils/task-generator.ts";
 import { resolveConfiguredMaxConcurrent } from "../workspace/setup-limits.ts";
 
@@ -1524,7 +1525,10 @@ function formatWorkspaceSummary({
     lines.push(
       renderBlessedLine([
         terminalSpan(
-          truncatePlainText(workspacePath, Math.max(contentWidth, 8)),
+          truncatePlainText(
+            compactHome(workspacePath),
+            Math.max(contentWidth, 8),
+          ),
           {
             role: "primary",
             emphasis: "bold",
