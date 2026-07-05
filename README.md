@@ -189,7 +189,7 @@ myspace   next-forge · 4 repos · 3h ago
 ~/Code/workforest/myspace
 !  AGENTS.md out of date by 3h
 
-  ✔︎ web    main          synced  clean
+  ✔ web    main          synced  clean
   ● api    cli-redesign  ↑2 ↓1   3 modified · 2 untracked
       ● rate-limit  rate-limit  unmerged  ready
   ↻ docs   main          ↑1      installing…

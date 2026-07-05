@@ -199,33 +199,33 @@ function collectCells(
     // cover them.
     if (cell.getWidth() === 0) continue;
     cells.push({
-      char: normalizeWideGlyph(cell.getChars() || " "),
+      char: stripVariationSelector(cell.getChars() || " "),
       style: sgrParams(cell),
     });
   }
   return cells;
 }
 
-// @unblessed hardcodes U+2714 (heavy check mark) and U+2716 (heavy
-// multiplication x) as double-width, while real terminals (and xterm here)
-// render them single-width. A cell holding one of these desyncs @unblessed's
-// column model by one for the rest of the row it's on. U+2713/U+2717 are
-// visually equivalent and single-width in both, so swap to those instead.
-// CLIs (e.g. the Vercel CLI's success checkmark) commonly print the U+2714
-// form, optionally followed by a variation selector (U+FE0E/U+FE0F); matching
-// on just the grapheme's first code point and replacing the whole thing drops
-// that selector along with the width mismatch. A full width-reconciliation
-// table is out of scope; this is a small explicit map for the glyphs seen in
-// practice.
-const WIDE_GLYPH_SUBSTITUTIONS: ReadonlyMap<number, string> = new Map([
-  [0x2714, "✓"], // ✔ -> ✓
-  [0x2716, "✗"], // ✖ -> ✗
-]);
+// @unblessed's width table used to hardcode U+2714/U+2716 as double-width
+// while real terminals (and xterm here) render them single-width; a pnpm
+// patch (patches/@unblessed__core@1.0.0-alpha.23.patch) fixes that at the
+// source, guarded by src/terminal/unblessed-width.test.ts against a future
+// @unblessed upgrade silently dropping it. What's still this module's job:
+// xterm folds a trailing variation selector (U+FE0E/U+FE0F) into the base
+// character's cell, since combining marks don't get their own column. CLIs
+// (e.g. the Vercel CLI's success checkmark) commonly emit that selector after
+// U+2714. If it reaches @unblessed's blessed-tags renderer as part of the
+// cell's text, it desyncs the column model again: @unblessed spends its own
+// column on U+FE0E, and U+FE0F can flip some terminals into wide emoji
+// presentation for the preceding glyph. Stripping it here is safe because the
+// base glyph renders identically without it.
+const VARIATION_SELECTORS = new Set(["\u{FE0E}", "\u{FE0F}"]);
 
-function normalizeWideGlyph(chars: string): string {
-  const codePoint = chars.codePointAt(0);
-  if (codePoint === undefined) return chars;
-  return WIDE_GLYPH_SUBSTITUTIONS.get(codePoint) ?? chars;
+function stripVariationSelector(chars: string): string {
+  const last = chars.at(-1);
+  return last !== undefined && VARIATION_SELECTORS.has(last)
+    ? chars.slice(0, -1)
+    : chars;
 }
 
 function trimTrailingBlank(cells: readonly Cell[]): readonly Cell[] {

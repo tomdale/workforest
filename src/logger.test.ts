@@ -21,7 +21,7 @@ describe("log", () => {
       "  │  ● Reading config",
     );
     expect(stripAnsi(String(stdout.mock.calls[1]?.[0]))).toBe(
-      "  │  ✓ Workspace ready",
+      "  │  ✔ Workspace ready",
     );
     expect(stripAnsi(String(warning.mock.calls[0]?.[0]))).toBe(
       "  │  ▲ Setup incomplete",

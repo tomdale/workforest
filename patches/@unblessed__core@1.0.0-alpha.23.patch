@@ -1,0 +1,26 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index ca79bdad1a8b8092f72713970fd772f645d060cf..81624eabda52da00c33fed0534981f388a43de79 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -8541,7 +8541,7 @@ unicode.charWidth = function(str, i, tabSize = 8) {
+   if (4352 <= point && point <= 4447 || 4515 <= point && point <= 4519 || 4602 <= point && point <= 4607 || 9001 <= point && point <= 9002 || // Miscellaneous Symbols and emoji symbols (selective)
+   9728 <= point && point <= 9983 || // Miscellaneous Symbols (☀️⚡✅❌)
+   9984 <= point && point <= 10002 || // Dingbats - before check marks
+-  10004 <= point && point <= 10006 || // Heavy check mark, etc (skip ✓ U+2713)
++  /* workforest patch: U+2714..U+2716 are width 1 in wcwidth and real terminals; the upstream table wrongly marked them wide */
+   10008 <= point && point <= 10175 || // Dingbats - after ballot X (skip ✗ U+2717)
+   11904 <= point && point <= 11929 || 11931 <= point && point <= 12019 || 12032 <= point && point <= 12245 || 12272 <= point && point <= 12283 || 12289 <= point && point <= 12350 || 12353 <= point && point <= 12438 || 12441 <= point && point <= 12543 || 12549 <= point && point <= 12589 || 12593 <= point && point <= 12686 || 12688 <= point && point <= 12730 || 12736 <= point && point <= 12771 || 12784 <= point && point <= 12830 || 12832 <= point && point <= 12871 || 12880 <= point && point <= 13054 || 13056 <= point && point <= 19903 || 19968 <= point && point <= 42124 || 42128 <= point && point <= 42182 || 43360 <= point && point <= 43388 || 44032 <= point && point <= 55203 || 55216 <= point && point <= 55238 || 55243 <= point && point <= 55291 || 63744 <= point && point <= 64255 || 65040 <= point && point <= 65049 || 65072 <= point && point <= 65106 || 65108 <= point && point <= 65126 || 65128 <= point && point <= 65131 || 110592 <= point && point <= 110593 || 127488 <= point && point <= 127490 || 127504 <= point && point <= 127546 || 127552 <= point && point <= 127560 || 127568 <= point && point <= 127569 || // Emoji ranges (double-width)
+   127744 <= point && point <= 128511 || // Misc Symbols and Pictographs
+diff --git a/dist/index.js b/dist/index.js
+index d2a2afd88d36700caa211e10fdefa9e5733d654c..61c5eaadea50f644135db8ad6c744b6b1b2b7d87 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -8535,7 +8535,7 @@ unicode.charWidth = function(str, i, tabSize = 8) {
+   if (4352 <= point && point <= 4447 || 4515 <= point && point <= 4519 || 4602 <= point && point <= 4607 || 9001 <= point && point <= 9002 || // Miscellaneous Symbols and emoji symbols (selective)
+   9728 <= point && point <= 9983 || // Miscellaneous Symbols (☀️⚡✅❌)
+   9984 <= point && point <= 10002 || // Dingbats - before check marks
+-  10004 <= point && point <= 10006 || // Heavy check mark, etc (skip ✓ U+2713)
++  /* workforest patch: U+2714..U+2716 are width 1 in wcwidth and real terminals; the upstream table wrongly marked them wide */
+   10008 <= point && point <= 10175 || // Dingbats - after ballot X (skip ✗ U+2717)
+   11904 <= point && point <= 11929 || 11931 <= point && point <= 12019 || 12032 <= point && point <= 12245 || 12272 <= point && point <= 12283 || 12289 <= point && point <= 12350 || 12353 <= point && point <= 12438 || 12441 <= point && point <= 12543 || 12549 <= point && point <= 12589 || 12593 <= point && point <= 12686 || 12688 <= point && point <= 12730 || 12736 <= point && point <= 12771 || 12784 <= point && point <= 12830 || 12832 <= point && point <= 12871 || 12880 <= point && point <= 13054 || 13056 <= point && point <= 19903 || 19968 <= point && point <= 42124 || 42128 <= point && point <= 42182 || 43360 <= point && point <= 43388 || 44032 <= point && point <= 55203 || 55216 <= point && point <= 55238 || 55243 <= point && point <= 55291 || 63744 <= point && point <= 64255 || 65040 <= point && point <= 65049 || 65072 <= point && point <= 65106 || 65108 <= point && point <= 65126 || 65128 <= point && point <= 65131 || 110592 <= point && point <= 110593 || 127488 <= point && point <= 127490 || 127504 <= point && point <= 127546 || 127552 <= point && point <= 127560 || 127568 <= point && point <= 127569 || // Emoji ranges (double-width)
+   127744 <= point && point <= 128511 || // Misc Symbols and Pictographs

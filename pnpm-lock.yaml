@@ -203,6 +203,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@unblessed/core@1.0.0-alpha.23': 21296bd4613f4a8cc63220346a5fd5098cafba698ae0e64326145321b67e3717
+
 importers:
 
   .:
@@ -2322,11 +2325,11 @@ snapshots:
 
   '@types/semver@7.7.1': {}
 
-  '@unblessed/core@1.0.0-alpha.23': {}
+  '@unblessed/core@1.0.0-alpha.23(patch_hash=21296bd4613f4a8cc63220346a5fd5098cafba698ae0e64326145321b67e3717)': {}
 
   '@unblessed/node@1.0.0-alpha.23(omggif@1.0.10)(pngjs@7.0.0)':
     dependencies:
-      '@unblessed/core': 1.0.0-alpha.23
+      '@unblessed/core': 1.0.0-alpha.23(patch_hash=21296bd4613f4a8cc63220346a5fd5098cafba698ae0e64326145321b67e3717)
       omggif: 1.0.10
       pngjs: 7.0.0
 

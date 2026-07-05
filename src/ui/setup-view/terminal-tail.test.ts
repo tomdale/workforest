@@ -113,18 +113,18 @@ describe("TerminalTailStore", () => {
     expect(store.linesFor("api")).toEqual(["first line", "second"]);
   });
 
-  it("substitutes double-width checkmark/cross glyphs for single-width equivalents", async () => {
+  it("passes heavy check/cross glyphs through, stripping any variation selector", async () => {
     const store = new TerminalTailStore();
     await store.apply(output("api", "✔ Created\r\n"));
     // U+FE0E (text variation selector) is part of the grapheme some CLIs emit
-    // alongside U+2714; it must not survive as a leftover character either.
+    // alongside U+2714; it must not survive as a leftover character.
     await store.apply(output("api", "✔︎ Linked\r\n"));
     await store.apply(output("api", "✖ Failed\r\n"));
 
     expect(store.linesFor("api")).toEqual([
-      "✓ Created",
-      "✓ Linked",
-      "✗ Failed",
+      "✔ Created",
+      "✔ Linked",
+      "✖ Failed",
     ]);
   });
 

@@ -237,15 +237,20 @@ const DEFAULT_SYMBOLS: ThemeSymbols = {
   checkOn: "◼",
   checkOff: "◻",
   info: "●",
-  // U+2713, not U+2714: @unblessed's width table treats U+2714 (and its
-  // variation-selector form) as double-width while real terminals render it
-  // single-width, desyncing the renderer's screen model one column for the
-  // rest of the row. U+2713 is single-width in both.
-  success: "✓",
+  // U+2714 (heavy check mark), bare with no variation selector. @unblessed's
+  // width table used to mark U+2714 double-width while real terminals render
+  // it single-width, desyncing the renderer's screen model one column for
+  // the rest of the row; a pnpm patch
+  // (patches/@unblessed__core@1.0.0-alpha.23.patch, guarded by
+  // src/terminal/unblessed-width.test.ts) fixes the table so this is now
+  // safe. The variation-selector form (U+2714 U+FE0E, "✔︎") is still unsafe:
+  // @unblessed spends an extra column on the selector itself, so it must
+  // never be used here.
+  success: "✔",
   warning: "▲",
   error: "✗",
   statusRunning: "↻", // ⟳
-  statusComplete: "✓",
+  statusComplete: "✔",
   statusFailed: "✗",
   statusPending: "○",
   statusCancelled: "⊘",

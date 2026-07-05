@@ -33,7 +33,13 @@ const PROJECT_FILES = [
   "README.md",
   "tsconfig.json",
 ] as const;
-const PROJECT_DIRS = ["bin", "packages", "skill-data", "src"] as const;
+const PROJECT_DIRS = [
+  "bin",
+  "packages",
+  "patches",
+  "skill-data",
+  "src",
+] as const;
 
 type PackageManifest = {
   name: string;
