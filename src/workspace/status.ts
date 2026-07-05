@@ -19,7 +19,6 @@ import {
 import { truncate, visibleWidth } from "../terminal/text.ts";
 import { terminalSymbol } from "../terminal/theme.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
-import { compactHome } from "../utils/display-path.ts";
 import {
   finalizeWorkspaceInitialization,
   getRepoInitializationLogPath,

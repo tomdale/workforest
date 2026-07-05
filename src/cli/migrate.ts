@@ -23,7 +23,6 @@ import type {
   WorkspaceConfig,
   WorkspaceMetadata,
 } from "../types.ts";
-import { compactHome } from "../utils/display-path.ts";
 import { comparablePath, validateResourceName } from "../utils/path-safety.ts";
 import {
   getWorktreeMetadataPath,

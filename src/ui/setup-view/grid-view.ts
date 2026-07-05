@@ -682,7 +682,7 @@ function resolveOutcome(
 function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
   const theme = activeTheme();
   const border = toBlessed(theme.chrome.border);
-  const focus = toBlessed(theme.palette.focus);
+  const focus = toBlessed(theme.palette.focus.color);
   const background = toBlessed(theme.chrome.background);
 
   let rawScreen: FullscreenScreen | null = null;
@@ -742,8 +742,8 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
         borderColor: border,
         focusBorderColor: focus,
         backgroundColor: background,
-        contentColor: toBlessed(theme.palette.dim),
-        focusContentColor: toBlessed(theme.palette.focus),
+        contentColor: toBlessed(theme.palette.dim.color),
+        focusContentColor: toBlessed(theme.palette.focus.color),
       });
       return {
         getPane: (index) => grid.getPane(index),
@@ -824,7 +824,7 @@ function createDefaultSetupViewEnvironment(): SetupViewEnvironment {
         padding: { top: 0, bottom: 0, left: 2, right: 2 },
         content: lines.join("\n"),
         style: {
-          fg: toBlessed(theme.palette.primary),
+          fg: toBlessed(theme.palette.primary.color),
           bg: background,
           border: { fg: focus, bg: background },
         },
