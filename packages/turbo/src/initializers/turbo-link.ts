@@ -145,7 +145,11 @@ async function* runCommandWithResult(
 ): AsyncGenerator<TaskState, CommandResult, undefined> {
   const task = options.foreground
     ? runForegroundTask(command, args, { cwd })
-    : spawnCommand(command, args, { cwd });
+    : // A pty gives the grid colored, live turbo CLI output instead of plain
+      // pipe text. The inactivity guard matters specifically for a pty: it
+      // keeps stdin open, so an unexpected interactive prompt would hang
+      // forever, where a pipe's closed stdin makes the same prompt fail fast.
+      spawnCommand(command, args, { cwd, pty: true, inactivityTimeoutMs: 120_000 });
 
   for await (const state of task) {
     if (state.status === "completed") {

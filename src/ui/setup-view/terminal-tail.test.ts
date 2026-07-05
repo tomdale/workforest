@@ -106,6 +106,28 @@ describe("TerminalTailStore", () => {
     expect(store.linesFor("api")).toBeNull();
   });
 
+  it("does not stagger bare-\\n chunks (pipe-spawned steps have no PTY ONLCR)", async () => {
+    const store = new TerminalTailStore();
+    await store.apply(output("api", "first line\nsecond\n"));
+
+    expect(store.linesFor("api")).toEqual(["first line", "second"]);
+  });
+
+  it("substitutes double-width checkmark/cross glyphs for single-width equivalents", async () => {
+    const store = new TerminalTailStore();
+    await store.apply(output("api", "✔ Created\r\n"));
+    // U+FE0E (text variation selector) is part of the grapheme some CLIs emit
+    // alongside U+2714; it must not survive as a leftover character either.
+    await store.apply(output("api", "✔︎ Linked\r\n"));
+    await store.apply(output("api", "✖ Failed\r\n"));
+
+    expect(store.linesFor("api")).toEqual([
+      "✓ Created",
+      "✓ Linked",
+      "✗ Failed",
+    ]);
+  });
+
   it("ignores events without output semantics", async () => {
     const store = new TerminalTailStore();
     await store.apply(

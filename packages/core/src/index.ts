@@ -180,6 +180,14 @@ const MAX_QUEUED_OUTPUT_BYTES = 1024 * 1024;
 const RESUME_QUEUED_OUTPUT_BYTES = MAX_QUEUED_OUTPUT_BYTES / 2;
 const TIMEOUT_FORCE_KILL_DELAY_MS = 5_000;
 
+// The headless VT100 emulator that renders setup-grid panes must use the same
+// cols/rows as the PTY the child was actually spawned with, or its line
+// wrapping won't match what the process drew. 120 columns keeps most panes
+// (which render narrower than the PTY) truncating long lines cleanly with an
+// ellipsis instead of showing the process's own mid-word wrap fragments.
+export const SETUP_PTY_COLS = 120;
+export const SETUP_PTY_ROWS = 24;
+
 type NodePtyModule = typeof import("@lydell/node-pty");
 
 // Importing the native PTY binding is comparatively expensive, and its
@@ -351,8 +359,8 @@ export async function* spawnCommand(
     try {
       const ptyProcess = ptyMod.spawn(command, args, {
         name: "xterm-256color",
-        cols: 80,
-        rows: 24,
+        cols: SETUP_PTY_COLS,
+        rows: SETUP_PTY_ROWS,
         ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
         env: buildPtyEnv(options.cwd),
       });

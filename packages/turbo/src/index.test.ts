@@ -71,7 +71,7 @@ describe("turboLinkInitializer.execute", () => {
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "turbo",
       ["link", "--yes", "--scope", "vercel"],
-      { cwd: context.repoDir },
+      { cwd: context.repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
     expect(states.at(-1)).toEqual({ status: "completed" });
   });
@@ -123,7 +123,7 @@ describe("turboLinkInitializer.execute", () => {
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "turbo",
       ["link", "--yes", "--scope", "some-owner"],
-      { cwd: context.repoDir },
+      { cwd: context.repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
   });
 
@@ -157,7 +157,7 @@ describe("turboLinkInitializer.execute", () => {
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "turbo",
       ["link", "--yes", "--scope", "custom-team"],
-      { cwd: context.repoDir },
+      { cwd: context.repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
   });
 

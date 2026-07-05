@@ -9,15 +9,17 @@
  * otherwise line-wrapping here will not match what the process actually drew.
  */
 
+import { SETUP_PTY_COLS, SETUP_PTY_ROWS } from "@wf-plugin/core";
+import type { Terminal } from "@xterm/headless";
 // @xterm/headless ships only a CJS bundle whose named exports Node's ESM
 // loader cannot detect statically (vitest interops them, real `node` throws
 // "does not provide an export named 'Terminal'"), so the value must come off
 // the default export. The type-only import below is erased at runtime.
 import xtermHeadless from "@xterm/headless";
-import type { Terminal } from "@xterm/headless";
 import { normalizeControlText } from "../../terminal/command-stream-adapter.ts";
 
 const { Terminal: HeadlessTerminal } = xtermHeadless;
+
 import type { RunEvent } from "../../workspace/run-log/events.ts";
 import { WORKSPACE_PANE_NAME } from "./model.ts";
 
@@ -34,8 +36,6 @@ export type TerminalTailOptions = {
   scrollback?: number;
 };
 
-const DEFAULT_COLS = 80;
-const DEFAULT_ROWS = 24;
 const DEFAULT_SCROLLBACK = 200;
 
 type TerminalEntry = {
@@ -51,8 +51,8 @@ export class TerminalTailStore {
   readonly #terminals = new Map<string, TerminalEntry>();
 
   constructor(options: TerminalTailOptions = {}) {
-    this.#cols = options.cols ?? DEFAULT_COLS;
-    this.#rows = options.rows ?? DEFAULT_ROWS;
+    this.#cols = options.cols ?? SETUP_PTY_COLS;
+    this.#rows = options.rows ?? SETUP_PTY_ROWS;
     this.#scrollback = options.scrollback ?? DEFAULT_SCROLLBACK;
   }
 
@@ -138,6 +138,13 @@ export class TerminalTailStore {
         rows: this.#rows,
         scrollback: this.#scrollback,
         allowProposedApi: true,
+        // PTY-spawned steps emit \r\n via the line discipline's ONLCR, but
+        // pipe-spawned steps (git, vercel/turbo link) emit bare \n with no
+        // PTY to add the \r. xterm treats \n as line-feed-only, so without
+        // this those chunks render as a staircase, each line starting one
+        // column further right than the last. convertEol treats every \n as
+        // \r\n, which is a no-op for streams that already send \r\n.
+        convertEol: true,
       }),
       pending: Promise.resolve(),
     };
@@ -191,9 +198,34 @@ function collectCells(
     // character in the previous column; the wide cell's chars already
     // cover them.
     if (cell.getWidth() === 0) continue;
-    cells.push({ char: cell.getChars() || " ", style: sgrParams(cell) });
+    cells.push({
+      char: normalizeWideGlyph(cell.getChars() || " "),
+      style: sgrParams(cell),
+    });
   }
   return cells;
+}
+
+// @unblessed hardcodes U+2714 (heavy check mark) and U+2716 (heavy
+// multiplication x) as double-width, while real terminals (and xterm here)
+// render them single-width. A cell holding one of these desyncs @unblessed's
+// column model by one for the rest of the row it's on. U+2713/U+2717 are
+// visually equivalent and single-width in both, so swap to those instead.
+// CLIs (e.g. the Vercel CLI's success checkmark) commonly print the U+2714
+// form, optionally followed by a variation selector (U+FE0E/U+FE0F); matching
+// on just the grapheme's first code point and replacing the whole thing drops
+// that selector along with the width mismatch. A full width-reconciliation
+// table is out of scope; this is a small explicit map for the glyphs seen in
+// practice.
+const WIDE_GLYPH_SUBSTITUTIONS: ReadonlyMap<number, string> = new Map([
+  [0x2714, "✓"], // ✔ -> ✓
+  [0x2716, "✗"], // ✖ -> ✗
+]);
+
+function normalizeWideGlyph(chars: string): string {
+  const codePoint = chars.codePointAt(0);
+  if (codePoint === undefined) return chars;
+  return WIDE_GLYPH_SUBSTITUTIONS.get(codePoint) ?? chars;
 }
 
 function trimTrailingBlank(cells: readonly Cell[]): readonly Cell[] {
