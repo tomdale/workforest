@@ -308,7 +308,7 @@ describe("buildStatusLine", () => {
     expect(line).toContain("1/3 ready");
     expect(line).toContain("1 failed");
     expect(line).toContain("1:42 elapsed");
-    expect(line).toContain("[enter] zoom");
+    expect(line).toContain("[z] zoom");
     expect(line).toContain("[d] detach");
     expect(line).toContain("[q] cancel");
     expect(line).toContain("[?] help");
@@ -368,7 +368,7 @@ describe("buildStatusLine", () => {
     );
     expect(line).toContain("[esc] back");
     expect(line).toContain("[?] help");
-    expect(line).not.toContain("[enter] zoom");
+    expect(line).not.toContain("[z] zoom");
   });
 });
 
@@ -378,7 +378,7 @@ describe("buildHelpLines", () => {
       .map(stripTags)
       .join("\n");
     expect(text).toContain("move focus between panes");
-    expect(text).toContain("zoom the focused pane");
+    expect(text).toContain("toggle zoom on the focused pane");
     expect(text).toContain("previous / next page");
     expect(text).toContain("detach; setup continues in the background");
     expect(text).toContain("cancel setup");

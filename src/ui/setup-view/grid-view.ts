@@ -481,6 +481,11 @@ export async function renderSetupGrid(
           scheduleRender();
         }
         break;
+      case "z":
+        zoomedPane =
+          zoomedPane === null ? (lastVisible[focusIndex] ?? null) : null;
+        scheduleRender();
+        break;
       case "escape":
         if (zoomedPane !== null) {
           zoomedPane = null;

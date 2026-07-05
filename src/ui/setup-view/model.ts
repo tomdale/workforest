@@ -298,7 +298,7 @@ export function buildStatusLine(input: StatusLineInput): string {
   if (zoomed) {
     hints.push("[esc] back");
   } else {
-    hints.push("[enter] zoom");
+    hints.push("[z] zoom");
     if (pageCount > 1) hints.push("[ ] page");
   }
   if (mode === "until-ready") {
@@ -329,7 +329,7 @@ export type HelpLinesInput = Readonly<{
 export function buildHelpLines(input: HelpLinesInput): string[] {
   const bindings: [key: string, action: string][] = [
     ["arrows / hjkl", "move focus between panes"],
-    ["enter", "zoom the focused pane"],
+    ["z / enter", "toggle zoom on the focused pane"],
     ["esc", "close zoom (or this help)"],
     ["[ and ]", "previous / next page"],
   ];

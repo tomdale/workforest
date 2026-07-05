@@ -547,6 +547,37 @@ describe("renderSetupGrid", () => {
     await promise;
   });
 
+  it("toggles zoom on the focused pane with z", async () => {
+    const { events, push, close } = createEventSource();
+    const mock = createMockEnvironment();
+
+    const promise = renderSetupGrid({
+      events,
+      repoNames: ["front", "api"],
+      mode: "watch",
+      environment: mock.environment,
+    });
+    push({
+      kind: "run-start",
+      command: "new",
+      repos: ["front", "api"],
+      scope: "workspace",
+      pid: 1,
+    });
+    await tick();
+
+    mock.press("right");
+    mock.press("z");
+    const grid = mock.grids[0];
+    expect(grid?.zoomCalls.at(-1)).toBe(1);
+
+    mock.press("z");
+    expect(grid?.zoomCalls.at(-1)).toBeNull();
+
+    close();
+    await promise;
+  });
+
   it("fits every pane on one page when the terminal is large enough", async () => {
     const { events, push, close } = createEventSource();
     // 200×41 holds a 6×5 of minimum panes, so 12 repos need no paging.
