@@ -26,7 +26,7 @@ Status values:
 | --- | --- | --- | --- |
 | Entry surface (go to or create a worktree or workspace) | bare `wf` (go-or-create), `wf new` (create-only) | `src/entry/surface.ts` (Phase 1 name/existing omni-prompt → Phase 2 source accumulation), `src/terminal/fuzzy-list.ts`, hands off to the setup view via `src/workspace/create.ts` | Audit needed |
 | Creation flow | `wf new <name> <source…>` setup output | `src/cli/new.ts` → `src/workspace/create.ts` → `src/ui/setup-view/present.ts` | Canonical |
-| Parallel repository setup grid | `wf new`, `wf status --watch` | `src/ui/setup-view/{grid-view,model,pager}.ts`, `src/ui/grid-layout.ts`; renders from the run event log (`src/workspace/run-log/`) with terminal-sized pane layout, pane zoom, paging, a `?` help overlay, detach, and graceful cancel; completion holds until a keypress | Canonical |
+| Parallel repository setup grid | `wf new`, `wf status --watch` | `src/ui/setup-view/{grid-view,model,pager}.ts`, `src/ui/grid-layout.ts`; renders from the run event log (`src/workspace/run-log/`) with terminal-sized pane layout, merged single-line borders with junctions, pane zoom, paging, a `?` help overlay, detach, and graceful cancel; setup commands run under a real pseudo-terminal for colored output and in-place progress (falls back to plain pipes if unavailable; forced via `WORKFOREST_NO_PTY=1`); completion holds until a keypress | Canonical |
 | Legacy pipeline grid (compat) | `wf add`, task setup, review, cloud | `src/ui/grid-consumer.ts` (>9 repos route through `src/ui/setup-view/compat.ts`) | Canonical |
 | Setup scrollback summary | Every setup grid or console exit path | `src/ui/setup-view/summary.ts` | Canonical |
 | Setup run log report | `wf init logs` | `src/workspace/run-log/render.ts` | Canonical |

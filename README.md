@@ -94,12 +94,17 @@ background workers.
 
 In an interactive terminal the setup grid stays attached through those
 installs and hooks until the workspace is fully ready. Each pane shows the
-repository's step checklist with live elapsed times above its streamed
-command output. The grid sizes itself to the terminal: it fits as many panes
-as the window holds, reflows on resize, and pages through the rest (`[` and
-`]`) when repositories overflow. The status line lists the active
-keybindings, and **?** opens a help overlay with the full keymap. While
-attached:
+repository's step checklist with live elapsed times above its command output.
+Setup commands run under a real pseudo-terminal, so you see colored output and
+in-place progress updates (for example pnpm's live reporter) just as you would
+in a real terminal. If PTY allocation is unavailable the CLI falls back to
+plain pipe output automatically. The grid sizes itself to the terminal: it fits
+as many panes as the window holds, reflows on resize, and pages through the
+rest (`[` and `]`) when repositories overflow. Adjacent panes share single
+border lines with proper junctions (tmux style). The focused pane's border and
+output render highlighted (white); unfocused panes show dim output. The status
+line lists active keybindings, and **?** opens a help overlay with the full
+keymap. While attached:
 
 - Arrows or `h`/`j`/`k`/`l` move focus, **Enter** zooms the focused pane to
   the full screen, and **Esc** zooms back out.
@@ -110,15 +115,17 @@ attached:
   code `130`. A second press forces an immediate exit.
 
 When the run finishes, the completion view (celebration on success, failure
-panes on error) stays on screen until you press a key. Every exit path then
-prints one persistent summary to scrollback: per-repo timings, failures with
-`wf init logs` pointers, and next steps. A fully attended run that fails
-exits with code `1`.
+panes on error) stays on screen until you press a key; the elapsed counter
+stops and the status line hides while the banner waits for input. Every exit
+path then prints one persistent summary to scrollback: per-repo timings,
+failures with `wf init logs` pointers, and next steps. A fully attended run
+that fails exits with code `1`.
 
 Outside a terminal the command prints one line per step and returns after the
 worktrees are available while initialization continues in the background. Add
 `--verbose` to `wf new` or `wf add` to stream subprocess output inline,
-prefixed per repository.
+prefixed per repository. Set `WORKFOREST_NO_PTY=1` to force plain-pipe output
+even in an interactive terminal (useful for capturing output to a log file).
 
 Run the command with just a name for the interactive creation flow:
 
