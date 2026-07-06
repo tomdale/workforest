@@ -380,7 +380,8 @@ describe("removeWorktree", () => {
     expect(cmds).not.toContain("worktree remove");
     expect(
       states.some(
-        (s) => "message" in s && /pruning mirror metadata/.test(s.message),
+        (s) =>
+          "message" in s && /Pruning stale worktree metadata/.test(s.message),
       ),
     ).toBe(true);
   });

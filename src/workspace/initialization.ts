@@ -8,6 +8,7 @@ import { validateRepositoryComponent } from "../repository-components.ts";
 import { refreshAndMaterializeTemplateAgentsMd } from "../templates/agents-md.ts";
 import { applyTemplate, copyTemplateFiles } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
+import { BACKGROUND_HANDOFF } from "../terminal/messages.ts";
 import type { RepositorySource } from "../types.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
 import {
@@ -500,7 +501,7 @@ export async function markWorkspaceInitializing(
   await updateWorkspaceInitializationState(scope, () => ({
     version: 1,
     status: "initializing",
-    message: "Repository initialization continues in the background",
+    message: BACKGROUND_HANDOFF,
     updated_at: new Date().toISOString(),
   }));
 }

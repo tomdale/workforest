@@ -202,7 +202,7 @@ async function* cleanupTargetedWorkspaceWorktrees(
   yield {
     status: "log",
     level: "info",
-    message: `Cleaning up ${targets.length} existing worktree(s) under ${workspaceDir}`,
+    message: `Cleaning up ${targets.length} existing worktree${targets.length === 1 ? "" : "s"} under ${workspaceDir}`,
   };
 
   for (const target of targets) {
@@ -273,7 +273,7 @@ async function* cleanupScannedWorkspaceWorktrees(
   yield {
     status: "log",
     level: "info",
-    message: `Cleaning up ${targets.length} existing worktree(s) under ${workspaceDir}`,
+    message: `Cleaning up ${targets.length} existing worktree${targets.length === 1 ? "" : "s"} under ${workspaceDir}`,
   };
 
   for (const target of targets) {
@@ -297,7 +297,7 @@ async function* pruneWorktreeMetadataWithLock(
   yield {
     status: "log",
     level: "warn",
-    message: `Stale worktree metadata for ${worktreePath}; pruning mirror metadata instead`,
+    message: `Pruning stale worktree metadata for ${worktreePath}`,
   };
 
   await withGitWorktreeLock(gitDir, () =>

@@ -169,7 +169,7 @@ export async function runDeleteCommand(
     if (json) {
       return jsonSuccess(deleteResult(entry, cleanup));
     }
-    log.success(`Deleted: ${entry.selector}`);
+    log.success(`Deleted ${entry.selector}`);
     return success();
   } finally {
     await timing.flush();
@@ -246,7 +246,7 @@ async function deleteReviewWorktree(
       },
     } satisfies DeleteResultData);
   }
-  log.success(`Deleted: ${selector}`);
+  log.success(`Deleted ${selector}`);
   return success();
 }
 

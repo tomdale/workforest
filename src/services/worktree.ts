@@ -359,7 +359,7 @@ export async function* pruneWorktreeMetadata(
   yield {
     status: "log",
     level: "warn",
-    message: `Stale worktree metadata for ${worktreePath}; pruning mirror metadata instead`,
+    message: `Pruning stale worktree metadata for ${worktreePath}`,
   };
 
   await runGit(["worktree", "prune"], { cwd: gitDir });
@@ -473,7 +473,7 @@ export async function* addWorktree(
       yield {
         status: "log",
         level: "info",
-        message: `Reusing existing checkout at ${targetDir}`,
+        message: `Reusing existing worktree at ${targetDir}`,
       };
       return true;
     }

@@ -93,12 +93,12 @@ prunable gitdir file points to non-existent location
       {
         status: "log",
         level: "info",
-        message: `Cleaning up 1 existing worktree(s) under ${workspaceDir}`,
+        message: `Cleaning up 1 existing worktree under ${workspaceDir}`,
       },
       {
         status: "log",
         level: "warn",
-        message: `Stale worktree metadata for ${repoDir}; pruning mirror metadata instead`,
+        message: `Pruning stale worktree metadata for ${repoDir}`,
       },
     ]);
 
@@ -153,12 +153,12 @@ branch refs/heads/test
       {
         status: "log",
         level: "info",
-        message: `Cleaning up 1 existing worktree(s) under ${workspaceDir}`,
+        message: `Cleaning up 1 existing worktree under ${workspaceDir}`,
       },
       {
         status: "log",
         level: "warn",
-        message: `Stale worktree metadata for ${repoDir}; pruning mirror metadata instead`,
+        message: `Pruning stale worktree metadata for ${repoDir}`,
       },
     ]);
 

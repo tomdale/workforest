@@ -145,7 +145,7 @@ describe("review command directory contexts", () => {
     const result = await runCli(fixture, fixture.checkoutDir, ["delete"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Deleted: omniagent#123");
+    expect(result.stdout).toContain("Deleted omniagent#123");
     expect(result.stderr).toBe("");
     await expect(readFile(cdPath(fixture), "utf8")).resolves.toBe(
       `${fixture.workspaceDir}\n`,

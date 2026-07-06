@@ -251,7 +251,7 @@ export async function stampWorkspace(
     emitServiceEvent(onEvent, {
       type: "message",
       level: "success",
-      message: "All repositories are already set up.",
+      message: "All repositories are already set up",
     });
     return {
       setupFailures: [],
@@ -331,7 +331,7 @@ export async function stampWorkspace(
     emitServiceEvent(onEvent, {
       type: "message",
       level: "success",
-      message: "Workspace created.",
+      message: "Workspace created",
     });
   }
 

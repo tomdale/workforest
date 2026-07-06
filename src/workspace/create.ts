@@ -236,7 +236,7 @@ async function reportCreateOutcome({
   switch (outcome) {
     case "background":
       printRepoSetupFailures(setupFailures, options.onEvent);
-      log.success(`Change ready: ${compactHome(targetDir)}`);
+      log.success(`Worktree ready: ${compactHome(targetDir)}`);
       await reportShellCdTarget(targetDir, {
         writeShellCdPath: options.writeShellCdPath,
       });
