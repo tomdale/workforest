@@ -11,13 +11,12 @@ import {
 } from "../services/git.ts";
 import {
   hasBrokenWorktreeLink,
-  isStaleWorktreeRemoveError,
-  pruneWorktreeMetadata,
+  removeWorktree,
   withGitWorktreeLock,
 } from "../services/worktree.ts";
 import type { RepositorySource } from "../types.ts";
 import { comparablePath, resolveContainedPath } from "../utils/path-safety.ts";
-import { asTask, withRetry } from "../utils/retry.ts";
+import { withRetry } from "../utils/retry.ts";
 import type { TaskState } from "../utils/task-generator.ts";
 import {
   GIT_CLONE_INACTIVITY_TIMEOUT_MS,
@@ -29,6 +28,10 @@ import {
 type WorktreeEntry = {
   path: string;
   prunable: boolean;
+};
+
+export type CleanupWorkspaceWorktreesOptions = {
+  targetPaths?: readonly string[];
 };
 
 function parseWorktreeList(stdout: string): WorktreeEntry[] {
@@ -161,6 +164,91 @@ async function* pruneStaleWorktreesIfNeeded(
 export async function* cleanupWorkspaceWorktrees(
   mirrorDir: string,
   workspaceDir: string,
+  options: CleanupWorkspaceWorktreesOptions = {},
+): AsyncGenerator<TaskState, void, undefined> {
+  if (options.targetPaths?.length) {
+    const result = yield* cleanupTargetedWorkspaceWorktrees(
+      mirrorDir,
+      workspaceDir,
+      options.targetPaths,
+    );
+    if (result === "cleaned") {
+      return;
+    }
+  }
+
+  yield* cleanupScannedWorkspaceWorktrees(mirrorDir, workspaceDir);
+}
+
+async function* cleanupTargetedWorkspaceWorktrees(
+  mirrorDir: string,
+  workspaceDir: string,
+  targetPaths: readonly string[],
+): AsyncGenerator<TaskState, "cleaned" | "fallback", undefined> {
+  const targets = await normalizeDirectCleanupTargets(
+    workspaceDir,
+    targetPaths,
+  );
+  if (targets.length === 0) {
+    return "fallback";
+  }
+
+  for (const target of targets) {
+    if (!(await pathExists(target)) || (await hasBrokenWorktreeLink(target))) {
+      return "fallback";
+    }
+  }
+
+  yield {
+    status: "log",
+    level: "info",
+    message: `Cleaning up ${targets.length} existing worktree(s) under ${workspaceDir}`,
+  };
+
+  for (const target of targets) {
+    const result = yield* removeWorktree({
+      gitDir: mirrorDir,
+      worktreePath: target,
+      force: true,
+    });
+    if (result.status === "stale") {
+      return "fallback";
+    }
+  }
+
+  return "cleaned";
+}
+
+async function normalizeDirectCleanupTargets(
+  workspaceDir: string,
+  targetPaths: readonly string[],
+): Promise<string[]> {
+  const normalizedWorkspaceDir = await comparablePath(workspaceDir);
+  const targets: string[] = [];
+  const seen = new Set<string>();
+
+  for (const targetPath of targetPaths) {
+    const resolvedTarget = path.resolve(targetPath);
+    const normalizedTarget = await comparablePath(resolvedTarget);
+    if (
+      normalizedTarget !== normalizedWorkspaceDir &&
+      !normalizedTarget.startsWith(`${normalizedWorkspaceDir}${path.sep}`)
+    ) {
+      return [];
+    }
+    if (seen.has(normalizedTarget)) {
+      continue;
+    }
+    seen.add(normalizedTarget);
+    targets.push(resolvedTarget);
+  }
+
+  return targets;
+}
+
+async function* cleanupScannedWorkspaceWorktrees(
+  mirrorDir: string,
+  workspaceDir: string,
 ): AsyncGenerator<TaskState, void, undefined> {
   // Compare via realpath so a symlinked workspace root still matches the
   // worktree paths git records (which may be resolved differently).
@@ -189,31 +277,32 @@ export async function* cleanupWorkspaceWorktrees(
   };
 
   for (const target of targets) {
-    if (target.prunable || (await hasBrokenWorktreeLink(target.path))) {
-      yield* pruneWorktreeMetadata(mirrorDir, target.path);
+    if (target.prunable) {
+      yield* pruneWorktreeMetadataWithLock(mirrorDir, target.path);
       continue;
     }
 
-    const removeGen = asTask(() =>
-      runGit(["worktree", "remove", "--force", target.path], {
-        cwd: mirrorDir,
-      }),
-    );
-
-    try {
-      yield* withRetry(removeGen, {
-        attempts: 3,
-        label: `worktree-remove:${path.basename(target.path)}`,
-      });
-    } catch (error) {
-      if (isStaleWorktreeRemoveError(error)) {
-        yield* pruneWorktreeMetadata(mirrorDir, target.path);
-        continue;
-      }
-
-      throw error;
-    }
+    yield* removeWorktree({
+      gitDir: mirrorDir,
+      worktreePath: target.path,
+      force: true,
+    });
   }
+}
+
+async function* pruneWorktreeMetadataWithLock(
+  gitDir: string,
+  worktreePath: string,
+): AsyncGenerator<TaskState, void, undefined> {
+  yield {
+    status: "log",
+    level: "warn",
+    message: `Stale worktree metadata for ${worktreePath}; pruning mirror metadata instead`,
+  };
+
+  await withGitWorktreeLock(gitDir, () =>
+    runGit(["worktree", "prune"], { cwd: gitDir }),
+  );
 }
 
 /**

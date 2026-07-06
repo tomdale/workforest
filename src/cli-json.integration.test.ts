@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -207,6 +207,45 @@ describe("JSON CLI integration", () => {
         tasks: [],
       },
     });
+  });
+
+  it("emits a clean delete dry-run plan without removing the workspace", async () => {
+    const workspaceDir = await createWorkspaceFixture();
+    const result = await runJson(["delete", "--dry-run", "--json"], {
+      cwd: workspaceDir,
+    });
+
+    const parsed = expectJsonResult(result, 0);
+    expect(parsed).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        dryRun: true,
+        selector: "_adhoc/json-status",
+        blocked: true,
+        blockers: expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining("front:"),
+            suggestion: expect.any(String),
+          }),
+        ]),
+        wouldRemove: expect.objectContaining({
+          directories: [workspaceDir],
+          metadata: [path.join(workspaceDir, ".workforest", "workspace.json")],
+          branches: [],
+        }),
+        preservation: expect.objectContaining({
+          cachedMirrors: expect.objectContaining({
+            action: "preserve",
+            repositories: ["front"],
+          }),
+          nodeModules: expect.objectContaining({
+            action: "preserve-before-delete",
+            repositories: ["front"],
+          }),
+        }),
+      }),
+    });
+    expect((await stat(workspaceDir)).isDirectory()).toBe(true);
   });
 
   it("emits JSON for template read and mutation commands", async () => {

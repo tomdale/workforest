@@ -57,12 +57,15 @@ afterEach(async () => {
 describe("cleanupWorkspaceWorktrees", () => {
   it("prunes stale target metadata when git marks the worktree as prunable", async () => {
     const workspaceDir = await createTempDir("workforest-cleanup-");
+    const mirrorDir = await createTempDir("workforest-api.git-");
+    const commonDir = await createTempDir("workforest-common-");
     const repoDir = path.join(workspaceDir, "api");
     await mkdir(repoDir, { recursive: true });
 
-    runGitMock
-      .mockResolvedValueOnce({
-        stdout: `worktree /tmp/cache/api.git
+    runGitMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          stdout: `worktree ${mirrorDir}
 bare
 
 worktree ${repoDir}
@@ -70,12 +73,20 @@ HEAD abc123
 branch refs/heads/test
 prunable gitdir file points to non-existent location
 `,
-        stderr: "",
-      })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+          stderr: "",
+        };
+      }
+      if (args[0] === "rev-parse") {
+        return { stdout: commonDir, stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "prune") {
+        return { stdout: "", stderr: "" };
+      }
+      throw new Error(`Unexpected git args: ${args.join(" ")}`);
+    });
 
     const states = await collectStates(
-      cleanupWorkspaceWorktrees("/tmp/cache/api.git", workspaceDir),
+      cleanupWorkspaceWorktrees(mirrorDir, workspaceDir),
     );
 
     expect(states).toEqual([
@@ -94,15 +105,17 @@ prunable gitdir file points to non-existent location
     expect(runGitMock).toHaveBeenNthCalledWith(
       1,
       ["worktree", "list", "--porcelain"],
-      { cwd: "/tmp/cache/api.git" },
+      { cwd: mirrorDir },
     );
-    expect(runGitMock).toHaveBeenNthCalledWith(2, ["worktree", "prune"], {
-      cwd: "/tmp/cache/api.git",
+    expect(runGitMock).toHaveBeenCalledWith(["worktree", "prune"], {
+      cwd: mirrorDir,
     });
   });
 
   it("prunes stale metadata when the worktree link exists but points to a missing admin dir", async () => {
     const workspaceDir = await createTempDir("workforest-cleanup-");
+    const mirrorDir = await createTempDir("workforest-front.git-");
+    const commonDir = await createTempDir("workforest-common-");
     const repoDir = path.join(workspaceDir, "front");
     await mkdir(repoDir, { recursive: true });
     await writeFile(
@@ -110,21 +123,30 @@ prunable gitdir file points to non-existent location
       "gitdir: /tmp/cache/front.git/worktrees/front6\n",
     );
 
-    runGitMock
-      .mockResolvedValueOnce({
-        stdout: `worktree /tmp/cache/front.git
+    runGitMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          stdout: `worktree ${mirrorDir}
 bare
 
 worktree ${repoDir}
 HEAD def456
 branch refs/heads/test
 `,
-        stderr: "",
-      })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+          stderr: "",
+        };
+      }
+      if (args[0] === "rev-parse") {
+        return { stdout: commonDir, stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "prune") {
+        return { stdout: "", stderr: "" };
+      }
+      throw new Error(`Unexpected git args: ${args.join(" ")}`);
+    });
 
     const states = await collectStates(
-      cleanupWorkspaceWorktrees("/tmp/cache/front.git", workspaceDir),
+      cleanupWorkspaceWorktrees(mirrorDir, workspaceDir),
     );
 
     expect(states).toEqual([
@@ -140,13 +162,15 @@ branch refs/heads/test
       },
     ]);
 
-    expect(runGitMock).toHaveBeenNthCalledWith(2, ["worktree", "prune"], {
-      cwd: "/tmp/cache/front.git",
+    expect(runGitMock).toHaveBeenCalledWith(["worktree", "prune"], {
+      cwd: mirrorDir,
     });
   });
 
-  it("removes worktrees without a timeout", async () => {
+  it("removes direct metadata targets without scanning worktrees", async () => {
     const workspaceDir = await createTempDir("workforest-cleanup-");
+    const mirrorDir = await createTempDir("workforest-api.git-");
+    const commonDir = await createTempDir("workforest-common-");
     const repoDir = path.join(workspaceDir, "api");
     const adminDir = path.join(workspaceDir, "api-admin");
     await mkdir(repoDir, { recursive: true });
@@ -157,28 +181,75 @@ branch refs/heads/test
 `,
     );
 
-    runGitMock
-      .mockResolvedValueOnce({
-        stdout: `worktree /tmp/cache/api.git
+    runGitMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === "rev-parse") {
+        return { stdout: commonDir, stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "remove") {
+        return { stdout: "", stderr: "" };
+      }
+      throw new Error(`Unexpected git args: ${args.join(" ")}`);
+    });
+
+    await collectStates(
+      cleanupWorkspaceWorktrees(mirrorDir, workspaceDir, {
+        targetPaths: [repoDir],
+      }),
+    );
+
+    expect(runGitMock).not.toHaveBeenCalledWith(
+      ["worktree", "list", "--porcelain"],
+      expect.anything(),
+    );
+    expect(runGitMock).toHaveBeenCalledWith(
+      ["worktree", "remove", "--force", repoDir],
+      { cwd: mirrorDir, timeout: expect.any(Number) },
+    );
+  });
+
+  it("falls back to scanned cleanup when a direct target is stale", async () => {
+    const workspaceDir = await createTempDir("workforest-cleanup-");
+    const mirrorDir = await createTempDir("workforest-api.git-");
+    const commonDir = await createTempDir("workforest-common-");
+    const repoDir = path.join(workspaceDir, "api");
+    await mkdir(repoDir, { recursive: true });
+
+    runGitMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          stdout: `worktree ${mirrorDir}
 bare
 
 worktree ${repoDir}
 HEAD abc123
 branch refs/heads/test
+prunable gitdir file points to non-existent location
 `,
-        stderr: "",
-      })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+          stderr: "",
+        };
+      }
+      if (args[0] === "rev-parse") {
+        return { stdout: commonDir, stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "prune") {
+        return { stdout: "", stderr: "" };
+      }
+      throw new Error(`Unexpected git args: ${args.join(" ")}`);
+    });
 
     await collectStates(
-      cleanupWorkspaceWorktrees("/tmp/cache/api.git", workspaceDir),
+      cleanupWorkspaceWorktrees(mirrorDir, workspaceDir, {
+        targetPaths: [repoDir],
+      }),
     );
 
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      2,
-      ["worktree", "remove", "--force", repoDir],
-      { cwd: "/tmp/cache/api.git" },
+    expect(runGitMock).toHaveBeenCalledWith(
+      ["worktree", "list", "--porcelain"],
+      { cwd: mirrorDir },
     );
+    expect(runGitMock).toHaveBeenCalledWith(["worktree", "prune"], {
+      cwd: mirrorDir,
+    });
   });
 });
 

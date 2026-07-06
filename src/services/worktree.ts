@@ -525,6 +525,10 @@ export type RemoveWorktreeOptions = {
   lock?: boolean;
 };
 
+export type RemoveWorktreeResult = {
+  status: "removed" | "stale";
+};
+
 /**
  * Remove a worktree with the hardened discipline previously unique to workspace
  * cleanup: prune metadata for a broken gitlink, retry transient failures, and
@@ -532,7 +536,7 @@ export type RemoveWorktreeOptions = {
  */
 export async function* removeWorktree(
   opts: RemoveWorktreeOptions,
-): AsyncGenerator<TaskState, void, undefined> {
+): AsyncGenerator<TaskState, RemoveWorktreeResult, undefined> {
   const {
     gitDir,
     worktreePath,
@@ -542,10 +546,10 @@ export async function* removeWorktree(
     lock = true,
   } = opts;
 
-  yield* withOptionalGitWorktreeLock(gitDir, lock, async function* () {
+  return yield* withOptionalGitWorktreeLock(gitDir, lock, async function* () {
     if (await hasBrokenWorktreeLink(worktreePath)) {
       yield* pruneWorktreeMetadata(gitDir, worktreePath);
-      return;
+      return { status: "stale" };
     }
 
     const args = force
@@ -563,10 +567,12 @@ export async function* removeWorktree(
     } catch (error) {
       if (isStaleWorktreeRemoveError(error)) {
         yield* pruneWorktreeMetadata(gitDir, worktreePath);
-        return;
+        return { status: "stale" };
       }
       throw error;
     }
+
+    return { status: "removed" };
   });
 }
 

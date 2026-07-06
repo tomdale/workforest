@@ -7,6 +7,7 @@ const {
   ensureCacheDirMock,
   cleanupWorkspaceWorktreesMock,
   pathExistsMock,
+  preserveNodeModulesMock,
   readWorkspaceMetadataMock,
   removeWorktreeMetadataMock,
 } = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const {
   ensureCacheDirMock: vi.fn(),
   cleanupWorkspaceWorktreesMock: vi.fn(),
   pathExistsMock: vi.fn(),
+  preserveNodeModulesMock: vi.fn(async () => ({ status: "missing" })),
   readWorkspaceMetadataMock: vi.fn(),
   removeWorktreeMetadataMock: vi.fn(),
 }));
@@ -44,7 +46,7 @@ vi.mock("../config.ts", () => ({
 }));
 
 vi.mock("../node-modules-cache.ts", () => ({
-  preserveNodeModules: vi.fn(async () => ({ status: "missing" })),
+  preserveNodeModules: preserveNodeModulesMock,
 }));
 
 vi.mock("@wf-plugin/core", async () => {
@@ -190,6 +192,84 @@ describe("streamWorkspaceCleanup", () => {
       phase: "complete",
       removedRepos: [],
     });
+  });
+
+  it("uses metadata targets and preserves node_modules before cleanup", async () => {
+    const callOrder: string[] = [];
+    preserveNodeModulesMock.mockImplementation(async (...args: unknown[]) => {
+      const { repoDir } = args[0] as { repoDir: string };
+      callOrder.push(`preserve:${repoDir}`);
+      return { status: "missing" };
+    });
+    cleanupWorkspaceWorktreesMock.mockImplementation(async function* () {
+      callOrder.push("cleanup");
+      yield { status: "running" };
+    });
+
+    await collectStates(streamWorkspaceCleanup("/tmp/workspace/demo"));
+
+    expect(cleanupWorkspaceWorktreesMock).toHaveBeenCalledWith(
+      "/tmp/cache/api.git",
+      "/tmp/workspace/demo",
+      {
+        targetPaths: [
+          "/tmp/workspace/demo/api",
+          "/tmp/workspace/demo/_tasks/api/fix-tests",
+        ],
+      },
+    );
+    expect(callOrder).toEqual([
+      "preserve:/tmp/workspace/demo/api",
+      "preserve:/tmp/workspace/demo/_tasks/api/fix-tests",
+      "cleanup",
+    ]);
+  });
+
+  it("bounds concurrent repository cleanup jobs", async () => {
+    readWorkspaceMetadataMock.mockResolvedValue({
+      workspace: {
+        version: "1",
+        created_at: "2026-04-16T00:00:00.000Z",
+        feature_name: "demo",
+      },
+      repos: ["api", "front", "docs", "web", "cli"].map((name) => ({
+        name,
+        remote: `git@github.com:vercel/${name}.git`,
+        has_lockfile: true,
+      })),
+      tasks: [],
+    });
+
+    const started: string[] = [];
+    const releases = new Map<string, () => void>();
+    cleanupWorkspaceWorktreesMock.mockImplementation(async function* (
+      mirrorDir: string,
+    ) {
+      started.push(mirrorDir);
+      await new Promise<void>((resolve) => {
+        releases.set(mirrorDir, resolve);
+      });
+      yield { status: "running" };
+    });
+
+    const cleanup = collectStates(
+      streamWorkspaceCleanup("/tmp/workspace/demo"),
+    );
+
+    await vi.waitFor(() => {
+      expect(started).toHaveLength(4);
+    });
+    expect(started).not.toContain("/tmp/cache/cli.git");
+
+    releases.get(started[0] ?? "")?.();
+    await vi.waitFor(() => {
+      expect(started).toContain("/tmp/cache/cli.git");
+    });
+
+    for (const release of releases.values()) {
+      release();
+    }
+    await cleanup;
   });
 
   it("includes tasks in cleanup previews", async () => {

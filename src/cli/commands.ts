@@ -626,7 +626,7 @@ const deleteCommand = leaf({
   path: ["delete"],
   summary: "Delete a worktree or workspace",
   description:
-    "Removes a worktree or workspace after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks; it refuses with a blocker report otherwise. With no selector, resolves the current one from the working directory. Pass --force to skip verification and remove unclean, unintegrated, or abandoned work (squash merges, cherry-picks, or proof Workforest cannot detect). Cached mirrors are preserved.",
+    "Removes a worktree or workspace after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks; it refuses with a blocker report otherwise. With no selector, resolves the current one from the working directory. Pass --dry-run to preview removals, blockers, node_modules preservation, and cached mirror preservation without deleting anything. Pass --force to skip verification and remove unclean, unintegrated, or abandoned work (squash merges, cherry-picks, or proof Workforest cannot detect). Cached mirrors are preserved.",
   handler: "delete",
   help: { kind: "command", command: "delete" },
   operands: operands(
@@ -637,6 +637,12 @@ const deleteCommand = leaf({
     "Selector as <group>/<name>, or a bare name when unique. Omit to delete the current worktree or workspace.",
   ),
   flags: [
+    booleanFlag(
+      "dryRun",
+      "--dry-run",
+      "-n",
+      "Preview what would be removed and preserved without deleting anything.",
+    ),
     booleanFlag(
       "force",
       "--force",
@@ -657,7 +663,12 @@ const deleteCommand = leaf({
       command: "wf delete _adhoc/experiment --force",
       description: "Abandon and delete unintegrated work.",
     },
+    {
+      command: "wf delete _adhoc/experiment --dry-run",
+      description: "Preview deletion without removing files or branches.",
+    },
   ],
+  outputModes: ["human", "report", "json"],
   tty: optionalStdin,
 });
 

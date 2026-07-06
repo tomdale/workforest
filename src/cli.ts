@@ -148,9 +148,24 @@ const humanServiceEventSink: ServiceEventSink = (event) => {
 
 function renderCleanupState(state: CleanupState, dryRun: boolean): void {
   switch (state.phase) {
-    case "init":
+    case "init": {
+      const message = state.message
+        ? state.message[0]?.toLowerCase() + state.message.slice(1)
+        : "preparing cleanup";
+      log.info(`Delete: ${message}`);
+      break;
+    }
     case "remove-dir":
-      log.info(state.message);
+      log.info(`Delete: ${state.message}`);
+      break;
+    case "node-modules":
+      if (state.status === "preserving") {
+        log.info(`${state.repo}: preserving node_modules`);
+      } else if (state.status === "preserved") {
+        log.info(`${state.repo}: preserved node_modules in cache`);
+      } else if (state.status === "warning") {
+        log.warn(`${state.repo}: ${state.message ?? "node_modules warning"}`);
+      }
       break;
     case "worktree":
       if (state.state.status === "log") {
@@ -162,7 +177,7 @@ function renderCleanupState(state: CleanupState, dryRun: boolean): void {
       }
       break;
     case "worktree-complete":
-      log.success(`${state.repo}: worktree removed from mirror`);
+      log.success(`${state.repo}: removed worktree from cached mirror`);
       break;
     case "remote-branch":
       if (state.status === "checking") {
@@ -313,10 +328,15 @@ async function runInvocation(
     case "delete":
       return runTypedCommand(async () => {
         const { runDeleteCommand } = await import("./cli/delete.ts");
+        const json = jsonRequested(invocation);
+        const interactive = isInteractive();
+        const dryRun = booleanInvocationFlag(invocation, "dryRun");
         return runDeleteCommand(invocation, {
-          interactive: isInteractive(),
+          interactive,
           writeShellCdPath,
-          onCleanupState: (state) => renderCleanupState(state, false),
+          ...(!json && interactive
+            ? { onCleanupState: (state) => renderCleanupState(state, dryRun) }
+            : {}),
         });
       });
     case "ai.status":

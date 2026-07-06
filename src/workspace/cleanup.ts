@@ -6,9 +6,14 @@ import { preserveNodeModules } from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
-import type { CleanupOptions, RepositorySource } from "../types.ts";
+import type {
+  CleanupOptions,
+  NodeModulesCacheConfig,
+  RepositorySource,
+  WorkspaceMetadata,
+} from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
-import type { TaskState } from "../utils/task-generator.ts";
+import { runParallel, type TaskState } from "../utils/task-generator.ts";
 import { ensureCacheDir } from "./index.ts";
 import {
   hasWorkspaceMetadata,
@@ -22,6 +27,14 @@ import { cleanupWorkspaceWorktrees } from "./repository.ts";
  */
 export type CleanupState =
   | { phase: "init"; message: string }
+  | {
+      phase: "node-modules";
+      repo: string;
+      path: string;
+      status: "preserving" | "preserved" | "skipped" | "warning";
+      reason?: "disabled" | "missing" | "ineligible";
+      message?: string;
+    }
   | { phase: "worktree"; repo: string; state: TaskState }
   | { phase: "worktree-complete"; repo: string }
   | {
@@ -74,6 +87,8 @@ export type WorktreeCleanupOptions = Readonly<{
   dryRun?: boolean;
   onState?: CleanupStateSink;
 }>;
+
+const CLEANUP_MAX_CONCURRENT = 4;
 
 /**
  * Check if a remote branch exists on origin.
@@ -286,7 +301,7 @@ export async function* streamWorkspaceCleanup(
 
   const cacheDir = await ensureCacheDir();
   const { config } = await loadWorkspaceConfig();
-  const removedRepos: string[] = [];
+  const cleanedRepos = new Set<string>();
   const deletedBranches: string[] = [];
   const repoConfigs = new Map(
     metadata?.repos.map((repo) => [
@@ -395,108 +410,32 @@ export async function* streamWorkspaceCleanup(
     }
   }
 
-  // Remove worktrees from mirrors
+  const cleanupTasks = new Map<string, AsyncGenerator<CleanupState>>();
   for (const repoName of repos) {
-    validateRepositoryComponent(repoName, "Repository name");
-    const repo = repoConfigs.get(repoName);
-    const mirrorDir = repo
-      ? await resolveMirrorDir(repo, cacheDir)
-      : resolveContainedPath(cacheDir, `${repoName}.git`);
-
-    // Check if mirror exists
-    try {
-      await fs.access(mirrorDir);
-    } catch {
-      yield {
-        phase: "worktree",
-        repo: repoName,
-        state: {
-          status: "skipped",
-          reason: "Mirror not found in cache",
-        },
-      };
-      continue;
-    }
-
-    if (dryRun) {
-      yield {
-        phase: "worktree",
-        repo: repoName,
-        state: {
-          status: "log",
-          level: "info",
-          message: "Would remove worktree from mirror (dry-run)",
-        },
-      };
-      yield { phase: "worktree-complete", repo: repoName };
-      removedRepos.push(repoName);
-    } else {
-      if (repo) {
-        const preserveResult = await preserveNodeModules({
-          repo,
-          repoDir: resolveContainedPath(resolvedDir, repoName),
-          config: config.cache?.nodeModules,
-        });
-        if (preserveResult.status === "warning") {
-          yield {
-            phase: "worktree",
-            repo: repoName,
-            state: {
-              status: "log",
-              level: "warn",
-              message: preserveResult.warning,
-            },
-          };
-        }
-        for (const task of metadata?.tasks ?? []) {
-          if (task.parent_repo !== repoName) {
-            continue;
-          }
-          const taskPreserveResult = await preserveNodeModules({
-            repo,
-            repoDir: resolveContainedPath(resolvedDir, task.path),
-            config: config.cache?.nodeModules,
-          });
-          if (taskPreserveResult.status === "warning") {
-            yield {
-              phase: "worktree",
-              repo: repoName,
-              state: {
-                status: "log",
-                level: "warn",
-                message: taskPreserveResult.warning,
-              },
-            };
-          }
-        }
-      }
-      let cleaned = false;
-
-      try {
-        for await (const state of cleanupWorkspaceWorktrees(
-          mirrorDir,
-          resolvedDir,
-        )) {
-          yield { phase: "worktree", repo: repoName, state };
-        }
-        cleaned = true;
-      } catch (error) {
-        yield {
-          phase: "worktree",
-          repo: repoName,
-          state: {
-            status: "failed",
-            error: error instanceof Error ? error : new Error(String(error)),
-          },
-        };
-      }
-
-      if (cleaned) {
-        yield { phase: "worktree-complete", repo: repoName };
-        removedRepos.push(repoName);
-      }
-    }
+    cleanupTasks.set(
+      repoName,
+      cleanupRepositoryWorktrees({
+        repoName,
+        repo: repoConfigs.get(repoName),
+        workspaceDir: resolvedDir,
+        cacheDir,
+        metadata,
+        dryRun,
+        nodeModulesConfig: config.cache?.nodeModules,
+      }),
+    );
   }
+
+  for await (const { state } of runParallel(cleanupTasks, {
+    maxConcurrent: CLEANUP_MAX_CONCURRENT,
+  })) {
+    if (state.phase === "worktree-complete") {
+      cleanedRepos.add(state.repo);
+    }
+    yield state;
+  }
+
+  const removedRepos = repos.filter((repoName) => cleanedRepos.has(repoName));
 
   // Remove workspace directory
   if (dryRun) {
@@ -565,6 +504,196 @@ export async function* streamWorkspaceCleanup(
   };
 }
 
+type RepositoryCleanupOptions = {
+  repoName: string;
+  repo: RepositorySource | undefined;
+  workspaceDir: string;
+  cacheDir: string;
+  metadata: WorkspaceMetadata | null;
+  dryRun: boolean;
+  nodeModulesConfig: NodeModulesCacheConfig | undefined;
+};
+
+async function* cleanupRepositoryWorktrees({
+  repoName,
+  repo,
+  workspaceDir,
+  cacheDir,
+  metadata,
+  dryRun,
+  nodeModulesConfig,
+}: RepositoryCleanupOptions): AsyncGenerator<CleanupState> {
+  const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
+  const mirrorDir = repo
+    ? await resolveMirrorDir(repo, cacheDir)
+    : resolveContainedPath(cacheDir, `${safeRepoName}.git`);
+
+  try {
+    await fs.access(mirrorDir);
+  } catch {
+    yield {
+      phase: "worktree",
+      repo: safeRepoName,
+      state: {
+        status: "skipped",
+        reason: "Mirror not found in cache",
+      },
+    };
+    return;
+  }
+
+  if (dryRun) {
+    yield {
+      phase: "worktree",
+      repo: safeRepoName,
+      state: {
+        status: "log",
+        level: "info",
+        message: "Would remove worktree from mirror (dry-run)",
+      },
+    };
+    yield { phase: "worktree-complete", repo: safeRepoName };
+    return;
+  }
+
+  if (repo) {
+    yield* preserveRepositoryNodeModules({
+      repo,
+      repoName: safeRepoName,
+      workspaceDir,
+      metadata,
+      config: nodeModulesConfig,
+    });
+  }
+
+  let cleaned = false;
+  try {
+    const targetPaths = directCleanupTargetsForRepo(
+      workspaceDir,
+      safeRepoName,
+      metadata,
+    );
+    const cleanupOptions = targetPaths ? { targetPaths } : {};
+    for await (const state of cleanupWorkspaceWorktrees(
+      mirrorDir,
+      workspaceDir,
+      cleanupOptions,
+    )) {
+      yield { phase: "worktree", repo: safeRepoName, state };
+    }
+    cleaned = true;
+  } catch (error) {
+    yield {
+      phase: "worktree",
+      repo: safeRepoName,
+      state: {
+        status: "failed",
+        error: error instanceof Error ? error : new Error(String(error)),
+      },
+    };
+  }
+
+  if (cleaned) {
+    yield { phase: "worktree-complete", repo: safeRepoName };
+  }
+}
+
+function directCleanupTargetsForRepo(
+  workspaceDir: string,
+  repoName: string,
+  metadata: WorkspaceMetadata | null,
+): string[] | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+
+  const targets = [resolveContainedPath(workspaceDir, repoName)];
+  for (const task of metadata.tasks ?? []) {
+    if (task.parent_repo === repoName) {
+      targets.push(resolveContainedPath(workspaceDir, task.path));
+    }
+  }
+  return targets;
+}
+
+async function* preserveRepositoryNodeModules({
+  repo,
+  repoName,
+  workspaceDir,
+  metadata,
+  config,
+}: {
+  repo: RepositorySource;
+  repoName: string;
+  workspaceDir: string;
+  metadata: WorkspaceMetadata | null;
+  config: NodeModulesCacheConfig | undefined;
+}): AsyncGenerator<CleanupState> {
+  yield* preserveNodeModulesForPath({
+    repo,
+    repoName,
+    repoDir: resolveContainedPath(workspaceDir, repoName),
+    config,
+  });
+
+  for (const task of metadata?.tasks ?? []) {
+    if (task.parent_repo !== repoName) {
+      continue;
+    }
+    yield* preserveNodeModulesForPath({
+      repo,
+      repoDir: resolveContainedPath(workspaceDir, task.path),
+      repoName,
+      config,
+    });
+  }
+}
+
+async function* preserveNodeModulesForPath({
+  repo,
+  repoName,
+  repoDir,
+  config,
+}: {
+  repo: RepositorySource;
+  repoName: string;
+  repoDir: string;
+  config: NodeModulesCacheConfig | undefined;
+}): AsyncGenerator<CleanupState> {
+  yield {
+    phase: "node-modules",
+    repo: repoName,
+    path: repoDir,
+    status: "preserving",
+  };
+
+  const result = await preserveNodeModules({ repo, repoDir, config });
+  if (result.status === "preserved") {
+    yield {
+      phase: "node-modules",
+      repo: repoName,
+      path: repoDir,
+      status: "preserved",
+    };
+  } else if (result.status === "warning") {
+    yield {
+      phase: "node-modules",
+      repo: repoName,
+      path: repoDir,
+      status: "warning",
+      message: result.warning,
+    };
+  } else {
+    yield {
+      phase: "node-modules",
+      repo: repoName,
+      path: repoDir,
+      status: "skipped",
+      reason: result.status,
+    };
+  }
+}
+
 export async function cleanupWorkspace(
   workspaceDir: string,
   { onState, ...options }: CleanupExecutionOptions = {},
@@ -625,21 +754,13 @@ export async function cleanupWorktree({
       removedRepos.push(safeRepoName);
     } else {
       if (repo) {
-        const preserveResult = await preserveNodeModules({
+        for await (const state of preserveNodeModulesForPath({
           repo,
+          repoName: safeRepoName,
           repoDir: resolvedChangePath,
           config: config.cache?.nodeModules,
-        });
-        if (preserveResult.status === "warning") {
-          await onState?.({
-            phase: "worktree",
-            repo: safeRepoName,
-            state: {
-              status: "log",
-              level: "warn",
-              message: preserveResult.warning,
-            },
-          });
+        })) {
+          await onState?.(state);
         }
       }
       let cleaned = false;
@@ -647,6 +768,7 @@ export async function cleanupWorktree({
         for await (const state of cleanupWorkspaceWorktrees(
           mirrorDir,
           resolvedChangePath,
+          { targetPaths: [resolvedChangePath] },
         )) {
           await onState?.({ phase: "worktree", repo: safeRepoName, state });
         }

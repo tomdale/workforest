@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,25 +6,25 @@ import { runDeleteCommand } from "./cli/delete.ts";
 import { OperationalError } from "./cli/errors.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
-import type { InventoryEntry } from "./workspace/inventory.ts";
+import type { CleanupExecutionOptions } from "./workspace/cleanup.ts";
+import type {
+  DeleteRepositorySafety,
+  DeleteTaskSafety,
+} from "./workspace/delete-safety.ts";
 import {
   writeWorkspaceMetadata,
   writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
-import type {
-  DirtySummary,
-  RepositoryStatus,
-  Status,
-  TaskStatus,
-} from "./workspace/status.ts";
 
 const ORIGINAL_CONFIG_DIR = process.env["WORKFOREST_CONFIG_DIR"];
+const ORIGINAL_TIMING_FILE = process.env["WORKFOREST_TIMING_FILE"];
 const ORIGINAL_CWD = process.cwd();
 const tempDirs: string[] = [];
 
 afterEach(async () => {
   process.chdir(ORIGINAL_CWD);
   restoreEnv("WORKFOREST_CONFIG_DIR", ORIGINAL_CONFIG_DIR);
+  restoreEnv("WORKFOREST_TIMING_FILE", ORIGINAL_TIMING_FILE);
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
@@ -34,24 +34,22 @@ describe("wf delete", () => {
   it("refuses dirty and unintegrated worktrees", async () => {
     const fixture = await createCleanupFixture();
     const cleanupWorktree = vi.fn();
-    const buildStatus = vi.fn(async (entry: InventoryEntry) =>
-      statusFor(entry, {
-        repositories: [
-          repositoryStatus({
-            path: fixture.repoChange,
-            state: "dirty",
-            integrated: false,
-          }),
-        ],
+    const buildDeleteRepositorySafety = vi.fn(async () => [
+      repositorySafety({
+        path: fixture.repoChange,
+        state: "dirty",
+        integrated: false,
       }),
-    );
+    ]);
+    const buildDeleteTaskSafety = vi.fn(async () => []);
 
     const error = await runDeleteCommand(
       invocation(["workforest/cli-redesign"]),
       {
         interactive: false,
         writeShellCdPath: async () => {},
-        buildStatus,
+        buildDeleteRepositorySafety,
+        buildDeleteTaskSafety,
         cleanupWorktree,
         resolveRepositorySpecifiers: async () => [],
       },
@@ -76,6 +74,109 @@ describe("wf delete", () => {
     expect(cleanupWorktree).not.toHaveBeenCalled();
   });
 
+  it("previews dirty and unintegrated worktrees without deleting", async () => {
+    const fixture = await createCleanupFixture();
+    const cleanupWorktree = vi.fn();
+    const buildDeleteRepositorySafety = vi.fn(async () => [
+      repositorySafety({
+        path: fixture.repoChange,
+        state: "dirty",
+        integrated: false,
+      }),
+    ]);
+    const buildDeleteTaskSafety = vi.fn(async () => []);
+
+    const result = await runDeleteCommand(
+      invocation(["workforest/cli-redesign"], { dryRun: true }),
+      {
+        interactive: false,
+        writeShellCdPath: async () => {},
+        buildDeleteRepositorySafety,
+        buildDeleteTaskSafety,
+        cleanupWorktree,
+        resolveRepositorySpecifiers: async () => [],
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.render.kind).toBe("text");
+    if (result.render.kind !== "text") {
+      throw new Error("Expected text report");
+    }
+    expect(result.render.value).toContain("Delete preview");
+    expect(result.render.value).toContain("Blocked; real delete would stop");
+    expect(result.render.value).toContain("worktree has uncommitted changes");
+    expect(result.render.value).toContain("Cached mirrors");
+    expect(result.render.value).toContain("node_modules");
+    expect(result.render.value).toContain("No files, worktrees, metadata");
+    expect(cleanupWorktree).not.toHaveBeenCalled();
+  });
+
+  it("emits the dry-run delete plan as JSON", async () => {
+    const fixture = await createCleanupFixture();
+    const cleanupWorktree = vi.fn();
+    const buildDeleteRepositorySafety = vi.fn(async () => [
+      repositorySafety({
+        path: fixture.repoChange,
+        state: "dirty",
+        integrated: false,
+      }),
+    ]);
+    const buildDeleteTaskSafety = vi.fn(async () => []);
+
+    const result = await runDeleteCommand(
+      invocation(["workforest/cli-redesign"], {
+        dryRun: true,
+        json: true,
+      }),
+      {
+        interactive: false,
+        writeShellCdPath: async () => {},
+        buildDeleteRepositorySafety,
+        buildDeleteTaskSafety,
+        cleanupWorktree,
+        resolveRepositorySpecifiers: async () => [],
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.render.kind).toBe("json");
+    if (result.render.kind !== "json") {
+      throw new Error("Expected JSON render");
+    }
+    expect(result.render.value).toEqual(
+      expect.objectContaining({
+        dryRun: true,
+        selector: "workforest/cli-redesign",
+        blocked: true,
+        blockers: expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining("uncommitted changes"),
+          }),
+        ]),
+        wouldRemove: expect.objectContaining({
+          directories: [fixture.repoChange],
+          metadata: [
+            path.join(
+              path.dirname(fixture.repoChange),
+              ".workforest",
+              "changes",
+              "cli-redesign.json",
+            ),
+          ],
+          branches: [],
+        }),
+        preservation: expect.objectContaining({
+          cachedMirrors: expect.objectContaining({ action: "preserve" }),
+          nodeModules: expect.objectContaining({
+            action: "preserve-before-delete",
+          }),
+        }),
+      }),
+    );
+    expect(cleanupWorktree).not.toHaveBeenCalled();
+  });
+
   it("uses --force to delete a worktree when Workforest cannot prove integration", async () => {
     const fixture = await createCleanupFixture();
     const invocationCwd = path.join(fixture.repoChange, "src");
@@ -86,7 +187,8 @@ describe("wf delete", () => {
       removedRepos: ["workforest"],
       deletedBranches: [],
     }));
-    const buildStatus = vi.fn();
+    const buildDeleteRepositorySafety = vi.fn();
+    const buildDeleteTaskSafety = vi.fn();
 
     await runDeleteCommand(
       invocation(["workforest/cli-redesign"], { force: true }),
@@ -95,14 +197,16 @@ describe("wf delete", () => {
         writeShellCdPath: async (targetDir: string) => {
           cdTargets.push(targetDir);
         },
-        buildStatus,
+        buildDeleteRepositorySafety,
+        buildDeleteTaskSafety,
         cleanupWorktree,
         resolveRepositorySpecifiers: async () => [],
         cwd: invocationCwd,
       },
     );
 
-    expect(buildStatus).not.toHaveBeenCalled();
+    expect(buildDeleteRepositorySafety).not.toHaveBeenCalled();
+    expect(buildDeleteTaskSafety).not.toHaveBeenCalled();
     expect(cleanupWorktree).toHaveBeenCalledWith(
       expect.objectContaining({
         repoName: "workforest",
@@ -115,24 +219,23 @@ describe("wf delete", () => {
   it("refuses unmerged nested tasks", async () => {
     const fixture = await createCleanupFixture();
     const cleanupWorkspace = vi.fn();
-    const buildStatus = vi.fn(async (entry: InventoryEntry) =>
-      statusFor(entry, {
-        repositories: [
-          repositoryStatus({
-            name: "api",
-            path: path.join(fixture.workspace, "api"),
-            integrated: true,
-          }),
-        ],
-        tasks: [taskStatus({ merged: false })],
+    const buildDeleteRepositorySafety = vi.fn(async () => [
+      repositorySafety({
+        name: "api",
+        path: path.join(fixture.workspace, "api"),
+        integrated: true,
       }),
-    );
+    ]);
+    const buildDeleteTaskSafety = vi.fn(async () => [
+      taskSafety({ merged: false }),
+    ]);
 
     await expect(
       runDeleteCommand(invocation(["_adhoc/experiment"]), {
         interactive: false,
         writeShellCdPath: async () => {},
-        buildStatus,
+        buildDeleteRepositorySafety,
+        buildDeleteTaskSafety,
         cleanupWorkspace,
       }),
     ).rejects.toThrow("wf task delete fix-tests --repo api --force");
@@ -146,22 +249,20 @@ describe("wf delete", () => {
       removedRepos: ["api", "front"],
       deletedBranches: [],
     }));
-    const buildStatus = vi.fn(async (entry: InventoryEntry) =>
-      statusFor(entry, {
-        repositories: [
-          repositoryStatus({
-            name: "api",
-            path: path.join(fixture.workspace, "api"),
-            integrated: true,
-          }),
-        ],
+    const buildDeleteRepositorySafety = vi.fn(async () => [
+      repositorySafety({
+        name: "api",
+        path: path.join(fixture.workspace, "api"),
+        integrated: true,
       }),
-    );
+    ]);
+    const buildDeleteTaskSafety = vi.fn(async () => []);
 
     await runDeleteCommand(invocation(["_adhoc/experiment"]), {
       interactive: false,
       writeShellCdPath: async () => {},
-      buildStatus,
+      buildDeleteRepositorySafety,
+      buildDeleteTaskSafety,
       cleanupWorkspace,
     });
 
@@ -189,16 +290,19 @@ describe("wf delete", () => {
       removedRepos: ["api", "front"],
       deletedBranches: [],
     }));
-    const buildStatus = vi.fn();
+    const buildDeleteRepositorySafety = vi.fn();
+    const buildDeleteTaskSafety = vi.fn();
 
     await runDeleteCommand(invocation(["_adhoc/experiment"], { force: true }), {
       interactive: false,
       writeShellCdPath: async () => {},
-      buildStatus,
+      buildDeleteRepositorySafety,
+      buildDeleteTaskSafety,
       cleanupWorkspace,
     });
 
-    expect(buildStatus).not.toHaveBeenCalled();
+    expect(buildDeleteRepositorySafety).not.toHaveBeenCalled();
+    expect(buildDeleteTaskSafety).not.toHaveBeenCalled();
     expect(cleanupWorkspace).toHaveBeenCalledWith(
       fixture.workspace,
       expect.objectContaining({ keepMirrors: true }),
@@ -227,6 +331,60 @@ describe("wf delete", () => {
     });
 
     expect(cdTargets).toEqual([path.dirname(fixture.workspace)]);
+  });
+
+  it("writes internal timing when WORKFOREST_TIMING_FILE is set", async () => {
+    const fixture = await createCleanupFixture();
+    const timingDir = await createTempDir("workforest-delete-timing-");
+    const timingFile = path.join(timingDir, "delete.json");
+    process.env["WORKFOREST_TIMING_FILE"] = timingFile;
+    const cleanupWorkspace = vi.fn(
+      async (_workspaceDir: string, options: CleanupExecutionOptions = {}) => {
+        await options.onState?.({ phase: "init", message: "Validating" });
+        await options.onState?.({
+          phase: "complete",
+          removedRepos: ["api", "front"],
+        });
+        return {
+          dryRun: false,
+          removedRepos: ["api", "front"],
+          deletedBranches: [],
+        };
+      },
+    );
+
+    await runDeleteCommand(invocation(["_adhoc/experiment"]), {
+      interactive: false,
+      writeShellCdPath: async () => {},
+      buildDeleteRepositorySafety: async () => [
+        repositorySafety({
+          name: "api",
+          path: path.join(fixture.workspace, "api"),
+          integrated: true,
+        }),
+      ],
+      buildDeleteTaskSafety: async () => [],
+      cleanupWorkspace,
+    });
+
+    const timing = JSON.parse(await readFile(timingFile, "utf8")) as {
+      kind: string;
+      phases: Array<{ name: string; status: string }>;
+      cleanupStates: Array<{ state: { phase: string } }>;
+    };
+
+    expect(timing.kind).toBe("workforest.delete.timing");
+    expect(timing.phases.map((phase) => phase.name)).toEqual([
+      "selector-resolution",
+      "repository-safety",
+      "task-checks",
+      "cleanup-dispatch",
+    ]);
+    expect(timing.phases.every((phase) => phase.status === "ok")).toBe(true);
+    expect(timing.cleanupStates.map((entry) => entry.state.phase)).toEqual([
+      "init",
+      "complete",
+    ]);
   });
 });
 
@@ -287,38 +445,9 @@ function invocation(
   return { beforeDoubleDash, flags } as ParsedInvocation;
 }
 
-function statusFor(
-  entry: InventoryEntry,
-  overrides: Readonly<{
-    repositories?: readonly RepositoryStatus[];
-    tasks?: readonly TaskStatus[];
-  }> = {},
-): Status {
-  return {
-    selector: entry.selector,
-    type: entry.type,
-    typeLabel: entry.type === "worktree" ? "repository change" : "workspace",
-    groupName: entry.groupName,
-    changeName: entry.changeName,
-    path: entry.path,
-    modifiedAt: entry.modifiedAt,
-    modifiedAtMs: entry.modifiedAtMs,
-    summary: {
-      change: entry.selector,
-      type: entry.type,
-      path: entry.path,
-      updated: entry.modifiedAt,
-    },
-    repositories: overrides.repositories ?? [],
-    tasks: overrides.tasks ?? [],
-    initialization: null,
-    nextSteps: [],
-  };
-}
-
-function repositoryStatus(
-  overrides: Partial<RepositoryStatus> = {},
-): RepositoryStatus {
+function repositorySafety(
+  overrides: Partial<DeleteRepositorySafety> = {},
+): DeleteRepositorySafety {
   const name = overrides.name ?? "workforest";
   const repoPath = overrides.path ?? `/tmp/${name}`;
 
@@ -326,42 +455,22 @@ function repositoryStatus(
     name,
     path: repoPath,
     branch: overrides.branch ?? "tomdale/cli-redesign",
-    defaultBranch: overrides.defaultBranch ?? "main",
     state: overrides.state ?? "clean",
-    dirty: overrides.dirty ?? dirtySummary(overrides.state === "dirty" ? 1 : 0),
     base: overrides.base ?? "origin/main",
-    ahead: overrides.ahead ?? 0,
-    behind: overrides.behind ?? 0,
     integrated: overrides.integrated ?? true,
-    setup: overrides.setup ?? { status: "ready" },
-    line: overrides.line ?? `${name} - clean`,
-    details: overrides.details ?? [],
   };
 }
 
-function taskStatus(overrides: Partial<TaskStatus> = {}): TaskStatus {
+function taskSafety(
+  overrides: Partial<DeleteTaskSafety> = {},
+): DeleteTaskSafety {
   return {
     selector: overrides.selector ?? "api/fix-tests",
     parentRepo: overrides.parentRepo ?? "api",
     slug: overrides.slug ?? "fix-tests",
     branch: overrides.branch ?? "tomdale/experiment/fix-tests",
-    path: overrides.path ?? "/tmp/api-fix-tests",
     state: overrides.state ?? "ready",
     merged: overrides.merged ?? true,
-    line: overrides.line ?? "api/fix-tests - ready",
-    details: overrides.details ?? [],
-  };
-}
-
-function dirtySummary(total: number): DirtySummary {
-  return {
-    total,
-    modified: total,
-    added: 0,
-    deleted: 0,
-    renamed: 0,
-    untracked: 0,
-    other: 0,
   };
 }
 
