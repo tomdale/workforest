@@ -1,5 +1,4 @@
 import { OperationalError } from "../cli/errors.ts";
-import { log } from "../logger.ts";
 import { emitServiceEvent, type ServiceEventSink } from "../services/events.ts";
 import type { RepositorySource, WorkspaceConfig } from "../types.ts";
 import { presentPipelines } from "../ui/grid-consumer.ts";
@@ -193,7 +192,6 @@ export async function finalizeCloudProvisioning(
   if (failedRepos.length > 0) {
     const failed = failedRepos.join(", ");
     const message = `Some repositories failed to set up: ${failed}. The workspace is usable for the repositories that succeeded.`;
-    log.warn(message);
     emitServiceEvent(onEvent, {
       type: "message",
       level: "warning",
@@ -526,19 +524,28 @@ function reportReady(
   ports: readonly number[],
   onEvent: ServiceEventSink | undefined,
 ): void {
-  log.success(`Cloud workspace ready: ${cloudSandboxName(changeName)}`);
+  // Route every line through the one event sink so it reaches the console once
+  // (via the human sink) and structured consumers still see the success event.
+  emitServiceEvent(onEvent, {
+    type: "message",
+    level: "success",
+    message: `Cloud workspace ready: ${cloudSandboxName(changeName)}`,
+  });
   for (const port of ports) {
     try {
-      log.info(`  ${port} → ${sandbox.domain(port)}`);
+      emitServiceEvent(onEvent, {
+        type: "message",
+        level: "info",
+        message: `  ${port} → ${sandbox.domain(port)}`,
+      });
     } catch {
       // Port has no route (not requested at create); skip it.
     }
   }
-  log.info(`  Attach: wf cloud attach ${changeName}`);
   emitServiceEvent(onEvent, {
     type: "message",
-    level: "success",
-    message: `Cloud workspace ${cloudSandboxName(changeName)} provisioned.`,
+    level: "info",
+    message: `  Attach: wf cloud attach ${changeName}`,
   });
 }
 

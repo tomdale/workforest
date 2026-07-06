@@ -234,7 +234,7 @@ async function runInitCancel(
     level: "success",
     message: `Cancelled initialization for ${targets
       .map((state) => state.repo)
-      .join(", ")}.`,
+      .join(", ")}`,
   });
   return success();
 }

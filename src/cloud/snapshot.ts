@@ -101,8 +101,8 @@ export async function ensureBaseSnapshot(
     type: "message",
     level: "info",
     message: existing
-      ? `Refreshing cloud base environment (${params.group})…`
-      : `Building cloud base environment (${params.group})…`,
+      ? `Refreshing cached snapshot (${params.group})…`
+      : `Building cached snapshot (${params.group})…`,
   });
 
   if (existing) {
@@ -112,7 +112,7 @@ export async function ensureBaseSnapshot(
       emitServiceEvent(params.onEvent, {
         type: "message",
         level: "warning",
-        message: `Could not replace stale base environment; provisioning cold. ${formatError(error)}`,
+        message: `Could not replace stale cached snapshot. Provisioning cold. ${formatError(error)}`,
       });
       return null;
     }
@@ -138,7 +138,7 @@ export async function ensureBaseSnapshot(
     emitServiceEvent(params.onEvent, {
       type: "message",
       level: "warning",
-      message: `Could not build base environment; provisioning cold. ${formatError(error)}`,
+      message: `Could not build cached snapshot. Provisioning cold. ${formatError(error)}`,
     });
     return null;
   }
@@ -178,7 +178,7 @@ export async function ensureBaseSnapshot(
     emitServiceEvent(params.onEvent, {
       type: "message",
       level: "warning",
-      message: `Base environment build failed; provisioning cold. ${formatError(error)}`,
+      message: `Cached snapshot build failed. Provisioning cold. ${formatError(error)}`,
     });
     return null;
   }
@@ -194,7 +194,7 @@ async function deletePartialBase(
     emitServiceEvent(onEvent, {
       type: "message",
       level: "warning",
-      message: `Could not delete partial base environment. ${formatError(error)}`,
+      message: `Could not delete partial cached snapshot. ${formatError(error)}`,
     });
   }
 }

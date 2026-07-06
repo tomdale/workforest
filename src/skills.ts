@@ -238,7 +238,7 @@ async function runSkillsList(
       reportOutput(
         renderReport({
           title: "Agent skills",
-          sections: [{ note: "No skills found." }],
+          sections: [{ note: "No skills found" }],
         }),
       ),
     );

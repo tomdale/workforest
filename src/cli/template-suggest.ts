@@ -36,7 +36,7 @@ export async function runTemplateSuggestCommand(
   }
 
   intro("Suggest templates");
-  promptLog.info("Preparing GitHub PR evidence for template suggestions.");
+  promptLog.info("Preparing GitHub PR evidence for template suggestions");
 
   let lastCompletedPhase: TemplateSuggestionPhase | null = null;
   let logDir: string | undefined;
@@ -74,15 +74,15 @@ export async function runTemplateSuggestCommand(
       { throwOnCancel: true },
     );
     if (!confirmed) {
-      promptLog.info("No templates saved.");
+      promptLog.info("No templates saved");
       outro(`Raw AI logs: ${logDir}`);
       return success();
     }
 
-    promptLog.info("Saving selected templates.");
+    promptLog.info("Saving selected templates");
     const saved = await (options.save ?? saveTemplateSuggestions)(selected);
     for (const suggestion of saved.saved) {
-      promptLog.success(`Template "${suggestion.id}" saved.`);
+      promptLog.success(`Template "${suggestion.id}" saved`);
     }
     for (const skipped of saved.skipped) {
       promptLog.warn(skipped.reason);
@@ -95,7 +95,7 @@ export async function runTemplateSuggestCommand(
       if (logDir) {
         outro(`Cancelled. Raw AI logs: ${logDir}`);
       } else {
-        outro("Cancelled.");
+        outro("Cancelled");
       }
       return success();
     }

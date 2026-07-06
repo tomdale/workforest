@@ -63,7 +63,7 @@ async function runCloudList(
     return jsonSuccess(sandboxes);
   }
   if (sandboxes.length === 0) {
-    return success(reportOutput("No cloud workspaces."));
+    return success(reportOutput("No cloud workspaces"));
   }
   return success(reportOutput(renderSandboxTable(sandboxes)));
 }
@@ -101,7 +101,7 @@ async function runCloudStop(
   if (json) {
     return jsonSuccess({ stopped: selector });
   }
-  return success(reportOutput(`Stopped cloud workspace: ${selector}`));
+  return success(reportOutput(`Stopped cloud workspace ${selector}`));
 }
 
 async function runCloudDelete(
@@ -119,7 +119,7 @@ async function runCloudDelete(
   if (json) {
     return jsonSuccess({ deleted: selector });
   }
-  return success(reportOutput(`Deleted cloud workspace: ${selector}`));
+  return success(reportOutput(`Deleted cloud workspace ${selector}`));
 }
 
 /**
