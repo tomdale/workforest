@@ -6,8 +6,7 @@ import {
   type TerminalSpan,
   terminalSpan,
 } from "./render-model.ts";
-import type { StatusTone } from "./status-indicator.ts";
-import { terminalSymbol } from "./theme.ts";
+import { type StatusTone, TONE_GLYPH, TONE_ROLE } from "./status-indicator.ts";
 
 export type ReportField = Readonly<{
   label: string;
@@ -110,43 +109,9 @@ function renderFields(
 
 function statusGlyphSpans(tone: StatusTone | undefined): TerminalSpan[] {
   if (!tone) return [];
-  return [
-    terminalSpan(statusGlyphText(tone), { role: statusRole(tone) }),
-    " ",
-  ].map((span) => (typeof span === "string" ? terminalSpan(span) : span));
-}
-
-function statusGlyphText(tone: StatusTone): string {
-  switch (tone) {
-    case "success":
-      return terminalSymbol.statusComplete;
-    case "error":
-      return terminalSymbol.statusFailed;
-    case "warning":
-      return terminalSymbol.warning;
-    case "pending":
-      return terminalSymbol.statusPending;
-    case "cancelled":
-      return terminalSymbol.statusCancelled;
-    case "info":
-      return terminalSymbol.info;
-  }
-}
-
-function statusRole(tone: StatusTone): NonNullable<TerminalSpan["role"]> {
-  switch (tone) {
-    case "success":
-      return "success";
-    case "error":
-      return "error";
-    case "warning":
-      return "warning";
-    case "pending":
-    case "cancelled":
-      return "muted";
-    case "info":
-      return "accent";
-  }
+  return [terminalSpan(TONE_GLYPH[tone], { role: TONE_ROLE[tone] }), " "].map(
+    (span) => (typeof span === "string" ? terminalSpan(span) : span),
+  );
 }
 
 function normalizeLine(line: TerminalLineInput): TerminalDoc["lines"][number] {

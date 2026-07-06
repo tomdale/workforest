@@ -31,21 +31,18 @@ import {
 import { qualifyRepositorySpecifiers } from "./repository-specifiers.ts";
 import { detectDefaultBranch } from "./services/worktree.ts";
 import { compactHomePath } from "./terminal/paths.ts";
-import {
-  renderTerminalLineAnsi,
-  type TerminalStyleRole,
-  terminalLine,
-  terminalSpan,
-} from "./terminal/render-model.ts";
 import { renderReport } from "./terminal/report.ts";
-import { type StatusTone, statusLabel } from "./terminal/status-indicator.ts";
-import { terminalSymbol } from "./terminal/theme.ts";
+import {
+  kindToTone,
+  type StatusTone,
+  statusLabel,
+  statusLine,
+} from "./terminal/status-indicator.ts";
 import {
   isInteractive,
   promptConfirm,
   withSpinner,
 } from "./ui/prompts/index.ts";
-import { S_BAR } from "./ui/prompts/symbols.ts";
 import {
   isPathInsideOrEqual,
   resolveWorkforestDirectories,
@@ -320,7 +317,9 @@ async function runCacheSync(
         return jsonSuccess({ messages: [], repositories: [] });
       }
       return success(
-        humanOutput(formatMessage("info", "No cached repositories to sync.")),
+        humanOutput(
+          statusLine(kindToTone("info"), "No cached repositories to sync."),
+        ),
       );
     }
     return operationResult(await syncRepositoryMessages(repositories), json);
@@ -563,7 +562,9 @@ async function runCacheClean(
       });
     }
     return success(
-      humanOutput(formatMessage("info", "No unused cached repositories.")),
+      humanOutput(
+        statusLine(kindToTone("info"), "No unused cached repositories."),
+      ),
     );
   }
   if (
@@ -605,8 +606,8 @@ async function runCacheClean(
     );
     return success(
       humanOutput(
-        formatMessage(
-          "success",
+        statusLine(
+          kindToTone("success"),
           `${verb} ${results.length} unused repositor${results.length === 1 ? "y" : "ies"} (${formatByteSize(repositorySize)}) and ${nodeModulesResult.deleted.length} node_modules entr${nodeModulesResult.deleted.length === 1 ? "y" : "ies"} (${formatByteSize(nodeModulesResult.totalSizeBytes)})`,
         ),
       ),
@@ -838,7 +839,7 @@ function operationResult(
   const failed = messages.some((message) => message.kind !== "success");
   const output = humanOutput(
     messages
-      .map((message) => formatMessage(message.kind, message.text))
+      .map((message) => statusLine(kindToTone(message.kind), message.text))
       .join("\n"),
     failed ? { stream: "stderr" } : {},
   );
@@ -847,44 +848,4 @@ function operationResult(
 
 function withExitCode(result: CommandResult, failed: boolean): CommandResult {
   return failed ? { ...result, exitCode: 1 } : result;
-}
-
-function formatMessage(
-  kind: "error" | "info" | "success" | "warning",
-  message: string,
-): string {
-  const messageRole = statusMessageRole(kind);
-  return renderTerminalLineAnsi(
-    terminalLine([
-      "  ",
-      terminalSpan(S_BAR, { role: "muted" }),
-      "  ",
-      terminalSpan(statusGlyph(kind), { role: statusGlyphRole(kind) }),
-      " ",
-      messageRole === undefined
-        ? message
-        : terminalSpan(message, { role: messageRole }),
-    ]),
-  );
-}
-
-function statusGlyph(kind: "error" | "info" | "success" | "warning"): string {
-  return {
-    error: terminalSymbol.error,
-    info: terminalSymbol.info,
-    success: terminalSymbol.success,
-    warning: terminalSymbol.warning,
-  }[kind];
-}
-
-function statusGlyphRole(
-  kind: "error" | "info" | "success" | "warning",
-): TerminalStyleRole {
-  return kind === "info" ? "accent" : kind;
-}
-
-function statusMessageRole(
-  kind: "error" | "info" | "success" | "warning",
-): TerminalStyleRole | undefined {
-  return kind === "info" ? undefined : kind;
 }
