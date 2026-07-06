@@ -366,7 +366,7 @@ export async function* cloudRepoPipeline(
           phase: "initializer",
           name: "vercel-env",
           status: "skipped",
-          message: "vercel link failed; skipped env pull",
+          message: "vercel link failed, skipped env pull",
         };
       } else {
         yield* runStep(

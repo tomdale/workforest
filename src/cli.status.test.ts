@@ -157,7 +157,7 @@ describe("wf status", () => {
 
     expect(result.exitCode, rendered.stdout + rendered.stderr).toBe(0);
     expect(rendered.stdout).toContain(
-      "No initialization is recorded for this worktree or workspace; showing the static report.",
+      "No initialization is recorded for this worktree or workspace. Showing the static report.",
     );
   });
 

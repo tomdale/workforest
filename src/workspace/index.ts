@@ -985,7 +985,7 @@ export async function writeVSCodeWorkspaceFile(
       emitServiceEvent(onEvent, {
         type: "message",
         level: "warning",
-        message: `Unable to parse existing VS Code workspace file at ${workspaceFile}; overwriting it.`,
+        message: `Unable to parse existing VS Code workspace file at ${workspaceFile}. Overwriting it.`,
       });
     }
   }

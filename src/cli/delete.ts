@@ -558,7 +558,7 @@ function blockerSection(plan: DeletePlan): ReportSection {
   if (plan.blockers.length === 0) {
     return {
       title: "Blockers",
-      note: "No blockers found.",
+      note: "No blockers found",
     };
   }
 
@@ -646,7 +646,7 @@ function deleteResult(
 }
 
 function typeLabel(entry: InventoryEntry): string {
-  return entry.type === "worktree" ? "repository change" : "workspace";
+  return entry.type === "worktree" ? "worktree" : "workspace";
 }
 
 function reviewSelector(target: ReviewTarget): string {

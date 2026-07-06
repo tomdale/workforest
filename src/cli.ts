@@ -1153,7 +1153,7 @@ async function runStatusCommand(
       return success(
         reportOutput(
           renderStatus(status, {
-            note: "No initialization is recorded for this worktree or workspace; nothing to wait for.",
+            note: "No initialization is recorded for this worktree or workspace. Nothing to wait for.",
           }),
         ),
       );
@@ -1170,7 +1170,7 @@ async function runStatusCommand(
       return success(
         reportOutput(
           renderStatus(status, {
-            note: "No initialization is recorded for this worktree or workspace; showing the static report.",
+            note: "No initialization is recorded for this worktree or workspace. Showing the static report.",
           }),
         ),
       );
@@ -2494,7 +2494,7 @@ async function runTemplateList(json: boolean): Promise<CommandResult> {
   if (templates.length === 0) {
     printReport({
       title: "Templates",
-      sections: [{ note: "No templates configured." }],
+      sections: [{ note: "No templates configured" }],
       footer: `Directory: ${compactHomePath(getTemplatesDir())}`,
     });
     return templateSuccess();

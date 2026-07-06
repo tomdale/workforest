@@ -226,7 +226,7 @@ export async function* cloneRepository(
     yield {
       status: "log",
       level: "info",
-      message: `Remote ${remote} is not a GitHub URL; cloning with git directly.`,
+      message: `Remote ${remote} is not a GitHub URL. Cloning with git directly.`,
     };
   }
 

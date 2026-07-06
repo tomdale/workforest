@@ -311,7 +311,7 @@ export function renderWorkspaceMigration(
       title,
       sections: [
         {
-          note: "No workspace directories, repository directories, or repository metadata need migration.",
+          note: "No workspace directories, repository directories, or repository metadata need migration",
         },
       ],
     });
