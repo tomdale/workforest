@@ -36,7 +36,7 @@ describe("createRunEventConsoleRenderer", () => {
       }),
     );
     expect(lines).toEqual([
-      { level: "info", message: "front: mirror ok 2.1s" },
+      { level: "info", message: "front: mirror in 2.1s" },
     ]);
   });
 
@@ -60,7 +60,7 @@ describe("createRunEventConsoleRenderer", () => {
       }),
     );
     expect(lines).toEqual([
-      { level: "warning", message: "front: mirror retry 2: network flake" },
+      { level: "warning", message: "front: mirror retry 2 (network flake)" },
     ]);
   });
 
@@ -157,6 +157,6 @@ describe("createRunEventConsoleRenderer", () => {
         durationMs: 500,
       }),
     );
-    expect(lines[0]?.message).toBe("workspace: lint ok 500ms");
+    expect(lines[0]?.message).toBe("workspace: lint in 500ms");
   });
 });

@@ -111,7 +111,7 @@ describe("presentRun console mode", () => {
           event.type === "message",
       )
       .map((event) => event.message);
-    expect(messages).toContain("front: mirror ok 2.1s");
+    expect(messages).toContain("front: mirror in 2.1s");
   });
 
   it("streams verbose output lines", async () => {

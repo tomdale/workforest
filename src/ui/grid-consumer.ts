@@ -23,6 +23,7 @@ import {
   type FullscreenStatusLine,
   fullTerminalViewport,
 } from "../terminal/fullscreen-surface.ts";
+import { BACKGROUND_HANDOFF } from "../terminal/messages.ts";
 import {
   renderTerminalLineBlessed,
   type TerminalLineInput,
@@ -435,7 +436,7 @@ export async function renderPipelinesGrid({
 
       statusLine?.setContent(
         backgroundInitialization
-          ? paneMessage("Initialization continues in the background", "muted")
+          ? paneMessage(BACKGROUND_HANDOFF, "muted")
           : "",
       );
       renderCompletion();
@@ -512,7 +513,7 @@ export async function renderPipelinesGrid({
           );
           pane.appendLine(
             paneMessage(
-              "Worktree ready; initialization moved to background",
+              "Worktree ready, initialization moved to background",
               "muted",
             ),
           );
@@ -620,7 +621,7 @@ function emitPipelineProgress(
         emitServiceEvent(onEvent, {
           type: "message",
           level: "info",
-          message: `${id}: ${label} - ${state.message}`,
+          message: `${id}: ${label} (${state.message})`,
         });
       }
       break;
@@ -629,7 +630,7 @@ function emitPipelineProgress(
         emitServiceEvent(onEvent, {
           type: "message",
           level: "warning",
-          message: `${id}: ${label} - ${state.message}`,
+          message: `${id}: ${label} (${state.message})`,
         });
       }
       break;
@@ -1073,7 +1074,7 @@ export function getCompletionModalContent({
     ...(backgroundInitialization
       ? [
           "",
-          paneMessage("Initialization continues in the background.", "muted"),
+          paneMessage(`${BACKGROUND_HANDOFF}.`, "muted"),
           paneMessage("Run wf status --watch to check progress.", "muted"),
         ]
       : []),
@@ -1112,10 +1113,7 @@ function getCompletionModalMaxTextWidth({
       ? formatCompletionFailures(setupWarnings, "Setup warnings")
       : []),
     ...(backgroundInitialization
-      ? [
-          "Initialization continues in the background.",
-          "Run wf status --watch to check progress.",
-        ]
+      ? [`${BACKGROUND_HANDOFF}.`, "Run wf status --watch to check progress."]
       : []),
     "press any key",
   ].map(stripBlessedTags);

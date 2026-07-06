@@ -915,7 +915,7 @@ describe("drainPipelinesToConsole", () => {
     expect(messages.filter((m) => m.message === "ok: ready")).toHaveLength(1);
     expect(messages).toContainEqual({
       level: "info",
-      message: "ok: worktree - Creating worktree",
+      message: "ok: worktree (Creating worktree)",
     });
     expect(messages).toContainEqual({
       level: "success",

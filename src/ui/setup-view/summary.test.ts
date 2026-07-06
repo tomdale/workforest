@@ -119,7 +119,7 @@ describe("formatRunSummary", () => {
       nowMs: 10_000,
     });
 
-    expect(summary).toContain("Setup continues in the background");
+    expect(summary).toContain("Initialization continues in the background");
     expect(summary).toContain("wf status --watch");
   });
 

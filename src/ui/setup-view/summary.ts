@@ -5,6 +5,7 @@
  * only on the vanished alternate screen.
  */
 
+import { BACKGROUND_HANDOFF } from "../../terminal/messages.ts";
 import {
   literalSpan,
   renderTerminalDocInline,
@@ -133,7 +134,7 @@ function summaryHeading(input: RunSummaryInput, nowMs: number): TerminalLine {
     case "detached":
       return {
         spans: [
-          terminalSpan("Setup continues in the background", {
+          terminalSpan(BACKGROUND_HANDOFF, {
             emphasis: "bold",
           }),
         ],
@@ -242,7 +243,7 @@ export function formatRunSummary(input: RunSummaryInput): string {
       spans: [
         literalSpan("  "),
         terminalSpan(
-          "Initialization continues in the background. Run wf status --watch to follow it.",
+          `${BACKGROUND_HANDOFF}. Run wf status --watch to follow it.`,
           { role: "muted" },
         ),
       ],
