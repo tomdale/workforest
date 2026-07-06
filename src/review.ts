@@ -597,7 +597,7 @@ function parseSingleTarget(input: string): ReviewTarget {
     }
 
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length !== 4 || parts[2] !== "pull") {
+    if (parts.length < 4 || parts[2] !== "pull") {
       throw new Error(`Invalid GitHub PR URL: ${input}`);
     }
 

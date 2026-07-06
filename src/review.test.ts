@@ -86,6 +86,14 @@ describe("parseReviewTarget", () => {
       { owner: "vercel", repo: "omniagent", prNumber: 123 },
     ],
     [
+      ["https://github.com/vercel/omniagent/pull/123/changes"],
+      { owner: "vercel", repo: "omniagent", prNumber: 123 },
+    ],
+    [
+      ["https://github.com/vercel/omniagent/pull/123/files"],
+      { owner: "vercel", repo: "omniagent", prNumber: 123 },
+    ],
+    [
       ["github.com/vercel/omniagent/pull/123"],
       { owner: "vercel", repo: "omniagent", prNumber: 123 },
     ],
