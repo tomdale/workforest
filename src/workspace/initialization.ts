@@ -251,6 +251,7 @@ export async function resumeWorkspaceInitialization({
 }): Promise<void> {
   const scope = workspaceInitializationScope(workspaceDir);
   await fs.mkdir(getInitializationDir(scope), { recursive: true });
+  await resetWorkspaceAgentsMdJobState(scope);
   const now = new Date().toISOString();
 
   await writeWorkspaceInitializationState(scope, {
@@ -285,6 +286,7 @@ async function initializeScopedInitialization({
   message: string;
 }): Promise<void> {
   await fs.mkdir(getInitializationDir(scope), { recursive: true });
+  await resetWorkspaceAgentsMdJobState(scope);
   const now = new Date().toISOString();
 
   await writeWorkspaceInitializationState(scope, {
@@ -1134,6 +1136,13 @@ function getWorkspaceStatePath(scope: InitializationScope): string {
 
 function getAgentsMdJobStatePath(scope: InitializationScope): string {
   return path.join(getInitializationDir(scope), "agents-md.json");
+}
+
+async function resetWorkspaceAgentsMdJobState(
+  scope: InitializationScope,
+): Promise<void> {
+  if (scope.kind !== "workspace") return;
+  await fs.rm(getAgentsMdJobStatePath(scope), { force: true });
 }
 
 function getFinalizeLockPath(scope: InitializationScope): string {

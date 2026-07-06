@@ -119,6 +119,45 @@ describe("background repository initialization", () => {
     });
   });
 
+  it("resets stale AGENTS.md refresh job state when initialization restarts", async () => {
+    const workspaceDir = await createWorkspace();
+    const statePath = path.join(
+      getInitializationDir(workspaceInitializationScope(workspaceDir)),
+      "agents-md.json",
+    );
+    const now = new Date().toISOString();
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        version: 1,
+        status: "ready",
+        run_id: "old-run",
+        created_at: now,
+        updated_at: now,
+        completed_at: now,
+      }),
+      "utf8",
+    );
+
+    await initializeWorkspaceInitialization({
+      workspaceDir,
+      repos: [repo],
+    });
+
+    const launchedRuns: string[] = [];
+    const refreshed = await startWorkspaceAgentsMdRefresh(
+      workspaceDir,
+      {},
+      async ({ runId }) => {
+        launchedRuns.push(runId);
+        return process.pid;
+      },
+    );
+
+    expect(refreshed.run_id).not.toBe("old-run");
+    expect(launchedRuns).toEqual([refreshed.run_id]);
+  });
+
   it("runs an initializer worker to completion and finalizes the workspace", async () => {
     const workspaceDir = await createWorkspace();
     const queued = await startRepoInitialization(
