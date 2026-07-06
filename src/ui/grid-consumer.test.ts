@@ -784,6 +784,17 @@ describe("completion modal content layout", () => {
     backgroundInitialization: true,
   };
 
+  // compactHome() contracts an ambient $HOME prefix to "~". These fixtures use
+  // absolute paths that assume $HOME is not one of their prefixes; pin it so the
+  // truncation assertions hold regardless of what other suites leave in the
+  // shared process environment.
+  beforeEach(() => {
+    vi.stubEnv("HOME", "/home/workforest-fixture");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   // The confetti layer animates by re-rendering with fresh random star rows.
   // If any composed line is wider than the content width the modal box wraps it
   // onto a second visual row, which shoves the text up and down between frames.
