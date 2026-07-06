@@ -815,7 +815,8 @@ describe("completion modal content layout", () => {
   it("keeps the workspace name whole and truncates the parent from the start", () => {
     const lines = getCompletionModalContent({
       ...baseOptions,
-      workspacePath: "/Users/me/Code/Workspaces/vercel-agent/auth-redesign",
+      workspacePath:
+        "/var/tmp/workforest/very/long/workspace/root/vercel-agent/auth-redesign",
       contentWidth: 30,
     }).map(stripTags);
 
