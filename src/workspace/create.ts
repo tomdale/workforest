@@ -207,6 +207,7 @@ async function createWorktree(
 
   const failures = [...setupFailures.values()];
   await reportCreateOutcome({
+    kind: "worktree",
     targetDir,
     outcome,
     setupFailures: failures,
@@ -223,20 +224,24 @@ async function createWorktree(
  * console path never printed a summary and keeps its ready line and cd hint.
  */
 async function reportCreateOutcome({
+  kind,
   targetDir,
   outcome,
   setupFailures,
   options,
 }: {
+  kind: "worktree" | "workspace";
   targetDir: string;
   outcome: PresentRunOutcome;
   setupFailures: readonly RepoSetupFailureSummary[];
   options: CreateOptions;
 }): Promise<void> {
+  const readyLabel =
+    kind === "workspace" ? "Workspace ready" : "Worktree ready";
   switch (outcome) {
     case "background":
       printRepoSetupFailures(setupFailures, options.onEvent);
-      log.success(`Worktree ready: ${compactHome(targetDir)}`);
+      log.success(`${readyLabel}: ${compactHome(targetDir)}`);
       await reportShellCdTarget(targetDir, {
         writeShellCdPath: options.writeShellCdPath,
       });
@@ -285,6 +290,7 @@ async function createWorkspace(
     ...(options.shouldUseGrid ? { shouldUseGrid: options.shouldUseGrid } : {}),
   });
   await reportCreateOutcome({
+    kind: "workspace",
     targetDir: workspaceDir,
     outcome: result.outcome,
     setupFailures: result.setupFailures,
