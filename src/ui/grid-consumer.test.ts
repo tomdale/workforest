@@ -509,7 +509,7 @@ describe("renderPipelinesGrid", () => {
     const modalCall = vi
       .mocked(Box)
       .mock.calls.find((call) =>
-        String(call[0]?.content).includes("/tmp/workspace"),
+        String(call[0]?.content).includes("press any key"),
       );
 
     expect(modalCall?.[0]).toEqual(
@@ -523,6 +523,14 @@ describe("renderPipelinesGrid", () => {
       }),
     );
     expect(modalCall?.[0]).not.toHaveProperty("label");
+
+    // The header leads with the workspace name (the path's final segment) while
+    // the parent directory is demoted to a second, muted line — so the name is
+    // never the thing that gets truncated away.
+    const modalContent = String(modalCall?.[0]?.content);
+    expect(modalContent).toContain("workspace");
+    expect(modalContent).toContain("/tmp");
+    expect(modalContent).toContain("1 worktree");
 
     const modalTitleCall = vi
       .mocked(Box)
@@ -798,6 +806,50 @@ describe("completion modal content layout", () => {
         expect(visibleWidth(line)).toBeLessThanOrEqual(contentWidth);
       }
     }
+  });
+
+  // When space is tight the workspace name (the path's final segment) must
+  // survive intact — it is the workspace's identity. The parent directory is
+  // what gives instead, truncated from the start so its trailing segments (the
+  // ones nearest the workspace) are the ones that stay.
+  it("keeps the workspace name whole and truncates the parent from the start", () => {
+    const lines = getCompletionModalContent({
+      ...baseOptions,
+      workspacePath: "/Users/me/Code/Workspaces/vercel-agent/auth-redesign",
+      contentWidth: 30,
+    }).map(stripTags);
+
+    const nameLine = lines.find((line) => line.includes("auth-redesign"));
+    expect(nameLine).toBeDefined();
+    // The full name is present with no truncation ellipsis on it.
+    expect(nameLine).not.toContain("…");
+
+    const parentLine = lines.find((line) => line.includes("vercel-agent"));
+    expect(parentLine).toBeDefined();
+    // The parent lost its leading segments to a start ellipsis, not its tail.
+    expect(parentLine?.trimStart().startsWith("…")).toBe(true);
+    expect(parentLine).toContain("vercel-agent");
+  });
+
+  it("summarizes the worktree count and pluralizes it", () => {
+    const one = getCompletionModalContent({
+      ...baseOptions,
+      worktreeNames: ["only"],
+      contentWidth: 44,
+    })
+      .map(stripTags)
+      .join("\n");
+    expect(one).toContain("1 worktree");
+    expect(one).not.toContain("1 worktrees");
+
+    const many = getCompletionModalContent({
+      ...baseOptions,
+      worktreeNames: ["a", "b", "c"],
+      contentWidth: 44,
+    })
+      .map(stripTags)
+      .join("\n");
+    expect(many).toContain("3 worktrees");
   });
 });
 
