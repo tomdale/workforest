@@ -162,8 +162,9 @@ Nouns:
                        \`wf new <name> @<template>\` or \`wf new <name> <repo> <repo>\`.
 
   task                 A short-lived nested worktree inside a worktree or workspace, on its own
-                       branch. Created with \`wf task new\` from inside one. Because tasks reuse the
-                       parent repository's cached mirror, setup is instant. Remove with
+                       branch. Created with \`wf task new\` from inside one. Tasks skip setup by
+                       default for fast handoff; pass \`--setup\` when dependencies and repository
+                       initializers should run before use. Remove with
                        \`wf task delete\` (pass --force to abandon unmerged work).
 
   template             A saved workspace recipe: a list of repositories plus optional hooks, extra
@@ -291,7 +292,8 @@ Interactive user workflows:
     wf review vercel/next.js#1234
 
   Add an isolated task inside an existing worktree or workspace:
-    wf task new fix-auth                # new branch, instant setup
+    wf task new fix-auth                # new branch, setup skipped
+    wf task new --setup fix-auth        # new branch with full setup
     cd _tasks/next.js/fix-auth          # or let shell integration cd there
     # ... experiment ...
     wf task delete fix-auth             # after it merges

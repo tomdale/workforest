@@ -62,6 +62,7 @@ describe("registry-derived help", () => {
     }
     expect(start).toContain("Usage: wf task new [options] <task names...>");
     expect(start).toContain("--repo <repository>");
+    expect(start).toContain("--setup");
     expect(start).toContain("--dry-run");
     expect(start).toContain("--json");
   });

@@ -49,6 +49,7 @@ describe("shell command model", () => {
     ]);
     expect(taskNew?.flags.map((flag) => flag.long)).toEqual([
       "--repo",
+      "--setup",
       "--dry-run",
       "--force",
       "--json",

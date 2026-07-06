@@ -193,7 +193,7 @@ export type TaskMetadata = {
   base_branch: string;
   base_sha: string;
   created_at: string;
-  setup_status: "ready" | "failed";
+  setup_status: "ready" | "failed" | "skipped";
   setup_log?: string;
 };
 

@@ -793,7 +793,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["task", "new"],
             summary: "Create nested task lanes",
             description:
-              "Adds one or more nested task worktrees under the current worktree or workspace's reserved _tasks directory, each on a new branch off the parent repository's committed HEAD, then runs setup initializers. Run from inside a workspace repo, worktree, or existing task; in workspaces, the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is created, changes your shell's directory to it under shell integration. See also `wf task delete`.",
+              "Adds one or more nested task worktrees under the current worktree or workspace's reserved _tasks directory, each on a new branch off the parent repository's committed HEAD. By default this skips setup initializers for fast handoff; pass `--setup` to restore pooled dependencies and run repository setup. Run from inside a workspace repo, worktree, or existing task; in workspaces, the parent repository is inferred from the current directory unless set with `--repo`. Refuses to run when the parent has uncommitted changes unless you pass `--force`. When one task is created, changes your shell's directory to it under shell integration. See also `wf task delete`.",
             handler: "task.new",
             help: nestedHelp("task", "new"),
             operands: operands(
@@ -808,6 +808,12 @@ export const commandRegistry: CommandRegistry = {
                 description:
                   "Parent repository in a workspace to branch from; defaults to the one inferred from the current directory.",
               }),
+              booleanFlag(
+                "setup",
+                "--setup",
+                undefined,
+                "Restore pooled dependencies and run repository setup initializers after creating each task.",
+              ),
               booleanFlag(
                 "dryRun",
                 "--dry-run",
@@ -825,7 +831,12 @@ export const commandRegistry: CommandRegistry = {
               {
                 command: "wf task new fix-login",
                 description:
-                  "Create one task lane off the inferred parent repo and cd into it.",
+                  "Create one task lane off the inferred parent repo and cd into it without running setup.",
+              },
+              {
+                command: "wf task new --setup fix-login",
+                description:
+                  "Create one task lane and run full repository setup before handing it off.",
               },
               {
                 command: "wf task new fix-login add-tests --repo web",

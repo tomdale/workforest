@@ -113,6 +113,7 @@ import {
 } from "./workspace/paths.ts";
 import type {
   CreateTasksResult,
+  TaskCreateResult,
   TaskFailure,
   TaskListEntry,
 } from "./workspace/tasks.ts";
@@ -1297,6 +1298,7 @@ async function runTaskStartInvocation(
 ): Promise<CommandResult> {
   const repo = stringFlag(invocation, "repo");
   const json = jsonRequested(invocation);
+  const setup = booleanFlag(invocation, "setup");
   const workspaceDir = await detectWorkspaceFromCwd();
   if (workspaceDir) {
     return runTaskStart(
@@ -1305,6 +1307,7 @@ async function runTaskStartInvocation(
         repo,
         dryRun: booleanFlag(invocation, "dryRun"),
         force: booleanFlag(invocation, "force"),
+        setup,
         json,
       },
       workspaceDir,
@@ -1318,6 +1321,7 @@ async function runTaskStartInvocation(
       context,
       dryRun: booleanFlag(invocation, "dryRun"),
       force: booleanFlag(invocation, "force"),
+      setup,
       json,
     });
   }
@@ -1645,12 +1649,14 @@ async function runTaskStart(
     repo,
     dryRun,
     force,
+    setup,
     json,
   }: {
     slugs: string[];
     repo: string | undefined;
     dryRun: boolean;
     force: boolean;
+    setup: boolean;
     json: boolean;
   },
   workspaceDir: string,
@@ -1691,6 +1697,7 @@ async function runTaskStart(
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun,
       force,
+      setup,
       interactive: !json && isInteractive(),
       ...(template?.config.disableInitializers !== undefined
         ? { disabledInitializers: template.config.disableInitializers }
@@ -1729,16 +1736,8 @@ async function runTaskStart(
     }
 
     for (const worktree of result.created) {
-      const setup =
-        worktree.setupStatus === "ready"
-          ? "ready"
-          : `setup failed${
-              worktree.setupLog
-                ? ` (log: ${compactHomePath(worktree.setupLog)})`
-                : ""
-            }`;
       log.success(
-        `${worktree.slug}: ${compactHomePath(worktree.path)} (${setup})`,
+        `${worktree.slug}: ${compactHomePath(worktree.path)} (${formatTaskSetupResult(worktree)})`,
       );
     }
 
@@ -1762,12 +1761,14 @@ async function runRepositoryTaskStart({
   context,
   dryRun,
   force,
+  setup,
   json,
 }: {
   slugs: string[];
   context: RepositoryTaskCommandContext;
   dryRun: boolean;
   force: boolean;
+  setup: boolean;
   json: boolean;
 }): Promise<CommandResult> {
   try {
@@ -1782,6 +1783,7 @@ async function runRepositoryTaskStart({
       ...(branchPrefix !== undefined ? { branchPrefix } : {}),
       dryRun,
       force,
+      setup,
       interactive: !json && isInteractive(),
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
@@ -1819,16 +1821,8 @@ async function runRepositoryTaskStart({
     }
 
     for (const worktree of result.created) {
-      const setup =
-        worktree.setupStatus === "ready"
-          ? "ready"
-          : `setup failed${
-              worktree.setupLog
-                ? ` (log: ${compactHomePath(worktree.setupLog)})`
-                : ""
-            }`;
       log.success(
-        `${worktree.slug}: ${compactHomePath(worktree.path)} (${setup})`,
+        `${worktree.slug}: ${compactHomePath(worktree.path)} (${formatTaskSetupResult(worktree)})`,
       );
     }
 
@@ -1852,6 +1846,19 @@ function taskStartFailed(result: CreateTasksResult): boolean {
     result.failures.length > 0 ||
     result.created.some((worktree) => worktree.setupStatus === "failed")
   );
+}
+
+function formatTaskSetupResult(worktree: TaskCreateResult): string {
+  switch (worktree.setupStatus) {
+    case "ready":
+      return "ready";
+    case "skipped":
+      return "setup skipped";
+    case "failed":
+      return `setup failed${
+        worktree.setupLog ? ` (log: ${compactHomePath(worktree.setupLog)})` : ""
+      }`;
+  }
 }
 
 async function reportSingleCreatedTaskTarget(
@@ -2012,7 +2019,7 @@ function taskListReportSections(
                 : ("cancelled" as const),
           details: [
             { label: "Branch", value: entry.branch },
-            { label: "Status", value: entry.state },
+            { label: "Status", value: formatTaskListStatus(entry.state) },
             {
               label: "Merged",
               value:
@@ -2022,6 +2029,19 @@ function taskListReportSections(
           ],
         })),
     }));
+}
+
+function formatTaskListStatus(state: TaskListEntry["state"]): string {
+  switch (state) {
+    case "ready":
+      return "ready";
+    case "failed":
+      return "setup failed";
+    case "skipped":
+      return "setup skipped";
+    case "stale":
+      return "stale";
+  }
 }
 
 function taskFailuresJson(failures: readonly TaskFailure[]) {

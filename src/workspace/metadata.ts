@@ -935,9 +935,12 @@ function validateTaskMetadata(
   requireString(worktree["created_at"], `${source}.created_at`);
   if (
     worktree["setup_status"] !== "ready" &&
-    worktree["setup_status"] !== "failed"
+    worktree["setup_status"] !== "failed" &&
+    worktree["setup_status"] !== "skipped"
   ) {
-    throw new Error(`${source}.setup_status must be "ready" or "failed".`);
+    throw new Error(
+      `${source}.setup_status must be "ready", "failed", or "skipped".`,
+    );
   }
   const setupLog = optionalString(worktree["setup_log"], `${source}.setup_log`);
   if (setupLog !== undefined) {

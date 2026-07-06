@@ -122,7 +122,7 @@ export type TaskStatus = Readonly<{
   slug: string;
   branch: string;
   path: string;
-  state: "ready" | "failed" | "stale";
+  state: "ready" | "failed" | "skipped" | "stale";
   merged: boolean | null;
   line: string;
   details: readonly StatusDetail[];
@@ -503,6 +503,8 @@ function taskCells(task: TaskStatus): readonly Cell[] {
 function taskGlyph(task: TaskStatus): TerminalSpan {
   if (task.state === "failed")
     return glyphSpan(terminalSymbol.statusFailed, "error");
+  if (task.state === "skipped")
+    return glyphSpan(terminalSymbol.statusComplete, "muted");
   if (task.state === "stale")
     return glyphSpan(terminalSymbol.statusCancelled, "muted");
   if (task.merged === true)
@@ -516,6 +518,8 @@ function taskSetupSpans(task: TaskStatus): TerminalSpan[] {
   switch (task.state) {
     case "failed":
       return [terminalSpan("setup failed", { role: "error" })];
+    case "skipped":
+      return [terminalSpan("setup skipped", { role: "muted" })];
     case "stale":
       return [terminalSpan("stale", { role: "muted" })];
     default:
@@ -1161,7 +1165,14 @@ function deriveNextSteps(
     steps.push("Commit or stash worktree changes before finishing.");
     steps.push("Run: git status");
   }
-  if (tasks.some((task) => task.merged === false || task.state !== "ready")) {
+  if (
+    tasks.some(
+      (task) =>
+        task.merged === false ||
+        task.state === "failed" ||
+        task.state === "stale",
+    )
+  ) {
     steps.push("Integrate or delete nested tasks before finishing.");
   }
   if (

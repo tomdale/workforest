@@ -262,9 +262,15 @@ cd ~/Code/workspaces/account-switching/front
 wf task new fix-tests upgrade-dependencies
 ```
 
-Each task starts from the primary repository's committed `HEAD`, receives a
-branch derived from the configured branch prefix, and runs repository
-initializers. Template files and workspace hooks are not reapplied.
+Each task starts from the primary repository's committed `HEAD` and receives a
+branch derived from the configured branch prefix. Repository initializers are
+skipped by default for fast handoff. Pass `--setup` when a task needs pooled
+dependencies restored and repository setup run before an agent starts work.
+Template files and workspace hooks are not reapplied.
+
+```sh
+wf task new --setup fix-tests
+```
 
 From the workspace root, identify the parent repository explicitly:
 

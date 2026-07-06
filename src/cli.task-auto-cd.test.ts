@@ -45,6 +45,77 @@ afterEach(async () => {
 });
 
 describe("task auto-cd", () => {
+  it("skips setup unless --setup is present", async () => {
+    const fixture = await createWorkspaceTaskFixture();
+    const targetDir = path.join(
+      fixture.workspaceDir,
+      "_tasks",
+      "front",
+      "fix-tests",
+    );
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.join(" "));
+    });
+
+    createTasksMock.mockResolvedValueOnce({
+      created: [
+        {
+          slug: "fix-tests",
+          parentRepo: "front",
+          path: targetDir,
+          branch: "tomdale/fix-tests",
+          setupStatus: "skipped",
+        },
+      ],
+      failures: [],
+    });
+
+    process.chdir(fixture.frontRepoDir);
+
+    const result = await executeCli(["task", "new", "fix-tests"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(createTasksMock).toHaveBeenCalledWith(
+      expect.objectContaining({ setup: false }),
+    );
+    expect(logs.join("\n")).toContain("(setup skipped)");
+  });
+
+  it("passes setup through when --setup is present", async () => {
+    const fixture = await createWorkspaceTaskFixture();
+    const targetDir = path.join(
+      fixture.workspaceDir,
+      "_tasks",
+      "front",
+      "fix-tests",
+    );
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    createTasksMock.mockResolvedValueOnce({
+      created: [
+        {
+          slug: "fix-tests",
+          parentRepo: "front",
+          path: targetDir,
+          branch: "tomdale/fix-tests",
+          setupStatus: "ready",
+          setupLog: ".workforest/logs/front-fix-tests.log",
+        },
+      ],
+      failures: [],
+    });
+
+    process.chdir(fixture.frontRepoDir);
+
+    const result = await executeCli(["task", "new", "--setup", "fix-tests"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(createTasksMock).toHaveBeenCalledWith(
+      expect.objectContaining({ setup: true }),
+    );
+  });
+
   it("prints a manual cd target instead of writing shell auto-cd on setup failure", async () => {
     const fixture = await createWorkspaceTaskFixture();
     const targetDir = path.join(

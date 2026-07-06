@@ -15,10 +15,12 @@ import {
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 
-const { runGitMock, runSingleRepoInitializersMock } = vi.hoisted(() => ({
-  runGitMock: vi.fn(),
-  runSingleRepoInitializersMock: vi.fn(),
-}));
+const { restoreNodeModulesMock, runGitMock, runSingleRepoInitializersMock } =
+  vi.hoisted(() => ({
+    restoreNodeModulesMock: vi.fn(),
+    runGitMock: vi.fn(),
+    runSingleRepoInitializersMock: vi.fn(),
+  }));
 
 vi.mock("../services/git.ts", () => ({
   runGit: runGitMock,
@@ -27,6 +29,17 @@ vi.mock("../services/git.ts", () => ({
 vi.mock("../services/initializers/index.ts", () => ({
   runSingleRepoInitializers: runSingleRepoInitializersMock,
 }));
+
+vi.mock("../node-modules-cache.ts", async () => {
+  const actual = await vi.importActual<
+    typeof import("../node-modules-cache.ts")
+  >("../node-modules-cache.ts");
+
+  return {
+    ...actual,
+    restoreNodeModules: restoreNodeModulesMock,
+  };
+});
 
 const tempDirs: string[] = [];
 
@@ -52,6 +65,7 @@ beforeEach(() => {
   // Reset the git mock's implementation (not just its call log) so a routing
   // impl from one test never leaks into a test that relies on a clean queue.
   runGitMock.mockReset();
+  restoreNodeModulesMock.mockResolvedValue({ status: "missing" });
   runSingleRepoInitializersMock.mockImplementation(async function* () {
     yield { phase: "complete" };
   });
@@ -118,10 +132,11 @@ describe("workspace tasks", () => {
         parentRepo: "front",
         path: path.join(workspaceDir, "_tasks", "front", "fix-tests"),
         branch: "tomdale/fix-tests",
-        setupStatus: "ready",
-        setupLog: ".workforest/logs/front-fix-tests.log",
+        setupStatus: "skipped",
       },
     ]);
+    expect(restoreNodeModulesMock).not.toHaveBeenCalled();
+    expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
     expect(runGitMock).toHaveBeenLastCalledWith(
       [
         "worktree",
@@ -142,6 +157,50 @@ describe("workspace tasks", () => {
           branch: "tomdale/fix-tests",
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",
+          setup_status: "skipped",
+        },
+      ],
+    });
+    await expect(
+      readFile(
+        path.join(workspaceDir, ".workforest/logs/front-fix-tests.log"),
+        "utf8",
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("runs setup and records a setup log when requested", async () => {
+    const workspaceDir = await createWorkspaceDir();
+    const { createTasks } = await import("./tasks.ts");
+
+    mockCreateTaskGit("tomdale/my-feature");
+
+    const result = await createTasks({
+      workspaceDir,
+      parentRepo: {
+        name: "front",
+        remote: "git@github.com:vercel/front.git",
+        has_lockfile: true,
+      },
+      slugs: ["fix-tests"],
+      setup: true,
+    });
+
+    expect(result.created).toEqual([
+      {
+        slug: "fix-tests",
+        parentRepo: "front",
+        path: path.join(workspaceDir, "_tasks", "front", "fix-tests"),
+        branch: "tomdale/fix-tests",
+        setupStatus: "ready",
+        setupLog: ".workforest/logs/front-fix-tests.log",
+      },
+    ]);
+    expect(restoreNodeModulesMock).toHaveBeenCalledOnce();
+    expect(runSingleRepoInitializersMock).toHaveBeenCalledOnce();
+    await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
+      tasks: [
+        {
           setup_status: "ready",
           setup_log: ".workforest/logs/front-fix-tests.log",
         },
@@ -289,6 +348,7 @@ describe("workspace tasks", () => {
         has_lockfile: true,
       },
       slugs: ["fix-tests"],
+      setup: true,
     });
 
     expect(result.created[0]).toMatchObject({
@@ -474,10 +534,11 @@ describe("workspace tasks", () => {
         parentRepo: "front",
         path: path.join(repoRootDir, "_tasks", "my-feature", "fix-tests"),
         branch: "tomdale/fix-tests",
-        setupStatus: "ready",
-        setupLog: ".workforest/logs/front-fix-tests.log",
+        setupStatus: "skipped",
       },
     ]);
+    expect(restoreNodeModulesMock).not.toHaveBeenCalled();
+    expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
     expect(runGitMock).toHaveBeenLastCalledWith(
       [
         "worktree",

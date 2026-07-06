@@ -15,7 +15,10 @@ wf task delete fix-tests
 wf task delete upgrade-deps --force
 ```
 
-Use `wf task --help` for the exact task syntax.
+Plain `wf task new` skips setup for fast concurrent work. Use
+`wf task new --setup` only when the task needs dependencies, environment files,
+or repository linking prepared up front. Use `wf task --help` for the exact task
+syntax.
 
 ## Delegate Narrowly
 

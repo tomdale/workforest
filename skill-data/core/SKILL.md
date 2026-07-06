@@ -53,6 +53,9 @@ wf review <repo>#<pr>
 Use tasks for parallel subagents, templates for repeatable workspace setups,
 and review workspaces for pull requests. For command syntax, load the scoped
 help pages with `wf task --help`, `wf template --help`, and `wf review --help`.
+Plain `wf task new` skips setup for fast concurrent work. Use
+`wf task new --setup` only when a task needs dependencies, environment files, or
+repository linking prepared before the agent starts.
 
 ## Cache And Config
 
