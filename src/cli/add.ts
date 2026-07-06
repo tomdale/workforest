@@ -16,6 +16,7 @@ import {
 } from "../templates/index.ts";
 import type { RepositorySource, WorkspaceMetadata } from "../types.ts";
 import { cancel, promptConfirm } from "../ui/prompts/index.ts";
+import { compactHome } from "../utils/display-path.ts";
 import { comparablePath } from "../utils/path-safety.ts";
 import {
   resolveWorkforestContext,
@@ -198,7 +199,7 @@ async function addToWorkspace(
 
   if (result.addedRepos.length > 0) {
     log.success(
-      `Added ${result.addedRepos.length} repo${result.addedRepos.length === 1 ? "" : "s"} to ${target.metadata.workspace.feature_name}.`,
+      `Added ${result.addedRepos.length} repo${result.addedRepos.length === 1 ? "" : "s"} to ${target.metadata.workspace.feature_name}`,
     );
     if (template) {
       await invalidateWorkspaceAgentsMd(template, target.workspaceDir).catch(
@@ -254,7 +255,7 @@ async function promoteWorktree(
     options,
   });
   if (!promote) {
-    cancel("Promotion cancelled.");
+    cancel("Promotion cancelled");
     return success();
   }
 
@@ -322,7 +323,7 @@ async function promoteWorktree(
     }
   }
 
-  log.success(`Promoted change to workspace: ${workspaceDir}`);
+  log.success(`Promoted worktree to workspace: ${compactHome(workspaceDir)}`);
   await reportShellCdTarget(workspaceDir, {
     writeShellCdPath: options.writeShellCdPath,
   });
@@ -418,8 +419,8 @@ async function confirmPromotion({
   yes: boolean;
   options: RunAddCommandOptions;
 }): Promise<boolean> {
-  log.info(`Source: ${sourcePath}`);
-  log.info(`Destination: ${destinationPath}`);
+  log.info(`Source: ${compactHome(sourcePath)}`);
+  log.info(`Destination: ${compactHome(destinationPath)}`);
   log.info(
     `Adding: ${addedRepos.length > 0 ? addedRepos.map((repo) => repo.name).join(", ") : "(none)"}`,
   );

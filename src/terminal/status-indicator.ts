@@ -43,7 +43,7 @@ export const TONE_ROLE: Record<StatusTone, TerminalStyleRole> = {
 
 /** Map from status tone to the role for message text (or undefined for unstyled). */
 function messageRole(tone: StatusTone): TerminalStyleRole | undefined {
-  return tone === "info" ? undefined : tone;
+  return tone === "info" ? undefined : TONE_ROLE[tone];
 }
 
 const TONES: Record<

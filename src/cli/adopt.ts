@@ -8,7 +8,9 @@ import { validateRepositoryComponent } from "../repository-components.ts";
 import { runGit, runGitWithStdin } from "../services/git.ts";
 import { withGitWorktreeLock } from "../services/worktree.ts";
 import { reportShellCdTarget } from "../shell.ts";
+import { kindToTone, statusLine } from "../terminal/status-indicator.ts";
 import type { RepositorySource } from "../types.ts";
+import { compactHome } from "../utils/display-path.ts";
 import { comparablePath, validateResourceName } from "../utils/path-safety.ts";
 import { writeWorktreeMetadata } from "../workspace/metadata.ts";
 import {
@@ -58,7 +60,12 @@ export async function runAdoptCommand(
     writeShellCdPath: options.writeShellCdPath,
   });
   return success(
-    humanOutput(`Adopted ${result.selector}: ${result.targetPath}`),
+    humanOutput(
+      statusLine(
+        kindToTone("success"),
+        `Adopted ${result.selector}: ${compactHome(result.targetPath)}`,
+      ),
+    ),
   );
 }
 

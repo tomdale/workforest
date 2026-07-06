@@ -8,6 +8,7 @@ import {
   renderBashCompletion,
   renderZshCompletion,
 } from "./shell/completion.ts";
+import { cdHint } from "./terminal/messages.ts";
 import { compactHome } from "./utils/display-path.ts";
 
 export const WORKFOREST_CD_PATH_ENV = "WORKFOREST_CD_PATH_FILE";
@@ -101,13 +102,13 @@ export async function reportShellCdTarget(
   const mode = options.mode ?? "auto";
 
   if (mode === "manual") {
-    log.info(`Run: cd ${compactHome(targetDir)}`);
+    log.info(cdHint(compactHome(targetDir)));
     return;
   }
 
   await (options.writeShellCdPath ?? writeShellCdPath)(targetDir);
   if (mode === "auto" && !isShellAutoCdEnabled()) {
-    log.info(`Run: cd ${compactHome(targetDir)}`);
+    log.info(cdHint(compactHome(targetDir)));
   }
 }
 
