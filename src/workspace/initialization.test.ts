@@ -14,6 +14,7 @@ import { createTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
 import {
   buildRepoInitializerWorkerEnvironment,
+  buildWorkspaceAgentsMdWorkerEnvironment,
   cancelRepoInitializations,
   getInitializationDir,
   initializeWorkspaceInitialization,
@@ -23,7 +24,10 @@ import {
   readWorkspaceInitializationState,
   retryRepoInitializations,
   runRepoInitializationWorker,
+  runWorkspaceAgentsMdWorker,
   startRepoInitialization,
+  startWorkspaceAgentsMdRefresh,
+  WORKSPACE_AGENTS_MD_WORKER,
   workspaceInitializationScope,
   worktreeInitializationScope,
 } from "./initialization.ts";
@@ -93,6 +97,25 @@ describe("background repository initialization", () => {
       WORKFOREST_WORKER_WORKSPACE: "/tmp/workspace",
       WORKFOREST_WORKER_REPO: "front",
       WORKFOREST_WORKER_RUN_ID: "run-1",
+    });
+  });
+
+  it("builds the private worker environment for workspace AGENTS.md refresh", () => {
+    expect(
+      buildWorkspaceAgentsMdWorkerEnvironment({
+        workspaceDir: "/tmp/workspace",
+        runId: "run-1",
+        setupRunId: "setup-1",
+        environment: { EXISTING: "value" },
+      }),
+    ).toEqual({
+      EXISTING: "value",
+      WORKFOREST_BACKGROUND_WORKER: "1",
+      WORKFOREST_WORKER: WORKSPACE_AGENTS_MD_WORKER,
+      WORKFOREST_WORKER_SCOPE: "workspace",
+      WORKFOREST_WORKER_WORKSPACE: "/tmp/workspace",
+      WORKFOREST_WORKER_RUN_ID: "run-1",
+      WORKFOREST_RUN_ID: "setup-1",
     });
   });
 
@@ -239,6 +262,23 @@ describe("background repository initialization", () => {
       workspaceDir,
       repos: [sourceRepo],
     });
+    const session = await createRunSession({
+      scope: workspaceInitializationScope(workspaceDir),
+      command: "new",
+      repos: [sourceRepo.name],
+    });
+    const agentsMd = await startWorkspaceAgentsMdRefresh(
+      workspaceDir,
+      { setupRunId: session.runId },
+      async () => process.pid,
+    );
+
+    await runWorkspaceAgentsMdWorker({
+      workspaceDir,
+      runId: agentsMd.run_id,
+      setupRunId: session.runId,
+    });
+
     const queued = await startRepoInitialization(
       { workspaceDir, repo: sourceRepo },
       async () => process.pid,
@@ -248,7 +288,9 @@ describe("background repository initialization", () => {
       workspaceDir,
       repoName: sourceRepo.name,
       runId: queued.run_id ?? "",
+      setupRunId: session.runId,
     });
+    await session.close();
 
     await expect(
       readWorkspaceInitializationState(workspaceDir),
@@ -258,6 +300,138 @@ describe("background repository initialization", () => {
     await expect(
       readFile(path.join(workspaceDir, "AGENTS.md"), "utf8"),
     ).resolves.toContain("Scope: Start in source/src/settings.ts.");
+
+    const events = await readRunEvents(session.runDir);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "step-start",
+          repo: null,
+          step: "setup:agents-md",
+        }),
+        expect.objectContaining({
+          kind: "step-end",
+          repo: null,
+          step: "setup:agents-md",
+          outcome: "ok",
+        }),
+      ]),
+    );
+  });
+
+  it("waits for a running AGENTS.md job before final workspace readiness", async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-guidance-race-"),
+    );
+    tempDirs.push(root);
+    const source = path.join(root, "source");
+    const configHome = path.join(root, "config");
+    const cache = path.join(root, "cache");
+    const bin = path.join(root, "bin");
+    const workspaceDir = path.join(root, "workspace");
+    const promptLog = path.join(root, "prompts.log");
+    const releaseFile = path.join(root, "release");
+    await mkdir(path.join(source, "src"), { recursive: true });
+    await mkdir(path.join(workspaceDir, "source"), { recursive: true });
+    await mkdir(bin);
+    await runGit(["init", "-b", "main"], { cwd: source });
+    await runGit(["config", "user.email", "test@example.com"], {
+      cwd: source,
+    });
+    await runGit(["config", "user.name", "Test"], { cwd: source });
+    await runGit(["config", "commit.gpgsign", "false"], { cwd: source });
+    await writeFile(
+      path.join(source, "src", "settings.ts"),
+      "export const settings = true;\n",
+      "utf8",
+    );
+    await runGit(["add", "src/settings.ts"], { cwd: source });
+    await runGit(["commit", "-m", "add settings"], { cwd: source });
+    await writeFile(
+      path.join(bin, "codex"),
+      fakeBlockingCodexScript(
+        releaseFile,
+        [
+          "<agents_md>",
+          "Template: guidance-race.",
+          "Scope: Start in source/src/settings.ts.",
+          "</agents_md>",
+        ].join("\n"),
+      ),
+      "utf8",
+    );
+    await chmod(path.join(bin, "codex"), 0o755);
+
+    process.env["XDG_CONFIG_HOME"] = configHome;
+    process.env["WORKFOREST_CACHE_DIR"] = cache;
+    process.env["WORKFOREST_AI_PROVIDER"] = "codex-cli";
+    delete process.env["WORKFOREST_AI_DISABLED"];
+    process.env["WORKFOREST_PROMPT_LOG"] = promptLog;
+    process.env["PATH"] = `${bin}${path.delimiter}${originalPath ?? ""}`;
+    delete process.env["SHELL"];
+    await createTemplate("guidance-race", {
+      repos: [`file://${source}`],
+      "AGENTS.md": {
+        focus: "How settings are loaded.",
+        paths: { source: ["src"] },
+      },
+    });
+    const sourceRepo: RepositorySource = {
+      name: "source",
+      remote: `file://${source}`,
+    };
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "guidance-race",
+      branchName: "tomdale/guidance-race",
+      templateId: "guidance-race",
+      repos: [{ ...sourceRepo, hasLockfile: false }],
+    });
+    await initializeWorkspaceInitialization({
+      workspaceDir,
+      repos: [sourceRepo],
+    });
+    const session = await createRunSession({
+      scope: workspaceInitializationScope(workspaceDir),
+      command: "new",
+      repos: [sourceRepo.name],
+    });
+    const agentsMd = await startWorkspaceAgentsMdRefresh(
+      workspaceDir,
+      { setupRunId: session.runId },
+      async () => process.pid,
+    );
+    const agentsPromise = runWorkspaceAgentsMdWorker({
+      workspaceDir,
+      runId: agentsMd.run_id,
+      setupRunId: session.runId,
+    });
+
+    const queued = await startRepoInitialization(
+      { workspaceDir, repo: sourceRepo },
+      async () => process.pid,
+    );
+    const repoPromise = runRepoInitializationWorker({
+      workspaceDir,
+      repoName: sourceRepo.name,
+      runId: queued.run_id ?? "",
+      setupRunId: session.runId,
+    });
+
+    await expect(
+      Promise.race([repoPromise.then(() => "done"), sleep(100)]),
+    ).resolves.toBe("timeout");
+    await expect(
+      readWorkspaceInitializationState(workspaceDir),
+    ).resolves.not.toMatchObject({ status: "ready" });
+
+    await writeFile(releaseFile, "go", "utf8");
+    await agentsPromise;
+    await repoPromise;
+    await session.close();
+
+    await expect(
+      readWorkspaceInitializationState(workspaceDir),
+    ).resolves.toMatchObject({ status: "ready" });
   });
 
   it("cancels a running worker process group and retries with a new attempt", async () => {
@@ -356,6 +530,10 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
+function sleep(ms: number): Promise<"timeout"> {
+  return new Promise((resolve) => setTimeout(() => resolve("timeout"), ms));
+}
+
 function fakeCodexScript(response: string): string {
   return `#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -371,6 +549,31 @@ for arg in "$@"; do
 done
 input="$(cat)"
 printf '%s\\n---PROMPT---\\n' "$input" >> "$WORKFOREST_PROMPT_LOG"
+printf '%s' ${JSON.stringify(response)} > "$output_file"
+`;
+}
+
+function fakeBlockingCodexScript(
+  releaseFile: string,
+  response: string,
+): string {
+  return `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'codex 1.0.0\\n'
+  exit 0
+fi
+output_file=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--output-last-message" ]; then output_file="$arg"; fi
+  if [ "$arg" = "--output-schema" ]; then exit 3; fi
+  previous="$arg"
+done
+input="$(cat)"
+printf '%s\\n---PROMPT---\\n' "$input" >> "$WORKFOREST_PROMPT_LOG"
+while [ ! -f ${JSON.stringify(releaseFile)} ]; do
+  sleep 0.02
+done
 printf '%s' ${JSON.stringify(response)} > "$output_file"
 `;
 }

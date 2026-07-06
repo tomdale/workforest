@@ -6,7 +6,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { refreshAndMaterializeTemplateAgentsMd } from "../templates/agents-md.ts";
-import { applyTemplate } from "../templates/apply.ts";
+import { applyTemplate, copyTemplateFiles } from "../templates/apply.ts";
 import { formatTemplateIdentifier, loadTemplate } from "../templates/index.ts";
 import type { RepositorySource } from "../types.ts";
 import { terminateRunningCommands } from "../utils/task-generator.ts";
@@ -43,6 +43,8 @@ const LOCK_TIMEOUT_MS = 10_000;
 const STALE_LOCK_MS = 30_000;
 const QUEUED_STALE_MS = 2_000;
 export const REPO_INITIALIZER_WORKER = "repo-initializer";
+export const WORKSPACE_AGENTS_MD_WORKER = "workspace-agents-md";
+const AGENTS_MD_STEP_ID = "setup:agents-md";
 
 export {
   type InitializationTarget,
@@ -112,6 +114,32 @@ type WorkerLaunch = (options: {
   setupRunId?: string | undefined;
 }) => Promise<number>;
 
+type WorkspaceWorkerLaunch = (options: {
+  scope: InitializationScope;
+  runId: string;
+  setupRunId?: string | undefined;
+}) => Promise<number>;
+
+export type WorkspaceAgentsMdJobStatus =
+  | "queued"
+  | "running"
+  | "ready"
+  | "skipped"
+  | "failed";
+
+export type WorkspaceAgentsMdJobState = {
+  version: 1;
+  status: WorkspaceAgentsMdJobStatus;
+  run_id: string;
+  pid?: number;
+  warnings?: string[];
+  error?: string;
+  created_at: string;
+  updated_at: string;
+  started_at?: string;
+  completed_at?: string;
+};
+
 export function buildRepoInitializerWorkerEnvironment({
   scope: explicitScope,
   workspaceDir,
@@ -143,6 +171,37 @@ export function buildRepoInitializerWorkerEnvironment({
           WORKFOREST_WORKER_CHANGE: scope.changeName,
         }),
     WORKFOREST_WORKER_REPO: repoName,
+    WORKFOREST_WORKER_RUN_ID: runId,
+    ...(setupRunId ? { WORKFOREST_RUN_ID: setupRunId } : {}),
+  };
+}
+
+export function buildWorkspaceAgentsMdWorkerEnvironment({
+  scope: explicitScope,
+  workspaceDir,
+  runId,
+  setupRunId,
+  environment = process.env,
+}: {
+  scope?: InitializationScope;
+  workspaceDir?: string;
+  runId: string;
+  setupRunId?: string | undefined;
+  environment?: NodeJS.ProcessEnv;
+}): NodeJS.ProcessEnv {
+  const scope = resolveInitializationScope({
+    workspaceDir,
+    scope: explicitScope,
+  });
+  if (scope.kind !== "workspace") {
+    throw new Error("AGENTS.md refresh worker only supports workspaces.");
+  }
+  return {
+    ...environment,
+    WORKFOREST_BACKGROUND_WORKER: "1",
+    WORKFOREST_WORKER: WORKSPACE_AGENTS_MD_WORKER,
+    WORKFOREST_WORKER_SCOPE: "workspace",
+    WORKFOREST_WORKER_WORKSPACE: scope.workspaceDir,
     WORKFOREST_WORKER_RUN_ID: runId,
     ...(setupRunId ? { WORKFOREST_RUN_ID: setupRunId } : {}),
   };
@@ -498,6 +557,148 @@ export async function startRepoInitialization(
   }
 }
 
+export async function readWorkspaceAgentsMdJobState(
+  target: InitializationTarget,
+): Promise<WorkspaceAgentsMdJobState | null> {
+  const scope = normalizeInitializationTarget(target);
+  const state = await readJsonFile<WorkspaceAgentsMdJobState>(
+    getAgentsMdJobStatePath(scope),
+  );
+  if (!state) return null;
+
+  if (
+    (state.status === "running" || state.status === "queued") &&
+    state.pid !== undefined &&
+    !isProcessAlive(state.pid) &&
+    (state.status === "running" ||
+      Date.now() - Date.parse(state.updated_at) > QUEUED_STALE_MS)
+  ) {
+    return updateWorkspaceAgentsMdJobState(scope, (current) => {
+      if (
+        current.run_id !== state.run_id ||
+        (current.status !== "running" && current.status !== "queued")
+      ) {
+        return current;
+      }
+      const now = new Date().toISOString();
+      return {
+        ...current,
+        status: "failed",
+        error: "Background AGENTS.md refresh exited unexpectedly.",
+        completed_at: now,
+        updated_at: now,
+      };
+    });
+  }
+
+  return state;
+}
+
+export async function startWorkspaceAgentsMdRefresh(
+  target: InitializationTarget,
+  { setupRunId }: { setupRunId?: string } = {},
+  launchWorker: WorkspaceWorkerLaunch = launchDetachedAgentsMdWorker,
+): Promise<WorkspaceAgentsMdJobState> {
+  const scope = normalizeInitializationTarget(target);
+  if (scope.kind !== "workspace") {
+    const now = new Date().toISOString();
+    const skipped: WorkspaceAgentsMdJobState = {
+      version: 1,
+      status: "skipped",
+      run_id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+      completed_at: now,
+    };
+    await writeWorkspaceAgentsMdJobState(scope, skipped);
+    return skipped;
+  }
+
+  const existing = await readWorkspaceAgentsMdJobState(scope);
+  if (
+    existing &&
+    (existing.status === "queued" ||
+      existing.status === "running" ||
+      existing.status === "ready" ||
+      existing.status === "failed" ||
+      existing.status === "skipped")
+  ) {
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const runId = randomUUID();
+  const queued: WorkspaceAgentsMdJobState = {
+    version: 1,
+    status: "queued",
+    run_id: runId,
+    created_at: now,
+    updated_at: now,
+  };
+  await writeWorkspaceAgentsMdJobState(scope, queued);
+
+  try {
+    const pid = await launchWorker({ scope, runId, setupRunId });
+    return updateWorkspaceAgentsMdJobState(scope, (current) =>
+      current.run_id === runId
+        ? { ...current, pid, updated_at: new Date().toISOString() }
+        : current,
+    );
+  } catch (error) {
+    const setupError =
+      error instanceof Error ? error : new Error(String(error));
+    const failed = await updateWorkspaceAgentsMdJobState(scope, (current) =>
+      current.run_id === runId
+        ? {
+            ...current,
+            status: "failed",
+            error: setupError.message,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+        : current,
+    );
+    return failed;
+  }
+}
+
+export async function runWorkspaceAgentsMdWorker({
+  workspaceDir,
+  scope: explicitScope,
+  runId,
+  setupRunId,
+}: {
+  workspaceDir?: string;
+  scope?: InitializationScope;
+  runId: string;
+  setupRunId?: string | undefined;
+}): Promise<void> {
+  const scope = resolveInitializationScope({
+    workspaceDir,
+    scope: explicitScope,
+  });
+  const rootDir = getInitializationRootDir(scope);
+  const metadata = await readInitializationMetadata(scope);
+  if (!metadata) {
+    throw new Error(`Workspace metadata not found: ${rootDir}`);
+  }
+  const session = await openWorkerRunSession({
+    scope,
+    repoName: "workspace",
+    runId: setupRunId,
+  });
+
+  try {
+    await runAgentsMdRefreshJob(scope, metadata, session, runId);
+    const finalState = await finalizeWorkspaceInitialization(scope, {
+      session,
+    });
+    emitRunEndIfTerminal(session, finalState);
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+}
+
 export async function runRepoInitializationWorker({
   workspaceDir,
   scope: explicitScope,
@@ -783,53 +984,21 @@ export async function finalizeWorkspaceInitialization(
         updated_at: new Date().toISOString(),
       }));
 
-      const agentsMdStartedAt = Date.now();
-      session?.emit({
-        kind: "step-start",
-        repo: null,
-        step: AGENTS_MD_STEP_ID,
-        title: "AGENTS.md",
-      });
-      try {
-        await refreshAndMaterializeTemplateAgentsMd(
-          template,
-          getInitializationRootDir(scope),
-          metadata.repos.map((repo) => ({
-            name: repo.name,
-            remote: repo.remote,
-          })),
-          {
-            onWarning: (message) => {
-              warnings.push(message);
-              session?.emit({
-                kind: "step-log",
-                repo: null,
-                step: AGENTS_MD_STEP_ID,
-                level: "warn",
-                message,
-              });
-            },
-          },
+      let job = await readWorkspaceAgentsMdJobState(scope);
+      if (!job) {
+        await copyTemplateFiles(template, getInitializationRootDir(scope));
+        job = await startWorkspaceAgentsMdRefresh(
+          scope,
+          session ? { setupRunId: session.runId } : {},
         );
-        session?.emit({
-          kind: "step-end",
-          repo: null,
-          step: AGENTS_MD_STEP_ID,
-          outcome: "ok",
-          durationMs: Date.now() - agentsMdStartedAt,
-        });
-      } catch (error) {
+      }
+
+      job = await waitForWorkspaceAgentsMdJob(scope);
+      if (job.warnings) warnings.push(...job.warnings);
+      if (job.status === "failed") {
         warnings.push(
-          `Could not materialize AGENTS.md guidance: ${formatError(error)}`,
+          `Could not materialize AGENTS.md guidance: ${job.error ?? "AGENTS.md refresh failed."}`,
         );
-        session?.emit({
-          kind: "step-end",
-          repo: null,
-          step: AGENTS_MD_STEP_ID,
-          outcome: "failed",
-          durationMs: Date.now() - agentsMdStartedAt,
-          error: { message: formatError(error) },
-        });
       }
     }
 
@@ -908,8 +1077,6 @@ export async function finalizeWorkspaceInitialization(
   });
 }
 
-const AGENTS_MD_STEP_ID = "setup:agents-md";
-
 /**
  * Record the run's terminal event when a finalize call actually performed
  * the transition (its return is non-null exactly once per run).
@@ -965,6 +1132,10 @@ function getWorkspaceStatePath(scope: InitializationScope): string {
   return path.join(getInitializationDir(scope), WORKSPACE_STATE_FILENAME);
 }
 
+function getAgentsMdJobStatePath(scope: InitializationScope): string {
+  return path.join(getInitializationDir(scope), "agents-md.json");
+}
+
 function getFinalizeLockPath(scope: InitializationScope): string {
   return path.join(getInitializationDir(scope), "finalize.lock");
 }
@@ -1005,11 +1176,170 @@ async function launchDetachedWorker({
   return child.pid;
 }
 
+async function launchDetachedAgentsMdWorker({
+  scope,
+  runId,
+  setupRunId,
+}: {
+  scope: InitializationScope;
+  runId: string;
+  setupRunId?: string | undefined;
+}): Promise<number> {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    throw new Error("Unable to resolve the workforest CLI entrypoint.");
+  }
+
+  const child = spawn(process.execPath, [path.resolve(entrypoint)], {
+    cwd: getInitializationRootDir(scope),
+    detached: true,
+    stdio: "ignore",
+    env: buildWorkspaceAgentsMdWorkerEnvironment({
+      scope,
+      runId,
+      setupRunId,
+    }),
+  });
+
+  await waitForSpawn(child);
+  if (child.pid === undefined) {
+    throw new Error("Failed to launch AGENTS.md refresh worker.");
+  }
+  child.unref();
+  return child.pid;
+}
+
 function waitForSpawn(child: ChildProcess): Promise<void> {
   return new Promise((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", reject);
   });
+}
+
+async function runAgentsMdRefreshJob(
+  scope: InitializationScope,
+  metadata: NonNullable<Awaited<ReturnType<typeof readInitializationMetadata>>>,
+  session: RunSession,
+  runId: string,
+): Promise<WorkspaceAgentsMdJobState> {
+  const template = metadata.workspace.template_id
+    ? await loadTemplate(
+        formatTemplateIdentifier({
+          parent: metadata.workspace.template_id,
+          variant: metadata.workspace.template_variant,
+        }),
+      )
+    : null;
+
+  const started = await updateWorkspaceAgentsMdJobState(scope, (current) => {
+    if (current.run_id !== runId || current.status === "skipped") {
+      return current;
+    }
+    const now = new Date().toISOString();
+    return {
+      ...current,
+      status: "running",
+      pid: process.pid,
+      started_at: now,
+      updated_at: now,
+    };
+  });
+  if (started.run_id !== runId || started.status === "skipped") {
+    return started;
+  }
+
+  const warnings: string[] = [];
+  const startedAt = Date.now();
+  session.emit({
+    kind: "step-start",
+    repo: null,
+    step: AGENTS_MD_STEP_ID,
+    title: "AGENTS.md",
+  });
+
+  if (!template?.config["AGENTS.md"]) {
+    session.emit({
+      kind: "step-end",
+      repo: null,
+      step: AGENTS_MD_STEP_ID,
+      outcome: "skipped",
+      durationMs: Date.now() - startedAt,
+      reason: "Template has no AGENTS.md guidance.",
+    });
+    return completeAgentsMdJob(scope, runId, "skipped", { warnings });
+  }
+
+  try {
+    await refreshAndMaterializeTemplateAgentsMd(
+      template,
+      getInitializationRootDir(scope),
+      metadata.repos.map((repo) => ({
+        name: repo.name,
+        remote: repo.remote,
+      })),
+      {
+        onWarning: (message) => {
+          warnings.push(message);
+          session.emit({
+            kind: "step-log",
+            repo: null,
+            step: AGENTS_MD_STEP_ID,
+            level: "warn",
+            message,
+          });
+        },
+      },
+    );
+    session.emit({
+      kind: "step-end",
+      repo: null,
+      step: AGENTS_MD_STEP_ID,
+      outcome: "ok",
+      durationMs: Date.now() - startedAt,
+    });
+    return completeAgentsMdJob(scope, runId, "ready", { warnings });
+  } catch (error) {
+    const message = formatError(error);
+    session.emit({
+      kind: "step-end",
+      repo: null,
+      step: AGENTS_MD_STEP_ID,
+      outcome: "failed",
+      durationMs: Date.now() - startedAt,
+      error: { message },
+    });
+    return completeAgentsMdJob(scope, runId, "failed", {
+      warnings,
+      error: message,
+    });
+  }
+}
+
+async function completeAgentsMdJob(
+  scope: InitializationScope,
+  runId: string,
+  status: "ready" | "skipped" | "failed",
+  {
+    warnings,
+    error,
+  }: {
+    warnings: readonly string[];
+    error?: string;
+  },
+): Promise<WorkspaceAgentsMdJobState> {
+  const now = new Date().toISOString();
+  return updateWorkspaceAgentsMdJobState(scope, (current) =>
+    current.run_id === runId
+      ? {
+          ...current,
+          status,
+          ...(warnings.length > 0 ? { warnings: [...warnings] } : {}),
+          ...(error !== undefined ? { error } : {}),
+          completed_at: now,
+          updated_at: now,
+        }
+      : current,
+  );
 }
 
 async function recordWorkerPipelineState(
@@ -1168,6 +1498,51 @@ async function writeRepoInitializationState(
   await withExclusiveLock(`${statePath}.lock`, () =>
     writeJsonFile(statePath, state),
   );
+}
+
+async function waitForWorkspaceAgentsMdJob(
+  scope: InitializationScope,
+): Promise<WorkspaceAgentsMdJobState> {
+  while (true) {
+    const state = await readWorkspaceAgentsMdJobState(scope);
+    if (!state) {
+      throw new Error("AGENTS.md refresh job state not found.");
+    }
+    if (
+      state.status === "ready" ||
+      state.status === "skipped" ||
+      state.status === "failed"
+    ) {
+      return state;
+    }
+    await delay(LOCK_RETRY_MS);
+  }
+}
+
+async function writeWorkspaceAgentsMdJobState(
+  scope: InitializationScope,
+  state: WorkspaceAgentsMdJobState,
+): Promise<void> {
+  const statePath = getAgentsMdJobStatePath(scope);
+  await withExclusiveLock(`${statePath}.lock`, () =>
+    writeJsonFile(statePath, state),
+  );
+}
+
+async function updateWorkspaceAgentsMdJobState(
+  scope: InitializationScope,
+  update: (state: WorkspaceAgentsMdJobState) => WorkspaceAgentsMdJobState,
+): Promise<WorkspaceAgentsMdJobState> {
+  const statePath = getAgentsMdJobStatePath(scope);
+  return withExclusiveLock(`${statePath}.lock`, async () => {
+    const current = await readJsonFile<WorkspaceAgentsMdJobState>(statePath);
+    if (!current) {
+      throw new Error("AGENTS.md refresh job state not found.");
+    }
+    const next = update(current);
+    await writeJsonFile(statePath, next);
+    return next;
+  });
 }
 
 async function updateWorkspaceInitializationState(

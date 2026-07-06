@@ -645,22 +645,22 @@ function formatInvocationCommand(invocation: ParsedInvocation): string {
 async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
   const worker = process.env["WORKFOREST_WORKER"];
   if (!worker) return null;
-  if (worker !== "repo-initializer") {
+  if (worker !== "repo-initializer" && worker !== "workspace-agents-md") {
     throw new OperationalError(`Unknown Workforest worker: ${worker}`);
   }
 
   const workerScope = process.env["WORKFOREST_WORKER_SCOPE"] ?? "workspace";
-  const repoName = process.env["WORKFOREST_WORKER_REPO"];
   const runId = process.env["WORKFOREST_WORKER_RUN_ID"];
   const setupRunId = process.env["WORKFOREST_RUN_ID"];
-  if (!repoName || !runId) {
+  if (!runId) {
     throw new OperationalError(
-      "Repository initialization worker requires WORKFOREST_WORKER_REPO and WORKFOREST_WORKER_RUN_ID.",
+      "Background worker requires WORKFOREST_WORKER_RUN_ID.",
     );
   }
 
   const {
     runRepoInitializationWorker,
+    runWorkspaceAgentsMdWorker,
     worktreeInitializationScope,
     workspaceInitializationScope,
   } = await import("./workspace/initialization.ts");
@@ -675,6 +675,21 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
         );
 
   try {
+    if (worker === "workspace-agents-md") {
+      await runWorkspaceAgentsMdWorker({
+        scope,
+        runId,
+        ...(setupRunId ? { setupRunId } : {}),
+      });
+      return success();
+    }
+
+    const repoName = process.env["WORKFOREST_WORKER_REPO"];
+    if (!repoName) {
+      throw new OperationalError(
+        "Repository initialization worker requires WORKFOREST_WORKER_REPO.",
+      );
+    }
     await runRepoInitializationWorker({
       scope,
       repoName,
