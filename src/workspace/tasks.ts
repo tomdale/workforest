@@ -51,7 +51,6 @@ import {
 import {
   appendRepoSetupLog,
   getRepoSetupLogPath,
-  removeRepoSetupLog,
   startRepoSetupLog,
 } from "./setup-logs.ts";
 
@@ -440,7 +439,7 @@ export async function listRepositoryTasks({
   for (const slug of slugs) {
     const relativePath = repositoryTaskRelativePath(safeName, slug);
     const absolutePath = resolveContainedPath(repoRootDir, relativePath);
-    const setupLog = await repositoryTaskSetupLog(
+    const setup = await repositoryTaskSetupStatus(
       repoRootDir,
       safeRepoName,
       slug,
@@ -457,10 +456,10 @@ export async function listRepositoryTasks({
       base_branch: baseBranch,
       base_sha: baseSha,
       created_at: await pathModifiedAt(absolutePath),
-      setup_status: setupLog ? "failed" : "ready",
-      ...(setupLog ? { setup_log: setupLog } : {}),
+      setup_status: setup.status,
+      ...(setup.logPath ? { setup_log: setup.logPath } : {}),
       absolutePath,
-      state: setupLog ? "failed" : "ready",
+      state: setup.status,
       merged: branch
         ? await isBranchMerged(resolvedParentRepoDir, branch)
         : null,
@@ -595,16 +594,6 @@ async function removeWorkspaceTasks({
       await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
     });
 
-    if (entry.setup_log) {
-      await fs.rm(
-        resolveContainedPath(
-          resolvedWorkspaceDir,
-          getTaskSetupLogRelativePath(entry.parent_repo, entry.slug),
-        ),
-        { force: true },
-      );
-    }
-
     removed.push(entry);
   }
 
@@ -702,13 +691,6 @@ async function removeRepositoryTasks({
       await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, force);
     });
 
-    if (entry.setup_log) {
-      await removeRepoSetupLog(
-        repoRootDir,
-        resolveContainedPath(repoRootDir, entry.setup_log),
-      );
-    }
-
     removed.push(entry);
   }
 
@@ -793,14 +775,7 @@ async function* createAndSetupTask({
       path: targetDir,
       branch: entry.branch,
       setupStatus: result.status,
-      ...(result.logPath
-        ? {
-            setupLog: getTaskSetupLogRelativePath(
-              entry.parent_repo,
-              entry.slug,
-            ),
-          }
-        : {}),
+      setupLog: getTaskSetupLogRelativePath(entry.parent_repo, entry.slug),
     });
     yield { phase: "complete", hasLockfile: false };
   } catch (error) {
@@ -853,8 +828,7 @@ async function* runTaskInitializers({
   }
 
   if (!failed) {
-    await removeRepoSetupLog(workspaceDir, logPath);
-    return { status: "ready" };
+    return { status: "ready", logPath };
   }
 
   return { status: "failed", logPath };
@@ -1047,14 +1021,32 @@ async function listRepositoryTaskSlugs(
     .sort((left, right) => left.localeCompare(right));
 }
 
-async function repositoryTaskSetupLog(
+async function repositoryTaskSetupStatus(
   repoRootDir: string,
   repoName: string,
   slug: string,
-): Promise<string | undefined> {
+): Promise<{ status: "ready" | "failed"; logPath?: string }> {
   const relativePath = getTaskSetupLogRelativePath(repoName, slug);
   const absolutePath = resolveContainedPath(repoRootDir, relativePath);
-  return (await pathExists(absolutePath)) ? relativePath : undefined;
+  if (!(await pathExists(absolutePath))) {
+    return { status: "ready" };
+  }
+
+  const log = await fs.readFile(absolutePath, "utf8");
+  return {
+    status: latestSetupLogSectionFailed(log) ? "failed" : "ready",
+    logPath: relativePath,
+  };
+}
+
+function latestSetupLogSectionFailed(log: string): boolean {
+  const latestHeaderIndex = log.lastIndexOf("# workforest repo setup log");
+  const latest = latestHeaderIndex === -1 ? log : log.slice(latestHeaderIndex);
+  return (
+    /^\[initializer:[^\]]+\] failed:/m.test(latest) ||
+    /^\[failed/m.test(latest) ||
+    /^\[thrown\]/m.test(latest)
+  );
 }
 
 async function pathModifiedAt(target: string): Promise<string> {

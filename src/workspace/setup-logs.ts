@@ -60,11 +60,11 @@ export async function startRepoSetupLog(
   const rootDir = getInitializationRootDir(scope);
   await fs.mkdir(logDir, { recursive: true });
   await assertContainedPathWithoutSymlinks(rootDir, logPath);
-  await fs.rm(logPath, { force: true });
 
   await appendRepoSetupLog(
     logPath,
     [
+      "",
       `# workforest repo setup log`,
       `timestamp: ${new Date().toISOString()}`,
       `repo: ${options.repoName}`,
@@ -117,22 +117,6 @@ class RepoSetupLogWriter {
     this.#stream.end();
     await finished;
   }
-}
-
-export async function removeRepoSetupLog(
-  workspaceDir: string,
-  logPath: string,
-  initializationScope?: InitializationScope,
-): Promise<void> {
-  const scope =
-    initializationScope ?? workspaceInitializationScope(workspaceDir);
-  const rootDir = getInitializationRootDir(scope);
-  const safeLogPath = resolveContainedPath(
-    rootDir,
-    path.relative(path.resolve(rootDir), path.resolve(logPath)),
-  );
-  await assertContainedPathWithoutSymlinks(rootDir, safeLogPath);
-  await fs.rm(safeLogPath, { force: true });
 }
 
 export async function readRepoSetupLogExcerpt({

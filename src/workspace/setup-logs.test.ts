@@ -139,6 +139,46 @@ describe("repo setup logs", () => {
     expect(log).toContain("[complete] hasLockfile=true");
   });
 
+  it("appends a new setup run without removing an existing log", async () => {
+    const workspaceDir = await createWorkspaceDir();
+
+    await collect(
+      withRepoSetupLog(
+        (async function* (): AsyncGenerator<RepoPipelineState> {
+          yield { phase: "failed", error: new Error("first setup failed") };
+        })(),
+        {
+          workspaceDir,
+          repoName: "front",
+          repoDir: path.join(workspaceDir, "front"),
+        },
+      ),
+    );
+
+    await collect(
+      withRepoSetupLog(
+        (async function* (): AsyncGenerator<RepoPipelineState> {
+          yield { phase: "complete", hasLockfile: true };
+        })(),
+        {
+          workspaceDir,
+          repoName: "front",
+          repoDir: path.join(workspaceDir, "front"),
+        },
+      ),
+    );
+
+    const logPath = await getRepoSetupLogPath({
+      workspaceDir,
+      repoName: "front",
+    });
+    const log = await readFile(logPath, "utf8");
+
+    expect(log).toContain("first setup failed");
+    expect(log).toContain("[complete] hasLockfile=true");
+    expect(log.match(/# workforest repo setup log/g)).toHaveLength(2);
+  });
+
   it("converts thrown setup errors into failed states and keeps the log", async () => {
     const workspaceDir = await createWorkspaceDir();
 

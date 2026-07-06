@@ -119,6 +119,7 @@ describe("workspace tasks", () => {
         path: path.join(workspaceDir, "_tasks", "front", "fix-tests"),
         branch: "tomdale/fix-tests",
         setupStatus: "ready",
+        setupLog: ".workforest/logs/front-fix-tests.log",
       },
     ]);
     expect(runGitMock).toHaveBeenLastCalledWith(
@@ -142,9 +143,16 @@ describe("workspace tasks", () => {
           base_branch: "tomdale/my-feature",
           base_sha: "abc123",
           setup_status: "ready",
+          setup_log: ".workforest/logs/front-fix-tests.log",
         },
       ],
     });
+    await expect(
+      readFile(
+        path.join(workspaceDir, ".workforest/logs/front-fix-tests.log"),
+        "utf8",
+      ),
+    ).resolves.toContain("[complete] initializers complete");
   });
 
   it("uses the configured branch prefix instead of inheriting the current branch namespace", async () => {
@@ -323,8 +331,15 @@ describe("workspace tasks", () => {
         base_sha: "abc123",
         created_at: "2026-05-15T00:00:00.000Z",
         setup_status: "ready",
+        setup_log: ".workforest/logs/front-fix-tests.log",
       },
     ]);
+    const setupLogPath = path.join(
+      workspaceDir,
+      ".workforest/logs/front-fix-tests.log",
+    );
+    await mkdir(path.dirname(setupLogPath), { recursive: true });
+    await writeFile(setupLogPath, "keep this setup log\n", "utf8");
     const { deleteTasks } = await import("./tasks.ts");
 
     runGitMock
@@ -359,6 +374,9 @@ describe("workspace tasks", () => {
     await expect(
       readWorkspaceMetadata(workspaceDir),
     ).resolves.not.toHaveProperty("tasks");
+    await expect(readFile(setupLogPath, "utf8")).resolves.toBe(
+      "keep this setup log\n",
+    );
   });
 
   it("prunes stale workspace tasks on delete", async () => {
@@ -457,6 +475,7 @@ describe("workspace tasks", () => {
         path: path.join(repoRootDir, "_tasks", "my-feature", "fix-tests"),
         branch: "tomdale/fix-tests",
         setupStatus: "ready",
+        setupLog: ".workforest/logs/front-fix-tests.log",
       },
     ]);
     expect(runGitMock).toHaveBeenLastCalledWith(
@@ -480,6 +499,21 @@ describe("workspace tasks", () => {
     const parentRepoDir = path.join(repoRootDir, "my-feature");
     const taskDir = path.join(repoRootDir, "_tasks", "my-feature", "fix-tests");
     await mkdir(taskDir, { recursive: true });
+    const setupLogPath = path.join(
+      repoRootDir,
+      ".workforest/logs/front-fix-tests.log",
+    );
+    await mkdir(path.dirname(setupLogPath), { recursive: true });
+    await writeFile(
+      setupLogPath,
+      [
+        "# workforest repo setup log",
+        "repo: front-fix-tests",
+        "[complete] initializers complete",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     const { listRepositoryTasks } = await import("./tasks.ts");
 
     runGitMock
@@ -500,6 +534,7 @@ describe("workspace tasks", () => {
         parent_repo: "front",
         path: "_tasks/my-feature/fix-tests",
         branch: "tomdale/fix-tests",
+        setup_log: ".workforest/logs/front-fix-tests.log",
         absolutePath: taskDir,
         state: "ready",
         merged: true,
