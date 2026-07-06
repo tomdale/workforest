@@ -150,14 +150,11 @@ const humanServiceEventSink: ServiceEventSink = (event) => {
 function renderCleanupState(state: CleanupState, dryRun: boolean): void {
   switch (state.phase) {
     case "init": {
-      const message = state.message
-        ? state.message[0]?.toLowerCase() + state.message.slice(1)
-        : "preparing cleanup";
-      log.info(`Delete: ${message}`);
+      log.info(state.message ?? "Preparing cleanup");
       break;
     }
     case "remove-dir":
-      log.info(`Delete: ${state.message}`);
+      log.info(state.message);
       break;
     case "node-modules":
       if (state.status === "preserving") {
@@ -172,7 +169,7 @@ function renderCleanupState(state: CleanupState, dryRun: boolean): void {
       if (state.state.status === "log") {
         log[state.state.level](`${state.repo}: ${state.state.message}`);
       } else if (state.state.status === "skipped") {
-        log.info(`${state.repo}: ${state.state.reason}`);
+        log.info(`${state.repo}: skipped (${state.state.reason})`);
       } else if (state.state.status === "failed") {
         log.error(`${state.repo}: ${state.state.error.message}`);
       }
@@ -188,24 +185,23 @@ function renderCleanupState(state: CleanupState, dryRun: boolean): void {
       } else if (state.status === "deleted") {
         log.success(`${state.repo}: deleted remote branch ${state.branch}`);
       } else if (state.status === "skipped") {
-        log.info(`${state.repo}: skipped ${state.branch} - ${state.reason}`);
+        log.info(`${state.repo}: skipped ${state.branch} (${state.reason})`);
       } else {
         log.error(
-          `${state.repo}: failed to delete ${state.branch} - ${state.reason}`,
+          `${state.repo}: failed to delete ${state.branch} (${state.reason})`,
         );
       }
       break;
     case "complete": {
       if (dryRun) {
-        log.info("Dry-run complete. No changes made.");
+        log.info("Dry run complete, no changes made");
         break;
       }
-      const branchMessage = state.deletedBranches?.length
-        ? `, deleted ${state.deletedBranches.length} remote branch(es)`
-        : "";
-      log.success(
-        `Cleanup complete. Removed ${state.removedRepos.length} worktree(s)${branchMessage}.`,
-      );
+      const n = state.removedRepos.length;
+      const b = state.deletedBranches?.length ?? 0;
+      const branchMessage =
+        b > 0 ? `, deleted ${b} remote branch${b === 1 ? "" : "es"}` : "";
+      log.success(`Removed ${n} worktree${n === 1 ? "" : "s"}${branchMessage}`);
       break;
     }
   }
@@ -992,7 +988,7 @@ async function runConfigEdit(): Promise<CommandResult> {
   // Get editor from environment
   const editor = process.env["EDITOR"] || process.env["VISUAL"] || "vi";
 
-  log.info(`Opening ${compactHomePath(configPath)} in ${editor}...`);
+  log.info(`Opening ${compactHomePath(configPath)} in ${editor}`);
 
   const child = spawn(editor, [configPath], {
     stdio: "inherit",
@@ -1286,7 +1282,7 @@ async function waitForInitializationResult(
     case "timeout":
       return failure(
         124,
-        humanOutput("Timed out waiting for initialization.", {
+        humanOutput("Timed out waiting for initialization", {
           stream: "stderr",
         }),
       );
@@ -1809,7 +1805,7 @@ async function runRepositoryTaskStart({
               title: worktree.slug,
               details: [
                 { label: "Repository", value: worktree.parentRepo },
-                { label: "Change", value: context.changeName },
+                { label: "Worktree", value: context.changeName },
                 { label: "Branch", value: worktree.branch },
                 { label: "Target", value: compactHomePath(worktree.path) },
               ],
@@ -1927,7 +1923,7 @@ async function runTaskList({
     }
 
     if (entries.length === 0) {
-      log.info("No tasks found.");
+      log.info("No tasks found");
       return success();
     }
 
@@ -1969,7 +1965,7 @@ async function runRepositoryTaskList(
     }
 
     if (entries.length === 0) {
-      log.info("No tasks found.");
+      log.info("No tasks found");
       return success();
     }
 
@@ -1979,7 +1975,7 @@ async function runRepositoryTaskList(
         changeName: context.changeName,
       }),
       footer: [
-        `Repository change: ${context.repoName}/${context.changeName}`,
+        `Repository worktree: ${context.repoName}/${context.changeName}`,
         `${entries.length} task${entries.length === 1 ? "" : "s"}`,
       ].join("\n"),
     });
@@ -2201,7 +2197,7 @@ async function runRepositoryTaskDelete({
               title: entry.slug,
               details: [
                 { label: "Repository", value: entry.parent_repo },
-                { label: "Change", value: context.changeName },
+                { label: "Worktree", value: context.changeName },
                 { label: "Branch", value: entry.branch },
                 {
                   label: "Path",
@@ -2442,7 +2438,7 @@ async function runTemplateAgentsMdRefresh(
     stream?.finishLine();
   }
   if (json) return jsonSuccess({ action: "refreshed", guidance });
-  log.success(`Refreshed AGENTS.md guidance for "${template.id}".`);
+  log.success(`Refreshed AGENTS.md guidance for "${template.id}"`);
   if (guidance.artifactPath) {
     log.info(`Artifact: ${compactHomePath(guidance.artifactPath)}`);
   }
@@ -2707,9 +2703,9 @@ async function runTemplateVariantNew(
   });
   if (await loadTemplate(canonicalId)) {
     if (json) {
-      throw new OperationalError(`Template "${canonicalId}" already exists.`);
+      throw new OperationalError(`Template "${canonicalId}" already exists`);
     }
-    log.error(`Template "${canonicalId}" already exists.`);
+    log.error(`Template "${canonicalId}" already exists`);
     return templateFailure();
   }
 
@@ -2731,7 +2727,7 @@ async function runTemplateVariantNew(
       template: created ? templateJson(created) : { id: canonicalId },
     });
   }
-  log.success(`Template variant "${canonicalId}" created.`);
+  log.success(`Template variant "${canonicalId}" created`);
   log.info(
     `Location: ${compactHomePath(
       path.join(
@@ -2770,9 +2766,9 @@ async function runTemplateNew(
   const existing = await loadTemplate(templateId);
   if (existing) {
     if (json) {
-      throw new OperationalError(`Template "${templateId}" already exists.`);
+      throw new OperationalError(`Template "${templateId}" already exists`);
     }
-    log.error(`Template "${templateId}" already exists.`);
+    log.error(`Template "${templateId}" already exists`);
     return templateFailure();
   }
 
@@ -2829,7 +2825,7 @@ async function runTemplateNew(
     });
   }
 
-  log.success(`Template "${templateId}" created.`);
+  log.success(`Template "${templateId}" created`);
   log.info(
     `Location: ${compactHomePath(
       path.join(getTemplatesDir(), templateId, "template.jsonc"),
@@ -2869,7 +2865,7 @@ async function runTemplateDelete(
 
     const confirmed = await promptConfirm(`Delete template "${templateId}"?`);
     if (!confirmed) {
-      log.info("Deletion cancelled.");
+      log.info("Deletion cancelled");
       return templateSuccess();
     }
   }
@@ -2881,7 +2877,7 @@ async function runTemplateDelete(
       template: templateJson(template),
     });
   }
-  log.success(`Template "${templateId}" deleted.`);
+  log.success(`Template "${templateId}" deleted`);
   return templateSuccess();
 }
 
@@ -2920,7 +2916,7 @@ async function runTemplateEdit(templateId: string): Promise<CommandResult> {
       } else {
         await createTemplate(templateId, qualifiedConfig);
       }
-      log.success(`Template "${templateId}" saved.`);
+      log.success(`Template "${templateId}" saved`);
     },
   });
   return templateSuccess();
@@ -3126,7 +3122,7 @@ async function runTemplateAddFile(
       );
 
       if (action === "cancel") {
-        log.info("Cancelled.");
+        log.info("Cancelled");
         return templateFailure();
       }
 
@@ -3174,7 +3170,7 @@ async function runTemplateAddFile(
       ),
     });
   }
-  log.success(`Added ${sourceSummary} to template "${template.id}".${suffix}`);
+  log.success(`Added ${sourceSummary} to template "${template.id}"${suffix}`);
   return templateSuccess();
 }
 
@@ -3427,7 +3423,7 @@ async function runTemplateCopy(
       template: copied ? templateJson(copied) : { id: destId },
     });
   }
-  log.success(`Template "${sourceId}" copied to "${destId}".`);
+  log.success(`Template "${sourceId}" copied to "${destId}"`);
   return templateSuccess();
 }
 
