@@ -121,7 +121,7 @@ export function inventoryDoc(
   ) {
     return {
       lines: [
-        { spans: [terminalSpan("No worktrees or workspaces found.")] },
+        { spans: [terminalSpan("No worktrees or workspaces found")] },
         {
           spans: [
             terminalSpan("Start one: wf new <name> <repo|@template>", {
@@ -133,11 +133,10 @@ export function inventoryDoc(
     };
   }
 
-  const lines: TerminalLineInput[] = [
-    [terminalSpan("Changes", { role: "primary", emphasis: "bold" })],
-  ];
+  const lines: TerminalLineInput[] = [];
   if (inventory.workspaces.length > 0) {
-    lines.push("", [
+    if (lines.length > 0) lines.push("");
+    lines.push([
       terminalSpan("Workspaces", { role: "accent", emphasis: "bold" }),
     ]);
     for (const [groupName, entries] of groupWorkspaceEntries(
@@ -154,7 +153,8 @@ export function inventoryDoc(
   }
 
   if (inventory.repositories.length > 0) {
-    lines.push("", [
+    if (lines.length > 0) lines.push("");
+    lines.push([
       terminalSpan("Repositories", { role: "accent", emphasis: "bold" }),
     ]);
     for (const [repoName, entries] of groupRepositoryEntries(
@@ -414,7 +414,7 @@ function formatWorkspaceHeader(showPaths: boolean): TerminalLineInput {
   return [
     "    ",
     ...formatColumns(
-      ["Change", "Repos", "State", "Updated"].map((value) =>
+      ["Name", "Repos", "State", "Updated"].map((value) =>
         terminalSpan(value, { role: "muted" }),
       ),
       showPaths,
@@ -426,7 +426,7 @@ function formatRepositoryHeader(showPaths: boolean): TerminalLineInput {
   return [
     "    ",
     ...formatColumns(
-      ["Change", "Repository", "State", "Updated"].map((value) =>
+      ["Name", "Repository", "State", "Updated"].map((value) =>
         terminalSpan(value, { role: "muted" }),
       ),
       showPaths,

@@ -1162,7 +1162,7 @@ function deriveNextSteps(
     steps.push("Inspect initialization details above.");
   }
   if (repositories.some((repo) => repo.state === "dirty")) {
-    steps.push("Commit or stash worktree changes before finishing.");
+    steps.push("Commit or stash worktree changes before deleting.");
     steps.push("Run: git status");
   }
   if (
@@ -1173,7 +1173,7 @@ function deriveNextSteps(
         task.state === "stale",
     )
   ) {
-    steps.push("Integrate or delete nested tasks before finishing.");
+    steps.push("Integrate or delete nested tasks before deleting.");
   }
   if (
     steps.length === 0 &&

@@ -38,7 +38,7 @@ describe("wf list", () => {
     expect(result.exitCode).toBe(0);
     expect(rendered.stdout).toBe(
       [
-        "No worktrees or workspaces found.",
+        "No worktrees or workspaces found",
         "Start one: wf new <name> <repo|@template>",
         "",
       ].join("\n"),
@@ -53,7 +53,7 @@ describe("wf list", () => {
 
     expect(result.exitCode).toBe(0);
     expect(rendered.stderr).toBe("");
-    expect(rendered.stdout).toContain("Changes\n\nWorkspaces");
+    expect(rendered.stdout).toContain("Workspaces");
     expect(rendered.stdout).toContain("  vercel-agent");
     expect(rendered.stdout).toContain("auth-fix");
     expect(rendered.stdout).toContain("  _adhoc");
