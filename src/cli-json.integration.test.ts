@@ -188,7 +188,7 @@ describe("JSON CLI integration", () => {
           deleted: [],
           totalSizeBytes: 0,
         },
-        message: "No unused cached repositories.",
+        message: "No unused cached repositories",
       },
     });
   });

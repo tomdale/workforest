@@ -151,18 +151,18 @@ describe("cache commands", () => {
   });
 
   it.each([
-    [["cache", "list"], 0, "No cached repositories.", ""],
+    [["cache", "list"], 0, "No cached repositories", ""],
     [["cache", "sync", "unknown"], 1, "", "Unknown repository"],
-    [["cache", "sync"], 0, "No cached repositories to sync.", ""],
-    [["cache", "doctor"], 0, "No cached repositories.", ""],
-    [["cache", "doctor", "--fix"], 0, "No cached repositories.", ""],
+    [["cache", "sync"], 0, "No cached repositories to sync", ""],
+    [["cache", "doctor"], 0, "No cached repositories", ""],
+    [["cache", "doctor", "--fix"], 0, "No cached repositories", ""],
     [
       ["cache", "delete", "missing"],
       1,
       "",
       "Cached repository not found: missing",
     ],
-    [["cache", "clean"], 0, "No unused cached repositories.", ""],
+    [["cache", "clean"], 0, "No unused cached repositories", ""],
   ] as const)("implements canonical cache behavior for %j", async (argv, exitCode, stdout, stderr) => {
     await createCache();
     const result = await runCommand(argv);

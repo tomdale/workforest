@@ -234,7 +234,7 @@ async function runCacheList(json: boolean): Promise<CommandResult> {
         renderReport({
           title: "Cached repositories",
           sections: [
-            { note: "No cached repositories." },
+            { note: "No cached repositories" },
             nodeModulesSummarySection(nodeModules),
           ],
           footer: cacheListFooter(repositories, nodeModules),
@@ -318,7 +318,7 @@ async function runCacheSync(
       }
       return success(
         humanOutput(
-          statusLine(kindToTone("info"), "No cached repositories to sync."),
+          statusLine(kindToTone("info"), "No cached repositories to sync"),
         ),
       );
     }
@@ -361,7 +361,7 @@ async function runCacheSync(
       const repository = await runWithOptionalSpinner(
         `Caching ${operand}`,
         () => addCachedRepository(input),
-        `Cached ${operand}`,
+        "",
       );
       messages.push({
         kind: "success",
@@ -389,7 +389,7 @@ async function syncRepositoryMessages(
       await runWithOptionalSpinner(
         `Updating ${name}`,
         () => updateCachedRepository(repository),
-        `Updated ${name}`,
+        "",
       );
       messages.push({
         kind: "success",
@@ -433,7 +433,7 @@ function renderCacheHealth(
       reportOutput(
         renderReport({
           title: "Repository cache health",
-          sections: [{ note: "No cached repositories." }],
+          sections: [{ note: "No cached repositories" }],
         }),
       ),
     );
@@ -558,12 +558,12 @@ async function runCacheClean(
           deleted: [],
           totalSizeBytes: 0,
         },
-        message: "No unused cached repositories.",
+        message: "No unused cached repositories",
       });
     }
     return success(
       humanOutput(
-        statusLine(kindToTone("info"), "No unused cached repositories."),
+        statusLine(kindToTone("info"), "No unused cached repositories"),
       ),
     );
   }
