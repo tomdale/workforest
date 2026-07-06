@@ -14,6 +14,8 @@ const METADATA_FILENAME = "metadata.json";
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
 const LOCKFILE_HASH_MARKER = ".pnpm-lockfile-hash";
 const DEFAULT_MAX_RETAINED_PER_REPO = 3;
+const REMOVE_RETRY_COUNT = 5;
+const REMOVE_RETRY_DELAY_MS = 20;
 const BACKGROUND_SIZE_SCRIPT = `
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -227,7 +229,7 @@ export async function restoreNodeModules({
 
   try {
     await fs.rename(entry.nodeModulesPath, targetPath);
-    await fs.rm(entry.entryPath, { recursive: true, force: true });
+    await removeCacheDirectory(entry.entryPath);
     return { status: "restored", entry };
   } catch (error) {
     return {
@@ -248,7 +250,7 @@ export async function rollbackPreservedNodeModules(
   if ((await pathExists(source)) && !(await pathExists(target))) {
     await fs.rename(source, target);
   }
-  await fs.rm(result.entry.entryPath, { recursive: true, force: true });
+  await removeCacheDirectory(result.entry.entryPath);
 }
 
 export async function listNodeModulesCacheEntries(): Promise<
@@ -298,7 +300,7 @@ export async function deleteNodeModulesCache(
 ): Promise<DeleteNodeModulesCacheResult> {
   const entries = await listNodeModulesCacheEntries();
   if (!dryRun) {
-    await fs.rm(nodeModulesPoolDir(), { recursive: true, force: true });
+    await removeCacheDirectory(nodeModulesPoolDir());
   }
   return {
     dryRun,
@@ -314,10 +316,17 @@ async function pruneNodeModulesCache(
   const entries = sortEntries(await entriesForRepo(repo));
   const excess = entries.slice(maxRetainedPerRepo);
   await Promise.all(
-    excess.map((entry) =>
-      fs.rm(entry.entryPath, { recursive: true, force: true }),
-    ),
+    excess.map((entry) => removeCacheDirectory(entry.entryPath)),
   );
+}
+
+async function removeCacheDirectory(targetPath: string): Promise<void> {
+  await fs.rm(targetPath, {
+    recursive: true,
+    force: true,
+    maxRetries: REMOVE_RETRY_COUNT,
+    retryDelay: REMOVE_RETRY_DELAY_MS,
+  });
 }
 
 async function newestEntryForRepo(

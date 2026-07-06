@@ -63,6 +63,11 @@ export type RepoPipelineOptions = {
     repoDir: string;
     workspaceDir: string;
   }) => Promise<void>;
+  afterWorktree?: (context: {
+    repo: RepositorySource;
+    repoDir: string;
+    workspaceDir: string;
+  }) => Promise<void>;
 };
 
 export type RepoInitializationOptions = {
@@ -90,6 +95,7 @@ export async function* repoSetupEvents({
   disabledInitializers,
   skipInitializers,
   beforeInitializers,
+  afterWorktree,
 }: RepoPipelineOptions): AsyncGenerator<RunEventBody> {
   const repoName = validateRepositoryComponent(repo.name, "Repository name");
   yield { kind: "repo-start", repo: repoName };
@@ -144,6 +150,11 @@ export async function* repoSetupEvents({
     if (worktree.outcome === "failed") {
       yield repoFailure(repoName, GIT_STEP_IDS.worktree, worktree.error);
       return;
+    }
+
+    if (afterWorktree) {
+      failStep = PREFLIGHT_STEP_ID;
+      await afterWorktree({ repo, repoDir: targetDir, workspaceDir });
     }
 
     const { config } = await loadWorkspaceConfig();

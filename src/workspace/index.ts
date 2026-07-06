@@ -31,6 +31,7 @@ import {
   recordRepoSetupFailure,
   resumeWorkspaceInitialization,
   startRepoInitialization,
+  startWorkspaceAgentsMdRefresh,
   watchRepoInitialization,
   workspaceInitializationScope,
 } from "./initialization.ts";
@@ -200,11 +201,17 @@ export async function stampWorkspace(
           repoCount: setupRepos.length,
           copyTemplateFiles: async () => {
             await copyTemplateFiles(template, workspaceDir);
-            await materializeTemplateAgentsMd(template, workspaceDir);
+            if (template.config["AGENTS.md"]) {
+              await startWorkspaceAgentsMdRefresh(scope, {
+                setupRunId: session.runId,
+              });
+            } else {
+              await materializeTemplateAgentsMd(template, workspaceDir);
+            }
           },
         })
       : null;
-  const beforeInitializers = async ({
+  const afterWorktree = async ({
     repo,
     repoDir,
   }: {
@@ -263,7 +270,7 @@ export async function stampWorkspace(
         workspaceDir,
         branchName: effectiveBranchName,
         isNewWorkspace,
-        beforeInitializers,
+        afterWorktree,
         templateBarrier,
         session,
       }),
@@ -403,7 +410,7 @@ async function* createBackgroundRepoSetupPipeline({
   workspaceDir,
   branchName,
   isNewWorkspace,
-  beforeInitializers,
+  afterWorktree,
   templateBarrier,
   session,
 }: {
@@ -411,7 +418,7 @@ async function* createBackgroundRepoSetupPipeline({
   workspaceDir: string;
   branchName: string;
   isNewWorkspace: boolean;
-  beforeInitializers: NonNullable<RepoPipelineOptions["beforeInitializers"]>;
+  afterWorktree: NonNullable<RepoPipelineOptions["afterWorktree"]>;
   templateBarrier: TemplateCopyBarrier | null;
   session: RunSession;
 }): AsyncGenerator<RepoPipelineState> {
@@ -422,7 +429,7 @@ async function* createBackgroundRepoSetupPipeline({
     repoDir: resolveContainedPath(workspaceDir, repo.name),
     branchName,
     isNewWorkspace,
-    beforeInitializers,
+    afterWorktree,
     // The attached grid renders worker progress from the run's event stream,
     // so the pipeline itself ends at handoff instead of tailing state files.
     monitorBackground: false,
@@ -442,6 +449,7 @@ export type ScopedRepoSetupPipelineOptions = {
   branchName: string;
   isNewWorkspace: boolean;
   beforeInitializers?: RepoPipelineOptions["beforeInitializers"];
+  afterWorktree?: RepoPipelineOptions["afterWorktree"];
   /** When true, watch the detached initializer and keep yielding its state. */
   monitorBackground: boolean;
   /** Invoked the first time the foreground git pipeline reports a failure. */
@@ -468,6 +476,7 @@ export async function* runScopedRepoSetupPipeline({
   branchName,
   isNewWorkspace,
   beforeInitializers,
+  afterWorktree,
   monitorBackground,
   onFailed,
   session,
@@ -482,6 +491,7 @@ export async function* runScopedRepoSetupPipeline({
       branchName,
       isNewWorkspace,
       ...(beforeInitializers ? { beforeInitializers } : {}),
+      ...(afterWorktree ? { afterWorktree } : {}),
       skipInitializers: true,
     }),
   );
@@ -725,6 +735,12 @@ function createTemplateCopyBarrier({
 
   const maybeCopyTemplate = (): void => {
     if (copyPromise || readyCount + failedCount < repoCount) return;
+    if (failedCount > 0) {
+      for (const waiter of waiters.splice(0)) {
+        waiter.resolve();
+      }
+      return;
+    }
     copyPromise = copyTemplateFiles();
     releaseWaiters(copyPromise);
   };
@@ -736,6 +752,9 @@ function createTemplateCopyBarrier({
 
       if (copyPromise) {
         await copyPromise;
+        return;
+      }
+      if (failedCount > 0 && readyCount + failedCount >= repoCount) {
         return;
       }
 

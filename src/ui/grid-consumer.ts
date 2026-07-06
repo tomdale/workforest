@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   Box,
   type BoxOptions,
@@ -908,8 +909,12 @@ export function createDefaultCompletionModal({
     backgroundInitialization,
     ...(workspacePath ? { workspacePath } : {}),
   });
+  // Budget the outer width so the widest line clears the box chrome (border +
+  // padding, ~6 cols) *and* the symmetric text inset the content applies
+  // (COMPLETION_MODAL_TEXT_PADDING on each side). Undercounting here is what
+  // used to clip the workspace path even when the terminal had room to spare.
   const width = Math.min(
-    Math.max(50, maxTextWidth + 7),
+    Math.max(50, maxTextWidth + 6 + COMPLETION_MODAL_TEXT_PADDING * 2),
     Math.max(50, screenWidth - 8),
   );
   const contentWidth = Math.max(width - 6, 1);
@@ -1522,22 +1527,46 @@ function formatWorkspaceSummary({
 }): string[] {
   const lines: string[] = [];
   if (workspacePath) {
+    const compact = compactHome(workspacePath);
+    // The workspace name (the path's final segment) is its identity, so it
+    // leads and is never sacrificed to truncation. The parent directory only
+    // gives context, so it sits beneath in muted text and, if space is tight,
+    // is truncated from the start to keep the segments nearest the workspace.
+    const name = path.basename(compact) || compact;
+    const parent = path.dirname(compact);
     lines.push(
       renderBlessedLine([
-        terminalSpan(
-          truncatePlainText(
-            compactHome(workspacePath),
-            Math.max(contentWidth, 8),
-          ),
-          {
-            role: "primary",
-            emphasis: "bold",
-          },
-        ),
+        terminalSpan(activeTheme().symbols.success, { role: "success" }),
+        " ",
+        terminalSpan(truncatePlainText(name, Math.max(contentWidth - 2, 8)), {
+          role: "primary",
+          emphasis: "bold",
+        }),
       ]),
     );
+    if (parent && parent !== "." && parent !== name) {
+      lines.push(
+        renderBlessedLine([
+          "  ",
+          terminalSpan(
+            truncatePlainTextStart(parent, Math.max(contentWidth - 2, 8)),
+            { role: "muted" },
+          ),
+        ]),
+      );
+    }
   }
 
+  if (worktreeNames.length > 0) {
+    // A blank row sets the worktree roster apart from the header block above.
+    if (lines.length > 0) lines.push("");
+    lines.push(
+      paneMessage(
+        pluralize(worktreeNames.length, "worktree", "worktrees"),
+        "muted",
+      ),
+    );
+  }
   for (const worktreeName of worktreeNames.slice(0, 6)) {
     lines.push(
       renderBlessedLine([
@@ -1563,6 +1592,10 @@ function formatWorkspaceSummary({
   return lines;
 }
 
+function pluralize(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function stripBlessedTags(value: string): string {
   return value.replace(/\{[^}]*\}/g, "");
 }
@@ -1570,6 +1603,12 @@ function stripBlessedTags(value: string): string {
 function truncatePlainText(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, Math.max(maxLength - 1, 0))}…`;
+}
+
+/** Truncate from the start, keeping the trailing `maxLength` columns. */
+function truncatePlainTextStart(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `…${value.slice(value.length - Math.max(maxLength - 1, 0))}`;
 }
 
 function formatCompletionFailures(
