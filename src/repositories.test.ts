@@ -177,7 +177,7 @@ describe("cached repository inventory", () => {
     ]);
   });
 
-  it("flags a bare mirror whose HEAD points to a missing local default branch", async () => {
+  it("treats a normalized bare mirror with only origin refs as healthy", async () => {
     const cacheDir = await createCacheDir();
     const mirrorDir = path.join(cacheDir, "myapp.git");
     await createMirror(
@@ -205,8 +205,8 @@ describe("cached repository inventory", () => {
 
     expect(repositories[0]).toMatchObject({
       name: "myapp",
-      health: "attention",
-      issues: ["HEAD points to missing local branch refs/heads/main"],
+      health: "healthy",
+      issues: [],
     });
   });
 

@@ -594,19 +594,12 @@ async function readHeadIssue(mirrorPath: string): Promise<string | null> {
     await runGit(["rev-parse", "--verify", "HEAD"], { cwd: mirrorPath });
     return null;
   } catch {
-    // Empty bare repositories also have an unresolved HEAD. Only report the
-    // repaired-cache failure mode when the matching remote default ref exists.
-  }
-
-  try {
-    await runGit(["rev-parse", "--verify", `refs/remotes/origin/${branch}`], {
-      cwd: mirrorPath,
-    });
-  } catch {
+    // Empty bare repositories have an unresolved HEAD. Workforest-normalized
+    // mirrors can also leave HEAD pointing at refs/heads/<branch> after moving
+    // branch tips under refs/remotes/origin/*; Workforest uses the origin ref
+    // explicitly, so that dangling local target is expected.
     return null;
   }
-
-  return `HEAD points to missing local branch refs/heads/${branch}`;
 }
 
 async function readGitStorageSize(mirrorPath: string): Promise<number | null> {
