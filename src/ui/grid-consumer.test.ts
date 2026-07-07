@@ -829,6 +829,7 @@ describe("completion modal content layout", () => {
       workspacePath:
         "/var/tmp/workforest/very/long/workspace/root/vercel-agent/auth-redesign",
       contentWidth: 30,
+      starRows: blankStarRows(30),
     }).map(stripTags);
 
     const nameLine = lines.find((line) => line.includes("auth-redesign"));
@@ -864,6 +865,12 @@ describe("completion modal content layout", () => {
     expect(many).toContain("3 worktrees");
   });
 });
+
+function blankStarRows(width: number): string[][] {
+  return Array.from({ length: 20 }, () =>
+    Array.from({ length: width }, () => " "),
+  );
+}
 
 // ─── drainPipelinesToConsole ────────────────────────────────────────────────
 
