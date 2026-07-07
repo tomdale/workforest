@@ -594,7 +594,7 @@ const switchCommand = leaf({
   path: ["switch"],
   summary: "Switch to a worktree or workspace",
   description:
-    "Changes your shell to a worktree or workspace. Use <group>/<name> to select exactly, a bare name when unique, or no selector in an interactive terminal to fuzzy-pick from everything known.",
+    "Changes your shell to a worktree or workspace. A selector operand is treated as a fuzzy query over <group>/<name> selectors and bare change names: one match switches immediately, while no matches or multiple matches open the picker with the query prefilled in an interactive terminal.",
   handler: "switch",
   help: { kind: "command", command: "switch" },
   operands: operands(
@@ -602,16 +602,16 @@ const switchCommand = leaf({
     1,
     "selector",
     "[selector]",
-    "Selector as <group>/<name>, or a bare name when unique.",
+    "Fuzzy selector query matched against <group>/<name> selectors and bare change names.",
   ),
   examples: [
     {
       command: "wf switch workforest/cli-redesign",
-      description: "Switch to a worktree.",
+      description: "Switch to a worktree by full selector.",
     },
     {
-      command: "wf switch vercel-agent/auth-fix",
-      description: "Switch to a workspace.",
+      command: "wf switch cli",
+      description: "Switch immediately when the query has one match.",
     },
     {
       command: "wf switch",

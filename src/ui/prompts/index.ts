@@ -50,6 +50,7 @@ export type PromptSelectOptions<T> = {
 
 export type PromptFuzzySelectOptions<T> = {
   options: PromptSelectOption<T>[];
+  initialQuery?: string;
   throwOnCancel?: boolean;
 };
 
@@ -115,6 +116,9 @@ export async function promptFuzzySelect<T>(
       label: o.label,
       ...(o.description ? { hint: o.description } : {}),
     })),
+    ...(options.initialQuery !== undefined
+      ? { initialQuery: options.initialQuery }
+      : {}),
     ...(options.throwOnCancel !== undefined
       ? { throwOnCancel: options.throwOnCancel }
       : {}),

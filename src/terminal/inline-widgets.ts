@@ -281,12 +281,13 @@ export async function fuzzySelectPrompt<T>(
   message: string,
   items: Choice<T>[],
   symbols: TerminalSymbols,
+  options: { initialQuery?: string } = {},
 ): Promise<PromptResult<T>> {
   if (items.length === 0) {
     throw new Error("fuzzySelect requires at least one option.");
   }
 
-  let query = "";
+  let query = options.initialQuery ?? "";
   let index = 0;
   const filtered = (): Choice<T>[] => filterFuzzyChoices(items, query);
 

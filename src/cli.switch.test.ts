@@ -56,20 +56,100 @@ describe("wf switch", () => {
     ]);
   });
 
-  it("reports ambiguous bare selectors with candidates", async () => {
+  it("switches to a fuzzy query when exactly one target matches", async () => {
+    const fixture = await createSwitchFixture();
+
+    await runSwitchCommand(invocation(["cli"]), {
+      interactive: false,
+      writeShellCdPath: fixture.writeShellCdPath,
+    });
+
+    expect(fixture.cdTargets).toEqual([
+      path.join(fixture.baseDir, "Repos", "workforest", "cli-redesign"),
+    ]);
+  });
+
+  it("opens the fullscreen surface with an ambiguous fuzzy query prefilled", async () => {
+    const fixture = await createSwitchFixture();
+    await pinSwitchFixtureMtimes(fixture.baseDir);
+    const surfaceCalls: Array<{
+      selectors: string[];
+      initialQuery: string | undefined;
+    }> = [];
+
+    await runSwitchCommand(invocation(["auth"]), {
+      interactive: true,
+      fullscreen: true,
+      writeShellCdPath: fixture.writeShellCdPath,
+      surface: async (entries, _scope, initialQuery) => {
+        surfaceCalls.push({
+          selectors: entries.map((entry) => entry.selector),
+          initialQuery,
+        });
+        return null;
+      },
+    });
+
+    expect(surfaceCalls).toEqual([
+      {
+        selectors: [
+          "_adhoc/auth-fix",
+          "workforest/cli-redesign",
+          "vercel-agent/auth-fix",
+        ],
+        initialQuery: "auth",
+      },
+    ]);
+    expect(fixture.cdTargets).toEqual([]);
+  });
+
+  it("opens the fullscreen surface with a missing fuzzy query prefilled", async () => {
+    const fixture = await createSwitchFixture();
+    let seenInitialQuery: string | undefined;
+
+    await runSwitchCommand(invocation(["nope"]), {
+      interactive: true,
+      fullscreen: true,
+      writeShellCdPath: fixture.writeShellCdPath,
+      surface: async (_entries, _scope, initialQuery) => {
+        seenInitialQuery = initialQuery;
+        return null;
+      },
+    });
+
+    expect(seenInitialQuery).toBe("nope");
+    expect(fixture.cdTargets).toEqual([]);
+  });
+
+  it("reports ambiguous fuzzy queries without an interactive terminal", async () => {
     await createSwitchFixture();
 
-    const result = await executeCli(["switch", "auth-fix"]);
+    const result = await executeCli(["switch", "auth"]);
     const rendered = renderResult(result);
 
     expect(result.exitCode).toBe(2);
-    expect(rendered.stderr).toContain('Ambiguous selector "auth-fix".');
+    expect(rendered.stderr).toContain('Multiple switch targets match "auth".');
     expect(rendered.stderr).toContain("_adhoc/auth-fix");
     expect(rendered.stderr).toContain("vercel-agent/auth-fix");
-    expect(rendered.stderr).toContain("Use <group>/<name>.");
+    expect(rendered.stderr).toContain(
+      "Run wf switch from an interactive terminal to choose from the picker.",
+    );
   });
 
-  it("reports exact selector collisions with actionable paths", async () => {
+  it("reports missing fuzzy queries without an interactive terminal", async () => {
+    await createSwitchFixture();
+
+    const result = await executeCli(["switch", "nope"]);
+    const rendered = renderResult(result);
+
+    expect(result.exitCode).toBe(2);
+    expect(rendered.stderr).toContain('No switch targets match "nope".');
+    expect(rendered.stderr).toContain(
+      "Run wf switch from an interactive terminal to choose from the picker.",
+    );
+  });
+
+  it("reports exact selector collisions without an interactive terminal", async () => {
     const fixture = await createSwitchFixture();
     await mkdir(
       path.join(
@@ -96,16 +176,12 @@ describe("wf switch", () => {
 
     expect(result.exitCode).toBe(2);
     expect(rendered.stderr).toContain(
-      'Ambiguous selector "workforest/cli-redesign".',
+      'Multiple switch targets match "workforest/cli-redesign".',
     );
-    expect(rendered.stderr).toContain("worktree");
-    expect(rendered.stderr).toContain("template-workspace");
-    expect(rendered.stderr).toContain("Repos/workforest/cli-redesign");
-    expect(rendered.stderr).toContain("Workspaces/workforest/cli-redesign");
+    expect(rendered.stderr).toContain("workforest/cli-redesign");
     expect(rendered.stderr).toContain(
-      "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.",
+      "Run wf switch from an interactive terminal to choose from the picker.",
     );
-    expect(rendered.stderr).not.toContain("Use <group>/<name>.");
   });
 
   it("uses all changes as fuzzy candidates when no selector is provided", async () => {

@@ -81,6 +81,14 @@ describe("runSwitchSurface", () => {
     expect(options.scopeToggle).toBeUndefined();
     expect(options.onTab).toBeUndefined();
   });
+
+  it("forwards an initial query to the fuzzy list", async () => {
+    const entries = [worktree("front/login", 100)];
+
+    await runSwitchSurface(entries, undefined, "login");
+
+    expect(fuzzyOptions().initialQuery).toBe("login");
+  });
 });
 
 function fuzzyOptions(): FuzzyListOptions<InventoryEntry> {

@@ -15,6 +15,7 @@ import {
 export async function runSwitchSurface(
   entries: readonly InventoryEntry[],
   scope?: Scope,
+  initialQuery?: string,
 ): Promise<InventoryEntry | null> {
   const screen = createFullscreenScreen();
   const stage = createFullscreenStage(screen);
@@ -46,6 +47,7 @@ export async function runSwitchSurface(
       parent: stage,
       items: itemsNow(),
       placeholder: "type to find a change",
+      ...(initialQuery !== undefined ? { initialQuery } : {}),
       ...(canScope
         ? {
             scopeToggle: { options: scopeOptions, active: activeScopeIndex() },

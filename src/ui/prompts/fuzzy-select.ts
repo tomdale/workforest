@@ -11,6 +11,7 @@ export type FuzzySelectOption<T> = {
 
 export type FuzzySelectOptions<T> = PromptBaseOptions & {
   options: FuzzySelectOption<T>[];
+  initialQuery?: string;
 };
 
 export async function fuzzySelect<T>(
@@ -21,6 +22,9 @@ export async function fuzzySelect<T>(
     message,
     options.options,
     terminalSymbols(),
+    options.initialQuery !== undefined
+      ? { initialQuery: options.initialQuery }
+      : undefined,
   );
 
   if (result.type === "submitted") return result.value;

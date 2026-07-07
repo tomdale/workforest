@@ -282,7 +282,7 @@ Interactive user workflows:
     wf new try-different-approach
 
   Switch and inspect:
-    wf switch                           # fuzzy-find a worktree or workspace
+    wf switch [query]                   # fuzzy-find a worktree or workspace
     wf switch workforest/cli-redesign
     wf list --group _adhoc --paths
     wf status workforest/cli-redesign
@@ -314,7 +314,7 @@ Agent workflows:
     wf delete [selector]                # clean up after integration
 
   Adding to an existing workspace:
-    wf switch <selector>
+    wf switch <query>
     wf add vercel/swr                   # add another repo mid-session
 
   Parallel work:
@@ -325,7 +325,7 @@ Agent workflows:
 
   Inspection:
     wf list                             # list worktrees and workspaces
-    wf switch                           # fuzzy-find one (interactive)
+    wf switch [query]                   # fuzzy-find one (interactive)
     wf cache list                       # inspect cached mirrors
     wf cache doctor                     # diagnose mirror health
 
