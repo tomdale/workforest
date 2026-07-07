@@ -91,5 +91,6 @@ function switchItems(
     value: entry,
     label: candidate.changeName,
     hint: candidate.statusHint,
+    searchText: `${entry.selector} ${entry.changeName}`,
   }));
 }

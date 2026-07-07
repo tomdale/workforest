@@ -27,6 +27,8 @@ export type FuzzyItem<T> = {
   label: string;
   /** Secondary text rendered muted after the label (e.g. a path or branch). */
   hint?: string;
+  /** Additional hidden text included in fuzzy matching without being rendered. */
+  searchText?: string;
 };
 
 /**
@@ -180,7 +182,8 @@ const MULTI_FOOTER_HINTS: ReadonlyArray<readonly [string, string]> = [
 
 /**
  * Default filter: a stable, case-insensitive subsequence match over each item's
- * label and hint. An empty query matches everything; ordering is preserved.
+ * label, hint, and hidden search text. An empty query matches everything;
+ * ordering is preserved.
  */
 export function fuzzyFilter<T>(
   items: FuzzyItem<T>[],
@@ -190,7 +193,8 @@ export function fuzzyFilter<T>(
   if (pattern.length === 0) return items.slice();
 
   return items.filter((item) => {
-    const haystack = `${item.label} ${item.hint ?? ""}`.toLocaleLowerCase();
+    const haystack =
+      `${item.label} ${item.hint ?? ""} ${item.searchText ?? ""}`.toLocaleLowerCase();
     let offset = 0;
     for (const char of pattern) {
       const next = haystack.indexOf(char, offset);

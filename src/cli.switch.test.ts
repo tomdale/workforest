@@ -178,9 +178,12 @@ describe("wf switch", () => {
     expect(rendered.stderr).toContain(
       'Multiple switch targets match "workforest/cli-redesign".',
     );
-    expect(rendered.stderr).toContain("workforest/cli-redesign");
+    expect(rendered.stderr).toContain("worktree");
+    expect(rendered.stderr).toContain("template-workspace");
+    expect(rendered.stderr).toContain("Repos/workforest/cli-redesign");
+    expect(rendered.stderr).toContain("Workspaces/workforest/cli-redesign");
     expect(rendered.stderr).toContain(
-      "Run wf switch from an interactive terminal to choose from the picker.",
+      "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.",
     );
   });
 

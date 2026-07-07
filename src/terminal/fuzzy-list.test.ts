@@ -95,6 +95,18 @@ describe("fuzzyFilter", () => {
       expected: ["alpha"],
     },
     {
+      label: "hidden search text match",
+      all: [
+        {
+          value: "a",
+          label: "cli-redesign",
+          searchText: "workforest/cli-redesign",
+        },
+      ],
+      query: "workforest/cli",
+      expected: ["cli-redesign"],
+    },
+    {
       label: "no match",
       all: items("alpha", "beta"),
       query: "zzz",

@@ -201,10 +201,40 @@ function fuzzySwitchUsageError(
     [
       `Multiple switch targets match "${query}".`,
       "Matches:",
-      ...matches.map((entry) => `  ${entry.selector}`),
-      "Run wf switch from an interactive terminal to choose from the picker.",
+      ...formatAmbiguousSwitchMatches(matches).map((match) => `  ${match}`),
+      ambiguityHint(matches),
     ].join("\n"),
   );
+}
+
+function formatAmbiguousSwitchMatches(
+  matches: readonly InventoryEntry[],
+): string[] {
+  return hasDuplicateSelectors(matches)
+    ? matches.map(formatAmbiguousSwitchMatch).sort()
+    : matches.map((entry) => entry.selector).sort();
+}
+
+function ambiguityHint(matches: readonly InventoryEntry[]): string {
+  if (hasDuplicateSelectors(matches)) {
+    return "This selector maps to more than one path; run from the intended path or choose it in the interactive switcher.";
+  }
+  return "Run wf switch from an interactive terminal to choose from the picker.";
+}
+
+function hasDuplicateSelectors(matches: readonly InventoryEntry[]): boolean {
+  const selectorCounts = new Map<string, number>();
+  for (const entry of matches) {
+    selectorCounts.set(
+      entry.selector,
+      (selectorCounts.get(entry.selector) ?? 0) + 1,
+    );
+  }
+  return Array.from(selectorCounts.values()).some((count) => count > 1);
+}
+
+function formatAmbiguousSwitchMatch(entry: InventoryEntry): string {
+  return `${entry.selector} (${entry.type} at ${entry.path})`;
 }
 
 function matchesSubsequence(haystack: string, query: string): boolean {

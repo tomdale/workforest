@@ -89,6 +89,16 @@ describe("runSwitchSurface", () => {
 
     expect(fuzzyOptions().initialQuery).toBe("login");
   });
+
+  it("includes selectors in hidden search text", async () => {
+    const entries = [worktree("workforest/cli-redesign", 100)];
+
+    await runSwitchSurface(entries, undefined, "workforest/cli");
+
+    const item = fuzzyOptions().items[0];
+    expect(item?.label).toBe("cli-redesign");
+    expect(item?.searchText).toContain("workforest/cli-redesign");
+  });
 });
 
 function fuzzyOptions(): FuzzyListOptions<InventoryEntry> {
