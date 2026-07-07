@@ -333,6 +333,7 @@ export async function createRepositoryTasks({
         repo,
         entry,
         setup,
+        setupLogRepoName: `${repoName}-${safeName}`,
         ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
         recordResult: (result) => createdBySlug.set(result.slug, result),
         recordFailure: (slug, error) => failureBySlug.set(slug, error),
@@ -448,7 +449,9 @@ export async function listRepositoryTasks({
     const setup = await repositoryTaskSetupStatus(
       repoRootDir,
       safeRepoName,
+      safeName,
       slug,
+      absolutePath,
     );
     const branch =
       (await requireCurrentBranch(absolutePath).catch(() => "")) ||
@@ -716,6 +719,7 @@ async function* createAndSetupTask({
   repo,
   entry,
   setup,
+  setupLogRepoName,
   disabledInitializers,
   recordResult,
   recordFailure,
@@ -725,6 +729,7 @@ async function* createAndSetupTask({
   repo: RepositorySource;
   entry: TaskMetadata;
   setup: boolean;
+  setupLogRepoName?: string;
   disabledInitializers?: boolean | string[];
   recordResult: (result: TaskCreateResult) => void;
   recordFailure: (slug: string, error: Error) => void;
@@ -786,6 +791,7 @@ async function* createAndSetupTask({
       repo,
       slug: entry.slug,
       targetDir,
+      setupLogRepoName: setupLogRepoName ?? entry.parent_repo,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     });
 
@@ -795,7 +801,10 @@ async function* createAndSetupTask({
       path: targetDir,
       branch: entry.branch,
       setupStatus: result.status,
-      setupLog: getTaskSetupLogRelativePath(entry.parent_repo, entry.slug),
+      setupLog: getTaskSetupLogRelativePath(
+        setupLogRepoName ?? entry.parent_repo,
+        entry.slug,
+      ),
     });
     yield { phase: "complete", hasLockfile: false };
   } catch (error) {
@@ -811,12 +820,14 @@ async function* runTaskInitializers({
   repo,
   slug,
   targetDir,
+  setupLogRepoName,
   disabledInitializers,
 }: {
   workspaceDir: string;
   repo: RepositorySource;
   slug: string;
   targetDir: string;
+  setupLogRepoName: string;
   disabledInitializers?: boolean | string[];
 }): AsyncGenerator<
   RepoPipelineState,
@@ -824,7 +835,7 @@ async function* runTaskInitializers({
 > {
   const logPath = await startRepoSetupLog({
     workspaceDir,
-    repoName: `${repo.name}-${slug}`,
+    repoName: `${setupLogRepoName}-${slug}`,
     repoDir: targetDir,
   });
   let failed = false;
@@ -1044,11 +1055,20 @@ async function listRepositoryTaskSlugs(
 async function repositoryTaskSetupStatus(
   repoRootDir: string,
   repoName: string,
+  changeName: string,
   slug: string,
+  taskPath: string,
 ): Promise<{ status: "ready" | "failed" | "skipped"; logPath?: string }> {
-  const relativePath = getTaskSetupLogRelativePath(repoName, slug);
+  const relativePath = getTaskSetupLogRelativePath(
+    `${repoName}-${changeName}`,
+    slug,
+  );
   const absolutePath = resolveContainedPath(repoRootDir, relativePath);
-  if (!(await pathExists(absolutePath))) {
+  const [logStat, taskStat] = await Promise.all([
+    fs.stat(absolutePath).catch(() => null),
+    fs.stat(taskPath).catch(() => null),
+  ]);
+  if (!logStat || !taskStat || logStat.mtimeMs < taskStat.mtimeMs) {
     return { status: "skipped" };
   }
 

@@ -4,6 +4,7 @@ import {
   readFile,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -562,14 +563,14 @@ describe("workspace tasks", () => {
     await mkdir(taskDir, { recursive: true });
     const setupLogPath = path.join(
       repoRootDir,
-      ".workforest/logs/front-fix-tests.log",
+      ".workforest/logs/front-my-feature-fix-tests.log",
     );
     await mkdir(path.dirname(setupLogPath), { recursive: true });
     await writeFile(
       setupLogPath,
       [
         "# workforest repo setup log",
-        "repo: front-fix-tests",
+        "repo: front-my-feature-fix-tests",
         "[complete] initializers complete",
         "",
       ].join("\n"),
@@ -595,12 +596,113 @@ describe("workspace tasks", () => {
         parent_repo: "front",
         path: "_tasks/my-feature/fix-tests",
         branch: "tomdale/fix-tests",
-        setup_log: ".workforest/logs/front-fix-tests.log",
+        setup_log: ".workforest/logs/front-my-feature-fix-tests.log",
         absolutePath: taskDir,
         state: "ready",
         merged: true,
       },
     ]);
+  });
+
+  it("does not reuse another worktree task's retained setup log", async () => {
+    const repoRootDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-repo-"),
+    );
+    tempDirs.push(repoRootDir);
+    const parentRepoDir = path.join(repoRootDir, "other-feature");
+    const taskDir = path.join(
+      repoRootDir,
+      "_tasks",
+      "other-feature",
+      "fix-tests",
+    );
+    await mkdir(taskDir, { recursive: true });
+    const setupLogPath = path.join(
+      repoRootDir,
+      ".workforest/logs/front-my-feature-fix-tests.log",
+    );
+    await mkdir(path.dirname(setupLogPath), { recursive: true });
+    await writeFile(
+      setupLogPath,
+      [
+        "# workforest repo setup log",
+        "repo: front-my-feature-fix-tests",
+        "[complete] initializers complete",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const { listRepositoryTasks } = await import("./tasks.ts");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/other-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "tomdale/fix-tests\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const tasks = await listRepositoryTasks({
+      parentRepoDir,
+      repoName: "front",
+      changeName: "other-feature",
+    });
+
+    expect(tasks).toMatchObject([
+      {
+        slug: "fix-tests",
+        state: "skipped",
+      },
+    ]);
+    expect(tasks[0]).not.toHaveProperty("setup_log");
+  });
+
+  it("does not reuse a retained setup log older than the task directory", async () => {
+    const repoRootDir = await mkdtemp(
+      path.join(os.tmpdir(), "workforest-repo-"),
+    );
+    tempDirs.push(repoRootDir);
+    const parentRepoDir = path.join(repoRootDir, "my-feature");
+    const taskDir = path.join(repoRootDir, "_tasks", "my-feature", "fix-tests");
+    await mkdir(taskDir, { recursive: true });
+    const setupLogPath = path.join(
+      repoRootDir,
+      ".workforest/logs/front-my-feature-fix-tests.log",
+    );
+    await mkdir(path.dirname(setupLogPath), { recursive: true });
+    await writeFile(
+      setupLogPath,
+      [
+        "# workforest repo setup log",
+        "repo: front-my-feature-fix-tests",
+        "[complete] initializers complete",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const old = new Date("2026-01-01T00:00:00.000Z");
+    const current = new Date("2026-01-02T00:00:00.000Z");
+    await utimes(setupLogPath, old, old);
+    await utimes(taskDir, current, current);
+    const { listRepositoryTasks } = await import("./tasks.ts");
+
+    runGitMock
+      .mockResolvedValueOnce({ stdout: "tomdale/my-feature\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "abc123\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "tomdale/fix-tests\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
+
+    const tasks = await listRepositoryTasks({
+      parentRepoDir,
+      repoName: "front",
+      changeName: "my-feature",
+    });
+
+    expect(tasks).toMatchObject([
+      {
+        slug: "fix-tests",
+        state: "skipped",
+      },
+    ]);
+    expect(tasks[0]).not.toHaveProperty("setup_log");
   });
 
   it("deletes merged worktree tasks", async () => {

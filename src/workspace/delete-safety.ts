@@ -26,7 +26,7 @@ export type DeleteTaskSafety = Readonly<{
   parentRepo: string;
   slug: string;
   branch: string;
-  state: "ready" | "failed" | "stale";
+  state: "ready" | "failed" | "skipped" | "stale";
   merged: boolean | null;
 }>;
 
@@ -202,7 +202,7 @@ function toDeleteTaskSafety(task: {
   parent_repo: string;
   slug: string;
   branch: string;
-  state: "ready" | "failed" | "stale";
+  state: "ready" | "failed" | "skipped" | "stale";
   merged: boolean | null;
 }): DeleteTaskSafety {
   return {
