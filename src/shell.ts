@@ -54,10 +54,10 @@ __workforest_invoke() {
   ${WORKFOREST_CD_PATH_ENV}="$workforest_cd_file" command "$workforest_cmd" "$@"
   local workforest_status=$?
 
-  if [ "$workforest_status" -eq 0 ] && [ -s "$workforest_cd_file" ]; then
+  if [ -s "$workforest_cd_file" ]; then
     local workforest_target
     workforest_target="$(cat "$workforest_cd_file")"
-    if [ -n "$workforest_target" ] && [ -d "$workforest_target" ]; then
+    if [ -n "$workforest_target" ]; then
       cd "$workforest_target" || workforest_status=$?
     fi
   fi

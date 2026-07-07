@@ -160,6 +160,48 @@ pwd -P
     expect(result.stdout.trim()).toBe(await realpath(target));
   });
 
+  it("cd's the parent shell on failure when a target is reported", async () => {
+    const tempDir = await createTempDir();
+    const binDir = path.join(tempDir, "bin");
+    const target = path.join(tempDir, "target");
+    await mkdir(binDir, { recursive: true });
+    await mkdir(target, { recursive: true });
+
+    const stub = path.join(binDir, "wf");
+    await writeFile(
+      stub,
+      `#!/bin/sh
+if [ -n "$${WORKFOREST_CD_PATH_ENV}" ]; then
+  printf '%s\\n' "$WF_STUB_TARGET" > "$${WORKFOREST_CD_PATH_ENV}"
+fi
+exit 1
+`,
+      "utf8",
+    );
+    await chmod(stub, 0o755);
+
+    const result = spawnSync("bash", [], {
+      input: `${renderShellInit("bash")}
+wf
+workforest_status=$?
+printf 'status=%s\\ncwd=%s\\n' "$workforest_status" "$PWD"
+exit "$workforest_status"
+`,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+        WF_STUB_TARGET: target,
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stdout).toContain("status=1\n");
+    expect(await realpath(parseValue(result.stdout, "cwd") ?? "")).toBe(
+      await realpath(target),
+    );
+  });
+
   it("writes the target workspace path for the shell wrapper", async () => {
     const tempDir = await createTempDir();
     const cdPathFile = path.join(tempDir, "cd-target");
@@ -231,6 +273,13 @@ pwd -P
 });
 
 type MutableCommandRegistry = Mutable<CommandRegistry>;
+
+function parseValue(output: string, key: string): string | undefined {
+  return output
+    .split("\n")
+    .find((line) => line.startsWith(`${key}=`))
+    ?.slice(key.length + 1);
+}
 
 type Mutable<Value> = Value extends readonly (infer Item)[]
   ? Mutable<Item>[]

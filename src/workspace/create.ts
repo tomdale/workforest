@@ -254,6 +254,11 @@ async function reportCreateOutcome({
       });
       return;
     case "failed":
+      await reportShellCdTarget(targetDir, {
+        mode: "silent",
+        writeShellCdPath: options.writeShellCdPath,
+      });
+      return;
     case "cancelled":
       return;
   }

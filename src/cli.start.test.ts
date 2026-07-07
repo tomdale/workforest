@@ -175,6 +175,32 @@ describe("wf new", () => {
     ]);
   });
 
+  it("keeps a failed interactive start failed while writing the cd target", async () => {
+    const fixture = await createStartFixture();
+    await createCachedMirror(
+      fixture.cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const targetDir = path.join(
+      fixture.baseDir,
+      "Repos",
+      "front",
+      "redesign-cli",
+    );
+
+    const result = await runNewCommand(invocation(["redesign-cli", "front"]), {
+      interactive: true,
+      writeShellCdPath: fixture.writeShellCdPath,
+      initializeWorktreeSetup: vi.fn(async () => undefined),
+      shouldUseGrid: () => true,
+      presentRun: fakeFailedPresentRun("front"),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(fixture.cdTargets).toEqual([targetDir]);
+  });
+
   it("drives an interactive workspace start through the setup view", async () => {
     const fixture = await createStartFixture();
     await createCachedMirror(
@@ -888,6 +914,20 @@ function fakePresentRun(repoResults: [string, { hasLockfile: boolean }][]) {
     results: new Map(repoResults),
     outcome: "ready" as const,
   }));
+}
+
+function fakeFailedPresentRun(repoName: string) {
+  return vi.fn(async (options: Parameters<PresentRun>[0]) => {
+    await options.onFailure?.(repoName, {
+      phase: "failed",
+      error: new Error("install failed"),
+      step: "init:install",
+    });
+    return {
+      results: new Map<string, { hasLockfile: boolean }>(),
+      outcome: "failed" as const,
+    };
+  });
 }
 
 function restoreEnv(name: string, value: string | undefined): void {

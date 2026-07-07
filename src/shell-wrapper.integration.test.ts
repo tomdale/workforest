@@ -79,9 +79,9 @@ describe("generated shell wrappers", () => {
   it.each([
     "bash",
     "zsh",
-  ] as const)("preserves cwd and status after a failed %s invocation", async (shell) => {
+  ] as const)("follows a cd target and preserves status after a failed %s invocation", async (shell) => {
     const fixture = await createShellFixture(shell);
-    const target = path.join(fixture.rootDir, "unused target");
+    const target = path.join(fixture.rootDir, "failed target");
     await mkdir(target);
 
     const result = await invokeWrapper(fixture, "wf", {
@@ -92,7 +92,7 @@ describe("generated shell wrappers", () => {
     expect(result.exitCode).toBe(0);
     expect(parseValue(result.stdout, "status")).toBe("7");
     expect(await realpath(parseValue(result.stdout, "cwd") ?? "")).toBe(
-      await realpath(fixture.startDir),
+      await realpath(target),
     );
     expect(result.stderr).toBe("");
     expect(await readdir(fixture.tmpDir)).toEqual([]);
