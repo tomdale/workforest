@@ -38,6 +38,24 @@ import { OperationalError, UsageError } from "./errors.ts";
 import { jsonSuccess, reportOutput, success } from "./output.ts";
 import type { CommandResult, ParsedInvocation } from "./types.ts";
 
+export type DeleteProgressPhase =
+  | "review-resolution"
+  | "selector-resolution"
+  | "repository-safety"
+  | "task-checks"
+  | "cleanup-dispatch";
+
+export type DeleteProgressState = Readonly<{
+  phase: DeleteProgressPhase;
+  status: "started" | "waiting" | "completed";
+  message: string;
+  elapsedMs?: number;
+}>;
+
+export type DeleteProgressSink = (
+  state: DeleteProgressState,
+) => void | Promise<void>;
+
 export type RunCleanupOptions = Readonly<{
   interactive: boolean;
   writeShellCdPath: (targetDir: string) => Promise<void>;
@@ -47,6 +65,7 @@ export type RunCleanupOptions = Readonly<{
   cleanupWorktree?: typeof cleanupWorktree;
   resolveRepositorySpecifiers?: typeof resolveRepositorySpecifiers;
   onCleanupState?: CleanupStateSink;
+  onDeleteProgress?: DeleteProgressSink;
   cwd?: string;
 }>;
 
@@ -112,6 +131,8 @@ type DeleteResultData = Readonly<{
 const DRY_RUN_NOTE =
   "Dry run only. No files, worktrees, metadata, branches, node_modules, or mirrors were removed.";
 
+const DELETE_PROGRESS_INTERVAL_MS = 10_000;
+
 /**
  * Removes a worktree or workspace. Without --force, it refuses unless every
  * managed repository is clean, integrated into its remote default branch, and
@@ -130,8 +151,12 @@ export async function runDeleteCommand(
 
   try {
     if (!invocation.beforeDoubleDash[0]) {
-      const reviewWorktree = await timing.time("review-resolution", () =>
-        resolveCurrentReviewWorktree(options.cwd ?? process.cwd()),
+      const reviewWorktree = await timeDeleteOperation(
+        timing,
+        options,
+        "review-resolution",
+        "Looking for a review worktree to delete",
+        () => resolveCurrentReviewWorktree(options.cwd ?? process.cwd()),
       );
       if (reviewWorktree) {
         return await deleteReviewWorktree(
@@ -143,8 +168,12 @@ export async function runDeleteCommand(
       }
     }
 
-    const entry = await timing.time("selector-resolution", () =>
-      resolveDeleteSelector(invocation.beforeDoubleDash[0]),
+    const entry = await timeDeleteOperation(
+      timing,
+      options,
+      "selector-resolution",
+      "Resolving delete target",
+      () => resolveDeleteSelector(invocation.beforeDoubleDash[0]),
     );
     const safety =
       dryRun || !force ? await buildDeleteSafety(entry, options, timing) : null;
@@ -163,8 +192,12 @@ export async function runDeleteCommand(
       }
     }
 
-    const cleanup = await timing.time("cleanup-dispatch", () =>
-      cleanupTarget(entry, options, timing),
+    const cleanup = await timeDeleteOperation(
+      timing,
+      options,
+      "cleanup-dispatch",
+      `Deleting ${typeLabel(entry)} ${entry.selector}`,
+      () => cleanupTarget(entry, options, timing),
     );
     if (json) {
       return jsonSuccess(deleteResult(entry, cleanup));
@@ -181,11 +214,22 @@ async function buildDeleteSafety(
   options: RunCleanupOptions,
   timing: DeleteTimingRecorder,
 ): Promise<DeleteSafety> {
-  const repositories = await timing.time("repository-safety", () =>
-    (options.buildDeleteRepositorySafety ?? buildDeleteRepositorySafety)(entry),
+  const repositories = await timeDeleteOperation(
+    timing,
+    options,
+    "repository-safety",
+    "Checking repository safety",
+    () =>
+      (options.buildDeleteRepositorySafety ?? buildDeleteRepositorySafety)(
+        entry,
+      ),
   );
-  const tasks = await timing.time("task-checks", () =>
-    (options.buildDeleteTaskSafety ?? buildDeleteTaskSafety)(entry),
+  const tasks = await timeDeleteOperation(
+    timing,
+    options,
+    "task-checks",
+    "Checking nested tasks",
+    () => (options.buildDeleteTaskSafety ?? buildDeleteTaskSafety)(entry),
   );
   return deleteSafetyFor(entry, repositories, tasks);
 }
@@ -205,13 +249,18 @@ async function deleteReviewWorktree(
     reviewWorktree.path,
     initialCwd,
   );
-  const result = await timing.time("cleanup-dispatch", () =>
-    removeReviewWorktree({
-      target: reviewWorktree.target,
-      reviewsRoot: reviewWorktree.reviewsRoot,
-      force: deleteOptions.force,
-      dryRun: deleteOptions.dryRun,
-    }),
+  const result = await timeDeleteOperation(
+    timing,
+    options,
+    "cleanup-dispatch",
+    `${deleteOptions.dryRun ? "Preparing" : "Deleting"} review worktree ${reviewSelector(reviewWorktree.target)}`,
+    () =>
+      removeReviewWorktree({
+        target: reviewWorktree.target,
+        reviewsRoot: reviewWorktree.reviewsRoot,
+        force: deleteOptions.force,
+        dryRun: deleteOptions.dryRun,
+      }),
   );
   const selector = reviewSelector(reviewWorktree.target);
 
@@ -651,6 +700,53 @@ function typeLabel(entry: InventoryEntry): string {
 
 function reviewSelector(target: ReviewTarget): string {
   return `${target.repo}#${target.prNumber}`;
+}
+
+async function timeDeleteOperation<T>(
+  timing: DeleteTimingRecorder,
+  options: RunCleanupOptions,
+  phase: DeleteProgressPhase,
+  message: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  await emitDeleteProgress(options, {
+    phase,
+    status: "started",
+    message,
+  });
+  const startedAt = Date.now();
+  let interval: NodeJS.Timeout | undefined;
+
+  if (options.onDeleteProgress) {
+    interval = setInterval(() => {
+      void emitDeleteProgress(options, {
+        phase,
+        status: "waiting",
+        message,
+        elapsedMs: Date.now() - startedAt,
+      });
+    }, DELETE_PROGRESS_INTERVAL_MS);
+    interval.unref?.();
+  }
+
+  try {
+    return await timing.time(phase, action);
+  } finally {
+    if (interval) clearInterval(interval);
+    await emitDeleteProgress(options, {
+      phase,
+      status: "completed",
+      message,
+      elapsedMs: Date.now() - startedAt,
+    });
+  }
+}
+
+async function emitDeleteProgress(
+  options: RunCleanupOptions,
+  state: DeleteProgressState,
+): Promise<void> {
+  await options.onDeleteProgress?.(state);
 }
 
 function formatWorktrees(worktrees: readonly DeleteWorktreeTarget[]): string {

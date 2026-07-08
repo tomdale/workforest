@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathExists } from "@wf-plugin/core";
 import { commandRegistry } from "./cli/commands.ts";
+import type { DeleteProgressState } from "./cli/delete.ts";
 import {
   isArgumentParserError,
   OperationalError,
@@ -146,6 +147,17 @@ const humanServiceEventSink: ServiceEventSink = (event) => {
 
   log[event.level === "warning" ? "warn" : event.level](event.message);
 };
+
+function renderDeleteProgress(state: DeleteProgressState): void {
+  if (state.status === "completed") {
+    return;
+  }
+  const elapsed =
+    state.status === "waiting" && state.elapsedMs !== undefined
+      ? ` (${Math.max(1, Math.floor(state.elapsedMs / 1000))}s)`
+      : "";
+  log.info(`${state.message}${elapsed}`);
+}
 
 function renderCleanupState(state: CleanupState, dryRun: boolean): void {
   switch (state.phase) {
@@ -332,7 +344,10 @@ async function runInvocation(
           interactive,
           writeShellCdPath,
           ...(!json && interactive
-            ? { onCleanupState: (state) => renderCleanupState(state, dryRun) }
+            ? {
+                onDeleteProgress: renderDeleteProgress,
+                onCleanupState: (state) => renderCleanupState(state, dryRun),
+              }
             : {}),
         });
       });

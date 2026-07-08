@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runDeleteCommand } from "./cli/delete.ts";
+import { type DeleteProgressState, runDeleteCommand } from "./cli/delete.ts";
 import { OperationalError } from "./cli/errors.ts";
 import type { ParsedInvocation } from "./cli/types.ts";
 import { saveWorkspaceConfig } from "./config.ts";
@@ -270,6 +270,107 @@ describe("wf delete", () => {
       fixture.workspace,
       expect.objectContaining({ keepMirrors: true }),
     );
+  });
+
+  it("emits progress for selector resolution, safety checks, and cleanup", async () => {
+    const fixture = await createCleanupFixture();
+    const progress: DeleteProgressState[] = [];
+    const cleanupWorkspace = vi.fn(async () => ({
+      dryRun: false,
+      removedRepos: ["api", "front"],
+      deletedBranches: [],
+    }));
+
+    await runDeleteCommand(invocation(["_adhoc/experiment"]), {
+      interactive: false,
+      writeShellCdPath: async () => {},
+      buildDeleteRepositorySafety: async () => [
+        repositorySafety({
+          name: "api",
+          path: path.join(fixture.workspace, "api"),
+          integrated: true,
+        }),
+      ],
+      buildDeleteTaskSafety: async () => [],
+      cleanupWorkspace,
+      onDeleteProgress: (state) => {
+        progress.push(state);
+      },
+    });
+
+    expect(progress.map((state) => `${state.phase}:${state.status}`)).toEqual([
+      "selector-resolution:started",
+      "selector-resolution:completed",
+      "repository-safety:started",
+      "repository-safety:completed",
+      "task-checks:started",
+      "task-checks:completed",
+      "cleanup-dispatch:started",
+      "cleanup-dispatch:completed",
+    ]);
+    expect(progress.map((state) => state.message)).toEqual(
+      expect.arrayContaining([
+        "Resolving delete target",
+        "Checking repository safety",
+        "Checking nested tasks",
+        "Deleting workspace _adhoc/experiment",
+      ]),
+    );
+  });
+
+  it("keeps emitting progress while a delete operation waits", async () => {
+    vi.useFakeTimers();
+    await createCleanupFixture();
+    const progress: DeleteProgressState[] = [];
+    let finishCleanup: (() => void) | undefined;
+    const cleanupWorkspace = vi.fn(
+      () =>
+        new Promise<{
+          dryRun: false;
+          removedRepos: string[];
+          deletedBranches: string[];
+        }>((resolve) => {
+          finishCleanup = () =>
+            resolve({
+              dryRun: false,
+              removedRepos: ["api", "front"],
+              deletedBranches: [],
+            });
+        }),
+    );
+
+    try {
+      const pending = runDeleteCommand(
+        invocation(["_adhoc/experiment"], { force: true }),
+        {
+          interactive: false,
+          writeShellCdPath: async () => {},
+          cleanupWorkspace,
+          onDeleteProgress: (state) => {
+            progress.push(state);
+          },
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(cleanupWorkspace).toHaveBeenCalled();
+      });
+      await vi.advanceTimersByTimeAsync(21_000);
+      finishCleanup?.();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(
+      progress.filter(
+        (state) =>
+          state.phase === "cleanup-dispatch" && state.status === "waiting",
+      ),
+    ).toEqual([
+      expect.objectContaining({ elapsedMs: 10_000 }),
+      expect.objectContaining({ elapsedMs: 20_000 }),
+    ]);
   });
 
   it("errors when run with no selector outside a worktree or workspace", async () => {
