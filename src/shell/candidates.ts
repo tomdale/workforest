@@ -164,17 +164,20 @@ async function leafCandidates(
   }
 
   const candidates: string[] = [];
-  if (current === "" || current.startsWith("-")) {
-    candidates.push(...flagWords(flags));
+  const completesSelector =
+    operandCompletionKind(leaf) === "selector" &&
+    parsed.beforeDoubleDashCount < maxBeforeDoubleDashOperands(leaf) &&
+    !parsed.hadDoubleDash;
+
+  if (!current.startsWith("-") && completesSelector) {
+    candidates.push(...((await options.selectorCandidates?.()) ?? []));
   }
 
   if (
-    !current.startsWith("-") &&
-    operandCompletionKind(leaf) === "selector" &&
-    parsed.beforeDoubleDashCount < maxBeforeDoubleDashOperands(leaf) &&
-    !parsed.hadDoubleDash
+    !parsed.hadDoubleDash &&
+    (current.startsWith("-") || (current === "" && !completesSelector))
   ) {
-    candidates.push(...((await options.selectorCandidates?.()) ?? []));
+    candidates.push(...unusedFlagWords(flags, parsed.usedFlagNames));
   }
 
   return uniqueSorted(candidates);
@@ -187,11 +190,13 @@ function parseCompletionArgs(
   beforeDoubleDashCount: number;
   hadDoubleDash: boolean;
   expectingFlagValue: boolean;
+  usedFlagNames: ReadonlySet<string>;
 }> {
   const byToken = flagTokenMap(flags);
   let beforeDoubleDashCount = 0;
   let hadDoubleDash = false;
   let expectingFlagValue = false;
+  const usedFlagNames = new Set<string>();
 
   for (const arg of args) {
     if (expectingFlagValue) {
@@ -207,6 +212,9 @@ function parseCompletionArgs(
     if (!hadDoubleDash && arg.startsWith("-")) {
       const [flagToken, inlineValue] = splitFlagToken(arg);
       const flag = byToken.get(flagToken);
+      if (flag) {
+        usedFlagNames.add(flag.name);
+      }
       if (flag?.kind === "string" && inlineValue === undefined) {
         expectingFlagValue = true;
       }
@@ -218,7 +226,12 @@ function parseCompletionArgs(
     }
   }
 
-  return { beforeDoubleDashCount, hadDoubleDash, expectingFlagValue };
+  return {
+    beforeDoubleDashCount,
+    hadDoubleDash,
+    expectingFlagValue,
+    usedFlagNames,
+  };
 }
 
 function operandCompletionKind(leaf: CommandLeaf): "selector" | null {
@@ -300,6 +313,13 @@ function flagWords(flags: readonly FlagDefinition[]): readonly string[] {
   return flags.flatMap((flag) =>
     flag.short ? [flag.short, flag.long] : [flag.long],
   );
+}
+
+function unusedFlagWords(
+  flags: readonly FlagDefinition[],
+  usedFlagNames: ReadonlySet<string>,
+): readonly string[] {
+  return flagWords(flags.filter((flag) => !usedFlagNames.has(flag.name)));
 }
 
 function flagTokenMap(

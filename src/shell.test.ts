@@ -115,6 +115,61 @@ printf '%s\\n' "\${COMPREPLY[@]}"
     expect(result.stdout).toContain("switch\n");
   });
 
+  it("passes zsh completion words to the hidden completion command", async () => {
+    const tempDir = await createTempDir();
+    const binDir = path.join(tempDir, "bin");
+    const argsFile = path.join(tempDir, "args.txt");
+    const compaddFile = path.join(tempDir, "compadd.txt");
+    await mkdir(binDir, { recursive: true });
+    const stub = path.join(binDir, "wf");
+    await writeFile(
+      stub,
+      `#!/bin/sh
+if [ "$1" = "_complete" ]; then
+  : > "$WF_STUB_ARGS"
+  for arg in "$@"; do
+    printf '<%s>\\n' "$arg" >> "$WF_STUB_ARGS"
+  done
+  printf '%s\\n' workforest/main switch-recent
+fi
+`,
+      "utf8",
+    );
+    await chmod(stub, 0o755);
+    const shell = normalizeShellName("/bin/zsh");
+    if (!shell) {
+      throw new Error("zsh should normalize as a supported shell");
+    }
+
+    const result = spawnSync(shell, ["-f"], {
+      input: `${renderShellInit("zsh")}
+compadd() {
+  for arg in "$@"; do
+    print -r -- "<$arg>"
+  done > "$WF_COMPADD_OUT"
+}
+words=(wf switch '')
+CURRENT=3
+_workforest_complete
+`,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+        WF_STUB_ARGS: argsFile,
+        WF_COMPADD_OUT: compaddFile,
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(argsFile, "utf8")).toBe(
+      ["<_complete>", "<-->", "<1>", "<switch>", "<>", ""].join("\n"),
+    );
+    expect(await readFile(compaddFile, "utf8")).toBe(
+      ["<-->", "<workforest/main>", "<switch-recent>", ""].join("\n"),
+    );
+  });
+
   it("cd's the parent shell for bare wf when a target is reported", async () => {
     const tempDir = await createTempDir();
     const binDir = path.join(tempDir, "bin");

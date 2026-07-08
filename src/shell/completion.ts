@@ -20,7 +20,7 @@ _workforest_complete() {
   local -a candidates completion_words
 
   command_name="$(_workforest_completion_command)"
-  completion_words=("\${words[@]:2}")
+  completion_words=("\${(@)words[2,-1]}")
   candidates=("\${(@f)$(command "$command_name" _complete -- "$((CURRENT - 2))" "\${completion_words[@]}" 2>/dev/null)}")
   (( $#candidates > 0 )) || return 0
   compadd -- "\${candidates[@]}"

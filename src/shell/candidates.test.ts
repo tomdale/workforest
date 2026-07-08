@@ -33,15 +33,30 @@ describe("shell completion candidates", () => {
   it("completes selector operands for worktrees and workspaces", async () => {
     await expect(
       complete(1, ["status", ""], ["cli-redesign", "workforest/cli-redesign"]),
-    ).resolves.toEqual(
-      expect.arrayContaining([
-        "--json",
-        "--wait",
-        "--watch",
-        "cli-redesign",
-        "workforest/cli-redesign",
-      ]),
+    ).resolves.toEqual(["cli-redesign", "workforest/cli-redesign"]);
+  });
+
+  it("completes flags when the current selector command word starts with a dash", async () => {
+    const candidates = await complete(
+      1,
+      ["status", "-"],
+      ["cli-redesign", "workforest/cli-redesign"],
     );
+
+    expect(candidates).toEqual(
+      expect.arrayContaining(["--json", "--timeout", "--wait", "--watch"]),
+    );
+    expect(candidates).not.toContain("cli-redesign");
+  });
+
+  it("does not repeat flags that are already present", async () => {
+    const candidates = await complete(
+      2,
+      ["switch", "--json", "-"],
+      ["workforest/cli-redesign"],
+    );
+
+    expect(candidates).toEqual([]);
   });
 
   it("does not complete selector operands while a string flag value is expected", async () => {
