@@ -1,9 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { commandRegistry } from "./cli/commands.ts";
-import type { CommandRegistry } from "./cli/types.ts";
 import { log } from "./logger.ts";
-import { createShellCommandModel } from "./shell/command-model.ts";
 import {
   renderBashCompletion,
   renderZshCompletion,
@@ -29,15 +26,9 @@ export function normalizeShellName(
   }
 }
 
-export function renderShellInit(
-  shell: SupportedShell,
-  registry: CommandRegistry = commandRegistry,
-): string {
-  const commandModel = createShellCommandModel(registry);
+export function renderShellInit(shell: SupportedShell): string {
   const completionBlock =
-    shell === "zsh"
-      ? renderZshCompletion(commandModel)
-      : renderBashCompletion(commandModel);
+    shell === "zsh" ? renderZshCompletion() : renderBashCompletion();
 
   // No per-command filter is needed: the CLI only writes a cd path when a
   // command actually has somewhere to go, and the wrapper only cd's when the

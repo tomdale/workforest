@@ -146,6 +146,16 @@ describe("core command family conformance", () => {
     });
   });
 
+  it("renders hidden shell completion candidates as raw lines", async () => {
+    const result = await runCommand(["_complete", "--", "0", "s"]);
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: ["shell", "skills", "status", "switch"].join("\n"),
+      stderr: "",
+    });
+  });
+
   it("renders config show as a JSON envelope", async () => {
     const result = await runCommand(["config", "show", "--json"]);
 

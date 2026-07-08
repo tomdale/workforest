@@ -738,6 +738,33 @@ const aiStatus = leaf({
   outputModes: ["report", "json"],
 });
 
+const shellCompleteCommand = leaf({
+  name: "_complete",
+  path: ["_complete"],
+  summary: "Print shell completion candidates",
+  description:
+    "Internal command used by generated shell integration to complete Workforest commands, flags, and dynamic local selectors.",
+  handler: "shell.complete",
+  help: { kind: "command", command: "_complete" },
+  operands: {
+    variants: [
+      {
+        beforeDoubleDash: cardinality(0, 0, "arguments"),
+        delimiter: "required",
+        afterDoubleDash: cardinality(
+          1,
+          null,
+          "completion arguments",
+          "<cursor-index> [word...]",
+        ),
+      },
+    ],
+  },
+  outputModes: ["shell"],
+  supportsJson: false,
+  visibility: "hidden",
+});
+
 export const commandRegistry: CommandRegistry = {
   shortcuts: [],
   root: group({
@@ -746,6 +773,7 @@ export const commandRegistry: CommandRegistry = {
     summary: "Workforest command line interface",
     help: { kind: "root" },
     children: [
+      shellCompleteCommand,
       newCommand,
       adoptCommand,
       listCommand,

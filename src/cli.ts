@@ -350,6 +350,8 @@ async function runInvocation(
         invocation.beforeDoubleDash[0],
         jsonRequested(invocation),
       );
+    case "shell.complete":
+      return runShellCompleteCommand(invocation);
     case "config.show":
       return runConfigShow(jsonRequested(invocation));
     case "config.init":
@@ -768,6 +770,42 @@ async function runShellInitCommand(
 
   const script = renderShellInit(shell);
   return json ? jsonSuccess({ shell, script }) : success(shellOutput(script));
+}
+
+async function runShellCompleteCommand(
+  invocation: ParsedInvocation,
+): Promise<CommandResult> {
+  const [cursorIndexText, ...words] = invocation.afterDoubleDash;
+  const cursorIndex = Number.parseInt(cursorIndexText ?? "", 10);
+  if (!Number.isInteger(cursorIndex)) {
+    return success(shellOutput(""));
+  }
+
+  const { shellCompletionCandidates, selectorCandidateWords } = await import(
+    "./shell/candidates.ts"
+  );
+  const candidates = await shellCompletionCandidates(
+    commandRegistry,
+    cursorIndex,
+    words,
+    {
+      selectorCandidates: async () => {
+        try {
+          const { config } = await loadWorkspaceConfig();
+          const { collectInventory } = await import("./workspace/inventory.ts");
+          const inventory = await collectInventory(config);
+          return selectorCandidateWords([
+            ...inventory.workspaces,
+            ...inventory.repositories,
+          ]);
+        } catch {
+          return [];
+        }
+      },
+    },
+  );
+
+  return success(shellOutput(candidates.join("\n")));
 }
 
 async function runConfigInit(): Promise<CommandResult> {

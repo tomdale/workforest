@@ -11,8 +11,6 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { commandRegistry } from "./cli/commands.ts";
-import type { CommandRegistry } from "./cli/types.ts";
 import {
   normalizeShellName,
   renderShellInit,
@@ -67,29 +65,6 @@ describe("shell integration", () => {
     expect(script).toContain("complete -F _workforest_complete wf workforest");
   });
 
-  it("derives completion commands from the registry", () => {
-    const registry = structuredClone(commandRegistry) as MutableCommandRegistry;
-    registry.shortcuts.push({
-      name: "inspect",
-      target: ["cache", "show"],
-      visibility: "visible",
-      summary: "Inspect a cached repository",
-      help: { kind: "command", command: "inspect" },
-    });
-    registry.shortcuts.push({
-      name: "visit",
-      target: ["review"],
-      visibility: "visible",
-      summary: "Visit a review workspace",
-      help: { kind: "command", command: "visit" },
-    });
-
-    const script = renderShellInit("bash", registry);
-
-    expect(script).toContain("inspect");
-    expect(script).toContain("visit");
-  });
-
   it.each(["bash", "zsh"] as const)("renders valid %s syntax", (shell) => {
     const result = spawnSync(shell, ["-n"], {
       input: renderShellInit(shell),
@@ -99,7 +74,22 @@ describe("shell integration", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it("registers and executes bash completion", () => {
+  it("registers and executes bash completion", async () => {
+    const tempDir = await createTempDir();
+    const binDir = path.join(tempDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const stub = path.join(binDir, "wf");
+    await writeFile(
+      stub,
+      `#!/bin/sh
+if [ "$1" = "_complete" ]; then
+  printf '%s\\n' status switch
+fi
+`,
+      "utf8",
+    );
+    await chmod(stub, 0o755);
+
     const result = spawnSync("bash", [], {
       input: `${renderShellInit("bash")}
 complete -p wf
@@ -110,6 +100,10 @@ _workforest_complete
 printf '%s\\n' "\${COMPREPLY[@]}"
 `,
       encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+      },
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -272,17 +266,9 @@ exit "$workforest_status"
   });
 });
 
-type MutableCommandRegistry = Mutable<CommandRegistry>;
-
 function parseValue(output: string, key: string): string | undefined {
   return output
     .split("\n")
     .find((line) => line.startsWith(`${key}=`))
     ?.slice(key.length + 1);
 }
-
-type Mutable<Value> = Value extends readonly (infer Item)[]
-  ? Mutable<Item>[]
-  : Value extends object
-    ? { -readonly [Key in keyof Value]: Mutable<Value[Key]> }
-    : Value;

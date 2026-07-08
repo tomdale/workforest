@@ -1,33 +1,29 @@
-import type { FlagDefinition } from "../cli/types.ts";
-import type {
-  ShellCommandModel,
-  ShellCompletionCommand,
-} from "./command-model.ts";
+export function renderZshCompletion(): string {
+  return `_workforest_completion_command() {
+  local command_name="$words[1]"
+  local alias_value
 
-export function renderZshCompletion(model: ShellCommandModel): string {
-  return `_workforest_complete_flags() {
-  local -a flags
-  flags=("$@")
-  (( $#flags > 0 )) || return 1
-  _values 'option' "$flags[@]"
+  if [[ "$command_name" != "wf" && "$command_name" != "workforest" ]]; then
+    alias_value="\${aliases[$command_name]:-}"
+    case "$alias_value" in
+      wf|workforest)
+        command_name="$alias_value"
+        ;;
+    esac
+  fi
+
+  printf '%s\\n' "$command_name"
 }
 
 _workforest_complete() {
-  local root_command="\${words[2]:-}"
-  local subcommand="\${words[3]:-}"
+  local command_name
+  local -a candidates completion_words
 
-  if (( CURRENT == 2 )); then
-    local -a commands
-    commands=(
-${renderZshDescriptions(model.commands, 6)}
-    )
-    _describe -t commands 'workforest command' commands
-    return
-  fi
-
-  case "$root_command" in
-${model.commands.map((command) => renderZshCommand(command)).join("\n")}
-  esac
+  command_name="$(_workforest_completion_command)"
+  completion_words=("\${words[@]:2}")
+  candidates=("\${(@f)$(command "$command_name" _complete -- "$((CURRENT - 2))" "\${completion_words[@]}" 2>/dev/null)}")
+  (( $#candidates > 0 )) || return 0
+  compadd -- "\${candidates[@]}"
 }
 
 __workforest_register_completion() {
@@ -48,29 +44,32 @@ __workforest_register_completion() {
 __workforest_register_completion`;
 }
 
-export function renderBashCompletion(model: ShellCommandModel): string {
-  return `_workforest_complete_words() {
-  local words="$1"
-  local current="$2"
-  COMPREPLY=( $(compgen -W "$words" -- "$current") )
+export function renderBashCompletion(): string {
+  return `_workforest_completion_command() {
+  local command_name="$1"
+  local alias_value
+
+  if [[ "$command_name" != "wf" && "$command_name" != "workforest" ]]; then
+    alias_value="\${BASH_ALIASES[$command_name]:-}"
+    case "$alias_value" in
+      wf|workforest)
+        command_name="$alias_value"
+        ;;
+    esac
+  fi
+
+  printf '%s\\n' "$command_name"
 }
 
 _workforest_complete() {
-  local current="\${COMP_WORDS[COMP_CWORD]}"
-  local root_command="\${COMP_WORDS[1]:-}"
-  local subcommand="\${COMP_WORDS[2]:-}"
+  local command_name
+  local candidate
+
+  command_name="$(_workforest_completion_command "\${COMP_WORDS[0]}")"
   COMPREPLY=()
-
-  if (( COMP_CWORD == 1 )); then
-    _workforest_complete_words ${shellQuote(
-      model.commands.map((command) => command.name).join(" "),
-    )} "$current"
-    return
-  fi
-
-  case "$root_command" in
-${model.commands.map((command) => renderBashCommand(command)).join("\n")}
-  esac
+  while IFS= read -r candidate; do
+    COMPREPLY+=("$candidate")
+  done < <(command "$command_name" _complete -- "$((COMP_CWORD - 1))" "\${COMP_WORDS[@]:1}" 2>/dev/null)
 }
 
 __workforest_register_completion() {
@@ -89,163 +88,4 @@ __workforest_register_completion() {
 }
 
 __workforest_register_completion`;
-}
-
-function renderZshCommand(command: ShellCompletionCommand): string {
-  const lines = [`    ${command.name})`];
-
-  if (command.children.length > 0) {
-    const actionEntries = [
-      renderZshDescriptions(command.children, 10),
-      renderZshFlagDescriptions(command.flags, 10),
-    ].filter(Boolean);
-
-    lines.push(
-      "      if (( CURRENT == 3 )); then",
-      "        local -a actions",
-      "        actions=(",
-      ...actionEntries,
-      "        )",
-      "        _describe -t actions 'action' actions",
-      "        return",
-      "      fi",
-      "",
-      '      case "$subcommand" in',
-      ...command.children.flatMap((child) => renderZshLeaf(child, 8)),
-      "      esac",
-    );
-
-    if (command.flags.length > 0) {
-      lines.push(
-        `      _workforest_complete_flags ${renderFlagWords(command.flags)}`,
-      );
-    }
-  } else {
-    lines.push(...renderZshLeafBody(command, 6));
-  }
-
-  lines.push("      ;;");
-  return lines.join("\n");
-}
-
-function renderZshLeaf(
-  command: ShellCompletionCommand,
-  indent: number,
-): string[] {
-  const padding = " ".repeat(indent);
-  return [
-    `${padding}${command.name})`,
-    ...renderZshLeafBody(command, indent + 2),
-    `${padding}  ;;`,
-  ];
-}
-
-function renderZshLeafBody(
-  command: ShellCompletionCommand,
-  indent: number,
-): string[] {
-  const padding = " ".repeat(indent);
-  const lines: string[] = [];
-
-  if (command.flags.length > 0) {
-    lines.push(
-      `${padding}_workforest_complete_flags ${renderFlagWords(command.flags)}`,
-    );
-  }
-
-  return lines;
-}
-
-function renderBashCommand(command: ShellCompletionCommand): string {
-  const lines = [`    ${command.name})`];
-
-  if (command.children.length > 0) {
-    const defaults = flagWords(command.flags);
-    const groupWords = [
-      ...command.children.map((child) => child.name),
-      ...defaults,
-    ].join(" ");
-
-    lines.push(
-      "      if (( COMP_CWORD == 2 )); then",
-      `        _workforest_complete_words ${shellQuote(groupWords)} "$current"`,
-      "        return",
-      "      fi",
-      "",
-      '      case "$subcommand" in',
-      ...command.children.flatMap((child) => renderBashLeaf(child, 8)),
-      "      esac",
-    );
-  } else {
-    lines.push(...renderBashLeafBody(command, 6));
-  }
-
-  lines.push("      ;;");
-  return lines.join("\n");
-}
-
-function renderBashLeaf(
-  command: ShellCompletionCommand,
-  indent: number,
-): string[] {
-  const padding = " ".repeat(indent);
-  return [
-    `${padding}${command.name})`,
-    ...renderBashLeafBody(command, indent + 2),
-    `${padding}  ;;`,
-  ];
-}
-
-function renderBashLeafBody(
-  command: ShellCompletionCommand,
-  indent: number,
-): string[] {
-  const padding = " ".repeat(indent);
-  const lines: string[] = [];
-
-  const flags = flagWords(command.flags);
-  if (flags.length > 0) {
-    lines.push(
-      `${padding}_workforest_complete_words ${shellQuote(flags.join(" "))} "$current"`,
-    );
-  }
-
-  return lines;
-}
-
-function renderZshDescriptions(
-  commands: readonly ShellCompletionCommand[],
-  indent: number,
-): string {
-  const padding = " ".repeat(indent);
-  return commands
-    .map(
-      (command) =>
-        `${padding}${shellQuote(`${command.name}:${command.summary}`)}`,
-    )
-    .join("\n");
-}
-
-function renderZshFlagDescriptions(
-  flags: readonly FlagDefinition[],
-  indent: number,
-): string {
-  const padding = " ".repeat(indent);
-  return flagWords(flags)
-    .map((flag) => `${padding}${shellQuote(`${flag}:option`)}`)
-    .join("\n");
-}
-
-function renderFlagWords(flags: readonly FlagDefinition[]): string {
-  return flagWords(flags).map(shellQuote).join(" ");
-}
-
-function flagWords(flags: readonly FlagDefinition[]): string[] {
-  return flags.flatMap((flag) =>
-    flag.short ? [flag.short, flag.long] : [flag.long],
-  );
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
