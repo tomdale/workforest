@@ -1512,15 +1512,24 @@ async function runReviewWorkspace(
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
 
+    if (workspace.outcome === "cancelled") {
+      return failure(130, { kind: "none" });
+    }
+
     if (json) {
       return jsonSuccess({
         target,
         path: workspace.path,
+        outcome: workspace.outcome,
       });
     }
 
-    log.success(`Review workspace ready: ${workspace.path}`);
-    await reportShellCdTarget(workspace.path);
+    if (workspace.outcome === "background") {
+      log.success(`Review workspace ready: ${workspace.path}`);
+      await reportShellCdTarget(workspace.path);
+    } else {
+      await reportShellCdTarget(workspace.path, { mode: "silent" });
+    }
     return success();
   } catch (error) {
     throw toOperationalError(error);
@@ -1534,12 +1543,17 @@ async function runReviewCheckout(
   try {
     const { createReviewWorktree } = await import("./review.ts");
     const reviewsRoot = await resolveReviewsDir();
-    const { metadata, reused } = await createReviewWorktree({
+    const result = await createReviewWorktree({
       target,
       reviewsRoot,
       interactive: !json && isInteractive(),
       ...(json ? {} : { onEvent: humanServiceEventSink }),
     });
+
+    if (result.outcome === "cancelled") {
+      return failure(130, { kind: "none" });
+    }
+    const { metadata, reused, outcome } = result;
 
     if (json) {
       return jsonSuccess({
@@ -1547,15 +1561,20 @@ async function runReviewCheckout(
         metadata,
         path: metadata.path,
         reused,
+        outcome,
       });
     }
 
-    log.success(
-      reused
-        ? `Review worktree already exists; switching to: ${metadata.path}`
-        : `Review worktree ready: ${metadata.path}`,
-    );
-    await reportShellCdTarget(metadata.path);
+    if (reused || outcome === "background") {
+      log.success(
+        reused
+          ? `Review worktree already exists; switching to: ${metadata.path}`
+          : `Review worktree ready: ${metadata.path}`,
+      );
+      await reportShellCdTarget(metadata.path);
+    } else {
+      await reportShellCdTarget(metadata.path, { mode: "silent" });
+    }
     return success();
   } catch (error) {
     throw toOperationalError(error);

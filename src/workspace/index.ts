@@ -48,6 +48,7 @@ import {
   repoPipeline,
   repoSetupEvents,
 } from "./pipeline.ts";
+import type { RunEventBody } from "./run-log/events.ts";
 import { toRunEventError } from "./run-log/events.ts";
 import { createPipelineStateConverter } from "./run-log/instrument.ts";
 import { createRunSession, type RunSession } from "./run-log/session.ts";
@@ -450,6 +451,12 @@ export type ScopedRepoSetupPipelineOptions = {
   isNewWorkspace: boolean;
   beforeInitializers?: RepoPipelineOptions["beforeInitializers"];
   afterWorktree?: RepoPipelineOptions["afterWorktree"];
+  /**
+   * An event-native foreground git phase. Callers with checkout semantics that
+   * differ from `repoSetupEvents` provide this while sharing the same worker
+   * handoff, cancellation, and initialization-state lifecycle.
+   */
+  gitPhaseEvents?: AsyncGenerator<RunEventBody>;
   /** When true, watch the detached initializer and keep yielding its state. */
   monitorBackground: boolean;
   /** Invoked the first time the foreground git pipeline reports a failure. */
@@ -477,6 +484,7 @@ export async function* runScopedRepoSetupPipeline({
   isNewWorkspace,
   beforeInitializers,
   afterWorktree,
+  gitPhaseEvents,
   monitorBackground,
   onFailed,
   session,
@@ -484,16 +492,17 @@ export async function* runScopedRepoSetupPipeline({
   let markedFailed = false;
   const converter = createPipelineStateConverter();
   const events = session.record(
-    repoSetupEvents({
-      repo,
-      workspaceDir: rootDir,
-      repoDir,
-      branchName,
-      isNewWorkspace,
-      ...(beforeInitializers ? { beforeInitializers } : {}),
-      ...(afterWorktree ? { afterWorktree } : {}),
-      skipInitializers: true,
-    }),
+    gitPhaseEvents ??
+      repoSetupEvents({
+        repo,
+        workspaceDir: rootDir,
+        repoDir,
+        branchName,
+        isNewWorkspace,
+        ...(beforeInitializers ? { beforeInitializers } : {}),
+        ...(afterWorktree ? { afterWorktree } : {}),
+        skipInitializers: true,
+      }),
   );
 
   for await (const event of events) {

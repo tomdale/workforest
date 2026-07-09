@@ -1,11 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { pathExists } from "@wf-plugin/core";
+import { hasAny, pathExists } from "@wf-plugin/core";
 import { getCacheDir } from "./config.ts";
 import { resolveMirrorDir } from "./repositories.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import type { ServiceEventSink } from "./services/events.ts";
-import { runSingleRepoInitializers } from "./services/initializers/index.ts";
 import {
   addWorktree,
   deleteBranchIfPossible,
@@ -13,24 +12,41 @@ import {
   isGitDirty,
   removeWorktree,
 } from "./services/worktree.ts";
+import { isShellAutoCdEnabled } from "./shell.ts";
 import type { RepositorySource } from "./types.ts";
-import { presentPipelines } from "./ui/grid-consumer.ts";
+import { type PresentRunOutcome, presentRun } from "./ui/setup-view/present.ts";
+import { compactHome } from "./utils/display-path.ts";
 import { runCommand } from "./utils/exec.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
+import { runScopedRepoSetupPipeline } from "./workspace/index.ts";
+import {
+  initializeWorktreeSetup,
+  workspaceInitializationScope,
+  worktreeInitializationScope,
+} from "./workspace/initialization.ts";
 import {
   readWorkspaceMetadata,
   removeReviewWorktreeMetadata,
   saveWorkspaceMetadata,
   upsertReviewWorktree,
   writeWorkspaceMetadata,
+  writeWorktreeMetadata,
 } from "./workspace/metadata.ts";
 import {
-  mapInitializerStateToPipelineState,
   mapTaskStateToPipelineState,
   type RepoPipelineState,
 } from "./workspace/pipeline.ts";
 import { ensureMirrorRepo } from "./workspace/repository.ts";
+import type { RunEventBody } from "./workspace/run-log/events.ts";
+import {
+  createPipelineEventBridge,
+  createPipelineStateConverter,
+} from "./workspace/run-log/instrument.ts";
+import {
+  createRunSession,
+  type RunSession,
+} from "./workspace/run-log/session.ts";
 
 export type ReviewTarget = {
   owner: string;
@@ -49,6 +65,13 @@ export type ReviewMetadata = ReviewTarget & {
 export type CreateReviewWorktreeResult = {
   metadata: ReviewMetadata;
   reused: boolean;
+  outcome: Exclude<PresentRunOutcome, "cancelled" | "failed">;
+};
+
+export type CancelledReviewWorktreeResult = {
+  path: string;
+  reused: false;
+  outcome: "cancelled";
 };
 
 export type ReviewListEntry = ReviewMetadata & {
@@ -73,6 +96,7 @@ export type EnsureReviewWorkspaceOptions = {
 
 export type ReviewWorkspace = ReviewRepoTarget & {
   path: string;
+  outcome: Exclude<PresentRunOutcome, "failed">;
 };
 
 export type ReviewTargetContext = {
@@ -140,7 +164,9 @@ export async function createReviewWorktree({
   reviewsRoot,
   interactive = false,
   onEvent,
-}: CreateReviewWorktreeOptions): Promise<CreateReviewWorktreeResult> {
+}: CreateReviewWorktreeOptions): Promise<
+  CreateReviewWorktreeResult | CancelledReviewWorktreeResult
+> {
   validateReviewTarget(target);
   const repo = targetToRepoConfig(target);
   const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
@@ -175,43 +201,113 @@ export async function createReviewWorktree({
       created_at: metadata.created_at,
     });
 
-    return { metadata, reused: true };
+    return { metadata, reused: true, outcome: "ready" };
   }
 
   const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
+  const changeName = `pr-${target.prNumber}`;
+  const scope = worktreeInitializationScope({
+    repoRootDir: workspaceDir,
+    changeName,
+  });
+  await reconcileReviewWorkspaceMetadata(
+    workspaceDir,
+    { owner: target.owner, repo: target.repo },
+    repo,
+  );
+  await writeWorktreeMetadata(workspaceDir, {
+    featureName: changeName,
+    repos: [{ ...repo, hasLockfile: false }],
+  });
+  await initializeWorktreeSetup({
+    repoRootDir: workspaceDir,
+    changeName,
+    repo,
+  });
 
-  // The whole checkout (base repo prep + PR worktree + `gh pr checkout` + repo
-  // setup) renders as one grid pane, or drains to inline events when not
-  // interactive. Metadata is written after setup succeeds.
+  // The foreground run is only mirror/base/PR checkout. Once the worktree is
+  // ready, the shared scoped pipeline hands its initializers to a worker so a
+  // review can detach without interrupting the checkout itself.
   let metadata: ReviewMetadata | undefined;
   let failure: Error | undefined;
-  const pipelines = new Map([
-    [
-      repo.name,
-      reviewCheckoutSetupPipeline(
-        { target, repo, mirrorDir, workspaceDir, baseRepoDir, targetDir },
-        {
-          recordMetadata: (value) => {
-            metadata = value;
-          },
-          recordFailure: (error) => {
-            failure = error;
-          },
-        },
-      ),
-    ],
-  ]);
-
-  await presentPipelines({
-    pipelines,
-    repoNames: [repo.name],
-    interactive,
-    ...(onEvent ? { onEvent } : {}),
+  let outcome: PresentRunOutcome = "background";
+  const session = await createRunSession({
+    scope,
+    command: "review",
+    repos: [repo.name],
   });
+  try {
+    const presented = await presentRun({
+      session,
+      scope,
+      pipelines: new Map([
+        [
+          repo.name,
+          runScopedRepoSetupPipeline({
+            repo,
+            scope,
+            rootDir: workspaceDir,
+            repoDir: targetDir,
+            branchName: changeName,
+            isNewWorkspace: true,
+            monitorBackground: false,
+            session,
+            gitPhaseEvents: reviewPipelineEvents(
+              repo,
+              reviewCheckoutGitPipeline(
+                {
+                  target,
+                  repo,
+                  mirrorDir,
+                  baseRepoDir,
+                  targetDir,
+                },
+                {
+                  recordMetadata: (value) => {
+                    metadata = value;
+                  },
+                },
+              ),
+            ),
+          }),
+        ],
+      ]),
+      repoNames: [repo.name],
+      interactive,
+      targetDir,
+      ...(onEvent ? { onEvent } : {}),
+      nextSteps: isShellAutoCdEnabled() ? [] : [`cd ${compactHome(targetDir)}`],
+      onFailure: (_repoName, state) => {
+        failure = state.error;
+      },
+      onBeforeCompletionPrompt: async () => {
+        if (!metadata) return;
+        await upsertReviewWorktree(workspaceDir, {
+          pr_number: target.prNumber,
+          path: path.relative(workspaceDir, targetDir),
+          ...(metadata.branch ? { branch: metadata.branch } : {}),
+          created_at: metadata.created_at,
+        });
+      },
+    });
+    outcome = presented.outcome;
+  } finally {
+    await session.close().catch(() => undefined);
+  }
 
   if (failure) {
     await cleanupFailedReviewWorktree(mirrorDir, targetDir);
     throw failure;
+  }
+  if (outcome === "failed") {
+    await cleanupFailedReviewWorktree(mirrorDir, targetDir);
+    throw new Error(
+      `Review checkout for ${target.repo}#${target.prNumber} failed.`,
+    );
+  }
+  if (outcome === "cancelled") {
+    await cleanupFailedReviewWorktree(mirrorDir, targetDir);
+    return { path: targetDir, reused: false, outcome };
   }
   if (!metadata) {
     throw new Error(
@@ -219,19 +315,7 @@ export async function createReviewWorktree({
     );
   }
 
-  await reconcileReviewWorkspaceMetadata(
-    workspaceDir,
-    { owner: target.owner, repo: target.repo },
-    repo,
-  );
-  await upsertReviewWorktree(workspaceDir, {
-    pr_number: target.prNumber,
-    path: path.relative(workspaceDir, targetDir),
-    ...(metadata.branch ? { branch: metadata.branch } : {}),
-    created_at: metadata.created_at,
-  });
-
-  return { metadata, reused: false };
+  return { metadata, reused: false, outcome };
 }
 
 export async function ensureReviewWorkspace({
@@ -246,34 +330,59 @@ export async function ensureReviewWorkspace({
   const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
 
   await ensureDir(workspaceDir);
-
-  let failure: Error | undefined;
-  const pipelines = new Map([
-    [
-      repo.name,
-      reviewWorkspaceSetupPipeline(
-        { repo, mirrorDir },
-        {
-          recordFailure: (error) => {
-            failure = error;
-          },
-        },
-      ),
-    ],
-  ]);
-  await presentPipelines({
-    pipelines,
-    repoNames: [repo.name],
-    interactive,
-    ...(onEvent ? { onEvent } : {}),
+  const scope = workspaceInitializationScope(workspaceDir);
+  const session = await createRunSession({
+    scope,
+    command: "review",
+    repos: [repo.name],
   });
+  let failure: Error | undefined;
+  let outcome: PresentRunOutcome = "background";
+  try {
+    const presented = await presentRun({
+      session,
+      scope,
+      pipelines: new Map([
+        [
+          repo.name,
+          reviewEventPipeline(
+            session,
+            reviewPipelineEvents(
+              repo,
+              reviewWorkspaceSetupPipeline({ repo, mirrorDir }),
+            ),
+          ),
+        ],
+      ]),
+      repoNames: [repo.name],
+      interactive,
+      targetDir: workspaceDir,
+      canDetach: false,
+      ...(onEvent ? { onEvent } : {}),
+      nextSteps: isShellAutoCdEnabled()
+        ? []
+        : [`cd ${compactHome(workspaceDir)}`],
+      onFailure: (_repoName, state) => {
+        failure = state.error;
+      },
+    });
+    outcome = presented.outcome;
+  } finally {
+    await session.close().catch(() => undefined);
+  }
   if (failure) throw failure;
+  if (outcome === "failed") {
+    throw new Error(`Review workspace setup for ${target.repo} failed.`);
+  }
+  if (outcome === "cancelled")
+    return { ...target, path: workspaceDir, outcome };
 
   await reconcileReviewWorkspaceMetadata(workspaceDir, target, repo);
 
   return {
     ...target,
     path: workspaceDir,
+    outcome,
   };
 }
 
@@ -329,9 +438,9 @@ async function reconcileReviewWorkspaceMetadata(
 }
 
 /**
- * Mirror → base detached checkout → repo setup, emitting {@link RepoPipelineState}
- * so `wf review` renders the same grid as every other creation command. Shared by
- * `open` (base workspace) and `checkout` (before the PR worktree).
+ * Mirror → base detached checkout, emitting {@link RepoPipelineState} so `wf
+ * review` renders the same git progress as every other creation command. The
+ * PR worktree's own initializers run only after the foreground handoff.
  */
 async function* reviewMirrorSteps({
   repo,
@@ -351,12 +460,10 @@ async function* reviewBaseSetupSteps({
   repo,
   mirrorDir,
   repoDir,
-  workspaceDir,
 }: {
   repo: RepositorySource;
   mirrorDir: string;
   repoDir: string;
-  workspaceDir: string;
 }): AsyncGenerator<RepoPipelineState> {
   yield* reviewMirrorSteps({ repo, mirrorDir });
 
@@ -371,81 +478,77 @@ async function* reviewBaseSetupSteps({
       const mapped = mapTaskStateToPipelineState(state, "worktree");
       if (mapped) yield mapped;
     }
-
-    yield* reviewInitializerPipeline({ repo, repoDir, workspaceDir });
-  }
-}
-
-/** Repo setup initializers as pipeline states. Throws on a fatal initializer. */
-async function* reviewInitializerPipeline({
-  repo,
-  repoDir,
-  workspaceDir,
-}: {
-  repo: RepositorySource;
-  repoDir: string;
-  workspaceDir: string;
-}): AsyncGenerator<RepoPipelineState> {
-  for await (const state of runSingleRepoInitializers({
-    context: { repo, repoDir, workspaceDir },
-  })) {
-    if (state.phase === "running" && state.state.status === "failed") {
-      throw state.state.error;
-    }
-    const mapped = mapInitializerStateToPipelineState(state);
-    if (mapped) yield mapped;
   }
 }
 
 /**
- * `wf review` (no PR): ensure the bare mirror exists as a single grid pane. The
- * review workspace is metadata-only — no base repo worktree is checked out.
+ * Record a legacy review pipeline as run events, then immediately derive its
+ * compatibility states for `presentRun`. Review checkout uses the event stream
+ * directly through `runScopedRepoSetupPipeline`; the metadata-only workspace
+ * path has no initialization worker and uses this adapter instead.
  */
-async function* reviewWorkspaceSetupPipeline(
-  args: {
-    repo: RepositorySource;
-    mirrorDir: string;
-  },
-  { recordFailure }: { recordFailure: (error: Error) => void },
+async function* reviewPipelineEvents(
+  repo: RepositorySource,
+  pipeline: AsyncGenerator<RepoPipelineState>,
+): AsyncGenerator<RunEventBody> {
+  yield { kind: "repo-start", repo: repo.name };
+  const bridge = createPipelineEventBridge(repo.name);
+  for await (const state of pipeline) {
+    yield* bridge.convert(state);
+  }
+}
+
+async function* reviewEventPipeline(
+  session: RunSession,
+  events: AsyncGenerator<RunEventBody>,
 ): AsyncGenerator<RepoPipelineState> {
+  const converter = createPipelineStateConverter();
+  for await (const event of session.record(events)) {
+    yield* converter.convert(event);
+  }
+}
+
+/**
+ * `wf review` (no PR): ensure the bare mirror exists as a single setup pane.
+ * The review workspace is metadata-only — no base repo worktree is checked out.
+ */
+async function* reviewWorkspaceSetupPipeline(args: {
+  repo: RepositorySource;
+  mirrorDir: string;
+}): AsyncGenerator<RepoPipelineState> {
   try {
     yield* reviewMirrorSteps(args);
     yield { phase: "complete", hasLockfile: false };
   } catch (error) {
     const normalized =
       error instanceof Error ? error : new Error(String(error));
-    recordFailure(normalized);
     yield { phase: "failed", error: normalized };
   }
 }
 
 /**
  * `wf review checkout`: base workspace prep (if needed) → PR worktree →
- * `gh pr checkout` → repo setup, as one grid pane. Records the review metadata
- * on success; the caller writes workspace/PR metadata and tears down on failure.
+ * `gh pr checkout`, then emits a foreground handoff. The scoped pipeline starts
+ * repository initialization after that event, so detach never interrupts git.
  */
-async function* reviewCheckoutSetupPipeline(
+async function* reviewCheckoutGitPipeline(
   {
     target,
     repo,
     mirrorDir,
-    workspaceDir,
     baseRepoDir,
     targetDir,
   }: {
     target: ReviewTarget;
     repo: RepositorySource;
     mirrorDir: string;
-    workspaceDir: string;
     baseRepoDir: string;
     targetDir: string;
   },
   {
     recordMetadata,
-    recordFailure,
   }: {
     recordMetadata: (metadata: ReviewMetadata) => void;
-    recordFailure: (error: Error) => void;
   },
 ): AsyncGenerator<RepoPipelineState> {
   try {
@@ -453,7 +556,6 @@ async function* reviewCheckoutSetupPipeline(
       repo,
       mirrorDir,
       repoDir: baseRepoDir,
-      workspaceDir,
     });
 
     // Detached checkout of the trunk; `gh pr checkout` immediately moves it to
@@ -479,12 +581,6 @@ async function* reviewCheckoutSetupPipeline(
       cwd: targetDir,
     });
 
-    yield* reviewInitializerPipeline({
-      repo,
-      repoDir: targetDir,
-      workspaceDir,
-    });
-
     const branch = await getCurrentBranch(targetDir);
     recordMetadata({
       ...target,
@@ -492,11 +588,13 @@ async function* reviewCheckoutSetupPipeline(
       ...(branch ? { branch } : {}),
       created_at: new Date().toISOString(),
     });
-    yield { phase: "complete", hasLockfile: false };
+    yield {
+      phase: "worktree-ready",
+      hasLockfile: await hasAny(targetDir, ["pnpm-lock.yaml", "pnpm-lock.yml"]),
+    };
   } catch (error) {
     const normalized =
       error instanceof Error ? error : new Error(String(error));
-    recordFailure(normalized);
     yield { phase: "failed", error: normalized };
   }
 }

@@ -207,4 +207,43 @@ describe("presentRun attached grid mode", () => {
     expect(summary).toContain(workspaceDir);
     expect(summary).toContain("wf status --watch");
   });
+
+  it("can hide detach from an attached setup view", async () => {
+    const { session, scope, workspaceDir } = await createFixture();
+    const statusLines: string[] = [];
+    const pipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "worktree-ready", hasLockfile: false };
+    };
+    const environment: SetupViewEnvironment = {
+      ...passiveEnvironment(),
+      createStatusLine: () => ({
+        setContent: (content) => statusLines.push(content),
+        destroy: vi.fn(),
+      }),
+    };
+
+    await presentRun({
+      session,
+      scope,
+      pipelines: new Map([["front", pipeline()]]),
+      repoNames: ["front"],
+      interactive: true,
+      targetDir: workspaceDir,
+      canDetach: false,
+      maxConcurrent: 2,
+      shouldUseGrid: () => true,
+      environment,
+      onBeforeCompletionPrompt: () => {
+        session.emit({
+          kind: "repo-end",
+          repo: "front",
+          outcome: "ready",
+          hasLockfile: false,
+        });
+        session.emit({ kind: "run-end", outcome: "ready", durationMs: 1 });
+      },
+    });
+
+    expect(statusLines.some((line) => line.includes("[d] detach"))).toBe(false);
+  });
 });

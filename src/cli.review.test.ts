@@ -43,8 +43,8 @@ function reviewWorktreeResult(
     created_at: string;
   },
   reused = false,
-): { metadata: typeof metadata; reused: boolean } {
-  return { metadata, reused };
+): { metadata: typeof metadata; reused: boolean; outcome: "background" } {
+  return { metadata, reused, outcome: "background" };
 }
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -201,6 +201,7 @@ describe("wf review", () => {
       owner: "vercel",
       repo: "omniagent",
       path: workspaceDir,
+      outcome: "background",
     });
 
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -234,6 +235,7 @@ describe("wf review", () => {
       owner: "vercel",
       repo: "omniagent",
       path: workspaceDir,
+      outcome: "background",
     });
 
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -269,6 +271,7 @@ describe("wf review", () => {
       owner: "vercel",
       repo: "omniagent",
       path: workspaceDir,
+      outcome: "background",
     });
 
     const { executeCli } = await importCliWithReviewMock();
@@ -374,6 +377,26 @@ describe("wf review", () => {
     expect(textResult.render.value).toContain(
       `Review worktree already exists; switching to: ${targetDir}`,
     );
+  });
+
+  it("returns the standard cancellation exit code for review checkout", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      directory: { reviews: reviewsRoot },
+    });
+    createReviewWorktreeMock.mockResolvedValue({
+      path: path.join(reviewsRoot, "omniagent", "pr-123"),
+      reused: false,
+      outcome: "cancelled",
+    });
+
+    const { executeCli } = await importCliWithReviewMock();
+    const result = await executeCli(["review", "vercel/omniagent#123"]);
+
+    expect(result).toEqual({ exitCode: 130, render: { kind: "none" } });
   });
 
   it("infers the repo for numeric review targets inside a review workspace", async () => {

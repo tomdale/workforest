@@ -47,6 +47,8 @@ export type PresentRunOptions = {
   onEvent?: ServiceEventSink;
   /** Stream subprocess output in the console fallback. */
   verbose?: boolean;
+  /** Whether the attached view may detach its foreground git phase. */
+  canDetach?: boolean;
   nextSteps?: readonly string[];
   onFailure?: (
     repoName: string,
@@ -200,6 +202,9 @@ export async function presentRun(
     repoNames: options.repoNames,
     mode: "until-ready",
     targetDir: options.targetDir,
+    ...(options.canDetach !== undefined
+      ? { canDetach: options.canDetach }
+      : {}),
     onCancelRequest: requestCancel,
     abort: driveFailed,
     ...(options.environment ? { environment: options.environment } : {}),

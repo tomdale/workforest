@@ -3,16 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const {
-  runGitMock,
-  runCommandMock,
-  ensureMirrorRepoMock,
-  runSingleRepoInitializersMock,
-} = vi.hoisted(() => ({
+const { runGitMock, runCommandMock, ensureMirrorRepoMock } = vi.hoisted(() => ({
   runGitMock: vi.fn(),
   runCommandMock: vi.fn(),
   ensureMirrorRepoMock: vi.fn(),
-  runSingleRepoInitializersMock: vi.fn(),
 }));
 
 const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
@@ -37,10 +31,6 @@ async function importReviewWithMocks(): Promise<typeof import("./review.ts")> {
   vi.doMock("./workspace/repository.ts", () => ({
     ensureMirrorRepo: ensureMirrorRepoMock,
   }));
-  vi.doMock("./services/initializers/index.ts", () => ({
-    runSingleRepoInitializers: runSingleRepoInitializersMock,
-  }));
-
   return import("./review.ts");
 }
 
@@ -50,11 +40,9 @@ afterEach(async () => {
   vi.unmock("./services/git.ts");
   vi.unmock("./utils/exec.ts");
   vi.unmock("./workspace/repository.ts");
-  vi.unmock("./services/initializers/index.ts");
   runGitMock.mockReset();
   runCommandMock.mockReset();
   ensureMirrorRepoMock.mockReset();
-  runSingleRepoInitializersMock.mockReset();
 
   if (ORIGINAL_CACHE_DIR === undefined) {
     delete process.env["WORKFOREST_CACHE_DIR"];
@@ -169,9 +157,6 @@ describe("review worktrees", () => {
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
     ensureMirrorRepoMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersMock.mockImplementation(async function* () {
-      yield { phase: "complete" };
-    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
@@ -191,8 +176,7 @@ describe("review worktrees", () => {
       expect.arrayContaining(["worktree", "add"]),
       expect.anything(),
     );
-    expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
-    expect(result.path).toBe(workspaceDir);
+    expect(result).toMatchObject({ path: workspaceDir, outcome: "background" });
 
     const metadata = JSON.parse(
       await readFile(
@@ -215,9 +199,6 @@ describe("review worktrees", () => {
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
     ensureMirrorRepoMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersMock.mockImplementation(async function* () {
-      yield { phase: "complete" };
-    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
@@ -243,6 +224,7 @@ describe("review worktrees", () => {
     });
 
     const targetDir = path.join(reviewsRoot, "omniagent", "pr-123");
+    const workspaceDir = path.dirname(targetDir);
     expect(runGitMock).toHaveBeenCalledWith(
       ["worktree", "add", "--detach", targetDir, "origin/main"],
       { cwd: path.join(cacheDir, "omniagent.git"), timeout: 120_000 },
@@ -258,18 +240,9 @@ describe("review worktrees", () => {
     // thrown error). The command must still never write directly to the tty.
     expect(stdoutWrite).not.toHaveBeenCalled();
     expect(stderrWrite).not.toHaveBeenCalled();
-    expect(runSingleRepoInitializersMock).toHaveBeenCalledWith({
-      context: {
-        repo: {
-          name: "omniagent",
-          remote: "git@github.com:vercel/omniagent.git",
-        },
-        repoDir: targetDir,
-        workspaceDir: path.join(reviewsRoot, "omniagent"),
-      },
-    });
     expect(result).toMatchObject({
       reused: false,
+      outcome: "background",
       metadata: { path: targetDir, branch: "pull/123" },
     });
 
@@ -289,6 +262,36 @@ describe("review worktrees", () => {
     expect(workspaceMetadata.review_worktrees).toMatchObject([
       { pr_number: 123, path: "pr-123" },
     ]);
+    const worktreeMetadata = JSON.parse(
+      await readFile(
+        path.join(
+          reviewsRoot,
+          "omniagent",
+          ".workforest",
+          "changes",
+          "pr-123.json",
+        ),
+        "utf8",
+      ),
+    ) as { repos: { name: string; remote: string; has_lockfile: boolean }[] };
+    expect(worktreeMetadata.repos).toEqual([
+      {
+        name: "omniagent",
+        remote: "git@github.com:vercel/omniagent.git",
+        has_lockfile: false,
+      },
+    ]);
+    const { readRepoInitializationState, worktreeInitializationScope } =
+      await import("./workspace/initialization.ts");
+    await expect(
+      readRepoInitializationState(
+        worktreeInitializationScope({
+          repoRootDir: workspaceDir,
+          changeName: "pr-123",
+        }),
+        "omniagent",
+      ),
+    ).resolves.toMatchObject({ repo: "omniagent" });
     await expect(
       readFile(
         path.join(
@@ -338,6 +341,7 @@ describe("review worktrees", () => {
 
     expect(result).toEqual({
       reused: true,
+      outcome: "ready",
       metadata: {
         owner: "vercel",
         repo: "omniagent",
@@ -349,7 +353,6 @@ describe("review worktrees", () => {
     });
     expect(ensureMirrorRepoMock).not.toHaveBeenCalled();
     expect(runCommandMock).not.toHaveBeenCalled();
-    expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
   });
 
   it("removes the created worktree if gh checkout fails", async () => {
@@ -359,9 +362,6 @@ describe("review worktrees", () => {
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
     ensureMirrorRepoMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersMock.mockImplementation(async function* () {
-      yield { phase: "complete" };
-    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref")
         return { stdout: "refs/heads/main\n", stderr: "" };
@@ -408,9 +408,6 @@ describe("review worktrees", () => {
     await mkdir(path.join(cacheDir, "omniagent.git"), { recursive: true });
 
     ensureMirrorRepoMock.mockImplementation(async function* () {});
-    runSingleRepoInitializersMock.mockImplementation(async function* () {
-      yield { phase: "complete" };
-    });
     runGitMock.mockImplementation(async (args: string[]) => {
       if (args[0] === "symbolic-ref") {
         return { stdout: "refs/heads/main\n", stderr: "" };
