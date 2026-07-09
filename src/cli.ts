@@ -1534,7 +1534,7 @@ async function runReviewCheckout(
   try {
     const { createReviewWorktree } = await import("./review.ts");
     const reviewsRoot = await resolveReviewsDir();
-    const metadata = await createReviewWorktree({
+    const { metadata, reused } = await createReviewWorktree({
       target,
       reviewsRoot,
       interactive: !json && isInteractive(),
@@ -1546,10 +1546,15 @@ async function runReviewCheckout(
         target,
         metadata,
         path: metadata.path,
+        reused,
       });
     }
 
-    log.success(`Review worktree ready: ${metadata.path}`);
+    log.success(
+      reused
+        ? `Review worktree already exists; switching to: ${metadata.path}`
+        : `Review worktree ready: ${metadata.path}`,
+    );
     await reportShellCdTarget(metadata.path);
     return success();
   } catch (error) {

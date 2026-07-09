@@ -268,8 +268,10 @@ describe("review worktrees", () => {
         workspaceDir: path.join(reviewsRoot, "omniagent"),
       },
     });
-    expect(result.path).toBe(targetDir);
-    expect(result.branch).toBe("pull/123");
+    expect(result).toMatchObject({
+      reused: false,
+      metadata: { path: targetDir, branch: "pull/123" },
+    });
 
     const workspaceMetadata = JSON.parse(
       await readFile(
@@ -298,6 +300,56 @@ describe("review worktrees", () => {
         "utf8",
       ),
     ).rejects.toThrow();
+  });
+
+  it("reuses an existing review worktree", async () => {
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const workspaceDir = path.join(reviewsRoot, "omniagent");
+    const targetDir = path.join(workspaceDir, "pr-123");
+    const createdAt = "2026-07-09T00:00:00.000Z";
+    await mkdir(targetDir, { recursive: true });
+    const { upsertReviewWorktree, writeWorkspaceMetadata } = await import(
+      "./workspace/metadata.ts"
+    );
+    await writeWorkspaceMetadata(workspaceDir, {
+      featureName: "omniagent",
+      type: "review",
+      review: { owner: "vercel", repo: "omniagent" },
+      repos: [
+        {
+          name: "omniagent",
+          remote: "git@github.com:vercel/omniagent.git",
+          hasLockfile: false,
+        },
+      ],
+    });
+    await upsertReviewWorktree(workspaceDir, {
+      pr_number: 123,
+      path: "pr-123",
+      branch: "pull/123",
+      created_at: createdAt,
+    });
+
+    const { createReviewWorktree } = await importReviewWithMocks();
+    const result = await createReviewWorktree({
+      reviewsRoot,
+      target: { owner: "vercel", repo: "omniagent", prNumber: 123 },
+    });
+
+    expect(result).toEqual({
+      reused: true,
+      metadata: {
+        owner: "vercel",
+        repo: "omniagent",
+        prNumber: 123,
+        path: targetDir,
+        branch: "pull/123",
+        created_at: createdAt,
+      },
+    });
+    expect(ensureMirrorRepoMock).not.toHaveBeenCalled();
+    expect(runCommandMock).not.toHaveBeenCalled();
+    expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
   });
 
   it("removes the created worktree if gh checkout fails", async () => {

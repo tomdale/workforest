@@ -46,6 +46,11 @@ export type ReviewMetadata = ReviewTarget & {
   created_at: string;
 };
 
+export type CreateReviewWorktreeResult = {
+  metadata: ReviewMetadata;
+  reused: boolean;
+};
+
 export type ReviewListEntry = ReviewMetadata & {
   state: "ready" | "stale";
 };
@@ -135,18 +140,45 @@ export async function createReviewWorktree({
   reviewsRoot,
   interactive = false,
   onEvent,
-}: CreateReviewWorktreeOptions): Promise<ReviewMetadata> {
+}: CreateReviewWorktreeOptions): Promise<CreateReviewWorktreeResult> {
   validateReviewTarget(target);
   const repo = targetToRepoConfig(target);
-  const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
   const workspaceDir = getRepoReviewsDir(reviewsRoot, target.repo);
   const baseRepoDir = resolveContainedPath(workspaceDir, target.repo);
   const targetDir = getReviewWorktreePath(reviewsRoot, target);
 
   await ensureDir(workspaceDir);
   if (await pathExists(targetDir)) {
-    throw new Error(`Review worktree already exists: ${targetDir}`);
+    const recordedMetadata = await readReviewWorktreeMetadata(
+      workspaceDir,
+      target,
+    );
+    const branch = recordedMetadata
+      ? undefined
+      : await getCurrentBranchIfExists(targetDir);
+    const metadata = recordedMetadata ?? {
+      ...target,
+      path: targetDir,
+      ...(branch ? { branch } : {}),
+      created_at: new Date().toISOString(),
+    };
+
+    await reconcileReviewWorkspaceMetadata(
+      workspaceDir,
+      { owner: target.owner, repo: target.repo },
+      repo,
+    );
+    await upsertReviewWorktree(workspaceDir, {
+      pr_number: target.prNumber,
+      path: path.relative(workspaceDir, targetDir),
+      ...(metadata.branch ? { branch: metadata.branch } : {}),
+      created_at: metadata.created_at,
+    });
+
+    return { metadata, reused: true };
   }
+
+  const mirrorDir = await resolveMirrorDir(repo, getCacheDir());
 
   // The whole checkout (base repo prep + PR worktree + `gh pr checkout` + repo
   // setup) renders as one grid pane, or drains to inline events when not
@@ -199,7 +231,7 @@ export async function createReviewWorktree({
     created_at: metadata.created_at,
   });
 
-  return metadata;
+  return { metadata, reused: false };
 }
 
 export async function ensureReviewWorkspace({

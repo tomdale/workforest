@@ -34,6 +34,19 @@ const ORIGINAL_CWD = process.cwd();
 const tempDirs: string[] = [];
 const execFileAsync = promisify(execFile);
 
+function reviewWorktreeResult(
+  metadata: {
+    owner: string;
+    repo: string;
+    prNumber: number;
+    path: string;
+    created_at: string;
+  },
+  reused = false,
+): { metadata: typeof metadata; reused: boolean } {
+  return { metadata, reused };
+}
+
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
@@ -291,13 +304,15 @@ describe("wf review", () => {
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
       directory: { reviews: reviewsRoot },
     });
-    createReviewWorktreeMock.mockResolvedValue({
-      owner: "vercel",
-      repo: "omniagent",
-      prNumber: 123,
-      path: targetDir,
-      created_at: new Date().toISOString(),
-    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult({
+        owner: "vercel",
+        repo: "omniagent",
+        prNumber: 123,
+        path: targetDir,
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
@@ -316,6 +331,49 @@ describe("wf review", () => {
       `${path.resolve(targetDir)}\n`,
     );
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("reports and returns an existing review worktree", async () => {
+    const configDir = await createTempDir("workforest-config-");
+    const reviewsRoot = await createTempDir("workforest-reviews-");
+    const targetDir = path.join(reviewsRoot, "omniagent", "pr-123");
+
+    process.env["WORKFOREST_CONFIG_DIR"] = configDir;
+    await saveWorkspaceConfig(path.join(configDir, "config.json"), {
+      directory: { reviews: reviewsRoot },
+    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult(
+        {
+          owner: "vercel",
+          repo: "omniagent",
+          prNumber: 123,
+          path: targetDir,
+          created_at: new Date().toISOString(),
+        },
+        true,
+      ),
+    );
+
+    const { executeCli } = await importCliWithReviewMock();
+    const jsonResult = await executeCli([
+      "review",
+      "vercel/omniagent#123",
+      "--json",
+    ]);
+    const textResult = await executeCli(["review", "vercel/omniagent#123"]);
+
+    expect(jsonResult).toMatchObject({
+      exitCode: 0,
+      render: {
+        kind: "json",
+        value: { path: targetDir, reused: true },
+      },
+    });
+    if (textResult.render.kind !== "text") return;
+    expect(textResult.render.value).toContain(
+      `Review worktree already exists; switching to: ${targetDir}`,
+    );
   });
 
   it("infers the repo for numeric review targets inside a review workspace", async () => {
@@ -342,13 +400,15 @@ describe("wf review", () => {
       ],
     });
     process.chdir(workspaceDir);
-    createReviewWorktreeMock.mockResolvedValue({
-      owner: "vercel",
-      repo: "omniagent",
-      prNumber: 123,
-      path: targetDir,
-      created_at: new Date().toISOString(),
-    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult({
+        owner: "vercel",
+        repo: "omniagent",
+        prNumber: 123,
+        path: targetDir,
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
@@ -413,13 +473,15 @@ describe("wf review", () => {
       },
     ]);
     process.chdir(cwd);
-    createReviewWorktreeMock.mockResolvedValue({
-      owner: "vercel",
-      repo: "omniagent",
-      prNumber: 456,
-      path: path.join(workspaceDir, "pr-456"),
-      created_at: new Date().toISOString(),
-    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult({
+        owner: "vercel",
+        repo: "omniagent",
+        prNumber: 456,
+        path: path.join(workspaceDir, "pr-456"),
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
@@ -459,13 +521,15 @@ describe("wf review", () => {
       ],
     });
     process.chdir(workspaceDir);
-    createReviewWorktreeMock.mockResolvedValue({
-      owner: "other",
-      repo: "repo",
-      prNumber: 456,
-      path: path.join(reviewsRoot, "repo", "pr-456"),
-      created_at: new Date().toISOString(),
-    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult({
+        owner: "other",
+        repo: "repo",
+        prNumber: 456,
+        path: path.join(reviewsRoot, "repo", "pr-456"),
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
@@ -495,13 +559,15 @@ describe("wf review", () => {
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
       directory: { reviews: reviewsRoot },
     });
-    createReviewWorktreeMock.mockResolvedValue({
-      owner: "vercel",
-      repo: "omniagent",
-      prNumber: 123,
-      path: path.join(reviewsRoot, "omniagent", "pr-123"),
-      created_at: new Date().toISOString(),
-    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult({
+        owner: "vercel",
+        repo: "omniagent",
+        prNumber: 123,
+        path: path.join(reviewsRoot, "omniagent", "pr-123"),
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
@@ -528,13 +594,15 @@ describe("wf review", () => {
     await saveWorkspaceConfig(path.join(configDir, "config.json"), {
       directory: { base },
     });
-    createReviewWorktreeMock.mockResolvedValue({
-      owner: "vercel",
-      repo: "omniagent",
-      prNumber: 123,
-      path: path.join(reviewsRoot, "omniagent", "pr-123"),
-      created_at: new Date().toISOString(),
-    });
+    createReviewWorktreeMock.mockResolvedValue(
+      reviewWorktreeResult({
+        owner: "vercel",
+        repo: "omniagent",
+        prNumber: 123,
+        path: path.join(reviewsRoot, "omniagent", "pr-123"),
+        created_at: new Date().toISOString(),
+      }),
+    );
 
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { cli } = await importCliWithReviewMock();
