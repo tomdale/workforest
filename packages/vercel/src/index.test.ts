@@ -177,12 +177,19 @@ describe("vercelLinkInitializer.execute", () => {
 
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["link", "--yes", "--repo", "--scope", "vercel"],
+      ["link", "--yes", "--repo", "--scope", "vercel", "--non-interactive"],
       { cwd: repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["env", "pull", "--environment", "development", "--yes"],
+      [
+        "env",
+        "pull",
+        "--environment",
+        "development",
+        "--yes",
+        "--non-interactive",
+      ],
       {
         cwd: path.join(repoDir, "apps/web"),
         pty: true,
@@ -191,7 +198,14 @@ describe("vercelLinkInitializer.execute", () => {
     );
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["env", "pull", "--environment", "development", "--yes"],
+      [
+        "env",
+        "pull",
+        "--environment",
+        "development",
+        "--yes",
+        "--non-interactive",
+      ],
       {
         cwd: path.join(repoDir, "apps/docs"),
         pty: true,
@@ -241,7 +255,14 @@ describe("vercelLinkInitializer.execute", () => {
 
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["link", "--yes", "--repo", "--scope", "some-owner"],
+      [
+        "link",
+        "--yes",
+        "--repo",
+        "--scope",
+        "some-owner",
+        "--non-interactive",
+      ],
       { cwd: repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
   });
@@ -345,7 +366,14 @@ describe("vercelLinkInitializer.execute", () => {
 
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["env", "pull", "--environment", "development", "--yes"],
+      [
+        "env",
+        "pull",
+        "--environment",
+        "development",
+        "--yes",
+        "--non-interactive",
+      ],
       { cwd: repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
     expect(states.at(-1)).toEqual({ status: "completed" });
@@ -396,12 +424,26 @@ describe("vercelLinkInitializer.execute", () => {
     expect(states.at(-1)).toEqual({ status: "completed" });
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["link", "--yes", "--repo", "--scope", "custom-team"],
+      [
+        "link",
+        "--yes",
+        "--repo",
+        "--scope",
+        "custom-team",
+        "--non-interactive",
+      ],
       { cwd: repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
     expect(spawnCommandMock).toHaveBeenCalledWith(
       "vercel",
-      ["env", "pull", "--environment", "development", "--yes"],
+      [
+        "env",
+        "pull",
+        "--environment",
+        "development",
+        "--yes",
+        "--non-interactive",
+      ],
       { cwd: repoDir, pty: true, inactivityTimeoutMs: 120_000 },
     );
   });

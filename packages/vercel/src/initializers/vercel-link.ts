@@ -102,7 +102,7 @@ async function* execute(context: InitializerContext) {
   }
 
   const linkResult = yield* runVercelAuthAwareCommand(
-    ["link", "--yes", "--repo", "--scope", target.team],
+    ["link", "--yes", "--repo", "--scope", target.team, "--non-interactive"],
     repoDir,
     authState,
     {
@@ -171,7 +171,14 @@ function createEnvPullTasks(
       String(index),
       withEnvPullCwdLabel(
         runVercelAuthAwareCommand(
-          ["env", "pull", "--environment", "development", "--yes"],
+          [
+            "env",
+            "pull",
+            "--environment",
+            "development",
+            "--yes",
+            "--non-interactive",
+          ],
           cwd,
           authState,
           {
