@@ -51,6 +51,14 @@ describe("TerminalTailStore", () => {
     expect(store.linesFor("api")).toEqual(["Progress 2 done"]);
   });
 
+  it("keeps the last visible output when a TTY reporter clears its screen", async () => {
+    const store = new TerminalTailStore();
+    await store.apply(output("api", "Packages: +1\r\nDone\r\n"));
+    await store.apply(output("api", "\x1b[2J\x1b[H"));
+
+    expect(store.linesFor("api")).toEqual(["Packages: +1", "Done"]);
+  });
+
   it("handles cursor-up multi-line redraws (pnpm reporter pattern)", async () => {
     const store = new TerminalTailStore();
     await store.apply(output("api", "line A\r\nline B\r\n"));
@@ -81,6 +89,23 @@ describe("TerminalTailStore", () => {
         reason: "network timeout",
       }),
     );
+
+    expect(store.linesFor("api")).toEqual(["Retry 2: network timeout"]);
+  });
+
+  it("does not retain output from a previous attempt after retry", async () => {
+    const store = new TerminalTailStore();
+    await store.apply(output("api", "attempt one\r\n"));
+    await store.apply(
+      event({
+        kind: "step-retry",
+        repo: "api",
+        step: "init:pnpm-install",
+        attempt: 2,
+        reason: "network timeout",
+      }),
+    );
+    await store.apply(output("api", "\x1b[2J\x1b[H"));
 
     expect(store.linesFor("api")).toEqual(["Retry 2: network timeout"]);
   });

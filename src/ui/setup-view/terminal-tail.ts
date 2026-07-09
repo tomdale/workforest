@@ -40,6 +40,7 @@ const DEFAULT_SCROLLBACK = 200;
 
 type TerminalEntry = {
   term: Terminal;
+  lastNonEmptyLines: string[] | null;
   /** Chains successive writes so `flush()` can await the latest one. */
   pending: Promise<void>;
 };
@@ -77,6 +78,7 @@ export class TerminalTailStore {
         // A retry restarts the step's output; a stale screen would
         // misattribute the previous attempt's output to the new one.
         entry.term.reset();
+        entry.lastNonEmptyLines = null;
         const reason = normalizeControlText(event.reason);
         await this.#writeEntry(entry, `Retry ${event.attempt}: ${reason}\r\n`);
         return;
@@ -96,6 +98,15 @@ export class TerminalTailStore {
     const entry = this.#terminals.get(key);
     if (!entry) return null;
 
+    const lines = this.#readLines(entry);
+    if (lines.length === 0 || !lines.some((line) => line !== "")) {
+      return entry.lastNonEmptyLines ?? [];
+    }
+    entry.lastNonEmptyLines = lines;
+    return lines;
+  }
+
+  #readLines(entry: TerminalEntry): string[] {
     const buffer = entry.term.buffer.active;
     const workCell = buffer.getNullCell();
     const cache = new Map<number, string>();
@@ -146,6 +157,7 @@ export class TerminalTailStore {
         // \r\n, which is a no-op for streams that already send \r\n.
         convertEol: true,
       }),
+      lastNonEmptyLines: null,
       pending: Promise.resolve(),
     };
     this.#terminals.set(key, created);
@@ -165,6 +177,8 @@ export class TerminalTailStore {
     );
     entry.pending = next;
     await next;
+    const lines = this.#readLines(entry);
+    if (lines.some((line) => line !== "")) entry.lastNonEmptyLines = lines;
   }
 }
 
