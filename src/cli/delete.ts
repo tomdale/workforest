@@ -47,7 +47,7 @@ export type DeleteProgressPhase =
 
 export type DeleteProgressState = Readonly<{
   phase: DeleteProgressPhase;
-  status: "started" | "waiting" | "completed";
+  status: "started" | "waiting" | "completed" | "failed";
   message: string;
   elapsedMs?: number;
 }>;
@@ -716,30 +716,54 @@ async function timeDeleteOperation<T>(
   });
   const startedAt = Date.now();
   let interval: NodeJS.Timeout | undefined;
+  let waitingProgress = Promise.resolve();
+  let operationFailed = true;
+  let result: T | undefined;
+  let operationError: unknown;
 
   if (options.onDeleteProgress) {
     interval = setInterval(() => {
-      void emitDeleteProgress(options, {
-        phase,
-        status: "waiting",
-        message,
-        elapsedMs: Date.now() - startedAt,
-      });
+      waitingProgress = waitingProgress.then(() =>
+        emitDeleteProgress(options, {
+          phase,
+          status: "waiting",
+          message,
+          elapsedMs: Date.now() - startedAt,
+        }),
+      );
+      void waitingProgress.catch(() => undefined);
     }, DELETE_PROGRESS_INTERVAL_MS);
     interval.unref?.();
   }
 
   try {
-    return await timing.time(phase, action);
-  } finally {
-    if (interval) clearInterval(interval);
+    result = await timing.time(phase, action);
+    operationFailed = false;
+  } catch (error) {
+    operationError = error;
+  }
+
+  if (interval) clearInterval(interval);
+  let progressError: unknown;
+  try {
+    await waitingProgress;
+  } catch (error) {
+    progressError = error;
+  }
+  try {
     await emitDeleteProgress(options, {
       phase,
-      status: "completed",
+      status: operationFailed ? "failed" : "completed",
       message,
       elapsedMs: Date.now() - startedAt,
     });
+  } catch (error) {
+    progressError ??= error;
   }
+
+  if (operationFailed) throw operationError;
+  if (progressError !== undefined) throw progressError;
+  return result as T;
 }
 
 async function emitDeleteProgress(

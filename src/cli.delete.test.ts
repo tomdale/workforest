@@ -373,6 +373,150 @@ describe("wf delete", () => {
     ]);
   });
 
+  it("serializes asynchronous waiting progress callbacks", async () => {
+    vi.useFakeTimers();
+    await createCleanupFixture();
+    let finishCleanup: (() => void) | undefined;
+    const waitingReleases: (() => void)[] = [];
+    let activeWaitingCallbacks = 0;
+    let maxActiveWaitingCallbacks = 0;
+    const cleanupWorkspace = vi.fn(
+      () =>
+        new Promise<{
+          dryRun: false;
+          removedRepos: string[];
+          deletedBranches: string[];
+        }>((resolve) => {
+          finishCleanup = () =>
+            resolve({
+              dryRun: false,
+              removedRepos: ["api", "front"],
+              deletedBranches: [],
+            });
+        }),
+    );
+
+    try {
+      const pending = runDeleteCommand(
+        invocation(["_adhoc/experiment"], { force: true }),
+        {
+          interactive: false,
+          writeShellCdPath: async () => {},
+          cleanupWorkspace,
+          onDeleteProgress: (state) => {
+            if (state.status !== "waiting") return;
+            activeWaitingCallbacks += 1;
+            maxActiveWaitingCallbacks = Math.max(
+              maxActiveWaitingCallbacks,
+              activeWaitingCallbacks,
+            );
+            return new Promise<void>((resolve) => {
+              waitingReleases.push(() => {
+                activeWaitingCallbacks -= 1;
+                resolve();
+              });
+            });
+          },
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(cleanupWorkspace).toHaveBeenCalled();
+      });
+      await vi.advanceTimersByTimeAsync(21_000);
+      expect(maxActiveWaitingCallbacks).toBe(1);
+      expect(waitingReleases).toHaveLength(1);
+
+      waitingReleases.shift()?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(waitingReleases).toHaveLength(1);
+      waitingReleases.shift()?.();
+
+      finishCleanup?.();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces a rejected waiting progress callback", async () => {
+    vi.useFakeTimers();
+    await createCleanupFixture();
+    let finishCleanup: (() => void) | undefined;
+    const cleanupWorkspace = vi.fn(
+      () =>
+        new Promise<{
+          dryRun: false;
+          removedRepos: string[];
+          deletedBranches: string[];
+        }>((resolve) => {
+          finishCleanup = () =>
+            resolve({
+              dryRun: false,
+              removedRepos: ["api", "front"],
+              deletedBranches: [],
+            });
+        }),
+    );
+
+    try {
+      const pending = runDeleteCommand(
+        invocation(["_adhoc/experiment"], { force: true }),
+        {
+          interactive: false,
+          writeShellCdPath: async () => {},
+          cleanupWorkspace,
+          onDeleteProgress: async (state) => {
+            if (state.status === "waiting") {
+              throw new Error("progress failed");
+            }
+          },
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(cleanupWorkspace).toHaveBeenCalled();
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      finishCleanup?.();
+
+      await expect(pending).rejects.toThrow("progress failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports failed progress when cleanup fails", async () => {
+    await createCleanupFixture();
+    const progress: DeleteProgressState[] = [];
+
+    await expect(
+      runDeleteCommand(invocation(["_adhoc/experiment"], { force: true }), {
+        interactive: false,
+        writeShellCdPath: async () => {},
+        cleanupWorkspace: async () => {
+          throw new Error("cleanup failed");
+        },
+        onDeleteProgress: (state) => {
+          progress.push(state);
+        },
+      }),
+    ).rejects.toThrow("cleanup failed");
+
+    expect(progress).toContainEqual(
+      expect.objectContaining({
+        phase: "cleanup-dispatch",
+        status: "failed",
+      }),
+    );
+    expect(progress).not.toContainEqual(
+      expect.objectContaining({
+        phase: "cleanup-dispatch",
+        status: "completed",
+      }),
+    );
+  });
+
   it("errors when run with no selector outside a worktree or workspace", async () => {
     await createCleanupFixture();
 

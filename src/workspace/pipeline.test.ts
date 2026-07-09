@@ -132,38 +132,52 @@ describe("cross-phase parallelism", () => {
   });
 
   it("no repo waits for any other repo", async () => {
-    const createPipeline = (delayMs: number) =>
-      async function* (): AsyncGenerator<RepoPipelineState> {
-        yield { phase: "git", step: "mirror", status: "running" };
-        await sleep(delayMs);
-        yield { phase: "git", step: "mirror", status: "completed" };
-        yield { phase: "initializer", name: "pnpm", status: "running" };
-        await sleep(delayMs);
-        yield { phase: "initializer", name: "pnpm", status: "completed" };
-        yield { phase: "complete", hasLockfile: false };
-      };
+    let releaseSlowGit: (() => void) | undefined;
+    const slowGit = new Promise<void>((resolve) => {
+      releaseSlowGit = resolve;
+    });
+
+    const fastPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "git", step: "mirror", status: "running" };
+      yield { phase: "git", step: "mirror", status: "completed" };
+      yield { phase: "initializer", name: "pnpm", status: "running" };
+      yield { phase: "initializer", name: "pnpm", status: "completed" };
+      yield { phase: "complete", hasLockfile: false };
+    };
+
+    const slowPipeline = async function* (): AsyncGenerator<RepoPipelineState> {
+      yield { phase: "git", step: "mirror", status: "running" };
+      await slowGit;
+      yield { phase: "git", step: "mirror", status: "completed" };
+      yield { phase: "complete", hasLockfile: false };
+    };
 
     const pipelines = new Map([
-      ["fast", createPipeline(5)()],
-      ["medium", createPipeline(15)()],
-      ["slow", createPipeline(30)()],
+      ["fast", fastPipeline()],
+      ["slow", slowPipeline()],
     ]);
 
-    const results = await collectWithOrder(runParallel(pipelines));
-
-    const fastComplete = results.find(
-      (r) => r.id === "fast" && r.state.phase === "complete",
-    );
-    const slowGitStates = results.filter(
-      (r) => r.id === "slow" && r.state.phase === "git",
-    );
-    const slowGitEnd = slowGitStates[slowGitStates.length - 1];
-
-    expect(fastComplete).toBeDefined();
-    expect(slowGitEnd).toBeDefined();
-    if (fastComplete && slowGitEnd) {
-      expect(fastComplete.order).toBeLessThan(slowGitEnd.order);
+    const updates = runParallel(pipelines);
+    while (true) {
+      const next = await updates.next();
+      expect(next.done).toBe(false);
+      if (
+        !next.done &&
+        next.value.id === "fast" &&
+        next.value.state.phase === "complete"
+      ) {
+        break;
+      }
     }
+
+    releaseSlowGit?.();
+    const remaining = await collectWithOrder(updates);
+    expect(remaining).toContainEqual(
+      expect.objectContaining({
+        id: "slow",
+        state: expect.objectContaining({ phase: "complete" }),
+      }),
+    );
   });
 });
 
