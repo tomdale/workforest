@@ -190,6 +190,21 @@ describe("renderPaneLines", () => {
     expect(lines.some((line) => line.includes("\x1b[32m"))).toBe(true);
   });
 
+  it("fills a PTY screen to the pane width and height", () => {
+    const width = 12;
+    const height = 4;
+    const lines = renderPaneLines(
+      repo({ tail: [], steps: [step()] }),
+      { width, height },
+      0,
+      ["output"],
+    ).map(stripTags);
+
+    expect(lines).toHaveLength(height);
+    expect(lines.every((line) => stringWidth(line) === width)).toBe(true);
+    expect(lines.some((line) => line.startsWith("output"))).toBe(true);
+  });
+
   it("escapes a literal brace in styledTail instead of parsing it as a tag", () => {
     const lines = renderPaneLines(
       repo({ tail: [] }),

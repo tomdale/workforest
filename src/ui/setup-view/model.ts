@@ -12,6 +12,7 @@ import {
   terminalLine,
   terminalSpan,
 } from "../../terminal/render-model.ts";
+import { visibleWidth } from "../../terminal/text.ts";
 import { activeTheme } from "../../terminal/theme-system.ts";
 import type {
   RepoRunSnapshot,
@@ -144,8 +145,9 @@ export function renderPaneLines(
     );
   }
 
-  const tailLines =
-    styledTail && styledTail.length > 0 ? styledTail : repo.tail;
+  const hasStyledTail =
+    styledTail !== null && styledTail !== undefined && styledTail.length > 0;
+  const tailLines = hasStyledTail ? styledTail : repo.tail;
   const remaining = height - lines.length;
   if (remaining >= 2 && tailLines.length > 0) {
     lines.push(
@@ -161,7 +163,22 @@ export function renderPaneLines(
     }
   }
 
-  return lines.slice(0, height);
+  const rendered = lines.slice(0, height);
+  // The headless terminal returns a screen, not a list of scrollback lines.
+  // Preserve that screen's rectangular shape when it is rendered in a pane;
+  // otherwise blessed only paints cells occupied by glyphs and the PTY view
+  // appears to float in the pane with stale cells around it.
+  if (hasStyledTail) {
+    return Array.from({ length: height }, (_, index) =>
+      padRenderedLine(rendered[index] ?? "", width),
+    );
+  }
+  return rendered;
+}
+
+function padRenderedLine(line: string, width: number): string {
+  const plain = line.replace(/\{[^}]*\}/g, "");
+  return `${line}${" ".repeat(Math.max(0, width - visibleWidth(plain)))}`;
 }
 
 /** The pane border label: repo name plus its most informative live state. */
