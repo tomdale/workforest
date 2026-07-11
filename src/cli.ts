@@ -282,7 +282,8 @@ export async function executeCli(
     if (
       error instanceof UsageError &&
       usageHelp &&
-      errorOutputMode === "human"
+      errorOutputMode === "human" &&
+      isArgumentUsageMessage(error.message)
     ) {
       return failure(
         error.exitCode,
@@ -751,6 +752,12 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
   } catch (error) {
     throw new OperationalError(getErrorMessage(error), { cause: error });
   }
+}
+
+function isArgumentUsageMessage(message: string): boolean {
+  return /^(?:Invalid operands|Unknown flag|Missing required flag|Flag ")/.test(
+    message,
+  );
 }
 
 function requiredWorkerEnv(name: string): string {
