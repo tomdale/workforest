@@ -197,7 +197,9 @@ describe("cache commands", () => {
       "Invalid operands for wf cache worktree add",
     );
     expect(result.stderr).toContain("Usage: wf cache worktree add");
-    expect(result.stderr).not.toContain("Usage: wf cache worktree <subcommand>");
+    expect(result.stderr).not.toContain(
+      "Usage: wf cache worktree <subcommand>",
+    );
   });
 
   it.each([
