@@ -142,6 +142,11 @@ describe("cache commands", () => {
     ["cache", "doctor", "--help"],
     ["cache", "delete", "--help"],
     ["cache", "clean", "--help"],
+    ["cache", "worktree", "--help"],
+    ["cache", "worktree", "list", "--help"],
+    ["cache", "worktree", "add", "--help"],
+    ["cache", "worktree", "move", "--help"],
+    ["cache", "worktree", "remove", "--help"],
   ])("renders cache help successfully for %j", async (...argv) => {
     const result = await runCommand(argv);
 
@@ -172,14 +177,27 @@ describe("cache commands", () => {
     expect(result.stderr).toContain(stderr);
   });
 
-  it("rejects invalid cache operands", async () => {
+  it("prints command help with invalid cache operands", async () => {
     const result = await runCommand(["cache", "list", "extra"]);
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).not.toBe("");
+    expect(result.stderr).toContain("Invalid operands for wf cache list");
+    expect(result.stderr).toContain("Usage: wf cache list");
     expect(result.stderr).not.toContain("ArgError");
     expect(result.stderr).not.toContain("node_modules/arg");
+  });
+
+  it("prints specific worktree help when required arguments are missing", async () => {
+    const result = await runCommand(["cache", "worktree", "add"]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "Invalid operands for wf cache worktree add",
+    );
+    expect(result.stderr).toContain("Usage: wf cache worktree add");
+    expect(result.stderr).not.toContain("Usage: wf cache worktree <subcommand>");
   });
 
   it.each([

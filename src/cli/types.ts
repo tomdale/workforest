@@ -30,7 +30,8 @@ export type TtyRequirement =
 export type HelpReference =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "command"; command: string }>
-  | Readonly<{ kind: "nested"; command: string; subcommand: string }>;
+  | Readonly<{ kind: "nested"; command: string; subcommand: string }>
+  | Readonly<{ kind: "path"; path: CommandPath }>;
 
 export type AliasDefinition = Readonly<{
   name: string;

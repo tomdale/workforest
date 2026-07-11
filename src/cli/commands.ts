@@ -187,6 +187,10 @@ function nestedHelp(command: string, subcommand: string): HelpReference {
   return { kind: "nested", command, subcommand };
 }
 
+function pathHelp(path: readonly string[]): HelpReference {
+  return { kind: "path", path };
+}
+
 const configDefault = leaf({
   name: "",
   path: ["config"],
@@ -1377,7 +1381,7 @@ export const commandRegistry: CommandRegistry = {
                 description:
                   "Lists every Git-registered worktree for an existing cached mirror, including Workforest-managed worktrees.",
                 handler: "cache.worktree.list",
-                help: nestedHelp("cache", "worktree"),
+                help: pathHelp(["cache", "worktree", "list"]),
                 operands: operands(
                   1,
                   1,
@@ -1396,7 +1400,7 @@ export const commandRegistry: CommandRegistry = {
                 description:
                   "Creates a worktree at the requested path, branching from the mirror's default branch (`origin/<default>`). With an explicit branch name it creates that new branch; when the branch is omitted the worktree is checked out in detached HEAD at `origin/<default>`.",
                 handler: "cache.worktree.add",
-                help: nestedHelp("cache", "worktree"),
+                help: pathHelp(["cache", "worktree", "add"]),
                 operands: operands(
                   2,
                   3,
@@ -1428,7 +1432,7 @@ export const commandRegistry: CommandRegistry = {
                 description:
                   "Moves a registered worktree to a new path using Git's standard safety checks.",
                 handler: "cache.worktree.move",
-                help: nestedHelp("cache", "worktree"),
+                help: pathHelp(["cache", "worktree", "move"]),
                 operands: operands(
                   3,
                   3,
@@ -1452,7 +1456,7 @@ export const commandRegistry: CommandRegistry = {
                 description:
                   "Removes a clean registered worktree using Git's standard safety checks. The branch is left intact.",
                 handler: "cache.worktree.remove",
-                help: nestedHelp("cache", "worktree"),
+                help: pathHelp(["cache", "worktree", "remove"]),
                 operands: operands(
                   2,
                   2,
