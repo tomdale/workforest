@@ -679,10 +679,14 @@ export async function removeReviewWorktree({
       );
     }
 
+    // The explicit status check owns the safety decision. Force Git's removal
+    // after that check so it cannot repeat a dirty-tree check after beginning
+    // to delete files, which can leave a partially removed worktree when the
+    // filesystem changes during cleanup.
     for await (const _state of removeWorktree({
       gitDir: mirrorDir,
       worktreePath: targetDir,
-      force,
+      force: true,
       timeoutMs: 30_000,
     })) {
       // Drained; review worktree removal does not surface per-step progress.
