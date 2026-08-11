@@ -135,10 +135,10 @@ const DELETE_PROGRESS_INTERVAL_MS = 10_000;
 
 /**
  * Removes a worktree or workspace. Without --force, it refuses unless every
- * managed repository is clean, integrated into its remote default branch, and
- * free of unmerged nested tasks. --force skips those checks and removes
- * regardless: the deliberate abandon path for squash merges, cherry-picks, or
- * thrown-away work.
+ * managed repository is clean, integrated into its remote default branch (via
+ * ancestry or a merged GitHub PR), and free of unmerged nested tasks. --force
+ * skips those checks and removes regardless: the deliberate abandon path for
+ * unproven, cherry-picked, or thrown-away work.
  */
 export async function runDeleteCommand(
   invocation: ParsedInvocation,
@@ -414,10 +414,10 @@ function repositoryBlockers(
     blockers.push({
       message:
         repo.integrated === false
-          ? `${repo.name}: ${repo.branch ?? "HEAD"} is not reachable from ${repo.base ?? "the remote default branch"}.`
+          ? `${repo.name}: ${repo.branch ?? "HEAD"} is not proven integrated into ${repo.base ?? "the remote default branch"} (ancestry and GitHub PR checks).`
           : `${repo.name}: integration status could not be verified.`,
       suggestion:
-        "Merge the branch first, or pass --force if it was integrated another way.",
+        "Merge the branch (or ensure gh can see the merged PR), or pass --force for abandoned/unproven work.",
     });
   }
 
@@ -448,7 +448,7 @@ function renderDeleteBlockers(
       `  - ${blocker.message}`,
       `    ${blocker.suggestion}`,
     ]),
-    "Use --force only for squash merges, cherry-picks, abandoned work, or proof Workforest cannot detect.",
+    "Use --force only for abandoned or unproven work (Workforest already detects squash-merged GitHub PRs).",
   ].join("\n");
 }
 

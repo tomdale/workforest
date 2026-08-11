@@ -6,6 +6,10 @@ import { preserveNodeModules } from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
+import {
+  isProvenIntegrated,
+  proveIntegration,
+} from "../services/integration-proof.ts";
 import type {
   CleanupOptions,
   NodeModulesCacheConfig,
@@ -108,8 +112,8 @@ async function remoteBranchExists(
 }
 
 /**
- * Check if a branch has been merged into the default branch.
- * Returns true if the branch is fully merged (no commits beyond default branch).
+ * Check if a remote feature branch has been integrated into the default branch.
+ * Uses ancestry first, then squash-aware GitHub merged-PR proof.
  */
 async function isBranchMerged(
   repoDir: string,
@@ -117,16 +121,22 @@ async function isBranchMerged(
   defaultBranch: string,
 ): Promise<boolean> {
   try {
-    // Fetch latest to ensure we have up-to-date refs
+    // Fetch latest so ancestry/PR head SHAs reflect remote state.
     await runGit(["fetch", "origin", defaultBranch], { cwd: repoDir });
+    try {
+      await runGit(["fetch", "origin", branch], { cwd: repoDir });
+    } catch {
+      // Branch may already be gone remotely; ancestry against local remote-tracking may still work.
+    }
 
-    // Check if the branch commit is reachable from default branch
-    // If `git log origin/main..origin/branch` returns nothing, branch is merged
-    const { stdout } = await runGit(
-      ["log", "--oneline", `origin/${defaultBranch}..origin/${branch}`],
-      { cwd: repoDir },
-    );
-    return stdout.trim() === "";
+    const proof = await proveIntegration({
+      cwd: repoDir,
+      base: `origin/${defaultBranch}`,
+      branch,
+      defaultBranch,
+      headRef: `origin/${branch}`,
+    });
+    return isProvenIntegrated(proof);
   } catch {
     // If check fails, assume not merged (safer default)
     return false;

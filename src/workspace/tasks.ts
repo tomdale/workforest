@@ -15,6 +15,10 @@ import {
   type SingleRepoInitializerState,
 } from "../services/initializers/index.ts";
 import {
+  isProvenIntegrated,
+  proveIntegration,
+} from "../services/integration-proof.ts";
+import {
   addWorktree,
   branchExists,
   deleteBranchIfPossible,
@@ -1196,14 +1200,15 @@ async function isBranchMerged(
   parentRepoDir: string,
   branch: string,
 ): Promise<boolean> {
-  try {
-    await runGit(["merge-base", "--is-ancestor", branch, "HEAD"], {
-      cwd: parentRepoDir,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  // Task branches are judged against the parent checkout HEAD (not origin/default).
+  // Squash-aware GitHub PR proof still applies when ancestry fails.
+  const proof = await proveIntegration({
+    cwd: parentRepoDir,
+    base: "HEAD",
+    branch,
+    headRef: branch,
+  });
+  return isProvenIntegrated(proof);
 }
 
 async function pruneStaleWorktree(parentRepoDir: string): Promise<void> {

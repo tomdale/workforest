@@ -68,10 +68,55 @@ describe("wf delete", () => {
     });
     expect(error).toMatchObject({
       message: expect.stringContaining(
-        "Merge the branch first, or pass --force if it was integrated another way.",
+        "Merge the branch (or ensure gh can see the merged PR), or pass --force for abandoned/unproven work.",
+      ),
+    });
+    expect(error).toMatchObject({
+      message: expect.stringContaining(
+        "Use --force only for abandoned or unproven work",
       ),
     });
     expect(cleanupWorktree).not.toHaveBeenCalled();
+  });
+
+  it("deletes a clean squash-merged worktree without --force when proof says integrated", async () => {
+    const fixture = await createCleanupFixture();
+    const cleanupWorktree = vi.fn(async () => ({
+      dryRun: false,
+      removedRepos: ["workforest"],
+      deletedBranches: [],
+    }));
+    // Safety layer already applied squash-aware proof; integrated true means
+    // ancestry or merged GitHub PR (including squash) succeeded.
+    const buildDeleteRepositorySafety = vi.fn(async () => [
+      repositorySafety({
+        path: fixture.repoChange,
+        state: "clean",
+        integrated: true,
+        branch: "tomdale/squash-feature",
+      }),
+    ]);
+    const buildDeleteTaskSafety = vi.fn(async () => []);
+
+    const result = await runDeleteCommand(
+      invocation(["workforest/cli-redesign"]),
+      {
+        interactive: false,
+        writeShellCdPath: async () => {},
+        buildDeleteRepositorySafety,
+        buildDeleteTaskSafety,
+        cleanupWorktree,
+        resolveRepositorySpecifiers: async () => [],
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(cleanupWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoName: "workforest",
+        targetPath: fixture.repoChange,
+      }),
+    );
   });
 
   it("previews dirty and unintegrated worktrees without deleting", async () => {

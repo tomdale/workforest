@@ -626,7 +626,7 @@ const deleteCommand = leaf({
   path: ["delete"],
   summary: "Delete a worktree or workspace",
   description:
-    "Removes a worktree or workspace after verifying every managed repository is clean, integrated into its remote default branch, and has no unmerged nested tasks; it refuses with a blocker report otherwise. With no selector, resolves the current one from the working directory. Pass --dry-run to preview removals, blockers, node_modules preservation, and cached mirror preservation without deleting anything. Pass --force to skip verification and remove unclean, unintegrated, or abandoned work (squash merges, cherry-picks, or proof Workforest cannot detect). Cached mirrors are preserved.",
+    "Removes a worktree or workspace after verifying every managed repository is clean, integrated into its remote default branch (ancestry or a merged GitHub PR), and has no unmerged nested tasks; it refuses with a blocker report otherwise. With no selector, resolves the current one from the working directory. Pass --dry-run to preview removals, blockers, node_modules preservation, and cached mirror preservation without deleting anything. Pass --force to skip verification and remove unclean, unintegrated, or abandoned/unproven work. Cached mirrors are preserved.",
   handler: "delete",
   help: { kind: "command", command: "delete" },
   operands: operands(
@@ -647,7 +647,7 @@ const deleteCommand = leaf({
       "force",
       "--force",
       "-f",
-      "Skip safety verification and remove even unclean, unintegrated, or abandoned work.",
+      "Skip safety verification and remove even unclean, unintegrated, or abandoned/unproven work.",
     ),
   ],
   examples: [
