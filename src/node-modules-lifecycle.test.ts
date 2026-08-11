@@ -218,6 +218,68 @@ describe("listLiveNodeModulesInstalls", () => {
     expect(listed[0]?.integrated).toBe(true);
   });
 
+  it("excludes only the checkout containing cwd, not sibling checkouts under a container cwd", async () => {
+    // When acquire runs from a workspace root / container path, cwd is an
+    // ancestor of every managed checkout. Only the checkout that contains
+    // cwd (or equals it) must be excluded — siblings remain borrowable.
+    const root = await createTempRoot("wf-live-cwd-container-");
+    const nowMs = Date.now();
+
+    const active = await createPnpmRepo(root, "active");
+    await ageSourceFile(active, EIGHT_DAYS_MS, nowMs);
+    const sibling = await createPnpmRepo(root, "sibling");
+    await ageSourceFile(sibling, EIGHT_DAYS_MS, nowMs);
+
+    // Nested cwd inside the active checkout (e.g. editing a package).
+    const nestedCwd = path.join(active, "packages", "ui");
+    await mkdir(nestedCwd, { recursive: true });
+
+    const checkouts: ManagedCheckout[] = [
+      { hostPath: active, selector: "app/active", remote: repo.remote },
+      { hostPath: sibling, selector: "app/sibling", remote: repo.remote },
+    ];
+
+    const fromNestedCwd = await listLiveNodeModulesInstalls({
+      identity: repoIdentity(repo),
+      excludePaths: [nestedCwd],
+      nowMs,
+      listCheckouts: async () => checkouts,
+      isDirty: async () => false,
+      isIntegrated: async () => true,
+    });
+    expect(fromNestedCwd.map((entry) => entry.selector)).toEqual([
+      "app/sibling",
+    ]);
+
+    // Container cwd (workspace root): neither checkout contains the root, so
+    // both remain eligible. Exact-match exclusion of a specific checkout still
+    // works via excludePaths: [active].
+    const fromContainer = await listLiveNodeModulesInstalls({
+      identity: repoIdentity(repo),
+      excludePaths: [root],
+      nowMs,
+      listCheckouts: async () => checkouts,
+      isDirty: async () => false,
+      isIntegrated: async () => true,
+    });
+    expect(fromContainer.map((entry) => entry.selector).sort()).toEqual([
+      "app/active",
+      "app/sibling",
+    ]);
+
+    const exactExcluded = await listLiveNodeModulesInstalls({
+      identity: repoIdentity(repo),
+      excludePaths: [active],
+      nowMs,
+      listCheckouts: async () => checkouts,
+      isDirty: async () => false,
+      isIntegrated: async () => true,
+    });
+    expect(exactExcluded.map((entry) => entry.selector)).toEqual([
+      "app/sibling",
+    ]);
+  });
+
   it("orders integrated donors before unproven, oldest activity first", async () => {
     const root = await createTempRoot("wf-live-order-");
     const nowMs = Date.now();

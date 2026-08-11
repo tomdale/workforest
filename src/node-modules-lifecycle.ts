@@ -585,15 +585,23 @@ function uniqueResolvedPaths(paths: readonly string[]): string[] {
   return result;
 }
 
+/**
+ * True when `hostPath` is the excluded path or contains it.
+ *
+ * Protects the checkout that *contains* cwd (and exact path matches) without
+ * treating every managed checkout under a container cwd — workspace root,
+ * `Repos/widgets`, configured base dir — as excluded. The previous
+ * bidirectional check (`hostPath` inside `excluded`) disabled borrow-first
+ * from common working directories.
+ */
 function isExcludedPath(
   hostPath: string,
   excludePaths: readonly string[],
 ): boolean {
   for (const excluded of excludePaths) {
-    if (
-      isPathInsideOrEqual(hostPath, excluded) ||
-      isPathInsideOrEqual(excluded, hostPath)
-    ) {
+    // Exact match, or excluded path lives inside this checkout (cwd is a
+    // subdirectory of the donor candidate → do not borrow from it).
+    if (isPathInsideOrEqual(hostPath, excluded)) {
       return true;
     }
   }
