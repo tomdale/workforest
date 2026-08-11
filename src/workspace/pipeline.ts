@@ -1,7 +1,7 @@
 import path from "node:path";
 import { hasAny } from "@wf-plugin/core";
 import { getCacheDir, loadWorkspaceConfig } from "../config.ts";
-import { restoreNodeModules } from "../node-modules-cache.ts";
+import { acquireNodeModules } from "../node-modules-lifecycle.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import {
@@ -158,13 +158,22 @@ export async function* repoSetupEvents({
     }
 
     const { config } = await loadWorkspaceConfig();
-    const restoreResult = await restoreNodeModules({
+    const acquireResult = await acquireNodeModules({
       repo,
       repoDir: targetDir,
       config: config.cache?.nodeModules,
+      workspaceConfig: config,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     });
-    if (restoreResult.status === "restored") {
+    if (acquireResult.status === "borrowed") {
+      yield {
+        kind: "step-log",
+        repo: repoName,
+        step: GIT_STEP_IDS.worktree,
+        level: "info",
+        message: `Reused node_modules from ${acquireResult.donor.selector}`,
+      };
+    } else if (acquireResult.status === "restored") {
       yield {
         kind: "step-log",
         repo: repoName,
@@ -172,13 +181,13 @@ export async function* repoSetupEvents({
         level: "info",
         message: `Restored pooled node_modules for ${repo.name}`,
       };
-    } else if (restoreResult.status === "warning") {
+    } else if (acquireResult.status === "warning") {
       yield {
         kind: "step-log",
         repo: repoName,
         step: GIT_STEP_IDS.worktree,
         level: "warn",
-        message: restoreResult.warning,
+        message: acquireResult.warning,
       };
     }
 
