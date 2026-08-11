@@ -639,6 +639,129 @@ describe("vercelLinkInitializer.execute", () => {
     expect(states.at(-1)).toEqual({ status: "completed" });
   });
 
+  it("re-runs env pull interactively for a Vercel device challenge", async () => {
+    const repoDir = await createRepoDir({
+      ".vercel/project.json": "{}\n",
+      "vercel.json": "{}\n",
+    });
+    let envAttempts = 0;
+
+    spawnCommandMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          if (args[0] === "env") {
+            envAttempts += 1;
+            // First attempt is non-interactive and hits the challenge.
+            if (args.includes("--non-interactive")) {
+              yield {
+                status: "failed" as const,
+                error: new Error("Error: Challenge required"),
+              };
+              return;
+            }
+            // Interactive recovery completes after device approval.
+            yield {
+              status: "output" as const,
+              data: "Visit https://vercel.com/oauth/device?user_code=TEST\n",
+            };
+            yield { status: "completed" as const };
+            return;
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(envAttempts).toBe(2);
+    expect(spawnCommandMock).toHaveBeenCalledWith(
+      "vercel",
+      ["env", "pull", "--environment", "development"],
+      expect.objectContaining({
+        cwd: repoDir,
+        pty: true,
+        inactivityTimeoutMs: 15 * 60 * 1000,
+      }),
+    );
+    expect(states).toContainEqual(
+      expect.objectContaining({
+        status: "log",
+        level: "warn",
+        message: expect.stringContaining("sensitive environment variables"),
+      }),
+    );
+    expect(states).toContainEqual(
+      expect.objectContaining({
+        status: "retrying",
+        reason: "Vercel env pull with interactive device authentication",
+      }),
+    );
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
+  it("skips with recovery commands when interactive device auth fails", async () => {
+    const repoDir = await createRepoDir({
+      ".vercel/project.json": "{}\n",
+      "vercel.json": "{}\n",
+    });
+
+    spawnCommandMock.mockImplementation(
+      (_command: string, args: string[]) =>
+        (async function* () {
+          if (args[0] === "env") {
+            if (args.includes("--non-interactive")) {
+              yield {
+                status: "failed" as const,
+                error: new Error("Error: Challenge required"),
+              };
+              return;
+            }
+            yield {
+              status: "failed" as const,
+              error: new Error("Authentication timed out"),
+            };
+            return;
+          }
+          yield { status: "completed" as const };
+        })(),
+    );
+
+    const states = await collectStates(
+      vercelLinkInitializer.execute(
+        {
+          repoDir,
+          workspaceDir: path.dirname(repoDir),
+          workspaceConfig: {},
+          repo: {
+            name: "omniagent",
+            remote: "git@github.com:vercel/omniagent.git",
+          },
+        },
+        {},
+      ),
+    );
+
+    expect(states).toContainEqual({
+      status: "skipped",
+      reason:
+        "Vercel device authentication did not complete. Run `vercel env pull --environment development` in the project directory, approve the URL, then run `wf init retry --repo omniagent`. Initialization continued.",
+    });
+    expect(states.at(-1)).toEqual({ status: "completed" });
+  });
+
   it("skips env pull auth failures in the background", async () => {
     const repoDir = await createRepoDir({
       ".vercel/project.json": "{}\n",
