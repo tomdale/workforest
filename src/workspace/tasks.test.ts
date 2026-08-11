@@ -16,9 +16,9 @@ import {
   writeWorkspaceMetadata,
 } from "./metadata.ts";
 
-const { restoreNodeModulesMock, runGitMock, runSingleRepoInitializersMock } =
+const { acquireNodeModulesMock, runGitMock, runSingleRepoInitializersMock } =
   vi.hoisted(() => ({
-    restoreNodeModulesMock: vi.fn(),
+    acquireNodeModulesMock: vi.fn(),
     runGitMock: vi.fn(),
     runSingleRepoInitializersMock: vi.fn(),
   }));
@@ -31,16 +31,9 @@ vi.mock("../services/initializers/index.ts", () => ({
   runSingleRepoInitializers: runSingleRepoInitializersMock,
 }));
 
-vi.mock("../node-modules-cache.ts", async () => {
-  const actual = await vi.importActual<
-    typeof import("../node-modules-cache.ts")
-  >("../node-modules-cache.ts");
-
-  return {
-    ...actual,
-    restoreNodeModules: restoreNodeModulesMock,
-  };
-});
+vi.mock("../node-modules-lifecycle.ts", () => ({
+  acquireNodeModules: acquireNodeModulesMock,
+}));
 
 const tempDirs: string[] = [];
 
@@ -66,7 +59,7 @@ beforeEach(() => {
   // Reset the git mock's implementation (not just its call log) so a routing
   // impl from one test never leaks into a test that relies on a clean queue.
   runGitMock.mockReset();
-  restoreNodeModulesMock.mockResolvedValue({ status: "missing" });
+  acquireNodeModulesMock.mockResolvedValue({ status: "missing" });
   runSingleRepoInitializersMock.mockImplementation(async function* () {
     yield { phase: "complete" };
   });
@@ -136,7 +129,7 @@ describe("workspace tasks", () => {
         setupStatus: "skipped",
       },
     ]);
-    expect(restoreNodeModulesMock).not.toHaveBeenCalled();
+    expect(acquireNodeModulesMock).not.toHaveBeenCalled();
     expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
     expect(runGitMock).toHaveBeenLastCalledWith(
       [
@@ -197,7 +190,7 @@ describe("workspace tasks", () => {
         setupLog: ".workforest/logs/front-fix-tests.log",
       },
     ]);
-    expect(restoreNodeModulesMock).toHaveBeenCalledOnce();
+    expect(acquireNodeModulesMock).toHaveBeenCalledOnce();
     expect(runSingleRepoInitializersMock).toHaveBeenCalledOnce();
     await expect(readWorkspaceMetadata(workspaceDir)).resolves.toMatchObject({
       tasks: [
@@ -538,7 +531,7 @@ describe("workspace tasks", () => {
         setupStatus: "skipped",
       },
     ]);
-    expect(restoreNodeModulesMock).not.toHaveBeenCalled();
+    expect(acquireNodeModulesMock).not.toHaveBeenCalled();
     expect(runSingleRepoInitializersMock).not.toHaveBeenCalled();
     expect(runGitMock).toHaveBeenLastCalledWith(
       [

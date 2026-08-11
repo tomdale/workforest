@@ -398,7 +398,7 @@ function scheduleNodeModulesSizeUpdate(entryPath: string): void {
   }
 }
 
-async function isEligiblePnpmInstall(repoDir: string): Promise<boolean> {
+export async function isEligiblePnpmInstall(repoDir: string): Promise<boolean> {
   return (
     (await hasAny(repoDir, PNPM_LOCK_FILES)) &&
     (await pathExists(path.join(repoDir, "node_modules", LOCKFILE_HASH_MARKER)))
@@ -414,7 +414,7 @@ function sortEntries(
   );
 }
 
-function repoIdentity(repo: RepositorySource): string {
+export function repoIdentity(repo: RepositorySource): string {
   return createHash("sha256")
     .update(normalizeRemote(repo.remote))
     .digest("hex");

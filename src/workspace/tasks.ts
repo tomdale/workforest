@@ -4,9 +4,9 @@ import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
 import {
   preserveNodeModules,
-  restoreNodeModules,
   rollbackPreservedNodeModules,
 } from "../node-modules-cache.ts";
+import { acquireNodeModules } from "../node-modules-lifecycle.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { ServiceEventSink } from "../services/events.ts";
 import { runGit } from "../services/git.ts";
@@ -764,25 +764,33 @@ async function* createAndSetupTask({
     }
 
     const { config } = await loadWorkspaceConfig();
-    const restoreResult = await restoreNodeModules({
+    const acquireResult = await acquireNodeModules({
       repo,
       repoDir: targetDir,
       config: config.cache?.nodeModules,
+      workspaceConfig: config,
       ...(disabledInitializers !== undefined ? { disabledInitializers } : {}),
     });
-    if (restoreResult.status === "restored") {
+    if (acquireResult.status === "borrowed") {
+      yield {
+        phase: "git",
+        step: "worktree",
+        status: "log",
+        message: `${repo.name}-${entry.slug}: reused node_modules from ${acquireResult.donor.selector}`,
+      };
+    } else if (acquireResult.status === "restored") {
       yield {
         phase: "git",
         step: "worktree",
         status: "log",
         message: `${repo.name}-${entry.slug}: restored pooled node_modules`,
       };
-    } else if (restoreResult.status === "warning") {
+    } else if (acquireResult.status === "warning") {
       yield {
         phase: "git",
         step: "worktree",
         status: "log",
-        message: restoreResult.warning,
+        message: acquireResult.warning,
       };
     }
 
