@@ -362,6 +362,65 @@ describe("proveIntegration", () => {
     expect(proof).toEqual({ status: "not-integrated", method: "ancestor" });
   });
 
+  it("proves integration via commit SHA for a merged fork PR into the expected base", async () => {
+    // Contributor fork squash: head owner differs from base repo, but local
+    // HEAD equals the PR head SHA and base is the intended default branch.
+    const runGit = gitMock({
+      ancestor: false,
+      headSha: HEAD,
+      originUrl: "git@github.com:acme/widgets.git",
+    });
+    const runGh = vi.fn(async (args: string[]) => {
+      if (args[0] === "pr") {
+        // Branch-name path sees only the fork head and must not accept it
+        // without owner match; commit path is the real proof.
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 77,
+              url: "https://github.com/acme/widgets/pull/77",
+              headRefOid: HEAD,
+              baseRefName: "main",
+              headRepositoryOwner: { id: "2", login: "contributor" },
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[0] === "api") {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 77,
+              url: "https://github.com/acme/widgets/pull/77",
+              headRefOid: HEAD,
+              baseRefName: "main",
+              baseRepository: "acme/widgets",
+              headRepositoryOwner: "contributor",
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      throw new Error(`unexpected gh ${args.join(" ")}`);
+    });
+
+    const proof = await proveIntegration({
+      cwd: "/repo",
+      base: "origin/main",
+      branch: "feature",
+      defaultBranch: "main",
+      runGit,
+      runGh,
+    });
+
+    expect(proof).toEqual({
+      status: "integrated",
+      method: "github-pr",
+      detail: "#77",
+    });
+  });
+
   it("rejects branch-name PR from another fork with the same branch name", async () => {
     const runGit = gitMock({
       ancestor: false,

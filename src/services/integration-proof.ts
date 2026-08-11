@@ -200,7 +200,7 @@ async function proveViaGithubPr(options: {
           expectedBase,
           expectedHeadOwner: repoOwner,
           expectedBaseRepo: repo,
-          requireHeadOwner: true,
+          requireHeadOwner: "require",
         }),
       );
 
@@ -259,10 +259,11 @@ async function proveViaGithubPr(options: {
           expectedBase,
           expectedHeadOwner: repoOwner,
           expectedBaseRepo: repo,
-          // Commit association already ties the SHA to this repo's history;
-          // still require base match. Head-owner check is soft: accept when
-          // the field is present and matches, or when it is absent.
-          requireHeadOwner: false,
+          // Commit association + head SHA equality already identify this
+          // checkout's tip as the merged PR head. Do not require head-owner
+          // match: contributor fork squash merges legitimately have a
+          // different headRepositoryOwner than the base repo.
+          requireHeadOwner: "ignore",
         }),
     );
     if (headMatch) {
@@ -302,7 +303,11 @@ function isEligibleMergedPr(
     expectedBase: string;
     expectedHeadOwner: string;
     expectedBaseRepo: string;
-    requireHeadOwner: boolean;
+    /**
+     * - `require`: branch-name proof must match this repo's head owner
+     * - `ignore`: commit/SHA proof; fork head owners are legitimate
+     */
+    requireHeadOwner: "require" | "ignore";
   },
 ): boolean {
   if (
@@ -319,7 +324,7 @@ function isEligibleMergedPr(
     return false;
   }
 
-  if (options.requireHeadOwner) {
+  if (options.requireHeadOwner === "require") {
     if (!pr.headRepositoryOwner) {
       return false;
     }
@@ -329,12 +334,6 @@ function isEligibleMergedPr(
     ) {
       return false;
     }
-  } else if (
-    pr.headRepositoryOwner &&
-    normalizeOwner(pr.headRepositoryOwner) !==
-      normalizeOwner(options.expectedHeadOwner)
-  ) {
-    return false;
   }
 
   return true;
