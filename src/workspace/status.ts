@@ -2,6 +2,10 @@ import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
 import {
+  integrationProofToBoolean,
+  proveIntegration,
+} from "../services/integration-proof.ts";
+import {
   getWorkspaceAgentsMdStatus,
   type TemplateAgentsMdState,
 } from "../templates/agents-md.ts";
@@ -841,15 +845,13 @@ async function isIntegrated(
   branch: string | null,
   defaultBranch: string | null,
 ): Promise<boolean | null> {
-  if (branch && defaultBranch && branch === defaultBranch) {
-    return true;
-  }
-  try {
-    await runGit(["merge-base", "--is-ancestor", "HEAD", base], { cwd });
-    return true;
-  } catch {
-    return false;
-  }
+  const proof = await proveIntegration({
+    cwd,
+    base,
+    branch,
+    defaultBranch,
+  });
+  return integrationProofToBoolean(proof);
 }
 
 function summarizeSetup(

@@ -1,6 +1,10 @@
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
+import {
+  integrationProofToBoolean,
+  proveIntegration,
+} from "../services/integration-proof.ts";
 import type { WorkspaceRepoMetadata } from "../types.ts";
 import type { InventoryEntry } from "./inventory.ts";
 import { readWorkspaceMetadata } from "./metadata.ts";
@@ -187,15 +191,13 @@ async function isIntegrated(
   branch: string | null,
   defaultBranch: string | null,
 ): Promise<boolean | null> {
-  if (branch && defaultBranch && branch === defaultBranch) {
-    return true;
-  }
-  try {
-    await runGit(["merge-base", "--is-ancestor", "HEAD", base], { cwd });
-    return true;
-  } catch {
-    return false;
-  }
+  const proof = await proveIntegration({
+    cwd,
+    base,
+    branch,
+    defaultBranch,
+  });
+  return integrationProofToBoolean(proof);
 }
 
 function toDeleteTaskSafety(task: {
