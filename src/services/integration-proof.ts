@@ -5,6 +5,7 @@ import {
   type GhRunner,
   listMergedPullRequestsByHead,
   listMergedPullRequestsForCommit,
+  type MergedPullRequest,
 } from "./github-cli.ts";
 
 export type GitRunner = (
@@ -68,8 +69,9 @@ export type ProveIntegrationOptions = Readonly<{
  * 1. On default branch → integrated
  * 2. `git merge-base --is-ancestor <head> <base>` → integrated (offline first)
  * 3. Else GitHub merged PR via `gh`:
- *    - merged PR for this branch, or
- *    - merged PR whose head SHA equals local head
+ *    - merged PR for this branch into the expected base, or
+ *    - merged PR whose head SHA equals local head into the expected base
+ *    - head repository must match this repo (reject same-named fork branches)
  *    - Rule C: branch-name-only match refuses when head is strictly ahead of
  *      that PR's head SHA (continued commits after the merge)
  * 4. Otherwise not integrated / unproven
@@ -98,7 +100,9 @@ export async function proveIntegration(
 
   return proveViaGithubPr({
     cwd: options.cwd,
+    base,
     branch,
+    defaultBranch,
     headRef,
     runGit,
     runGh,
@@ -131,7 +135,9 @@ export function isProvenIntegrated(proof: IntegrationProof): boolean {
 
 async function proveViaGithubPr(options: {
   cwd: string;
+  base: string;
   branch: string | null;
+  defaultBranch: string | null;
   headRef: string;
   runGit: GitRunner;
   runGh: GhRunner;
@@ -154,6 +160,31 @@ async function proveViaGithubPr(options: {
     };
   }
 
+  const expectedBase = await resolveExpectedBaseRefName({
+    base: options.base,
+    defaultBranch: options.defaultBranch,
+    cwd: options.cwd,
+    runGit: options.runGit,
+  });
+  if (!expectedBase) {
+    // Without a resolvable base branch name we cannot safely accept PR proof
+    // (would re-open the wrong-base bypass). Leave unproven.
+    return {
+      status: "not-integrated",
+      method: "github-pr",
+      detail: "unresolvable-base",
+    };
+  }
+
+  const repoOwner = repoOwnerLogin(repo);
+  if (!repoOwner) {
+    return {
+      status: "not-integrated",
+      method: "ancestor",
+      detail: "non-github-remote",
+    };
+  }
+
   try {
     // Prefer branch-scoped PR list when we know the branch name.
     if (options.branch) {
@@ -164,7 +195,16 @@ async function proveViaGithubPr(options: {
         runGh: options.runGh,
       });
 
-      const headMatch = byBranch.find(
+      const eligible = byBranch.filter((pr) =>
+        isEligibleMergedPr(pr, {
+          expectedBase,
+          expectedHeadOwner: repoOwner,
+          expectedBaseRepo: repo,
+          requireHeadOwner: true,
+        }),
+      );
+
+      const headMatch = eligible.find(
         (pr) => normalizeSha(pr.headRefOid) === normalizeSha(headSha),
       );
       if (headMatch) {
@@ -175,9 +215,9 @@ async function proveViaGithubPr(options: {
         };
       }
 
-      if (byBranch.length > 0) {
+      if (eligible.length > 0) {
         // Rule C: branch-name-only match must not be strictly ahead of PR head.
-        for (const pr of byBranch) {
+        for (const pr of eligible) {
           const ahead = await isStrictlyAhead(
             options.runGit,
             options.cwd,
@@ -193,7 +233,7 @@ async function proveViaGithubPr(options: {
           }
         }
 
-        const matched = byBranch[0];
+        const matched = eligible[0];
         if (matched) {
           return {
             status: "integrated",
@@ -213,7 +253,17 @@ async function proveViaGithubPr(options: {
       runGh: options.runGh,
     });
     const headMatch = byCommit.find(
-      (pr) => normalizeSha(pr.headRefOid) === normalizeSha(headSha),
+      (pr) =>
+        normalizeSha(pr.headRefOid) === normalizeSha(headSha) &&
+        isEligibleMergedPr(pr, {
+          expectedBase,
+          expectedHeadOwner: repoOwner,
+          expectedBaseRepo: repo,
+          // Commit association already ties the SHA to this repo's history;
+          // still require base match. Head-owner check is soft: accept when
+          // the field is present and matches, or when it is absent.
+          requireHeadOwner: false,
+        }),
     );
     if (headMatch) {
       return {
@@ -238,6 +288,138 @@ async function proveViaGithubPr(options: {
       detail: errorMessage(error),
     };
   }
+}
+
+/**
+ * True when the PR is a valid integration proof for this checkout:
+ * - merged into the expected base branch name
+ * - base repository is this repo when the field is present
+ * - head repository owner matches this repo when required (branch-name path)
+ */
+function isEligibleMergedPr(
+  pr: MergedPullRequest,
+  options: {
+    expectedBase: string;
+    expectedHeadOwner: string;
+    expectedBaseRepo: string;
+    requireHeadOwner: boolean;
+  },
+): boolean {
+  if (
+    normalizeRefName(pr.baseRefName) !== normalizeRefName(options.expectedBase)
+  ) {
+    return false;
+  }
+
+  if (
+    pr.baseRepository &&
+    normalizeRepoSlug(pr.baseRepository) !==
+      normalizeRepoSlug(options.expectedBaseRepo)
+  ) {
+    return false;
+  }
+
+  if (options.requireHeadOwner) {
+    if (!pr.headRepositoryOwner) {
+      return false;
+    }
+    if (
+      normalizeOwner(pr.headRepositoryOwner) !==
+      normalizeOwner(options.expectedHeadOwner)
+    ) {
+      return false;
+    }
+  } else if (
+    pr.headRepositoryOwner &&
+    normalizeOwner(pr.headRepositoryOwner) !==
+      normalizeOwner(options.expectedHeadOwner)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Map the ancestry `base` argument to a GitHub PR `baseRefName`.
+ *
+ * Callers pass git refs such as `origin/main`, `main`, or parent `HEAD`.
+ * PR proof needs the bare branch name the PR was merged into.
+ */
+async function resolveExpectedBaseRefName(options: {
+  base: string;
+  defaultBranch: string | null;
+  cwd: string;
+  runGit: GitRunner;
+}): Promise<string | null> {
+  const stripped = stripRemoteRefPrefix(options.base);
+  if (stripped && !isSymbolicOrSha(stripped)) {
+    return stripped;
+  }
+
+  if (options.defaultBranch?.trim()) {
+    return options.defaultBranch.trim();
+  }
+
+  // Task callers pass base `HEAD` without defaultBranch. Resolve the parent's
+  // current branch name so PR proof still pins to the intended base.
+  if (stripped === "HEAD" || options.base === "HEAD") {
+    try {
+      const { stdout } = await options.runGit(["branch", "--show-current"], {
+        cwd: options.cwd,
+      });
+      const current = stdout.trim();
+      if (current) {
+        return current;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  return null;
+}
+
+function stripRemoteRefPrefix(ref: string): string {
+  let value = ref.trim();
+  if (value.startsWith("refs/remotes/")) {
+    // refs/remotes/<remote>/<branch>
+    const parts = value.slice("refs/remotes/".length).split("/");
+    value = parts.slice(1).join("/");
+  } else if (value.startsWith("refs/heads/")) {
+    value = value.slice("refs/heads/".length);
+  } else {
+    const originPrefix = "origin/";
+    if (value.startsWith(originPrefix)) {
+      value = value.slice(originPrefix.length);
+    }
+  }
+  return value;
+}
+
+function isSymbolicOrSha(ref: string): boolean {
+  if (ref === "HEAD" || ref === "@") {
+    return true;
+  }
+  // Full or abbreviated SHA — not a usable PR baseRefName.
+  return /^[0-9a-f]{7,40}$/i.test(ref);
+}
+
+function repoOwnerLogin(slug: string): string | null {
+  const owner = slug.split("/")[0]?.trim();
+  return owner || null;
+}
+
+function normalizeRefName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function normalizeOwner(owner: string): string {
+  return owner.trim().toLowerCase();
+}
+
+function normalizeRepoSlug(slug: string): string {
+  return slug.trim().toLowerCase();
 }
 
 async function isAncestor(

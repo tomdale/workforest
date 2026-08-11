@@ -71,6 +71,8 @@ describe("proveIntegration", () => {
               number: 42,
               url: "https://github.com/acme/widgets/pull/42",
               headRefOid: HEAD,
+              baseRefName: "main",
+              headRepositoryOwner: { id: "1", login: "acme" },
             },
           ]),
           stderr: "",
@@ -113,6 +115,9 @@ describe("proveIntegration", () => {
               number: 99,
               url: "https://github.com/acme/widgets/pull/99",
               headRefOid: HEAD,
+              baseRefName: "main",
+              baseRepository: "acme/widgets",
+              headRepositoryOwner: "acme",
             },
           ]),
           stderr: "",
@@ -151,6 +156,9 @@ describe("proveIntegration", () => {
               number: 7,
               url: "https://github.com/acme/widgets/pull/7",
               headRefOid: HEAD,
+              baseRefName: "main",
+              baseRepository: "acme/widgets",
+              headRepositoryOwner: "acme",
             },
           ]),
           stderr: "",
@@ -191,6 +199,8 @@ describe("proveIntegration", () => {
               number: 12,
               url: "https://github.com/acme/widgets/pull/12",
               headRefOid: PR_HEAD,
+              baseRefName: "main",
+              headRepositoryOwner: { id: "1", login: "acme" },
             },
           ]),
           stderr: "",
@@ -233,6 +243,8 @@ describe("proveIntegration", () => {
               number: 12,
               url: "https://github.com/acme/widgets/pull/12",
               headRefOid: PR_HEAD,
+              baseRefName: "main",
+              headRepositoryOwner: { id: "1", login: "acme" },
             },
           ]),
           stderr: "",
@@ -273,6 +285,8 @@ describe("proveIntegration", () => {
               number: 15,
               url: "https://github.com/acme/widgets/pull/15",
               headRefOid: PR_HEAD,
+              baseRefName: "main",
+              headRepositoryOwner: { id: "1", login: "acme" },
             },
           ]),
           stderr: "",
@@ -295,6 +309,98 @@ describe("proveIntegration", () => {
       method: "github-pr",
       detail: "#15",
     });
+  });
+
+  it("rejects merged PR into a non-default base branch", async () => {
+    const runGit = gitMock({
+      ancestor: false,
+      headSha: HEAD,
+      originUrl: "git@github.com:acme/widgets.git",
+    });
+    const runGh = vi.fn(async (args: string[]) => {
+      if (args[0] === "pr") {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 50,
+              url: "https://github.com/acme/widgets/pull/50",
+              headRefOid: HEAD,
+              baseRefName: "release/1.x",
+              headRepositoryOwner: { id: "1", login: "acme" },
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[0] === "api") {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 50,
+              url: "https://github.com/acme/widgets/pull/50",
+              headRefOid: HEAD,
+              baseRefName: "release/1.x",
+              baseRepository: "acme/widgets",
+              headRepositoryOwner: "acme",
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      throw new Error(`unexpected gh ${args.join(" ")}`);
+    });
+
+    const proof = await proveIntegration({
+      cwd: "/repo",
+      base: "origin/main",
+      branch: "feature",
+      defaultBranch: "main",
+      runGit,
+      runGh,
+    });
+
+    expect(proof).toEqual({ status: "not-integrated", method: "ancestor" });
+  });
+
+  it("rejects branch-name PR from another fork with the same branch name", async () => {
+    const runGit = gitMock({
+      ancestor: false,
+      headSha: HEAD,
+      originUrl: "git@github.com:acme/widgets.git",
+      // Unrelated SHAs: local HEAD is not strictly ahead of the fork PR head.
+      aheadOf: {},
+    });
+    const runGh = vi.fn(async (args: string[]) => {
+      if (args[0] === "pr") {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 88,
+              url: "https://github.com/acme/widgets/pull/88",
+              headRefOid: PR_HEAD,
+              baseRefName: "main",
+              headRepositoryOwner: { id: "9", login: "other-fork" },
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[0] === "api") {
+        return { stdout: "[]", stderr: "" };
+      }
+      throw new Error(`unexpected gh ${args.join(" ")}`);
+    });
+
+    const proof = await proveIntegration({
+      cwd: "/repo",
+      base: "origin/main",
+      branch: "feature",
+      defaultBranch: "main",
+      runGit,
+      runGh,
+    });
+
+    expect(proof).toEqual({ status: "not-integrated", method: "ancestor" });
   });
 
   it("returns unknown when gh is unavailable after ancestry fails", async () => {
@@ -433,6 +539,48 @@ describe("proveIntegration", () => {
       { cwd: "/parent" },
     );
   });
+
+  it("resolves parent HEAD branch name for task PR proof base", async () => {
+    const runGit = gitMock({
+      ancestor: false,
+      headSha: HEAD,
+      headRef: "tomdale/task-fix",
+      originUrl: "git@github.com:acme/widgets.git",
+      currentBranch: "feature-parent",
+    });
+    const runGh = vi.fn(async (args: string[]) => {
+      if (args[0] === "pr") {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 3,
+              url: "https://github.com/acme/widgets/pull/3",
+              headRefOid: HEAD,
+              baseRefName: "feature-parent",
+              headRepositoryOwner: { id: "1", login: "acme" },
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      throw new Error(`unexpected gh ${args.join(" ")}`);
+    });
+
+    const proof = await proveIntegration({
+      cwd: "/parent",
+      base: "HEAD",
+      branch: "tomdale/task-fix",
+      headRef: "tomdale/task-fix",
+      runGit,
+      runGh,
+    });
+
+    expect(proof).toEqual({
+      status: "integrated",
+      method: "github-pr",
+      detail: "#3",
+    });
+  });
 });
 
 describe("integrationProofToBoolean", () => {
@@ -454,6 +602,7 @@ function gitMock(options: {
   headSha?: string;
   headRef?: string;
   originUrl?: string;
+  currentBranch?: string;
   /** Map of candidate ancestor SHA → whether it is an ancestor of HEAD. */
   aheadOf?: Record<string, boolean>;
 }) {
@@ -474,7 +623,10 @@ function gitMock(options: {
         throw new Error("not an ancestor");
       }
       // Rule C: is PR head an ancestor of local head?
-      if (descendant === (options.headSha ?? "HEAD")) {
+      if (
+        descendant === (options.headSha ?? "HEAD") ||
+        descendant === options.headRef
+      ) {
         if (options.aheadOf?.[maybeAncestor]) {
           return { stdout: "", stderr: "" };
         }
@@ -484,6 +636,9 @@ function gitMock(options: {
     }
     if (args[0] === "rev-parse") {
       return { stdout: `${options.headSha ?? HEAD}\n`, stderr: "" };
+    }
+    if (args[0] === "branch" && args[1] === "--show-current") {
+      return { stdout: `${options.currentBranch ?? ""}\n`, stderr: "" };
     }
     if (args[0] === "config" && args[1] === "--get") {
       if (!options.originUrl) {
