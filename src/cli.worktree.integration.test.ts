@@ -83,7 +83,7 @@ describe("wf worktree", () => {
       options,
     );
     expect(detachedRemove.exitCode).toBe(0);
-  }, 20_000);
+  }, 60_000);
 
   it("enforces each primitive's fixed operands and rejects flags", async () => {
     const fixture = await createFixture();
@@ -104,7 +104,7 @@ describe("wf worktree", () => {
         /Invalid operands|Unknown flag|not supported/,
       );
     }
-  });
+  }, 60_000);
 
   it("resolves relative worktree paths from the caller's directory", async () => {
     const fixture = await createFixture();

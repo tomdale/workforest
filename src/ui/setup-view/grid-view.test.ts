@@ -270,7 +270,7 @@ describe("renderSetupGrid", () => {
     expect(frontPane?.contents.map(stripTags).join("\n")).toContain("mirror");
   });
 
-  it("keeps the grid up on failure until a keypress", async () => {
+  it("returns immediately on failure without a completion modal", async () => {
     const { events, push } = createEventSource();
     const mock = createMockEnvironment();
 
@@ -290,20 +290,9 @@ describe("renderSetupGrid", () => {
     });
     push({ kind: "run-end", outcome: "failed", durationMs: 5_000 });
 
-    let resolved = false;
-    void promise.then(() => {
-      resolved = true;
-    });
-    await tick();
-    await tick();
-    expect(resolved).toBe(false);
-    expect(mock.completionCalls[0]?.failures).toEqual([
-      { repoName: "front", step: "init:pnpm-install", message: "boom" },
-    ]);
-
-    mock.press("x");
     const result = await promise;
     expect(result.outcome).toBe("failed");
+    expect(mock.completionCalls).toEqual([]);
   });
 
   it("hides the status line at a terminal state, before the acknowledging keypress", async () => {

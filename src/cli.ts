@@ -36,6 +36,7 @@ import {
 import type { Scope } from "./entry/entries-data.ts";
 import {
   commandHelp,
+  commandPathHelp,
   conceptsPage,
   help,
   nestedCommandHelp,
@@ -230,6 +231,8 @@ export async function executeCli(
 ): Promise<CommandResult> {
   const errorOutputMode = requestsJsonOutput(argv) ? "json" : "human";
 
+  let usageHelp: string | undefined;
+
   try {
     const workerResult = await runPrivateWorkerIfRequested();
     if (workerResult) return workerResult;
@@ -250,6 +253,10 @@ export async function executeCli(
       });
     }
 
+    usageHelp = await renderHelpReference(
+      resolution.help,
+      resolution.canonicalPath,
+    );
     const invocation = parseInvocation(resolution, {
       interactive: isInteractive(),
     });
@@ -270,6 +277,17 @@ export async function executeCli(
     if (isArgumentParserError(error)) {
       return (
         errorResult(new UsageError(error.message), errorOutputMode) ?? success()
+      );
+    }
+    if (
+      error instanceof UsageError &&
+      usageHelp &&
+      errorOutputMode === "human" &&
+      isArgumentUsageMessage(error.message)
+    ) {
+      return failure(
+        error.exitCode,
+        humanOutput(`${error.message}\n\n${usageHelp}`, { stream: "stderr" }),
       );
     }
     const result = errorResult(error, errorOutputMode);
@@ -736,6 +754,12 @@ async function runPrivateWorkerIfRequested(): Promise<CommandResult | null> {
   }
 }
 
+function isArgumentUsageMessage(message: string): boolean {
+  return /^(?:Invalid operands|Unknown flag|Missing required flag|Flag ")/.test(
+    message,
+  );
+}
+
 function requiredWorkerEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -759,6 +783,9 @@ async function renderHelpReference(
       break;
     case "nested":
       rendered = nestedCommandHelp(reference.command, reference.subcommand);
+      break;
+    case "path":
+      rendered = commandPathHelp(commandRegistry, reference.path);
       break;
   }
 

@@ -14,6 +14,8 @@ import {
 } from "@wf-plugin/core";
 
 const MAX_CONCURRENT_ENV_PULLS = 6;
+/** Device auth can sit on "Waiting for authentication…" for several minutes. */
+const VERCEL_DEVICE_AUTH_INACTIVITY_MS = 15 * 60 * 1000;
 const VERCEL_AUTH_HINT =
   "Run `vercel login`, then rerun setup to link the project and pull development env.";
 
@@ -76,7 +78,10 @@ function resolveVercelRepoLinkTarget(
 
 async function* execute(context: InitializerContext) {
   const { repoDir } = context;
-  const authState: AuthRecoveryState = { loginAttempted: false };
+  const authState: AuthRecoveryState = {
+    loginAttempted: false,
+    challengeRecovery: null,
+  };
   const target = resolveVercelRepoLinkTarget(
     context.repo.remote,
     context.workspaceConfig ?? {},
@@ -94,6 +99,7 @@ async function* execute(context: InitializerContext) {
     {
       commandLabel: "Vercel authentication",
       skipReason: `Vercel authentication required. ${VERCEL_AUTH_HINT}`,
+      repoName: context.repo.name,
     },
   );
   const preflightResult = yield* preflight;
@@ -108,6 +114,7 @@ async function* execute(context: InitializerContext) {
     {
       commandLabel: "Vercel link",
       skipReason: `Vercel authentication required. ${VERCEL_AUTH_HINT}`,
+      repoName: context.repo.name,
     },
   );
   if (linkResult !== "completed") {
@@ -130,7 +137,7 @@ async function* execute(context: InitializerContext) {
 
   let envPullFailed = false;
   for await (const { state } of runParallel(
-    createEnvPullTasks(repoDir, envPullTargets.cwd, authState),
+    createEnvPullTasks(repoDir, envPullTargets.cwd, authState, context.repo.name),
     {
       maxConcurrent: MAX_CONCURRENT_ENV_PULLS,
     },
@@ -165,6 +172,7 @@ function createEnvPullTasks(
   repoDir: string,
   cwds: string[],
   authState: AuthRecoveryState,
+  repoName: string,
 ): Map<string, TaskGenerator> {
   return new Map(
     cwds.map((cwd, index) => [
@@ -184,6 +192,7 @@ function createEnvPullTasks(
           {
             commandLabel: "Vercel env pull",
             skipReason: `Vercel authentication required for env pull. ${VERCEL_AUTH_HINT}`,
+            repoName,
           },
         ),
         repoDir,
@@ -195,6 +204,11 @@ function createEnvPullTasks(
 
 type AuthRecoveryState = {
   loginAttempted: boolean;
+  /**
+   * One shared device-auth attempt for the whole initializer run so parallel
+   * env pulls do not open multiple browser challenges at once.
+   */
+  challengeRecovery: Promise<boolean> | null;
 };
 
 type AuthAwareResult = "completed" | "failed" | "skipped";
@@ -202,6 +216,8 @@ type AuthAwareResult = "completed" | "failed" | "skipped";
 type AuthAwareOptions = {
   commandLabel: string;
   skipReason: string;
+  /** Repository name used in the actionable initialization retry command. */
+  repoName: string;
 };
 
 async function* runVercelAuthAwareCommand(
@@ -213,6 +229,11 @@ async function* runVercelAuthAwareCommand(
   const firstResult = yield* runCommandWithResult("vercel", args, cwd);
   if (firstResult.status === "completed") {
     return "completed";
+  }
+
+  // Check before generic auth: the sensitive-env message also matches "authentication".
+  if (isVercelChallengeRequiredError(firstResult.error)) {
+    return yield* recoverVercelChallenge(args, cwd, authState, options);
   }
 
   if (!isVercelAuthError(firstResult.error)) {
@@ -260,6 +281,84 @@ async function* runVercelAuthAwareCommand(
   return "failed";
 }
 
+/**
+ * Sensitive env pulls require a browser device flow. Re-run the same command
+ * without non-interactive flags so Vercel prints the approval URL into the
+ * setup stream; parallel callers wait on the first recovery and then retry.
+ */
+async function* recoverVercelChallenge(
+  args: string[],
+  cwd: string,
+  authState: AuthRecoveryState,
+  options: AuthAwareOptions,
+): AsyncGenerator<TaskState, AuthAwareResult, undefined> {
+  const recoveryCommand = formatInteractiveCommand(args);
+  const skipReason =
+    `Vercel device authentication did not complete. Run \`${recoveryCommand}\` in the project directory, approve the URL, then run \`wf init retry --repo ${options.repoName}\`. Initialization continued.`;
+
+  if (authState.challengeRecovery) {
+    yield {
+      status: "log",
+      level: "info",
+      message: `${options.commandLabel}: waiting for Vercel device authentication started by another step.`,
+    };
+    const refreshed = await authState.challengeRecovery;
+    if (!refreshed) {
+      yield { status: "skipped", reason: skipReason };
+      return "skipped";
+    }
+
+    yield {
+      status: "retrying",
+      reason: `${options.commandLabel} after Vercel device authentication`,
+      attempt: 1,
+    };
+    const retryResult = yield* runCommandWithResult("vercel", args, cwd);
+    if (retryResult.status === "completed") {
+      return "completed";
+    }
+    yield { status: "skipped", reason: skipReason };
+    return "skipped";
+  }
+
+  let resolveChallenge: (ok: boolean) => void = () => undefined;
+  authState.challengeRecovery = new Promise<boolean>((resolve) => {
+    resolveChallenge = resolve;
+  });
+
+  try {
+    yield {
+      status: "log",
+      level: "warn",
+      message: `${options.commandLabel} needs fresh Vercel authentication for sensitive environment variables. Approve the device URL in your browser when it appears.`,
+    };
+    yield {
+      status: "retrying",
+      reason: `${options.commandLabel} with interactive device authentication`,
+      attempt: 1,
+    };
+
+    const interactiveArgs = toInteractiveArgs(args);
+    const recoveryResult = yield* runCommandWithResult(
+      "vercel",
+      interactiveArgs,
+      cwd,
+      { inactivityTimeoutMs: VERCEL_DEVICE_AUTH_INACTIVITY_MS },
+    );
+    if (recoveryResult.status === "completed") {
+      resolveChallenge(true);
+      return "completed";
+    }
+
+    resolveChallenge(false);
+    yield { status: "skipped", reason: skipReason };
+    return "skipped";
+  } catch (error) {
+    resolveChallenge(false);
+    throw error;
+  }
+}
+
 type CommandResult =
   | { status: "completed" }
   | { status: "failed"; error: Error };
@@ -268,7 +367,7 @@ async function* runCommandWithResult(
   command: string,
   args: string[],
   cwd: string,
-  options: { foreground?: boolean } = {},
+  options: { foreground?: boolean; inactivityTimeoutMs?: number } = {},
 ): AsyncGenerator<TaskState, CommandResult, undefined> {
   const task = options.foreground
     ? runForegroundTask(command, args, { cwd })
@@ -276,7 +375,11 @@ async function* runCommandWithResult(
       // plain pipe text. The inactivity guard matters specifically for a pty:
       // it keeps stdin open, so an unexpected interactive prompt would hang
       // forever, where a pipe's closed stdin makes the same prompt fail fast.
-      spawnCommand(command, args, { cwd, pty: true, inactivityTimeoutMs: 120_000 });
+      spawnCommand(command, args, {
+        cwd,
+        pty: true,
+        inactivityTimeoutMs: options.inactivityTimeoutMs ?? 120_000,
+      });
 
   for await (const state of task) {
     if (state.status === "completed") {
@@ -300,6 +403,24 @@ function isVercelAuthError(error: Error): boolean {
   return /\b(auth|authentication|credential|login|logged in|token)\b/i.test(
     error.message,
   );
+}
+
+function isVercelChallengeRequiredError(error: Error): boolean {
+  return (
+    /\bchallenge required\b/i.test(error.message) ||
+    /sensitive environment variables require fresh authentication/i.test(
+      error.message,
+    )
+  );
+}
+
+function toInteractiveArgs(args: readonly string[]): string[] {
+  return args.filter((arg) => arg !== "--yes" && arg !== "--non-interactive");
+}
+
+/** The automated form cannot solve a browser challenge, so omit its flags. */
+function formatInteractiveCommand(args: readonly string[]): string {
+  return ["vercel", ...toInteractiveArgs(args)].join(" ");
 }
 
 async function* withEnvPullCwdLabel(

@@ -39,20 +39,27 @@ function manifest(runId: string, startedAt: string): RunManifest {
   };
 }
 
+/** Recent wall-clock times so createRunDir's default age retention keeps them. */
+function hoursAgo(hours: number): Date {
+  return new Date(Date.now() - hours * 60 * 60 * 1000);
+}
+
 describe("run store", () => {
   it("creates sortable run ids", () => {
-    const earlier = createRunId(new Date("2026-07-03T10:00:00Z"));
-    const later = createRunId(new Date("2026-07-03T10:00:01Z"));
+    const earlier = createRunId(hoursAgo(2));
+    const later = createRunId(hoursAgo(1));
     expect(earlier < later).toBe(true);
     expect(earlier).toMatch(/^\d{8}-\d{6}-[a-z0-9]{6}$/);
   });
 
   it("creates run dirs, tracks the current run, and lists newest first", async () => {
     const scope = await createScope();
-    const first = createRunId(new Date("2026-07-03T10:00:00Z"));
-    const second = createRunId(new Date("2026-07-03T11:00:00Z"));
-    await createRunDir(scope, manifest(first, "2026-07-03T10:00:00Z"));
-    await createRunDir(scope, manifest(second, "2026-07-03T11:00:00Z"));
+    const firstStarted = hoursAgo(2);
+    const secondStarted = hoursAgo(1);
+    const first = createRunId(firstStarted);
+    const second = createRunId(secondStarted);
+    await createRunDir(scope, manifest(first, firstStarted.toISOString()));
+    await createRunDir(scope, manifest(second, secondStarted.toISOString()));
 
     const runs = await listRuns(scope);
     expect(runs.map((run) => run.runId)).toEqual([second, first]);
@@ -63,8 +70,9 @@ describe("run store", () => {
 
   it("resolves run ids exactly and by unique prefix", async () => {
     const scope = await createScope();
-    const runId = createRunId(new Date("2026-07-03T10:00:00Z"));
-    await createRunDir(scope, manifest(runId, "2026-07-03T10:00:00Z"));
+    const startedAt = hoursAgo(1);
+    const runId = createRunId(startedAt);
+    await createRunDir(scope, manifest(runId, startedAt.toISOString()));
 
     expect(await resolveRunDir(scope, runId)).toBe(getRunDir(scope, runId));
     expect(await resolveRunDir(scope, runId.slice(0, 10))).toBe(
@@ -75,12 +83,16 @@ describe("run store", () => {
 
   it("rejects ambiguous run id prefixes", async () => {
     const scope = await createScope();
-    const first = createRunId(new Date("2026-07-03T10:00:00Z"));
-    const second = createRunId(new Date("2026-07-03T10:00:00Z"));
-    await createRunDir(scope, manifest(first, "2026-07-03T10:00:00Z"));
-    await createRunDir(scope, manifest(second, "2026-07-03T10:00:00Z"));
+    // Same second so both ids share a long common prefix.
+    const startedAt = hoursAgo(1);
+    const first = createRunId(startedAt);
+    const second = createRunId(startedAt);
+    await createRunDir(scope, manifest(first, startedAt.toISOString()));
+    await createRunDir(scope, manifest(second, startedAt.toISOString()));
 
-    await expect(resolveRunDir(scope, "20260703")).rejects.toThrow(
+    const sharedPrefix = first.slice(0, 15); // YYYYMMDD-HHMMSS
+    expect(second.startsWith(sharedPrefix)).toBe(true);
+    await expect(resolveRunDir(scope, sharedPrefix)).rejects.toThrow(
       /matches 2 runs/,
     );
   });
@@ -88,15 +100,16 @@ describe("run store", () => {
   it("prunes runs beyond the retention count, keeping the named run", async () => {
     const scope = await createScope();
     const ids: string[] = [];
-    for (let hour = 0; hour < 7; hour += 1) {
-      const startedAt = `2026-07-03T0${hour}:00:00Z`;
-      const runId = createRunId(new Date(startedAt));
+    for (let hour = 6; hour >= 0; hour -= 1) {
+      const startedAt = hoursAgo(hour);
+      const runId = createRunId(startedAt);
       ids.push(runId);
-      await createRunDir(scope, manifest(runId, startedAt));
+      await createRunDir(scope, manifest(runId, startedAt.toISOString()));
     }
 
     await pruneRuns(scope, { keep: 3, maxAgeDays: 365 });
     const remaining = (await listRuns(scope)).map((run) => run.runId);
+    // ids is oldest→newest; listRuns is newest-first, keep 3 newest.
     expect(remaining).toEqual([...ids].reverse().slice(0, 3));
   });
 
@@ -120,10 +133,11 @@ describe("run store", () => {
 
   it("records the manifest contents it was given", async () => {
     const scope = await createScope();
-    const runId = createRunId();
+    const startedAt = hoursAgo(1);
+    const runId = createRunId(startedAt);
     const runDir = await createRunDir(
       scope,
-      manifest(runId, "2026-07-03T10:00:00Z"),
+      manifest(runId, startedAt.toISOString()),
     );
 
     const raw = JSON.parse(

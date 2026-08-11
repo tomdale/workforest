@@ -642,11 +642,17 @@ export async function renderSetupGrid(
       return { outcome, snapshot };
     }
 
-    // Terminal state: keep the grid and completion modal up until the user
-    // dismisses them, so both the celebration and failure panes stay readable
-    // for as long as anyone wants to look. The modal swallows every key from
-    // here on, so the status line's hints and ticking elapsed time would be
-    // dead and misleading if left running behind it.
+    // Failures must release the terminal immediately so the caller can return
+    // its error and shell integrations can regain control. The scrollback
+    // summary printed by presentRun retains the actionable failure details.
+    if (outcome === "failed") {
+      return { outcome, snapshot };
+    }
+
+    // Keep a successful completion visible until it is acknowledged. The
+    // modal swallows every key from here on, so the status line's hints and
+    // ticking elapsed time would be dead and misleading if left running behind
+    // it.
     terminalStateReached = true;
     if (ticker) clearInterval(ticker);
     hideStatusLine();
