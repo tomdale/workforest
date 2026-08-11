@@ -13,6 +13,10 @@ import {
   restoreNodeModules,
 } from "./node-modules-cache.ts";
 import { createDefaultBranchResolver, runGit } from "./services/git.ts";
+import {
+  integrationProofToBoolean,
+  proveIntegration,
+} from "./services/integration-proof.ts";
 import { isGitDirty } from "./services/worktree.ts";
 import type {
   NodeModulesCacheConfig,
@@ -72,8 +76,8 @@ export type LiveNodeModulesInstall = Readonly<{
   /** Newest source-tree mtime under the checkout (generated roots excluded). */
   sourceActivityMs: number;
   /**
-   * Ancestry-only integration preference for donor ordering.
-   * Lane 1's full proof (GitHub PR) can replace this later via the seam below.
+   * Integration preference for donor ordering (full proof by default:
+   * ancestry → GitHub merged PR + Rule C).
    */
   integrated: boolean;
 }>;
@@ -254,7 +258,7 @@ export async function acquireNodeModules(
 
 /**
  * List evictable live installs for a repo identity, ordered for borrow:
- *   1. proven integrated (ancestry-only seam), oldest source activity first
+ *   1. proven integrated, oldest source activity first
  *   2. else any other evictable, oldest source activity first
  *
  * Evictable requires: eligible pnpm install, git clean, outside excludePaths,
@@ -274,7 +278,7 @@ export async function listLiveNodeModulesInstalls(
     });
   const isDirty = options.isDirty ?? isGitDirty;
   const isIntegrated =
-    options.isIntegrated ?? ((hostPath) => isAncestryIntegrated(hostPath));
+    options.isIntegrated ?? ((hostPath) => isDonorIntegrated(hostPath));
   const readSourceActivityMs =
     options.readSourceActivityMs ?? readSourceTreeActivityMs;
 
@@ -369,27 +373,30 @@ export async function listManagedCheckouts(
 }
 
 /**
- * Ancestry-only integration preference for donor ordering.
- *
- * Lane 1 seam: replace callers' `isIntegrated` inject with full proof
- * (ancestry → GitHub merged PR + Rule C) without changing acquire/borrow.
+ * Default donor integration preference: full squash-aware proof
+ * (default branch → ancestry → merged GitHub PR + Rule C).
+ * Injectable via {@link ListLiveInstallsOptions.isIntegrated} for tests.
  */
-export async function isAncestryIntegrated(hostPath: string): Promise<boolean> {
+export async function isDonorIntegrated(hostPath: string): Promise<boolean> {
   try {
     const resolver = createDefaultBranchResolver();
     const defaultBranch = await resolver.resolveWorktreeDefaultBranch(hostPath);
-    const { stdout: branchOut } = await runGit(["branch", "--show-current"], {
-      cwd: hostPath,
-    });
-    const branch = branchOut.trim();
-    if (branch && branch === defaultBranch) {
-      return true;
+    let branch: string | null = null;
+    try {
+      const { stdout } = await runGit(["branch", "--show-current"], {
+        cwd: hostPath,
+      });
+      branch = stdout.trim() || null;
+    } catch {
+      branch = null;
     }
-    await runGit(
-      ["merge-base", "--is-ancestor", "HEAD", `origin/${defaultBranch}`],
-      { cwd: hostPath },
-    );
-    return true;
+    const proof = await proveIntegration({
+      cwd: hostPath,
+      base: `origin/${defaultBranch}`,
+      branch,
+      defaultBranch,
+    });
+    return integrationProofToBoolean(proof) === true;
   } catch {
     return false;
   }
