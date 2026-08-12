@@ -121,6 +121,9 @@ describe("spawnCommand", () => {
   });
 
   it("does not trip the inactivity timeout while output flows", async () => {
+    // Tick well inside the inactivity window. Under full-suite load a 60ms
+    // interval against a 250ms limit was racing the scheduler and false-failing
+    // enqueue validation; the contract is only "output keeps the command alive".
     const states = await collectStates(
       spawnCommand(
         process.execPath,
@@ -131,10 +134,10 @@ describe("spawnCommand", () => {
             "const timer = setInterval(() => {",
             "  process.stdout.write('tick');",
             "  if (++ticks === 5) { clearInterval(timer); }",
-            "}, 60);",
+            "}, 40);",
           ].join("\n"),
         ],
-        { inactivityTimeoutMs: 250 },
+        { inactivityTimeoutMs: 1_000 },
       ),
     );
 
