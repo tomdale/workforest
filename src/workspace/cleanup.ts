@@ -2,7 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
-import { preserveNodeModules } from "../node-modules-cache.ts";
+import {
+  type PreserveNodeModulesResult,
+  preserveNodeModules,
+} from "../node-modules-cache.ts";
 import { resolveMirrorDir } from "../repositories.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import { createDefaultBranchResolver, runGit } from "../services/git.ts";
@@ -18,6 +21,7 @@ import type {
 } from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import { runParallel, type TaskState } from "../utils/task-generator.ts";
+import { disposeWorktreeCheckout } from "./dispose-worktree.ts";
 import { ensureCacheDir } from "./index.ts";
 import {
   hasWorkspaceMetadata,
@@ -659,6 +663,47 @@ async function* preserveRepositoryNodeModules({
   }
 }
 
+function disposeWorktreeMessage(
+  status: "removed" | "stale" | "missing",
+): string {
+  if (status === "stale") return "Pruned stale worktree metadata";
+  if (status === "missing") return "Worktree already absent";
+  return "Removed worktree from mirror";
+}
+
+function nodeModulesStateFromDispose(
+  repoName: string,
+  repoDir: string,
+  status: PreserveNodeModulesResult["status"],
+): CleanupState {
+  if (status === "preserved") {
+    return {
+      phase: "node-modules",
+      repo: repoName,
+      path: repoDir,
+      status: "preserved",
+    };
+  }
+  if (status === "warning") {
+    return {
+      phase: "node-modules",
+      repo: repoName,
+      path: repoDir,
+      status: "warning",
+    };
+  }
+  return {
+    phase: "node-modules",
+    repo: repoName,
+    path: repoDir,
+    status: "skipped",
+    reason:
+      status === "disabled" || status === "missing" || status === "ineligible"
+        ? status
+        : "missing",
+  };
+}
+
 async function* preserveNodeModulesForPath({
   repo,
   repoName,
@@ -763,25 +808,45 @@ export async function cleanupWorktree({
       await onState?.({ phase: "worktree-complete", repo: safeRepoName });
       removedRepos.push(safeRepoName);
     } else {
-      if (repo) {
-        for await (const state of preserveNodeModulesForPath({
-          repo,
-          repoName: safeRepoName,
-          repoDir: resolvedChangePath,
-          config: config.cache?.nodeModules,
-        })) {
-          await onState?.(state);
-        }
-      }
       let cleaned = false;
       try {
-        for await (const state of cleanupWorkspaceWorktrees(
-          mirrorDir,
-          resolvedChangePath,
-          { targetPaths: [resolvedChangePath] },
-        )) {
-          await onState?.({ phase: "worktree", repo: safeRepoName, state });
+        // Same dispose primitive as review and task teardown: preserve
+        // node_modules, remove the linked checkout, sweep residuals.
+        if (repo) {
+          await onState?.({
+            phase: "node-modules",
+            repo: safeRepoName,
+            path: resolvedChangePath,
+            status: "preserving",
+          });
         }
+        const disposed = await disposeWorktreeCheckout({
+          gitDir: mirrorDir,
+          worktreePath: resolvedChangePath,
+          ...(repo ? { repo } : {}),
+          ...(config.cache?.nodeModules
+            ? { nodeModulesConfig: config.cache.nodeModules }
+            : {}),
+          force: true,
+        });
+        if (repo) {
+          await onState?.(
+            nodeModulesStateFromDispose(
+              safeRepoName,
+              resolvedChangePath,
+              disposed.nodeModules,
+            ),
+          );
+        }
+        await onState?.({
+          phase: "worktree",
+          repo: safeRepoName,
+          state: {
+            status: "log",
+            level: "info",
+            message: disposeWorktreeMessage(disposed.status),
+          },
+        });
         cleaned = true;
       } catch (error) {
         await onState?.({
@@ -820,6 +885,9 @@ export async function cleanupWorktree({
       phase: "remove-dir",
       message: `Removing directory: ${resolvedChangePath}`,
     });
+    // disposeWorktreeCheckout already swept a linked checkout; this rm still
+    // covers the residual case where the mirror was missing and only the
+    // directory remains. force:true makes a second pass a no-op.
     await fs.rm(resolvedChangePath, { recursive: true, force: true });
     await removeWorktreeMetadata(
       path.dirname(resolvedChangePath),

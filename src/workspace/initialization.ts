@@ -874,6 +874,17 @@ export async function cancelRepoInitializations(
       );
     }
 
+    // Detached workers install their own SIGTERM handler that drains children
+    // and emits run-end. Marking cancelled alone only helps if the worker is
+    // still polling; a stuck pnpm needs the signal.
+    if (state.pid !== undefined && isProcessAlive(state.pid)) {
+      try {
+        process.kill(state.pid, "SIGTERM");
+      } catch {
+        // Worker may have exited between the liveness probe and the kill.
+      }
+    }
+
     const cancelled = await markRepoCancelled(scope, repoName, state.run_id);
     results.push(cancelled);
   }

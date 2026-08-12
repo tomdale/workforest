@@ -477,7 +477,9 @@ describe("background repository initialization", () => {
     const workspaceDir = await createWorkspace();
     const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
       expect(pid).toBe(4242);
-      expect(signal).toBe(0);
+      // Liveness probe uses signal 0; cancel then SIGTERMs the detached worker
+      // so a stuck initializer (pnpm, etc.) does not outlive the grid cancel.
+      expect(signal === 0 || signal === "SIGTERM").toBe(true);
       return true;
     });
     await startRepoInitialization({ workspaceDir, repo }, async () => 4242);
@@ -489,7 +491,7 @@ describe("background repository initialization", () => {
       status: "cancelled",
       attempt: 1,
     });
-    expect(kill).not.toHaveBeenCalledWith(4242, "SIGTERM");
+    expect(kill).toHaveBeenCalledWith(4242, "SIGTERM");
     await expect(
       readWorkspaceInitializationState(workspaceDir),
     ).resolves.toMatchObject({

@@ -6,6 +6,7 @@ const {
   statMock,
   ensureCacheDirMock,
   cleanupWorkspaceWorktreesMock,
+  disposeWorktreeCheckoutMock,
   pathExistsMock,
   preserveNodeModulesMock,
   readWorkspaceMetadataMock,
@@ -16,6 +17,7 @@ const {
   statMock: vi.fn(),
   ensureCacheDirMock: vi.fn(),
   cleanupWorkspaceWorktreesMock: vi.fn(),
+  disposeWorktreeCheckoutMock: vi.fn(),
   pathExistsMock: vi.fn(),
   preserveNodeModulesMock: vi.fn(async () => ({ status: "missing" })),
   readWorkspaceMetadataMock: vi.fn(),
@@ -69,6 +71,10 @@ vi.mock("./repository.ts", () => ({
   cleanupWorkspaceWorktrees: cleanupWorkspaceWorktreesMock,
 }));
 
+vi.mock("./dispose-worktree.ts", () => ({
+  disposeWorktreeCheckout: disposeWorktreeCheckoutMock,
+}));
+
 import {
   type CleanupState,
   cleanupWorkspace,
@@ -93,6 +99,11 @@ beforeEach(() => {
   rmMock.mockResolvedValue(undefined);
   ensureCacheDirMock.mockResolvedValue("/tmp/cache");
   pathExistsMock.mockResolvedValue(true);
+  disposeWorktreeCheckoutMock.mockResolvedValue({
+    status: "removed",
+    nodeModules: "missing",
+    branchDeleted: false,
+  });
   readWorkspaceMetadataMock.mockResolvedValue({
     workspace: {
       version: "1",
@@ -375,6 +386,7 @@ describe("cleanupWorktree", () => {
     });
 
     expect(cleanupWorkspaceWorktreesMock).not.toHaveBeenCalled();
+    expect(disposeWorktreeCheckoutMock).not.toHaveBeenCalled();
     expect(rmMock).not.toHaveBeenCalled();
     expect(removeWorktreeMetadataMock).not.toHaveBeenCalled();
     expect(states).toContainEqual({
@@ -385,5 +397,57 @@ describe("cleanupWorktree", () => {
       phase: "complete",
       removedRepos: ["api"],
     });
+  });
+
+  it("disposes a linked checkout through the shared primitive", async () => {
+    const states: CleanupState[] = [];
+    disposeWorktreeCheckoutMock.mockResolvedValue({
+      status: "removed",
+      nodeModules: "preserved",
+      branchDeleted: false,
+    });
+
+    await expect(
+      cleanupWorktree({
+        repoName: "api",
+        targetPath: "/tmp/repos/api/demo",
+        repo: {
+          name: "api",
+          remote: "git@github.com:vercel/api.git",
+        },
+        onState: (state) => {
+          states.push(state);
+        },
+      }),
+    ).resolves.toEqual({
+      dryRun: false,
+      removedRepos: ["api"],
+      deletedBranches: [],
+    });
+
+    expect(disposeWorktreeCheckoutMock).toHaveBeenCalledWith({
+      gitDir: "/tmp/cache/api.git",
+      worktreePath: "/tmp/repos/api/demo",
+      repo: {
+        name: "api",
+        remote: "git@github.com:vercel/api.git",
+      },
+      nodeModulesConfig: {
+        enabled: true,
+        maxRetainedPerRepo: 3,
+      },
+      force: true,
+    });
+    expect(cleanupWorkspaceWorktreesMock).not.toHaveBeenCalled();
+    expect(states).toContainEqual({
+      phase: "node-modules",
+      repo: "api",
+      path: "/tmp/repos/api/demo",
+      status: "preserved",
+    });
+    expect(removeWorktreeMetadataMock).toHaveBeenCalledWith(
+      "/tmp/repos/api",
+      "demo",
+    );
   });
 });

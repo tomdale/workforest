@@ -534,7 +534,7 @@ function buildReviewDeletePlan(
     preservation: {
       nodeModules: {
         action: "preserve-before-delete",
-        repositories: [],
+        repositories: [reviewWorktree.target.repo],
       },
       cachedMirrors: {
         action: "preserve",

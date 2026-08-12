@@ -2,10 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { loadWorkspaceConfig } from "../config.ts";
-import {
-  preserveNodeModules,
-  rollbackPreservedNodeModules,
-} from "../node-modules-cache.ts";
 import { acquireNodeModules } from "../node-modules-lifecycle.ts";
 import { validateRepositoryComponent } from "../repository-components.ts";
 import type { ServiceEventSink } from "../services/events.ts";
@@ -23,7 +19,6 @@ import {
   branchExists,
   deleteBranchIfPossible,
   isGitDirty,
-  removeWorktree,
   requireCurrentBranch,
   withGitWorktreeLock,
 } from "../services/worktree.ts";
@@ -40,6 +35,7 @@ import {
   validateResourceName,
 } from "../utils/path-safety.ts";
 import { isSlug } from "../utils/slug.ts";
+import { disposeWorktreeCheckout } from "./dispose-worktree.ts";
 import {
   appendTasks,
   getTaskSetupLogRelativePath,
@@ -581,30 +577,23 @@ async function removeWorkspaceTasks({
     }
 
     const repo = reposByName.get(entry.parent_repo);
-    const preserved = repo
-      ? await preserveNodeModules({
-          repo,
-          repoDir: absolutePath,
-          config: config.cache?.nodeModules,
-        })
-      : { status: "missing" as const };
-
     await withGitWorktreeLock(parentRepoDir, async () => {
-      try {
-        for await (const _state of removeWorktree({
-          gitDir: parentRepoDir,
-          worktreePath: absolutePath,
-          force,
-          lock: false,
-          timeoutMs: 30_000,
-        })) {
-          // Drained; task removal does not surface per-step progress.
-        }
-      } catch (error) {
-        await rollbackPreservedNodeModules(preserved);
-        throw error;
-      }
-      await deleteBranchIfPossible(parentRepoDir, entry.branch, force);
+      await disposeWorktreeCheckout({
+        gitDir: parentRepoDir,
+        worktreePath: absolutePath,
+        ...(repo ? { repo } : {}),
+        ...(config.cache?.nodeModules
+          ? { nodeModulesConfig: config.cache.nodeModules }
+          : {}),
+        // Dirty/merged gates above own safety; force git removal so it cannot
+        // re-check mid-delete after those checks passed. Branch deletion still
+        // respects the caller's --force (safe `-d` vs abandon `-D`).
+        force: true,
+        branch: entry.branch,
+        forceBranchDelete: force,
+        lock: false,
+        timeoutMs: 30_000,
+      });
     });
 
     removed.push(entry);
@@ -678,30 +667,20 @@ async function removeRepositoryTasks({
       );
     }
 
-    const preserved = repo
-      ? await preserveNodeModules({
-          repo,
-          repoDir: absolutePath,
-          config: config.cache?.nodeModules,
-        })
-      : { status: "missing" as const };
-
     await withGitWorktreeLock(resolvedParentRepoDir, async () => {
-      try {
-        for await (const _state of removeWorktree({
-          gitDir: resolvedParentRepoDir,
-          worktreePath: absolutePath,
-          force,
-          lock: false,
-          timeoutMs: 30_000,
-        })) {
-          // Drained; task removal does not surface per-step progress.
-        }
-      } catch (error) {
-        await rollbackPreservedNodeModules(preserved);
-        throw error;
-      }
-      await deleteBranchIfPossible(resolvedParentRepoDir, entry.branch, force);
+      await disposeWorktreeCheckout({
+        gitDir: resolvedParentRepoDir,
+        worktreePath: absolutePath,
+        ...(repo ? { repo } : {}),
+        ...(config.cache?.nodeModules
+          ? { nodeModulesConfig: config.cache.nodeModules }
+          : {}),
+        force: true,
+        branch: entry.branch,
+        forceBranchDelete: force,
+        lock: false,
+        timeoutMs: 30_000,
+      });
     });
 
     removed.push(entry);

@@ -417,10 +417,13 @@ describe("workspace tasks", () => {
       ],
     });
 
-    expect(runGitMock).toHaveBeenCalledWith(["worktree", "remove", targetDir], {
-      cwd: path.join(workspaceDir, "front"),
-      timeout: 30_000,
-    });
+    expect(runGitMock).toHaveBeenCalledWith(
+      ["worktree", "remove", "--force", targetDir],
+      {
+        cwd: path.join(workspaceDir, "front"),
+        timeout: 30_000,
+      },
+    );
     expect(runGitMock).toHaveBeenCalledWith(
       ["branch", "-d", "tomdale/fix-tests"],
       { cwd: path.join(workspaceDir, "front") },
@@ -736,10 +739,13 @@ describe("workspace tasks", () => {
       ],
     });
 
-    expect(runGitMock).toHaveBeenCalledWith(["worktree", "remove", taskDir], {
-      cwd: parentRepoDir,
-      timeout: 30_000,
-    });
+    expect(runGitMock).toHaveBeenCalledWith(
+      ["worktree", "remove", "--force", taskDir],
+      {
+        cwd: parentRepoDir,
+        timeout: 30_000,
+      },
+    );
     expect(runGitMock).toHaveBeenCalledWith(
       ["branch", "-d", "tomdale/fix-tests"],
       { cwd: parentRepoDir },

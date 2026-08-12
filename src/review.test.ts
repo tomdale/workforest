@@ -3,11 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { runGitMock, runCommandMock, ensureMirrorRepoMock } = vi.hoisted(() => ({
-  runGitMock: vi.fn(),
-  runCommandMock: vi.fn(),
-  ensureMirrorRepoMock: vi.fn(),
-}));
+const { runGitMock, spawnCommandMock, ensureMirrorRepoMock } = vi.hoisted(
+  () => ({
+    runGitMock: vi.fn(),
+    spawnCommandMock: vi.fn(),
+    ensureMirrorRepoMock: vi.fn(),
+  }),
+);
 
 const ORIGINAL_CACHE_DIR = process.env["WORKFOREST_CACHE_DIR"];
 const tempDirs: string[] = [];
@@ -18,6 +20,19 @@ async function createTempDir(prefix: string): Promise<string> {
   return dir;
 }
 
+async function* successfulSpawn(): AsyncGenerator<{
+  status: "running" | "completed";
+}> {
+  yield { status: "running" };
+  yield { status: "completed" };
+}
+
+async function* failedSpawn(
+  error: Error,
+): AsyncGenerator<{ status: "failed"; error: Error }> {
+  yield { status: "failed", error };
+}
+
 async function importReviewWithMocks(): Promise<typeof import("./review.ts")> {
   vi.doMock("./services/git.ts", () => ({
     createDefaultBranchResolver: () => ({
@@ -25,9 +40,15 @@ async function importReviewWithMocks(): Promise<typeof import("./review.ts")> {
     }),
     runGit: runGitMock,
   }));
-  vi.doMock("./utils/exec.ts", () => ({
-    runCommand: runCommandMock,
-  }));
+  vi.doMock("./utils/task-generator.ts", async () => {
+    const actual = await vi.importActual<
+      typeof import("./utils/task-generator.ts")
+    >("./utils/task-generator.ts");
+    return {
+      ...actual,
+      spawnCommand: spawnCommandMock,
+    };
+  });
   vi.doMock("./workspace/repository.ts", () => ({
     ensureMirrorRepo: ensureMirrorRepoMock,
   }));
@@ -38,10 +59,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.resetModules();
   vi.unmock("./services/git.ts");
-  vi.unmock("./utils/exec.ts");
+  vi.unmock("./utils/task-generator.ts");
   vi.unmock("./workspace/repository.ts");
   runGitMock.mockReset();
-  runCommandMock.mockReset();
+  spawnCommandMock.mockReset();
   ensureMirrorRepoMock.mockReset();
 
   if (ORIGINAL_CACHE_DIR === undefined) {
@@ -207,7 +228,7 @@ describe("review worktrees", () => {
       if (args[0] === "branch") return { stdout: "pull/123\n", stderr: "" };
       return { stdout: "", stderr: "" };
     });
-    runCommandMock.mockResolvedValue({ stdout: "", stderr: "" });
+    spawnCommandMock.mockImplementation(() => successfulSpawn());
 
     const { createReviewWorktree } = await importReviewWithMocks();
     const events: import("./services/events.ts").ServiceEvent[] = [];
@@ -229,7 +250,7 @@ describe("review worktrees", () => {
       ["worktree", "add", "--detach", targetDir, "origin/main"],
       { cwd: path.join(cacheDir, "omniagent.git"), timeout: 120_000 },
     );
-    expect(runCommandMock).toHaveBeenCalledWith(
+    expect(spawnCommandMock).toHaveBeenCalledWith(
       "gh",
       ["pr", "checkout", "123"],
       expect.objectContaining({ cwd: targetDir }),
@@ -352,7 +373,7 @@ describe("review worktrees", () => {
       },
     });
     expect(ensureMirrorRepoMock).not.toHaveBeenCalled();
-    expect(runCommandMock).not.toHaveBeenCalled();
+    expect(spawnCommandMock).not.toHaveBeenCalled();
   });
 
   it("removes the created worktree if gh checkout fails", async () => {
@@ -380,7 +401,9 @@ describe("review worktrees", () => {
       }
       return { stdout: "", stderr: "" };
     });
-    runCommandMock.mockRejectedValue(new Error("checkout failed"));
+    spawnCommandMock.mockImplementation(() =>
+      failedSpawn(new Error("checkout failed")),
+    );
 
     const { createReviewWorktree } = await importReviewWithMocks();
     await expect(
@@ -420,7 +443,9 @@ describe("review worktrees", () => {
       }
       return { stdout: "", stderr: "" };
     });
-    runCommandMock.mockRejectedValue(new Error("checkout failed"));
+    spawnCommandMock.mockImplementation(() =>
+      failedSpawn(new Error("checkout failed")),
+    );
 
     const { createReviewWorktree } = await importReviewWithMocks();
     await expect(

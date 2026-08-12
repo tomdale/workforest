@@ -1,13 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { hasAny, pathExists } from "@wf-plugin/core";
-import { getCacheDir } from "./config.ts";
+import { getCacheDir, loadWorkspaceConfig } from "./config.ts";
 import { resolveMirrorDir } from "./repositories.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
 import type { ServiceEventSink } from "./services/events.ts";
 import {
   addWorktree,
-  deleteBranchIfPossible,
   getCurrentBranch,
   isGitDirty,
   removeWorktree,
@@ -16,9 +15,10 @@ import { isShellAutoCdEnabled } from "./shell.ts";
 import type { RepositorySource } from "./types.ts";
 import { type PresentRunOutcome, presentRun } from "./ui/setup-view/present.ts";
 import { compactHome } from "./utils/display-path.ts";
-import { runCommand } from "./utils/exec.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
+import { spawnCommand } from "./utils/task-generator.ts";
+import { disposeWorktreeCheckout } from "./workspace/dispose-worktree.ts";
 import { runScopedRepoSetupPipeline } from "./workspace/index.ts";
 import {
   initializeWorktreeSetup,
@@ -577,9 +577,17 @@ async function* reviewCheckoutGitPipeline(
       status: "running",
       message: `Checking out PR #${target.prNumber}`,
     };
-    await runCommand("gh", ["pr", "checkout", String(target.prNumber)], {
-      cwd: targetDir,
-    });
+    // spawnCommand (not runCommand) so Ctrl-C → terminateRunningCommands can
+    // stop `gh` the same way it stops other long-running setup children.
+    for await (const state of spawnCommand(
+      "gh",
+      ["pr", "checkout", String(target.prNumber)],
+      { cwd: targetDir },
+    )) {
+      if (state.status === "failed") {
+        throw state.error;
+      }
+    }
 
     const branch = await getCurrentBranch(targetDir);
     recordMetadata({
@@ -672,30 +680,27 @@ export async function removeReviewWorktree({
     };
   }
 
-  if (exists) {
-    if (!force && (await isGitDirty(targetDir))) {
-      throw new Error(
-        `Review worktree "${target.repo}#${target.prNumber}" has uncommitted changes. Commit, discard, or pass --force.`,
-      );
-    }
-
-    // The explicit status check owns the safety decision. Force Git's removal
-    // after that check so it cannot repeat a dirty-tree check after beginning
-    // to delete files, which can leave a partially removed worktree when the
-    // filesystem changes during cleanup.
-    for await (const _state of removeWorktree({
-      gitDir: mirrorDir,
-      worktreePath: targetDir,
-      force: true,
-      timeoutMs: 30_000,
-    })) {
-      // Drained; review worktree removal does not surface per-step progress.
-    }
+  if (exists && !force && (await isGitDirty(targetDir))) {
+    throw new Error(
+      `Review worktree "${target.repo}#${target.prNumber}" has uncommitted changes. Commit, discard, or pass --force.`,
+    );
   }
 
-  if (branch) {
-    await deleteBranchIfPossible(mirrorDir, branch, force);
-  }
+  // Same physical teardown as standalone worktrees and nested tasks: preserve
+  // node_modules, then remove. The explicit dirty check above owns safety;
+  // force git removal afterward so it cannot re-check mid-delete.
+  const { config } = await loadWorkspaceConfig();
+  await disposeWorktreeCheckout({
+    gitDir: mirrorDir,
+    worktreePath: targetDir,
+    repo,
+    ...(config.cache?.nodeModules
+      ? { nodeModulesConfig: config.cache.nodeModules }
+      : {}),
+    force: true,
+    ...(branch ? { branch, forceBranchDelete: force } : {}),
+    timeoutMs: 30_000,
+  });
 
   if (await readWorkspaceMetadata(workspaceDir)) {
     await removeReviewWorktreeMetadata(workspaceDir, target.prNumber);
