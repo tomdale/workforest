@@ -97,7 +97,7 @@ describe("pnpmInstallInitializer", () => {
     expect(spawnCommandMock).toHaveBeenCalledTimes(2);
     expect(spawnCommandMock.mock.calls[1]).toMatchObject([
       "pnpm",
-      ["install"],
+      ["install", "--config.confirmModulesPurge=false"],
       { cwd: repoDir },
     ]);
     expect(states).toContainEqual({
