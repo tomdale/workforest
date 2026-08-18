@@ -34,11 +34,44 @@ async function createMirror(
   remote: string,
 ): Promise<void> {
   const mirrorDir = path.join(cacheDir, directoryName);
+  const sourceDir = await mkdtemp(
+    path.join(os.tmpdir(), "workforest-repository-source-"),
+  );
+  tempDirs.push(sourceDir);
+
+  await execFileAsync("git", ["init", "--initial-branch=main", "--quiet"], {
+    cwd: sourceDir,
+  });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+    cwd: sourceDir,
+  });
+  await execFileAsync("git", ["config", "user.name", "Test User"], {
+    cwd: sourceDir,
+  });
+  await writeFile(path.join(sourceDir, "README.md"), "initial\n", "utf8");
+  await execFileAsync("git", ["add", "README.md"], { cwd: sourceDir });
+  await execFileAsync("git", ["commit", "--quiet", "-m", "initial"], {
+    cwd: sourceDir,
+  });
+
   await mkdir(mirrorDir, { recursive: true });
   await execFileAsync("git", ["init", "--bare", "--quiet"], {
     cwd: mirrorDir,
   });
   await execFileAsync("git", ["remote", "add", "origin", remote], {
+    cwd: mirrorDir,
+  });
+  await execFileAsync(
+    "git",
+    ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+    { cwd: mirrorDir },
+  );
+  await execFileAsync(
+    "git",
+    ["push", "--quiet", mirrorDir, "main:refs/remotes/origin/main"],
+    { cwd: sourceDir },
+  );
+  await execFileAsync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], {
     cwd: mirrorDir,
   });
 }

@@ -57,7 +57,7 @@ export const CONCEPTS: readonly Readonly<{ term: string; summary: string }>[] =
     {
       term: "cached mirror",
       summary:
-        "A local bare clone each worktree is built from, kept for fast offline setup",
+        "A local bare mirror each worktree is built from, kept for fast offline setup",
     },
     {
       term: "review workspace",
@@ -174,7 +174,7 @@ Nouns:
 
   cached mirror        A bare local clone of a remote repository kept under \`~/.cache/workforest/\`.
                        All worktrees are built from these mirrors, so creation works offline after
-                       the first clone, and is fast on every subsequent call.
+                       the first sync, and is fast on every subsequent call.
                        Inspect and repair with \`wf cache list\` and \`wf cache doctor\`.
 
   review workspace     A persistent bare workspace for reviewing pull requests from one repository.
@@ -188,8 +188,8 @@ Nouns:
 
 Git model:
   Creating a worktree or workspace follows this sequence for each repository:
-    1. Clone the remote as a bare mirror into \`~/.cache/workforest/\` if one does not exist.
-       The clone uses \`--filter=blob:none\` to skip file blobs (fetched on demand).
+    1. Seed or sync the remote as a bare mirror under \`~/.cache/workforest/\`.
+       New mirrors use \`--filter=blob:none\` to skip file blobs (fetched on demand).
     2. Create a git worktree from the mirror onto a new branch whose name is derived
        from the name you gave.
     3. Run \`pnpm install\` (or the configured installer) inside the worktree.

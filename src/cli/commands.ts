@@ -1091,7 +1091,7 @@ export const commandRegistry: CommandRegistry = {
         path: ["cache"],
         summary: "Manage cached repositories",
         description:
-          "The cached bare mirrors that workforest clones from to create worktrees, workspaces, and tasks live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to clone or fetch, `doctor --fix` to inspect and repair, and `delete`/`clean` to reclaim space.",
+          "The cached bare mirrors that workforest seeds and syncs to create worktrees, workspaces, and tasks live under `$WORKFOREST_CACHE_DIR`, fetched with `--filter=blob:none` to stay small. The usual lifecycle is `sync` to seed or update, `doctor --fix` to diagnose and repair, and `delete`/`clean` to reclaim space.",
         help: { kind: "command", command: "cache" },
         children: [
           leaf({
@@ -1197,7 +1197,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["cache", "sync"],
             summary: "Sync cached repositories",
             description:
-              "Fetches new commits for existing cached mirrors, or clones missing repository specifiers as cached bare mirrors over the network using `--filter=blob:none`. With no repositories, syncs every cached mirror. Each repository is reported independently: a failed sync does not stop the rest, and any failure exits 1.",
+              "Fetches new commits for existing cached mirrors, or seeds missing repository specifiers as cached bare mirrors over the network using `--filter=blob:none`. With no repositories, syncs every cached mirror. Each repository is reported independently: a failed sync does not stop the rest, and any failure exits 1.",
             handler: "cache.sync",
             help: nestedHelp("cache", "sync"),
             operands: operands(
@@ -1223,7 +1223,7 @@ export const commandRegistry: CommandRegistry = {
               {
                 command: "wf cache sync vercel/next.js facebook/react",
                 description:
-                  "Update cached matches and clone missing mirrors in one invocation.",
+                  "Update cached matches and seed missing mirrors in one invocation.",
               },
             ],
             outputModes: ["report", "json"],
@@ -1234,7 +1234,7 @@ export const commandRegistry: CommandRegistry = {
             path: ["cache", "doctor"],
             summary: "Diagnose cached repositories",
             description:
-              "Diagnoses cached bare mirrors for integrity problems — missing origin remote, non-bare or unreadable repositories, and stale worktree registrations — and reports each one's health. With no repositories, diagnoses every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any diagnosed repository is unhealthy (in both report and JSON modes).",
+              "Diagnoses cached bare mirrors for invariant problems — missing origin remote, non-bare or unreadable repositories, noncanonical fetch refspecs, misplaced remote refs, case-conflicting remote refs, missing default remote-tracking refs, and stale worktree registrations — and reports each one's health. With no repositories, diagnoses every mirror. Reads only the local cache unless `--fix` is passed. Exits 1 if any diagnosed repository is unhealthy (in both report and JSON modes).",
             handler: "cache.doctor",
             help: nestedHelp("cache", "doctor"),
             operands: operands(
@@ -1242,7 +1242,7 @@ export const commandRegistry: CommandRegistry = {
               null,
               "repositories",
               undefined,
-              "Zero or more repositories to check; omit to check all cached mirrors.",
+              "Zero or more repositories to diagnose; omit to diagnose all cached mirrors.",
             ),
             flags: [
               booleanFlag(
@@ -1261,7 +1261,7 @@ export const commandRegistry: CommandRegistry = {
             examples: [
               {
                 command: "wf cache doctor",
-                description: "Report health for every cached mirror.",
+                description: "Diagnose every cached mirror.",
               },
               {
                 command: "wf cache doctor --json",

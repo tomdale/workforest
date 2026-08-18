@@ -30,15 +30,71 @@ async function createMirror(
   cacheDir: string,
   name: string,
   remote: string,
-): Promise<void> {
+): Promise<{ mirrorDir: string; sourceDir: string; initialSha: string }> {
   const mirrorDir = path.join(cacheDir, name);
-  await mkdir(mirrorDir);
+  const sourceDir = await mkdtemp(
+    path.join(os.tmpdir(), "workforest-cache-source-"),
+  );
+  tempDirs.push(sourceDir);
+
+  await execFileAsync("git", ["init", "--initial-branch=main", "--quiet"], {
+    cwd: sourceDir,
+  });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+    cwd: sourceDir,
+  });
+  await execFileAsync("git", ["config", "user.name", "Test User"], {
+    cwd: sourceDir,
+  });
+  await writeFile(path.join(sourceDir, "README.md"), "initial\n", "utf8");
+  await execFileAsync("git", ["add", "README.md"], { cwd: sourceDir });
+  await execFileAsync("git", ["commit", "--quiet", "-m", "initial"], {
+    cwd: sourceDir,
+  });
+  const { stdout } = await execFileAsync("git", ["rev-parse", "main"], {
+    cwd: sourceDir,
+  });
+  const initialSha = stdout.trim();
+
+  await mkdir(mirrorDir, { recursive: true });
   await execFileAsync("git", ["init", "--bare", "--quiet"], {
     cwd: mirrorDir,
   });
   await execFileAsync("git", ["remote", "add", "origin", remote], {
     cwd: mirrorDir,
   });
+  await execFileAsync(
+    "git",
+    ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+    { cwd: mirrorDir },
+  );
+  await execFileAsync(
+    "git",
+    ["push", "--quiet", mirrorDir, "main:refs/remotes/origin/main"],
+    { cwd: sourceDir },
+  );
+  await execFileAsync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], {
+    cwd: mirrorDir,
+  });
+
+  return { mirrorDir, sourceDir, initialSha };
+}
+
+async function commitSource(
+  sourceDir: string,
+  filename: string,
+  contents: string,
+  message: string,
+): Promise<string> {
+  await writeFile(path.join(sourceDir, filename), contents, "utf8");
+  await execFileAsync("git", ["add", filename], { cwd: sourceDir });
+  await execFileAsync("git", ["commit", "--quiet", "-m", message], {
+    cwd: sourceDir,
+  });
+  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+    cwd: sourceDir,
+  });
+  return stdout.trim();
 }
 
 async function createBrokenMirror(
@@ -311,6 +367,168 @@ describe("cache commands", () => {
     expect(fixed.stdout).toContain("broken");
     expect(fixed.stdout).toContain("damaged");
     expect(fixed.stdout).toContain("invalid");
+  }, 15_000);
+
+  it("reports and fixes local cache invariant violations safely", async () => {
+    const cacheDir = await createCache();
+    const { mirrorDir, sourceDir, initialSha } = await createMirror(
+      cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    const featureSha = await commitSource(
+      sourceDir,
+      "feature.txt",
+      "feature\n",
+      "feature",
+    );
+    await execFileAsync(
+      "git",
+      ["push", "--quiet", mirrorDir, "HEAD:refs/heads/object-keeper"],
+      { cwd: sourceDir },
+    );
+    await execFileAsync(
+      "git",
+      ["update-ref", "-d", "refs/heads/object-keeper"],
+      { cwd: mirrorDir },
+    );
+
+    await execFileAsync(
+      "git",
+      ["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"],
+      { cwd: mirrorDir },
+    );
+    await execFileAsync("git", ["update-ref", "refs/heads/main", initialSha], {
+      cwd: mirrorDir,
+    });
+    await execFileAsync(
+      "git",
+      ["update-ref", "refs/remotes/origin/feature", initialSha],
+      { cwd: mirrorDir },
+    );
+    await execFileAsync(
+      "git",
+      ["update-ref", "refs/heads/feature", featureSha],
+      { cwd: mirrorDir },
+    );
+    await execFileAsync(
+      "git",
+      ["update-ref", "refs/remotes/origin/Test-Branch", initialSha],
+      { cwd: mirrorDir },
+    );
+    await execFileAsync("git", ["pack-refs", "--all"], { cwd: mirrorDir });
+    await execFileAsync(
+      "git",
+      ["update-ref", "refs/remotes/origin/test-branch", featureSha],
+      { cwd: mirrorDir },
+    );
+
+    const doctor = await runCommand(["cache", "doctor", "front", "--json"]);
+    const fixed = await runCommand([
+      "cache",
+      "doctor",
+      "front",
+      "--fix",
+      "--json",
+    ]);
+
+    expect(doctor.exitCode).toBe(1);
+    const doctorJson = JSON.parse(doctor.stdout);
+    expect(doctorJson).toEqual({
+      ok: true,
+      data: [expect.objectContaining({ health: "attention" })],
+    });
+    const doctorIssues = doctorJson.data[0].issues as string[];
+    expect(doctorIssues).toEqual(
+      expect.arrayContaining([
+        "Noncanonical origin fetch refspec",
+        "Remote state stored under refs/heads/main",
+        "refs/heads/feature differs from origin/feature",
+      ]),
+    );
+    expect(
+      doctorIssues.some(
+        (issue) =>
+          issue.startsWith("Case-conflicting remote refs: ") &&
+          issue.includes("refs/remotes/origin/Test-Branch") &&
+          issue.includes("refs/remotes/origin/test-branch"),
+      ),
+    ).toBe(true);
+    expect(fixed.exitCode).toBe(1);
+    expect(JSON.parse(fixed.stdout)).toEqual({
+      ok: true,
+      data: [
+        expect.objectContaining({
+          health: "attention",
+          issues: ["refs/heads/feature differs from origin/feature"],
+        }),
+      ],
+    });
+    await expect(
+      execFileAsync("git", ["config", "--get-all", "remote.origin.fetch"], {
+        cwd: mirrorDir,
+      }),
+    ).resolves.toMatchObject({
+      stdout: "+refs/heads/*:refs/remotes/origin/*\n",
+    });
+    await expect(
+      execFileAsync(
+        "git",
+        ["show-ref", "--verify", "--quiet", "refs/heads/main"],
+        { cwd: mirrorDir },
+      ),
+    ).rejects.toThrow();
+    await expect(
+      execFileAsync(
+        "git",
+        ["show-ref", "--verify", "--quiet", "refs/heads/feature"],
+        { cwd: mirrorDir },
+      ),
+    ).resolves.toMatchObject({ stdout: "" });
+  }, 15_000);
+
+  it("preserves duplicate local heads that are checked out by worktrees", async () => {
+    const cacheDir = await createCache();
+    const { mirrorDir, initialSha } = await createMirror(
+      cacheDir,
+      "front.git",
+      "git@github.com:vercel/front.git",
+    );
+    // Duplicate the remote tip under refs/heads/main so a worktree can check
+    // it out; doctor --fix must leave that checked-out local head alone.
+    await execFileAsync("git", ["update-ref", "refs/heads/main", initialSha], {
+      cwd: mirrorDir,
+    });
+    const worktreeDir = path.join(cacheDir, "front-worktree");
+    await execFileAsync("git", ["worktree", "add", worktreeDir, "main"], {
+      cwd: mirrorDir,
+    });
+
+    const result = await runCommand([
+      "cache",
+      "doctor",
+      "front",
+      "--fix",
+      "--json",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: true,
+      data: [
+        expect.objectContaining({
+          health: "attention",
+          issues: ["refs/heads/main duplicates origin/main but is checked out"],
+        }),
+      ],
+    });
+    await expect(
+      execFileAsync(
+        "git",
+        ["show-ref", "--verify", "--quiet", "refs/heads/main"],
+        { cwd: mirrorDir },
+      ),
+    ).resolves.toMatchObject({ stdout: "" });
   }, 15_000);
 
   it("syncs cached selections and continues after missing repository errors", async () => {

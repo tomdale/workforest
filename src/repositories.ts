@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathExists } from "@wf-plugin/core";
 import { getCacheDir, reposFromSlugs } from "./config.ts";
 import { validateRepositoryComponent } from "./repository-components.ts";
-import { runGit } from "./services/git.ts";
+import { CANONICAL_CACHE_FETCH_REFSPEC, runGit } from "./services/git.ts";
 import { withGitWorktreeLock } from "./services/worktree.ts";
 import type { RepositorySource } from "./types.ts";
 import { ensureDir } from "./utils/fs.ts";
@@ -365,13 +365,24 @@ export async function repairCachedRepository(
 ): Promise<CachedRepository> {
   if (repository.health === "invalid") {
     throw new Error(
-      `${repositoryDisplayName(repository)} is not a valid bare Git repository. Delete and add it again.`,
+      `${repositoryDisplayName(repository)} is not a valid bare Git repository. Delete and sync it again.`,
     );
   }
 
+  await runGit(
+    [
+      "config",
+      "--replace-all",
+      "remote.origin.fetch",
+      CANONICAL_CACHE_FETCH_REFSPEC,
+    ],
+    { cwd: repository.mirrorPath },
+  );
   await withGitWorktreeLock(repository.mirrorPath, () =>
     runGit(["worktree", "prune"], { cwd: repository.mirrorPath }),
   );
+  await repairCaseConflictingRemoteRefs(repository.mirrorPath);
+  await deleteUnownedDuplicateLocalHeads(repository.mirrorPath);
   await runGit(["fsck", "--connectivity-only"], {
     cwd: repository.mirrorPath,
   });
@@ -506,6 +517,7 @@ async function inspectCachedRepository(
   if (!remote) {
     issues.push("Missing origin remote");
   }
+  await inspectFetchRefspec(mirrorPath, issues);
 
   const identity = remote ? getRemoteIdentity(remote) : null;
   const worktrees = await readWorktrees(mirrorPath, issues);
@@ -516,6 +528,25 @@ async function inspectCachedRepository(
     issues.push(
       `${staleWorktrees.length} stale worktree registration${staleWorktrees.length === 1 ? "" : "s"}`,
     );
+  }
+  await inspectRemoteTrackingRefs(mirrorPath, worktrees, issues);
+  const defaultBranch = await readDefaultBranch(mirrorPath);
+  if (defaultBranch) {
+    try {
+      await runGit(
+        [
+          "show-ref",
+          "--verify",
+          "--quiet",
+          `refs/remotes/origin/${defaultBranch}`,
+        ],
+        { cwd: mirrorPath },
+      );
+    } catch {
+      issues.push(
+        `Missing default remote-tracking ref origin/${defaultBranch}`,
+      );
+    }
   }
 
   const headIssue = await readHeadIssue(mirrorPath);
@@ -529,13 +560,170 @@ async function inspectCachedRepository(
     remote,
     mirrorPath,
     directoryName,
-    defaultBranch: await readDefaultBranch(mirrorPath),
+    defaultBranch,
     sizeBytes: await readGitStorageSize(mirrorPath),
     lastFetchedAt: await readLastFetchedAt(mirrorPath),
     worktrees,
     health: issues.length === 0 ? "healthy" : "attention",
     issues,
   };
+}
+
+async function inspectFetchRefspec(
+  mirrorPath: string,
+  issues: string[],
+): Promise<void> {
+  try {
+    const { stdout } = await runGit(
+      ["config", "--get-all", "remote.origin.fetch"],
+      { cwd: mirrorPath },
+    );
+    const refspecs = stdout.trim().split("\n").filter(Boolean);
+    if (
+      refspecs.length !== 1 ||
+      refspecs[0] !== CANONICAL_CACHE_FETCH_REFSPEC
+    ) {
+      issues.push("Noncanonical origin fetch refspec");
+    }
+  } catch {
+    issues.push("Noncanonical origin fetch refspec");
+  }
+}
+
+async function inspectRemoteTrackingRefs(
+  mirrorPath: string,
+  worktrees: readonly CachedRepositoryWorktree[],
+  issues: string[],
+): Promise<void> {
+  let localHeads: Map<string, string>;
+  let remoteHeads: Map<string, string>;
+  try {
+    ({ localHeads, remoteHeads } = await readLocalAndRemoteHeads(mirrorPath));
+  } catch {
+    issues.push("Unable to inspect cached refs");
+    return;
+  }
+  const checkedOutBranches = new Set(
+    worktrees.flatMap((worktree) =>
+      worktree.branch && !worktree.detached ? [worktree.branch] : [],
+    ),
+  );
+
+  for (const [branch, localSha] of localHeads) {
+    const remoteSha = remoteHeads.get(branch);
+    if (!remoteSha) {
+      continue;
+    }
+
+    const localRef = `refs/heads/${branch}`;
+    if (localSha === remoteSha) {
+      if (checkedOutBranches.has(branch)) {
+        issues.push(
+          `${localRef} duplicates origin/${branch} but is checked out`,
+        );
+      } else {
+        issues.push(`Remote state stored under ${localRef}`);
+      }
+      continue;
+    }
+
+    issues.push(`${localRef} differs from origin/${branch}`);
+  }
+
+  for (const refs of caseConflictingRemoteRefs(remoteHeads)) {
+    issues.push(`Case-conflicting remote refs: ${refs.join(", ")}`);
+  }
+}
+
+async function readLocalAndRemoteHeads(mirrorPath: string): Promise<{
+  localHeads: Map<string, string>;
+  remoteHeads: Map<string, string>;
+}> {
+  const { stdout } = await runGit(
+    [
+      "for-each-ref",
+      "--format=%(refname) %(objectname)",
+      "refs/heads/",
+      "refs/remotes/origin/",
+    ],
+    { cwd: mirrorPath },
+  );
+
+  const localHeads = new Map<string, string>();
+  const remoteHeads = new Map<string, string>();
+  for (const line of stdout.trim().split("\n").filter(Boolean)) {
+    const [ref, sha] = line.split(" ");
+    if (!ref || !sha) {
+      continue;
+    }
+
+    if (ref.startsWith("refs/heads/")) {
+      localHeads.set(ref.slice("refs/heads/".length), sha);
+    } else if (
+      ref.startsWith("refs/remotes/origin/") &&
+      ref !== "refs/remotes/origin/HEAD"
+    ) {
+      remoteHeads.set(ref.slice("refs/remotes/origin/".length), sha);
+    }
+  }
+
+  return { localHeads, remoteHeads };
+}
+
+function caseConflictingRemoteRefs(
+  remoteHeads: ReadonlyMap<string, string>,
+): string[][] {
+  const groups = new Map<string, string[]>();
+  for (const branch of remoteHeads.keys()) {
+    const key = branch.toLowerCase();
+    const refs = groups.get(key) ?? [];
+    refs.push(`refs/remotes/origin/${branch}`);
+    groups.set(key, refs);
+  }
+
+  return [...groups.values()]
+    .filter((refs) => refs.length > 1)
+    .map((refs) => refs.sort((a, b) => a.localeCompare(b)));
+}
+
+async function repairCaseConflictingRemoteRefs(
+  mirrorPath: string,
+): Promise<void> {
+  const { remoteHeads } = await readLocalAndRemoteHeads(mirrorPath);
+  for (const refs of caseConflictingRemoteRefs(remoteHeads)) {
+    for (const ref of refs) {
+      await runGit(["update-ref", "-d", ref], { cwd: mirrorPath });
+    }
+  }
+}
+
+async function deleteUnownedDuplicateLocalHeads(
+  mirrorPath: string,
+): Promise<void> {
+  const worktreeIssues: string[] = [];
+  const worktrees = await readWorktrees(mirrorPath, worktreeIssues);
+  if (worktreeIssues.length > 0) {
+    return;
+  }
+  const checkedOutBranches = new Set(
+    worktrees.flatMap((worktree) =>
+      worktree.branch && !worktree.detached ? [worktree.branch] : [],
+    ),
+  );
+  const { localHeads, remoteHeads } = await readLocalAndRemoteHeads(mirrorPath);
+
+  for (const [branch, localSha] of localHeads) {
+    if (checkedOutBranches.has(branch)) {
+      continue;
+    }
+
+    const remoteSha = remoteHeads.get(branch);
+    if (remoteSha && remoteSha === localSha) {
+      await runGit(["update-ref", "-d", `refs/heads/${branch}`, localSha], {
+        cwd: mirrorPath,
+      });
+    }
+  }
 }
 
 async function readRemote(mirrorPath: string): Promise<string | null> {
