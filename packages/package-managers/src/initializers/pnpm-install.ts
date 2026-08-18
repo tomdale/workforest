@@ -101,10 +101,15 @@ async function* execute(context: InitializerContext) {
 
     if (versionPrefix) {
       command = versionPrefix.command;
-      args = [...versionPrefix.args, "pnpm", "install"];
+      args = [
+        ...versionPrefix.args,
+        "pnpm",
+        "install",
+        "--config.confirmModulesPurge=false",
+      ];
     } else {
       command = "pnpm";
-      args = ["install"];
+      args = ["install", "--config.confirmModulesPurge=false"];
     }
 
     const fallbackInstall = spawnCommand(command, args, {
