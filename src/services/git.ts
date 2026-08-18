@@ -9,6 +9,21 @@ import {
   type TaskState,
 } from "../utils/task-generator.ts";
 
+export const CANONICAL_CACHE_FETCH_REFSPEC =
+  "+refs/heads/*:refs/remotes/origin/*";
+
+export function cacheFetchArgs(options: { filter?: boolean } = {}): string[] {
+  return [
+    "fetch",
+    "--prune",
+    "--no-tags",
+    ...(options.filter ? ["--filter=blob:none"] : []),
+    "--refmap=",
+    "origin",
+    CANONICAL_CACHE_FETCH_REFSPEC,
+  ];
+}
+
 export function runGit(
   args: string[],
   options: RunCommandOptions = {},
@@ -260,8 +275,10 @@ export async function* forwardSubtask(
 }
 
 /**
- * Move all refs from refs/heads/* to refs/remotes/origin/* in a bare repo.
- * This fixes the issue where git clone --bare creates local branches instead of remote-tracking refs.
+ * Move all refs from refs/heads/* to refs/remotes/origin/* in a temporary bare clone.
+ * This fixes the issue where git clone --bare creates local branches instead
+ * of remote-tracking refs. Do not use this on published caches because linked
+ * worktrees may legitimately own refs/heads/*.
  * Uses batched git update-ref --stdin for efficiency (single git call instead of 2N calls).
  */
 export async function* fixBareRepoRefs(
