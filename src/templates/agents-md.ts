@@ -177,6 +177,7 @@ export async function refreshTemplateAgentsMd(
     force?: boolean;
     now?: Date;
     onProgress?: (message: string) => void;
+    onWarning?: (message: string) => void;
     onEvent?: (event: AiProgressEvent) => void;
   } = {},
 ): Promise<TemplateAgentsMdStatus> {
@@ -221,8 +222,12 @@ export async function refreshTemplateAgentsMd(
     );
   }
   options.onProgress?.("Synchronizing clean default-branch sources…");
-  const sources = await prepareSources(repos, config, template, (repo) =>
-    options.onProgress?.(`Preparing ${repo}…`),
+  const sources = await prepareSources(
+    repos,
+    config,
+    template,
+    (repo) => options.onProgress?.(`Preparing ${repo}…`),
+    options.onWarning,
   );
   try {
     const ai = await getAiStatus({
@@ -374,6 +379,7 @@ export async function refreshAndMaterializeTemplateAgentsMd(
         ...(options.force !== undefined ? { force: options.force } : {}),
         ...(options.now !== undefined ? { now: options.now } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+        ...(options.onWarning ? { onWarning: options.onWarning } : {}),
         ...(options.onEvent ? { onEvent: options.onEvent } : {}),
       });
     } catch (error) {
@@ -599,6 +605,7 @@ async function prepareSources(
   config: TemplateAgentsMdConfig,
   template: Template,
   onRepository?: (repository: string) => void,
+  onWarning?: (message: string) => void,
 ): Promise<PreparedSources> {
   const cacheDir = getCacheDir();
   const root = await fs.mkdtemp(
@@ -626,7 +633,18 @@ async function prepareSources(
       })) {
         if (state.status === "failed") throw state.error;
       }
-      const hints = config.paths?.[repo.name] ?? [];
+      const configuredHints = config.paths?.[repo.name] ?? [];
+      const hints: string[] = [];
+      for (const hint of configuredHints) {
+        const hintPath = resolveContainedPath(target, hint);
+        if (!(await pathExists(hintPath))) {
+          onWarning?.(
+            `Configured AGENTS.md path does not exist at ${repo.name}/${hint}; omitting it from generation.`,
+          );
+          continue;
+        }
+        hints.push(hint);
+      }
       prepared.push({
         name: repo.name,
         path: repo.name,
@@ -634,14 +652,6 @@ async function prepareSources(
         revision: revisionOut.trim(),
         hints,
       });
-      for (const hint of hints) {
-        const hintPath = resolveContainedPath(target, hint);
-        if (!(await pathExists(hintPath))) {
-          throw new Error(
-            `Configured AGENTS.md path does not exist at ${repo.name}/${hint}.`,
-          );
-        }
-      }
     }
     const templateRootFiles = await stageTemplateRootFiles(template, root);
     return { root, repositories: prepared, templateRootFiles };
