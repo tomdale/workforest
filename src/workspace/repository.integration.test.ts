@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -20,39 +20,34 @@ async function git(args: string[], cwd?: string): Promise<string> {
   return stdout.trim();
 }
 
-async function createCommit(
-  cwd: string,
-  tree: string,
-  message: string,
-  parent?: string,
-): Promise<string> {
-  const { stdout } = await execFileAsync(
-    "git",
-    ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message],
-    {
-      cwd,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "Test User",
-        GIT_AUTHOR_EMAIL: "test@example.com",
-        GIT_COMMITTER_NAME: "Test User",
-        GIT_COMMITTER_EMAIL: "test@example.com",
-      },
-    },
-  );
-  return stdout.trim();
-}
-
-async function updateMain(cwd: string, commit: string): Promise<void> {
-  await git(["update-ref", "refs/heads/main", commit], cwd);
-}
-
 async function collectStates<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const states: T[] = [];
   for await (const state of gen) {
     states.push(state);
   }
   return states;
+}
+
+async function createRemoteFixture(): Promise<{
+  originDir: string;
+  sourceDir: string;
+}> {
+  const rootDir = await createTempDir("workforest-cache-fixture-");
+  const originDir = path.join(rootDir, "origin.git");
+  const sourceDir = path.join(rootDir, "source");
+
+  await git(["init", "--bare", originDir]);
+  await git(["init", "--initial-branch=main", sourceDir]);
+  await git(["config", "user.email", "test@example.com"], sourceDir);
+  await git(["config", "user.name", "Test User"], sourceDir);
+  await writeFile(path.join(sourceDir, "README.md"), "initial\n");
+  await git(["add", "README.md"], sourceDir);
+  await git(["commit", "-m", "initial"], sourceDir);
+  await git(["remote", "add", "origin", originDir], sourceDir);
+  await git(["push", "origin", "main"], sourceDir);
+  await git(["symbolic-ref", "HEAD", "refs/heads/main"], originDir);
+
+  return { originDir, sourceDir };
 }
 
 afterEach(async () => {
@@ -62,41 +57,75 @@ afterEach(async () => {
 });
 
 describe("ensureMirrorRepo", () => {
-  it("updates remote refs without damaging a linked worktree on main", async () => {
+  it("seeds missing mirrors with canonical remote-tracking refs", async () => {
+    const { originDir, sourceDir } = await createRemoteFixture();
+    const mirrorDir = path.join(
+      await createTempDir("workforest-cache-seed-"),
+      "front.git",
+    );
+    const sourceMain = await git(["rev-parse", "main"], sourceDir);
+
+    await collectStates(
+      ensureMirrorRepo(
+        {
+          name: "front",
+          remote: originDir,
+        },
+        mirrorDir,
+      ),
+    );
+
+    await expect(
+      git(["rev-parse", "--is-bare-repository"], mirrorDir),
+    ).resolves.toBe("true");
+    await expect(
+      git(["config", "--get-all", "remote.origin.fetch"], mirrorDir),
+    ).resolves.toBe("+refs/heads/*:refs/remotes/origin/*");
+    await expect(git(["symbolic-ref", "HEAD"], mirrorDir)).resolves.toBe(
+      "refs/heads/main",
+    );
+    await expect(
+      git(["rev-parse", "refs/remotes/origin/main"], mirrorDir),
+    ).resolves.toBe(sourceMain);
+    await expect(
+      git(["for-each-ref", "--format=%(refname)", "refs/heads/"], mirrorDir),
+    ).resolves.toBe("");
+  });
+
+  it("updates origin refs without damaging a linked worktree on main", async () => {
+    const { originDir, sourceDir } = await createRemoteFixture();
     const rootDir = await createTempDir("workforest-cache-update-");
-    const sourceDir = path.join(rootDir, "source");
     const mirrorDir = path.join(rootDir, "front.git");
     const worktreeDir = path.join(rootDir, "front");
 
-    await git(["init", "--initial-branch=main", sourceDir]);
-    const emptyTree = await git(["write-tree"], sourceDir);
-    const localMainBefore = await createCommit(sourceDir, emptyTree, "initial");
-    await updateMain(sourceDir, localMainBefore);
-
-    await git(["clone", "--bare", sourceDir, mirrorDir]);
+    await git(["clone", "--bare", originDir, mirrorDir]);
     await git(
       ["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"],
       mirrorDir,
     );
     await git(["worktree", "add", worktreeDir, "main"], mirrorDir);
 
-    const originMain = await createCommit(
-      sourceDir,
-      emptyTree,
-      "update",
-      localMainBefore,
+    const localMainBefore = await git(
+      ["rev-parse", "refs/heads/main"],
+      mirrorDir,
     );
-    await updateMain(sourceDir, originMain);
+
+    await writeFile(path.join(sourceDir, "README.md"), "updated\n");
+    await git(["add", "README.md"], sourceDir);
+    await git(["commit", "-m", "update"], sourceDir);
+    await git(["push", "origin", "main"], sourceDir);
+    const originMain = await git(["rev-parse", "main"], sourceDir);
 
     const states = await collectStates(
       ensureMirrorRepo(
         {
           name: "front",
-          remote: sourceDir,
+          remote: originDir,
         },
         mirrorDir,
       ),
     );
+
     // The fetch streams: a running state with the command line, progress
     // output chunks, and no failure or warning states.
     expect(states.length).toBeGreaterThan(0);

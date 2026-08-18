@@ -12,9 +12,12 @@ import {
 export const CANONICAL_CACHE_FETCH_REFSPEC =
   "+refs/heads/*:refs/remotes/origin/*";
 
-export function cacheFetchArgs(options: { filter?: boolean } = {}): string[] {
+export function cacheFetchArgs(
+  options: { filter?: boolean; progress?: boolean } = {},
+): string[] {
   return [
     "fetch",
+    ...(options.progress ? ["--progress"] : []),
     "--prune",
     "--no-tags",
     ...(options.filter ? ["--filter=blob:none"] : []),
