@@ -110,6 +110,23 @@ describe("renderPaneLines", () => {
     expect(lines[0]).toContain("(retry 2)");
   });
 
+  it("renders structured step progress in the checklist row", () => {
+    const lines = renderPaneLines(
+      repo({
+        steps: [
+          liveStep("running", {
+            title: "pnpm install",
+            progress: { current: 12, total: 40, message: "pnpm resolved" },
+          }),
+        ],
+      }),
+      { width: 80, height: 10 },
+      5_000,
+    ).map(stripTags);
+
+    expect(lines[0]).toContain("pnpm resolved 12/40");
+  });
+
   it("shows a queued placeholder before any step starts", () => {
     const lines = renderPaneLines(
       repo({ status: "pending" }),

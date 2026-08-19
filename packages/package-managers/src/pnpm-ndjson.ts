@@ -14,6 +14,7 @@ type PnpmEvent = {
  */
 export class PnpmNdjsonAdapter {
   #buffer = "";
+  #source: "stdout" | "stderr" | undefined;
 
   *push(state: TaskState): Generator<TaskState> {
     if (state.status !== "output" || state.source === "stderr") {
@@ -22,6 +23,7 @@ export class PnpmNdjsonAdapter {
     }
 
     this.#buffer += state.data;
+    this.#source = state.source;
     yield* this.#drain();
   }
 
@@ -29,8 +31,10 @@ export class PnpmNdjsonAdapter {
   *finish(): Generator<TaskState> {
     if (this.#buffer) {
       const line = this.#buffer;
+      const source = this.#source;
       this.#buffer = "";
-      yield* this.#record(line);
+      this.#source = undefined;
+      yield* this.#record(line, source);
     }
   }
 
@@ -39,17 +43,21 @@ export class PnpmNdjsonAdapter {
     while (newline >= 0) {
       const line = this.#buffer.slice(0, newline + 1);
       this.#buffer = this.#buffer.slice(newline + 1);
-      yield* this.#record(line);
+      yield* this.#record(line, this.#source);
       newline = this.#buffer.indexOf("\n");
     }
   }
 
-  *#record(line: string): Generator<TaskState> {
+  *#record(
+    line: string,
+    source: "stdout" | "stderr" | undefined,
+  ): Generator<TaskState> {
     const parsed = parseRecord(line);
     const progress = parsed ? progressOf(parsed) : undefined;
     yield {
       status: "output",
       data: line,
+      ...(source !== undefined ? { source } : {}),
       ...(parsed ? { format: "ndjson" as const } : {}),
     };
     if (progress) yield { status: "progress", progress };

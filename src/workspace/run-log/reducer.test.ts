@@ -92,6 +92,46 @@ describe("createRunReducer", () => {
     expect(repo?.tail).toEqual(["progress 100%", "resolved 1204"]);
   });
 
+  it("stores structured output progress without putting transport JSON in the tail", () => {
+    const reducer = createRunReducer();
+    reducer.apply(
+      event({
+        kind: "step-start",
+        repo: "api",
+        step: "init:pnpm-install",
+        title: "install",
+      }),
+    );
+    reducer.apply(
+      event({
+        kind: "step-output",
+        repo: "api",
+        step: "init:pnpm-install",
+        chunk: '{"name":"pnpm:progress"}\\n',
+        format: "ndjson",
+        source: "stdout",
+      }),
+    );
+    reducer.apply(
+      event({
+        kind: "step-progress",
+        repo: "api",
+        step: "init:pnpm-install",
+        current: 12,
+        total: 40,
+        message: "pnpm resolved",
+      }),
+    );
+
+    const snapshot = reducer.snapshot().repos.get("api");
+    expect(snapshot?.tail).toEqual([]);
+    expect(snapshot?.steps[0]?.progress).toEqual({
+      current: 12,
+      total: 40,
+      message: "pnpm resolved",
+    });
+  });
+
   it("resets the tail on step-retry so output is not misattributed", () => {
     const reducer = createRunReducer();
     reducer.apply(

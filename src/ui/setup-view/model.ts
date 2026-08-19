@@ -67,11 +67,26 @@ function stepElapsed(step: StepSnapshot, nowMs: number): string | null {
   return null;
 }
 
+function stepProgress(step: StepSnapshot): string | null {
+  const progress = step.progress;
+  if (!progress) return null;
+  const counts =
+    progress.current !== undefined && progress.total !== undefined
+      ? `${progress.current}/${progress.total}`
+      : progress.current !== undefined
+        ? String(progress.current)
+        : progress.total !== undefined
+          ? `of ${progress.total}`
+          : "";
+  return [progress.message, counts].filter(Boolean).join(" ") || null;
+}
+
 function stepRow(step: StepSnapshot, width: number, nowMs: number): string {
   const { glyph, role } = stepGlyph(step.status);
   const elapsed = stepElapsed(step, nowMs);
+  const progress = stepProgress(step);
   const attempt = step.attempt > 1 ? ` (retry ${step.attempt})` : "";
-  const suffixText = `${attempt}${elapsed ? ` ${elapsed}` : ""}`;
+  const suffixText = `${attempt}${progress ? ` ${progress}` : ""}${elapsed ? ` ${elapsed}` : ""}`;
   const titleWidth = Math.max(width - 2 - suffixText.length, 4);
   return renderLine([
     terminalSpan(glyph, { role }),
@@ -80,6 +95,7 @@ function stepRow(step: StepSnapshot, width: number, nowMs: number): string {
       role: step.status === "pending" ? "muted" : "primary",
     }),
     ...(attempt ? [terminalSpan(attempt, { role: "warning" })] : []),
+    ...(progress ? [" ", terminalSpan(progress, { role: "muted" })] : []),
     ...(elapsed ? [" ", terminalSpan(elapsed, { role: "muted" })] : []),
   ]);
 }
