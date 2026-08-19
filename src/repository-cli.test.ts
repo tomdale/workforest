@@ -460,7 +460,10 @@ describe("cache commands", () => {
       data: [
         expect.objectContaining({
           health: "attention",
-          issues: ["refs/heads/feature differs from origin/feature"],
+          issues: expect.arrayContaining([
+            "refs/heads/feature differs from origin/feature",
+            expect.stringMatching(/^Case-conflicting remote refs: /),
+          ]),
         }),
       ],
     });

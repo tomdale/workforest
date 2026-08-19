@@ -74,9 +74,7 @@ async function removeStaleGitWorktreeLock(lockPath: string): Promise<boolean> {
 
 type LockRelease = () => Promise<void>;
 
-async function acquireGitWorktreeLock(gitDir: string): Promise<LockRelease> {
-  const gitCommonDir = await resolveGitCommonDir(gitDir);
-  const lockPath = path.join(gitCommonDir, GIT_WORKTREE_LOCK_FILENAME);
+async function acquireFileLock(lockPath: string): Promise<LockRelease> {
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
 
   // A unique token identifies this holder. Release only deletes the lock file
@@ -137,6 +135,11 @@ async function acquireGitWorktreeLock(gitDir: string): Promise<LockRelease> {
       // Already gone.
     }
   };
+}
+
+async function acquireGitWorktreeLock(gitDir: string): Promise<LockRelease> {
+  const gitCommonDir = await resolveGitCommonDir(gitDir);
+  return acquireFileLock(path.join(gitCommonDir, GIT_WORKTREE_LOCK_FILENAME));
 }
 
 /**

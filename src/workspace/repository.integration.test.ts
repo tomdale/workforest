@@ -92,6 +92,27 @@ describe("ensureMirrorRepo", () => {
     ).resolves.toBe("");
   });
 
+  it("reuses a concurrent mirror publication", async () => {
+    const { originDir } = await createRemoteFixture();
+    const mirrorDir = path.join(
+      await createTempDir("workforest-cache-concurrent-seed-"),
+      "front.git",
+    );
+    const repo = { name: "front", remote: originDir };
+
+    await Promise.all([
+      collectStates(ensureMirrorRepo(repo, mirrorDir)),
+      collectStates(ensureMirrorRepo(repo, mirrorDir)),
+    ]);
+
+    await expect(
+      git(["rev-parse", "--is-bare-repository"], mirrorDir),
+    ).resolves.toBe("true");
+    await expect(
+      git(["config", "--get-all", "remote.origin.fetch"], mirrorDir),
+    ).resolves.toBe("+refs/heads/*:refs/remotes/origin/*");
+  });
+
   it("updates origin refs without damaging a linked worktree on main", async () => {
     const { originDir, sourceDir } = await createRemoteFixture();
     const rootDir = await createTempDir("workforest-cache-update-");

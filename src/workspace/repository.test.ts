@@ -294,39 +294,24 @@ bare
     );
   });
 
-  it("repairs case-conflicting stale remote refs when pruning the mirror fails", async () => {
+  it("keeps case-distinct remote refs when a fetch cannot lock one", async () => {
     const mirrorDir = await createTempDir("workforest-front.git-");
     const lockError = new Error(
       "git fetch exited with code 1\nerror: could not delete references: cannot lock ref 'refs/remotes/origin/test-branch': Unable to create '/tmp/front.git/refs/remotes/origin/test-branch.lock': File exists.",
     );
 
-    // Three failing fetch attempts, then a clean fetch after the repair.
-    streamGitMock
-      .mockImplementationOnce(
-        taskStates({ status: "failed", error: lockError }),
-      )
-      .mockImplementationOnce(
-        taskStates({ status: "failed", error: lockError }),
-      )
-      .mockImplementationOnce(
-        taskStates({ status: "failed", error: lockError }),
-      )
-      .mockImplementationOnce(taskStates({ status: "completed" }));
-
-    runGitMock
-      .mockResolvedValueOnce({
-        stdout:
-          "refs/remotes/origin/Test-Branch\nrefs/remotes/origin/test-branch\n",
-        stderr: "",
-      })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockResolvedValueOnce({ stdout: "", stderr: "" })
-      .mockResolvedValueOnce({
-        stdout: `worktree ${mirrorDir}
+    streamGitMock.mockImplementation(
+      taskStates({
+        status: "failed",
+        error: lockError,
+      }),
+    );
+    runGitMock.mockResolvedValueOnce({
+      stdout: `worktree ${mirrorDir}
 bare
 `,
-        stderr: "",
-      });
+      stderr: "",
+    });
 
     const states = await collectStates(
       ensureMirrorRepo(
@@ -342,23 +327,12 @@ bare
       status: "log",
       level: "warn",
       message:
-        "Repairing case-conflicting cached refs for front: refs/remotes/origin/Test-Branch, refs/remotes/origin/test-branch",
+        "Unable to update pristine repo for front. Using the last cached snapshot.",
     });
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      1,
-      ["for-each-ref", "--format=%(refname)", "refs/remotes"],
+    expect(runGitMock).not.toHaveBeenCalledWith(
+      ["update-ref", "-d", expect.any(String)],
       { cwd: mirrorDir },
     );
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      2,
-      ["update-ref", "-d", "refs/remotes/origin/Test-Branch"],
-      { cwd: mirrorDir },
-    );
-    expect(runGitMock).toHaveBeenNthCalledWith(
-      3,
-      ["update-ref", "-d", "refs/remotes/origin/test-branch"],
-      { cwd: mirrorDir },
-    );
-    expect(streamGitMock).toHaveBeenCalledTimes(4);
+    expect(streamGitMock).toHaveBeenCalledTimes(3);
   });
 });

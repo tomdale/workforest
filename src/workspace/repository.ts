@@ -169,8 +169,22 @@ async function* seedMirrorRepo(
     }
 
     await validateSeededMirror(repo, tempDir);
-    await fs.rename(tempDir, mirrorDir);
-    published = true;
+    try {
+      await fs.rename(tempDir, mirrorDir);
+      published = true;
+    } catch (error) {
+      if (
+        !["EEXIST", "ENOTEMPTY"].includes(
+          (error as NodeJS.ErrnoException).code ?? "",
+        )
+      ) {
+        throw error;
+      }
+
+      // Another process completed the same seed while this one was fetching.
+      // Reuse its validated publication rather than failing a concurrent setup.
+      await validateSeededMirror(repo, mirrorDir);
+    }
   } finally {
     if (!published) {
       await removeTemporaryMirrorDir(tempDir);
@@ -557,64 +571,7 @@ async function* updatePristineRepo(
   }
   if (!failure) return;
 
-  if (yield* repairCaseConflictingRemoteRef(mirrorDir, repo.name, failure)) {
-    let retryFailure: Error | null;
-    try {
-      retryFailure = yield* attemptFetch();
-    } catch (retryError) {
-      retryFailure =
-        retryError instanceof Error
-          ? retryError
-          : new Error(String(retryError));
-    }
-    if (!retryFailure) return;
-    yield* warnPristineUpdateFailed(repo.name, retryFailure);
-    return;
-  }
-
   yield* warnPristineUpdateFailed(repo.name, failure);
-}
-
-function getCannotLockRef(error: unknown): string | null {
-  const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/cannot lock ref '([^']+)'/);
-  return match?.[1] ?? null;
-}
-
-async function* repairCaseConflictingRemoteRef(
-  mirrorDir: string,
-  repoName: string,
-  error: unknown,
-): AsyncGenerator<TaskState, boolean, undefined> {
-  const lockedRef = getCannotLockRef(error);
-  if (!lockedRef?.startsWith("refs/remotes/")) {
-    return false;
-  }
-
-  const { stdout } = await runGit(
-    ["for-each-ref", "--format=%(refname)", "refs/remotes"],
-    { cwd: mirrorDir },
-  );
-  const caseConflictingRefs = stdout
-    .trim()
-    .split("\n")
-    .filter((ref) => ref.toLowerCase() === lockedRef.toLowerCase());
-
-  if (caseConflictingRefs.length <= 1) {
-    return false;
-  }
-
-  yield {
-    status: "log",
-    level: "warn",
-    message: `Repairing case-conflicting cached refs for ${repoName}: ${caseConflictingRefs.join(", ")}`,
-  };
-
-  for (const ref of caseConflictingRefs) {
-    await runGit(["update-ref", "-d", ref], { cwd: mirrorDir });
-  }
-
-  return true;
 }
 
 async function* warnPristineUpdateFailed(

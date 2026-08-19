@@ -369,22 +369,21 @@ export async function repairCachedRepository(
     );
   }
 
-  await runGit(
-    [
-      "config",
-      "--replace-all",
-      "remote.origin.fetch",
-      CANONICAL_CACHE_FETCH_REFSPEC,
-    ],
-    { cwd: repository.mirrorPath },
-  );
-  await withGitWorktreeLock(repository.mirrorPath, () =>
-    runGit(["worktree", "prune"], { cwd: repository.mirrorPath }),
-  );
-  await repairCaseConflictingRemoteRefs(repository.mirrorPath);
-  await deleteUnownedDuplicateLocalHeads(repository.mirrorPath);
-  await runGit(["fsck", "--connectivity-only"], {
-    cwd: repository.mirrorPath,
+  await withGitWorktreeLock(repository.mirrorPath, async () => {
+    await runGit(
+      [
+        "config",
+        "--replace-all",
+        "remote.origin.fetch",
+        CANONICAL_CACHE_FETCH_REFSPEC,
+      ],
+      { cwd: repository.mirrorPath },
+    );
+    await runGit(["worktree", "prune"], { cwd: repository.mirrorPath });
+    await deleteUnownedDuplicateLocalHeads(repository.mirrorPath);
+    await runGit(["fsck", "--connectivity-only"], {
+      cwd: repository.mirrorPath,
+    });
   });
 
   return inspectCachedRepository(repository.mirrorPath);
@@ -684,17 +683,6 @@ function caseConflictingRemoteRefs(
   return [...groups.values()]
     .filter((refs) => refs.length > 1)
     .map((refs) => refs.sort((a, b) => a.localeCompare(b)));
-}
-
-async function repairCaseConflictingRemoteRefs(
-  mirrorPath: string,
-): Promise<void> {
-  const { remoteHeads } = await readLocalAndRemoteHeads(mirrorPath);
-  for (const refs of caseConflictingRemoteRefs(remoteHeads)) {
-    for (const ref of refs) {
-      await runGit(["update-ref", "-d", ref], { cwd: mirrorPath });
-    }
-  }
 }
 
 async function deleteUnownedDuplicateLocalHeads(
