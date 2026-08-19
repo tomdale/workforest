@@ -55,6 +55,7 @@ type JsonTaskState =
   | { status: "pending" }
   | { status: "running"; message?: string }
   | { status: "output"; data: string }
+  | { status: "progress"; message?: string }
   | { status: "retrying"; reason: string; attempt: number }
   | { status: "completed" }
   | { status: "skipped"; reason: string }
@@ -200,6 +201,13 @@ function taskStateToJson(
       };
     case "output":
       return { status: state.status, data: state.data };
+    case "progress":
+      return {
+        status: state.status,
+        ...(state.progress.message !== undefined
+          ? { message: state.progress.message }
+          : {}),
+      };
     case "log":
       return {
         status: state.status,

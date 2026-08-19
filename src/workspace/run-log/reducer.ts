@@ -18,6 +18,7 @@ export type StepSnapshot = {
   durationMs?: number;
   attempt: number;
   lastMessage?: string;
+  progress?: { current?: number; total?: number; message?: string };
 };
 
 export type RepoRunStatus =
@@ -72,6 +73,7 @@ type MutableStep = {
   durationMs?: number;
   attempt: number;
   lastMessage?: string;
+  progress?: { current?: number; total?: number; message?: string };
 };
 
 type MutableTarget = {
@@ -155,7 +157,22 @@ export function createRunReducer(options: RunReducerOptions = {}): RunReducer {
         return;
       }
       case "step-output": {
-        targetFor(event.repo).tail.pushChunk(event.chunk);
+        // Structured source records stay durable for diagnosis but render via
+        // their derived progress state instead of exposing transport JSON.
+        if (event.format !== "ndjson") {
+          targetFor(event.repo).tail.pushChunk(event.chunk);
+        }
+        return;
+      }
+      case "step-progress": {
+        const step = targetFor(event.repo).steps.get(event.step);
+        if (step) {
+          step.progress = {
+            ...(event.current !== undefined ? { current: event.current } : {}),
+            ...(event.total !== undefined ? { total: event.total } : {}),
+            ...(event.message !== undefined ? { message: event.message } : {}),
+          };
+        }
         return;
       }
       case "step-log": {

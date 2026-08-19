@@ -69,7 +69,22 @@ export type RunEventBody =
     }
   | { kind: "repo-start"; repo: string }
   | { kind: "step-start"; repo: string | null; step: StepId; title: string }
-  | { kind: "step-output"; repo: string | null; step: StepId; chunk: string }
+  | {
+      kind: "step-output";
+      repo: string | null;
+      step: StepId;
+      chunk: string;
+      source?: "stdout" | "stderr";
+      format?: "ndjson";
+    }
+  | {
+      kind: "step-progress";
+      repo: string | null;
+      step: StepId;
+      current?: number;
+      total?: number;
+      message?: string;
+    }
   | {
       kind: "step-log";
       repo: string | null;
@@ -126,6 +141,7 @@ const EVENT_KINDS: ReadonlySet<string> = new Set([
   "repo-start",
   "step-start",
   "step-output",
+  "step-progress",
   "step-log",
   "step-retry",
   "step-end",

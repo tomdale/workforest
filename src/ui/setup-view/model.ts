@@ -12,7 +12,6 @@ import {
   terminalLine,
   terminalSpan,
 } from "../../terminal/render-model.ts";
-import { visibleWidth } from "../../terminal/text.ts";
 import { activeTheme } from "../../terminal/theme-system.ts";
 import type {
   RepoRunSnapshot,
@@ -95,16 +94,6 @@ export function renderPaneLines(
   repo: RepoRunSnapshot,
   size: PaneSize,
   nowMs: number,
-  /**
-   * Live emulator-rendered screen lines for this pane (from
-   * `TerminalTailStore`), preferred over `repo.tail` when non-null and
-   * non-empty. `repo.tail` is the reducer's plain normalized tail (the
-   * canonical text also used for logs and the scrollback summary);
-   * `styledTail` is the current @xterm/headless screen contents, carrying
-   * real SGR codes so the pane looks like what the child process actually
-   * drew (progress bars, colored output, cursor-addressed redraws resolved).
-   */
-  styledTail?: readonly string[] | null,
 ): string[] {
   const width = Math.max(size.width, 8);
   const height = Math.max(size.height, 1);
@@ -145,9 +134,7 @@ export function renderPaneLines(
     );
   }
 
-  const hasStyledTail =
-    styledTail !== null && styledTail !== undefined && styledTail.length > 0;
-  const tailLines = hasStyledTail ? styledTail : repo.tail;
+  const tailLines = repo.tail;
   const remaining = height - lines.length;
   if (remaining >= 2 && tailLines.length > 0) {
     lines.push(
@@ -163,22 +150,7 @@ export function renderPaneLines(
     }
   }
 
-  const rendered = lines.slice(0, height);
-  // The headless terminal returns a screen, not a list of scrollback lines.
-  // Preserve that screen's rectangular shape when it is rendered in a pane;
-  // otherwise blessed only paints cells occupied by glyphs and the PTY view
-  // appears to float in the pane with stale cells around it.
-  if (hasStyledTail) {
-    return Array.from({ length: height }, (_, index) =>
-      padRenderedLine(rendered[index] ?? "", width),
-    );
-  }
-  return rendered;
-}
-
-function padRenderedLine(line: string, width: number): string {
-  const plain = line.replace(/\{[^}]*\}/g, "");
-  return `${line}${" ".repeat(Math.max(0, width - visibleWidth(plain)))}`;
+  return lines.slice(0, height);
 }
 
 /** The pane border label: repo name plus its most informative live state. */

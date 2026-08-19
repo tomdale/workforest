@@ -50,7 +50,6 @@ export async function* runHook(
 
   const hookGen = spawnCommand(command, args, {
     cwd,
-    pty: true,
     ...(hook.timeoutMs !== undefined ? { timeoutMs: hook.timeoutMs } : {}),
   });
 

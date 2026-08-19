@@ -21,7 +21,7 @@ async function* execute(context: InitializerContext) {
     args = ["install", "--frozen-lockfile"];
   }
 
-  const install = spawnCommand(command, args, { cwd: repoDir, pty: true });
+  const install = spawnCommand(command, args, { cwd: repoDir });
   for await (const state of install) {
     yield state;
   }

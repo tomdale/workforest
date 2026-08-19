@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 // Pins patches/@unblessed__core@1.0.0-alpha.23.patch: upstream hardcodes
 // U+2714-U+2716 as double-width, while wcwidth and real terminals render
-// them single-width (see src/ui/setup-view/terminal-tail.ts and
+// them single-width in terminal output and pane rendering.
 // src/terminal/theme-system.ts, both of which now emit these glyphs bare on
 // the strength of this being fixed). If this test fails, an @unblessed
 // upgrade has dropped the patch's dist files; rebase

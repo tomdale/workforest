@@ -167,72 +167,28 @@ describe("renderPaneLines", () => {
     expect(stringWidth(last)).toBe(width);
   });
 
-  it("prefers styledTail over repo.tail when non-empty", () => {
+  it("renders reducer output without terminal emulation", () => {
     const lines = renderPaneLines(
       repo({ tail: ["from reducer"] }),
       { width: 40, height: 6 },
       0,
-      ["from emulator"],
     ).map(stripTags);
 
-    expect(lines.some((line) => line.includes("from emulator"))).toBe(true);
-    expect(lines.some((line) => line.includes("from reducer"))).toBe(false);
+    expect(lines.some((line) => line.includes("from reducer"))).toBe(true);
   });
 
-  it("carries SGR codes from styledTail through into the rendered string", () => {
-    const lines = renderPaneLines(
-      repo({ tail: [] }),
-      { width: 40, height: 6 },
-      0,
-      ["\x1b[32mok\x1b[0m"],
-    );
-
-    expect(lines.some((line) => line.includes("\x1b[32m"))).toBe(true);
-  });
-
-  it("fills a PTY screen to the pane width and height", () => {
+  it("renders the pane within its height", () => {
     const width = 12;
     const height = 4;
     const lines = renderPaneLines(
       repo({ tail: [], steps: [step()] }),
       { width, height },
       0,
-      ["output"],
     ).map(stripTags);
 
-    expect(lines).toHaveLength(height);
-    expect(lines.every((line) => stringWidth(line) === width)).toBe(true);
-    expect(lines.some((line) => line.startsWith("output"))).toBe(true);
-  });
-
-  it("escapes a literal brace in styledTail instead of parsing it as a tag", () => {
-    const lines = renderPaneLines(
-      repo({ tail: [] }),
-      { width: 40, height: 6 },
-      0,
-      ["{not a tag}"],
-    );
-
-    expect(lines.some((line) => line.includes("{open}"))).toBe(true);
-    expect(lines.some((line) => line.includes("{close}"))).toBe(true);
-  });
-
-  it("falls back to repo.tail when styledTail is null or empty", () => {
-    const nullTail = renderPaneLines(
-      repo({ tail: ["from reducer"] }),
-      { width: 40, height: 6 },
-      0,
-      null,
-    ).map(stripTags);
-    expect(nullTail.some((line) => line.includes("from reducer"))).toBe(true);
-
-    const emptyTail = renderPaneLines(
-      repo({ tail: ["from reducer"] }),
-      { width: 40, height: 6 },
-      0,
-      [],
-    ).map(stripTags);
-    expect(emptyTail.some((line) => line.includes("from reducer"))).toBe(true);
+    expect(lines.length).toBeLessThanOrEqual(height);
+    expect(lines.every((line) => stringWidth(line) <= width)).toBe(true);
+    expect(lines.length).toBeGreaterThan(0);
   });
 
   it("never exceeds the pane height", () => {

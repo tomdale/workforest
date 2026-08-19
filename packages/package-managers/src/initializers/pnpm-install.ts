@@ -10,6 +10,7 @@ import {
   type InitializerContext,
   type InitializerDefinition,
 } from "@wf-plugin/core";
+import { PnpmNdjsonAdapter } from "../pnpm-ndjson.ts";
 
 const PNPM_LOCK_FILES = ["pnpm-lock.yaml", "pnpm-lock.yml"];
 const LOCKFILE_HASH_FILE = ".pnpm-lockfile-hash";
@@ -64,17 +65,23 @@ async function* execute(context: InitializerContext) {
       "install",
       "--frozen-lockfile",
       "--prefer-offline",
+      "--reporter=ndjson",
     ];
   } else {
     command = "pnpm";
-    args = ["install", "--frozen-lockfile", "--prefer-offline"];
+    args = [
+      "install",
+      "--frozen-lockfile",
+      "--prefer-offline",
+      "--reporter=ndjson",
+    ];
   }
 
   const fastInstall = spawnCommand(command, args, {
     cwd: repoDir,
-    pty: true,
     ...INSTALL_LIMITS,
   });
+  const fastOutput = new PnpmNdjsonAdapter();
 
   for await (const state of fastInstall) {
     if (state.status === "failed") {
@@ -82,11 +89,12 @@ async function* execute(context: InitializerContext) {
       lastError = state.error;
     } else if (state.status === "output") {
       collectedOutput.append(state.data);
-      yield state;
+      yield* fastOutput.push(state);
     } else {
       yield state;
     }
   }
+  yield* fastOutput.finish();
 
   if (
     failed &&
@@ -101,30 +109,42 @@ async function* execute(context: InitializerContext) {
 
     if (versionPrefix) {
       command = versionPrefix.command;
+<<<<<<< HEAD
       args = [
         ...versionPrefix.args,
         "pnpm",
         "install",
         "--config.confirmModulesPurge=false",
+        "--reporter=ndjson",
       ];
     } else {
       command = "pnpm";
-      args = ["install", "--config.confirmModulesPurge=false"];
+<<<<<<< HEAD
+      args = [
+        "install",
+        "--config.confirmModulesPurge=false",
+        "--reporter=ndjson",
+      ];
     }
 
     const fallbackInstall = spawnCommand(command, args, {
       cwd: repoDir,
-      pty: true,
       ...INSTALL_LIMITS,
     });
+    const fallbackOutput = new PnpmNdjsonAdapter();
 
     let fallbackFailed = false;
     for await (const state of fallbackInstall) {
       if (state.status === "failed") {
         fallbackFailed = true;
       }
-      yield state;
+      if (state.status === "output") {
+        yield* fallbackOutput.push(state);
+      } else {
+        yield state;
+      }
     }
+    yield* fallbackOutput.finish();
 
     if (!fallbackFailed && lockfileHash) {
       await storeLockfileHash(repoDir, lockfileHash);

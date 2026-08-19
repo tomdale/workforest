@@ -52,10 +52,25 @@ export type PluginDetect = (
   context: InitializerContext,
 ) => Promise<PluginDetection>;
 
+export type TaskOutputSource = "stdout" | "stderr";
+
+export type TaskProgress = {
+  current?: number;
+  total?: number;
+  message?: string;
+};
+
 export type TaskState =
   | { status: "pending" }
   | { status: "running"; message?: string }
-  | { status: "output"; data: string }
+  | {
+      status: "output";
+      data: string;
+      source?: TaskOutputSource;
+      /** Machine-readable output retained in the run log but not line-rendered. */
+      format?: "ndjson";
+    }
+  | { status: "progress"; progress: TaskProgress }
   | { status: "log"; level: "info" | "warn" | "error"; message: string }
   | { status: "retrying"; reason: string; attempt: number }
   | { status: "completed" }
@@ -173,6 +188,7 @@ type CommandKill = {
 type QueuedOutput = {
   data: string;
   bytes: number;
+  source: TaskOutputSource;
 };
 
 const MAX_OUTPUT_TAIL_CHARS = 4096;
@@ -180,13 +196,8 @@ const MAX_QUEUED_OUTPUT_BYTES = 1024 * 1024;
 const RESUME_QUEUED_OUTPUT_BYTES = MAX_QUEUED_OUTPUT_BYTES / 2;
 const TIMEOUT_FORCE_KILL_DELAY_MS = 5_000;
 
-// The headless VT100 emulator that renders setup-grid panes must use the same
-// cols/rows as the PTY the child was actually spawned with, or its line
-// wrapping won't match what the process drew. 120 columns keeps most panes
-// (which render narrower than the PTY) truncating long lines cleanly with an
-// ellipsis instead of showing the process's own mid-word wrap fragments.
-export const SETUP_PTY_COLS = 120;
-export const SETUP_PTY_ROWS = 24;
+const DEFAULT_PTY_COLS = 120;
+const DEFAULT_PTY_ROWS = 24;
 
 type NodePtyModule = typeof import("@lydell/node-pty");
 
@@ -290,9 +301,12 @@ export async function* spawnCommand(
     streamsPaused = false;
   }
 
-  function enqueueOutput(chunk: string): void {
+  function enqueueOutput(
+    chunk: string,
+    source: TaskOutputSource = "stdout",
+  ): void {
     const bytes = Buffer.byteLength(chunk, "utf8");
-    outputQueue.push({ data: chunk, bytes });
+    outputQueue.push({ data: chunk, bytes, source });
     queuedBytes += bytes;
     resetInactivityTimer();
     pauseStreamsIfNeeded();
@@ -332,10 +346,10 @@ export async function* spawnCommand(
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
 
-    child.stdout.on("data", enqueueOutput);
+    child.stdout.on("data", (chunk: string) => enqueueOutput(chunk, "stdout"));
     child.stderr.on("data", (chunk: string) => {
       outputTail.append(chunk);
-      enqueueOutput(chunk);
+      enqueueOutput(chunk, "stderr");
     });
 
     child.on("error", (error) => settleExit({ type: "error", error }));
@@ -359,8 +373,8 @@ export async function* spawnCommand(
     try {
       const ptyProcess = ptyMod.spawn(command, args, {
         name: "xterm-256color",
-        cols: SETUP_PTY_COLS,
-        rows: SETUP_PTY_ROWS,
+        cols: DEFAULT_PTY_COLS,
+        rows: DEFAULT_PTY_ROWS,
         ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
         env: buildPtyEnv(options.cwd),
       });
@@ -381,7 +395,7 @@ export async function* spawnCommand(
 
       ptyProcess.onData((chunk) => {
         outputTail.append(chunk);
-        enqueueOutput(chunk);
+        enqueueOutput(chunk, "stdout");
       });
       ptyProcess.onExit(({ exitCode }) => {
         settleExit({ type: "close", code: exitCode });
@@ -421,7 +435,7 @@ export async function* spawnCommand(
     while (chunk !== undefined) {
       queuedBytes -= chunk.bytes;
       resumeStreamsIfNeeded();
-      yield { status: "output", data: chunk.data };
+      yield { status: "output", data: chunk.data, source: chunk.source };
       chunk = outputQueue.shift();
     }
   }

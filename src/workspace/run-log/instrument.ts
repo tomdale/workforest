@@ -57,7 +57,22 @@ export async function* taskToEvents(
           }
           break;
         case "output":
-          yield { kind: "step-output", repo, step, chunk: state.data };
+          yield {
+            kind: "step-output",
+            repo,
+            step,
+            chunk: state.data,
+            ...(state.source !== undefined ? { source: state.source } : {}),
+            ...(state.format !== undefined ? { format: state.format } : {}),
+          };
+          break;
+        case "progress":
+          yield {
+            kind: "step-progress",
+            repo,
+            step,
+            ...state.progress,
+          };
           break;
         case "log":
           yield {
@@ -213,7 +228,17 @@ export async function* initializerStatesToEvents(
               }
               break;
             case "output":
-              yield { kind: "step-output", repo, step, chunk: task.data };
+              yield {
+                kind: "step-output",
+                repo,
+                step,
+                chunk: task.data,
+                ...(task.source !== undefined ? { source: task.source } : {}),
+                ...(task.format !== undefined ? { format: task.format } : {}),
+              };
+              break;
+            case "progress":
+              yield { kind: "step-progress", repo, step, ...task.progress };
               break;
             case "log":
               yield {
@@ -317,7 +342,22 @@ export async function* hookStatesToEvents(
               }
               break;
             case "output":
-              yield { kind: "step-output", repo: null, step, chunk: task.data };
+              yield {
+                kind: "step-output",
+                repo: null,
+                step,
+                chunk: task.data,
+                ...(task.source !== undefined ? { source: task.source } : {}),
+                ...(task.format !== undefined ? { format: task.format } : {}),
+              };
+              break;
+            case "progress":
+              yield {
+                kind: "step-progress",
+                repo: null,
+                step,
+                ...task.progress,
+              };
               break;
             case "log":
               yield {

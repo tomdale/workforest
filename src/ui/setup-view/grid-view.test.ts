@@ -725,7 +725,7 @@ describe("renderSetupGrid", () => {
     await promise;
   });
 
-  it("renders panes from the emulator-styled tail instead of the plain tail", async () => {
+  it("renders panes from the reducer tail", async () => {
     const { events, push } = createEventSource();
     const mock = createMockEnvironment();
 
@@ -743,10 +743,16 @@ describe("renderSetupGrid", () => {
       pid: 1,
     });
     push({
+      kind: "step-start",
+      repo: "front",
+      step: "init:pnpm-install",
+      title: "Install",
+    });
+    push({
       kind: "step-output",
       repo: "front",
       step: "init:pnpm-install",
-      chunk: "\x1b[32mok\x1b[0m done\r\n",
+      chunk: "ok done\n",
     });
     push({ kind: "run-end", outcome: "ready", durationMs: 1_000 });
     await tick();
@@ -757,7 +763,6 @@ describe("renderSetupGrid", () => {
     const rendered = frontPane?.contents.join("\n") ?? "";
     expect(rendered).toContain("ok");
     expect(rendered).toContain("done");
-    expect(rendered).toContain("\x1b[32m");
 
     mock.press("x");
     await promise;

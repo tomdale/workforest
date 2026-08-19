@@ -331,6 +331,15 @@ export function mapTaskStateToPipelineState(
         status: "output",
         output: state.data,
       };
+    case "progress":
+      return {
+        phase: "git",
+        step,
+        status: "running",
+        ...(state.progress.message !== undefined
+          ? { message: state.progress.message }
+          : {}),
+      };
     case "log":
       return {
         phase: "git",

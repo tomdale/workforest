@@ -45,7 +45,6 @@ import {
   panePriorityForStatus,
   selectVisiblePanes,
 } from "./pager.ts";
-import { TerminalTailStore } from "./terminal-tail.ts";
 
 export type SetupKeyEvent = Readonly<{ name?: string; ctrl?: boolean }>;
 
@@ -180,10 +179,6 @@ export async function renderSetupGrid(
     });
 
   const reducer = createRunReducer();
-  // Replays the same events through a headless VT100 emulator so panes can
-  // render the live styled screen instead of the reducer's plain tail; see
-  // TerminalTailStore's own doc comment for why a second pass is needed.
-  const tailStore = new TerminalTailStore();
   const screen = environment.createScreen();
   // Created lazily on the first frame, after the grid: terminal surfaces
   // paint in creation order, so a status line created before the grid's
@@ -361,14 +356,7 @@ export async function renderSetupGrid(
       const paneSnapshot = paneSnapshotOf(snapshot, name);
       pane.setLabel(paneLabel(paneSnapshot, nowMs));
       const size = pane.getContentSize?.() ?? { width: 60, height: 12 };
-      pane.setContent(
-        renderPaneLines(
-          paneSnapshot,
-          size,
-          nowMs,
-          tailStore.linesFor(name),
-        ).join("\n"),
-      );
+      pane.setContent(renderPaneLines(paneSnapshot, size, nowMs).join("\n"));
       pane.setFocused?.(index === focusIndex && visible.length > 1);
     });
 
@@ -590,7 +578,6 @@ export async function renderSetupGrid(
     grid?.destroy();
     grid = null;
     screen.destroy();
-    tailStore.dispose();
     void Promise.resolve(options.events.return(undefined)).catch(
       () => undefined,
     );
@@ -600,7 +587,6 @@ export async function renderSetupGrid(
   const pump = (async (): Promise<void> => {
     for await (const event of options.events) {
       reducer.apply(event);
-      await tailStore.apply(event);
       scheduleRender();
       if (event.kind === "run-end") {
         runEnded = true;
@@ -631,9 +617,6 @@ export async function renderSetupGrid(
       clearTimeout(renderTimer);
       renderTimer = null;
     }
-    // Drain any writes still parsing so the last frame reflects fully
-    // processed output rather than whatever had landed mid-chunk.
-    await tailStore.flush();
     renderFrame();
     const snapshot = reducer.snapshot();
     const outcome = resolveOutcome(snapshot, cancelRequested, runEnded);

@@ -868,6 +868,10 @@ function formatInitializerState(state: SingleRepoInitializerState): string {
       switch (state.state.status) {
         case "output":
           return state.state.data;
+        case "progress":
+          return state.state.progress.message
+            ? `[initializer:${state.initializerId}] ${state.state.progress.message}\n`
+            : "";
         case "running":
           return state.state.message
             ? `[initializer:${state.initializerId}] ${state.state.message}\n`

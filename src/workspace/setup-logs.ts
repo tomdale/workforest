@@ -221,6 +221,8 @@ function formatTaskLikeState(
   switch (state.status) {
     case "output":
       return state.output ?? "";
+    case "progress":
+      return state.message ? `[${scope}] ${state.message}\n` : "";
     case "running":
       return state.message ? `[${scope}] ${state.message}\n` : "";
     case "retrying":
