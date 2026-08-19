@@ -3,6 +3,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { getTimingFilePath } from "../config.ts";
 import type { CleanupState } from "../workspace/cleanup.ts";
+import type { DisposeWorktreeEvent } from "../workspace/dispose-worktree.ts";
 
 type DeleteTimingPhaseName =
   | "review-resolution"
@@ -70,11 +71,13 @@ type DeleteTimingReport = Readonly<{
   totalMs: number;
   phases: readonly DeleteTimingPhase[];
   cleanupStates: readonly DeleteTimingCleanupState[];
+  disposalEvents: readonly (DisposeWorktreeEvent & { atMs: number })[];
 }>;
 
 export type DeleteTimingRecorder = Readonly<{
   time<T>(name: DeleteTimingPhaseName, action: () => Promise<T>): Promise<T>;
   recordCleanupState(state: CleanupState): void;
+  recordDisposalEvent(event: DisposeWorktreeEvent): void;
   flush(): Promise<void>;
 }>;
 
@@ -85,6 +88,7 @@ export function createDeleteTimingRecorder(
   const startedAt = performance.now();
   const phases: DeleteTimingPhase[] = [];
   const cleanupStates: DeleteTimingCleanupState[] = [];
+  const disposalEvents: (DisposeWorktreeEvent & { atMs: number })[] = [];
 
   const elapsed = () => performance.now() - startedAt;
 
@@ -121,6 +125,9 @@ export function createDeleteTimingRecorder(
         state: cleanupStateToJson(state),
       });
     },
+    recordDisposalEvent(event) {
+      disposalEvents.push({ ...event, atMs: roundMs(elapsed()) });
+    },
     async flush() {
       if (!timingFilePath) {
         return;
@@ -135,6 +142,7 @@ export function createDeleteTimingRecorder(
         totalMs: roundMs(performance.now() - startedAt),
         phases,
         cleanupStates,
+        disposalEvents,
       };
 
       try {

@@ -17,6 +17,18 @@ import type { NodeModulesCacheConfig, RepositorySource } from "../types.ts";
  * node_modules preservation, git worktree removal, residual directory cleanup,
  * and optional branch deletion cannot drift apart again.
  */
+export type DisposeWorktreeEvent = Readonly<{
+  worktreePath: string;
+  phase:
+    | "checkout"
+    | "node-modules"
+    | "worktree-remove"
+    | "residual-cleanup"
+    | "branch";
+  status: "started" | "completed" | "skipped" | "failed";
+  detail?: string;
+}>;
+
 export type DisposeWorktreeCheckoutOptions = Readonly<{
   /** Bare mirror or parent checkout that owns the worktree admin entry. */
   gitDir: string;
@@ -45,6 +57,8 @@ export type DisposeWorktreeCheckoutOptions = Readonly<{
   timeoutMs?: number;
   /** When false, the caller already holds the worktree lock. */
   lock?: boolean;
+  /** Receives structured diagnostics for delete timing and troubleshooting. */
+  onEvent?: (event: DisposeWorktreeEvent) => void;
 }>;
 
 export type DisposeWorktreeCheckoutResult = Readonly<{
@@ -64,6 +78,7 @@ export async function disposeWorktreeCheckout(
   const {
     gitDir,
     worktreePath,
+    onEvent,
     repo,
     nodeModulesConfig,
     force = false,
@@ -72,15 +87,51 @@ export async function disposeWorktreeCheckout(
     timeoutMs,
     lock = true,
   } = options;
+  const emit = (event: Omit<DisposeWorktreeEvent, "worktreePath">) => {
+    try {
+      onEvent?.({ ...event, worktreePath });
+    } catch {
+      // Diagnostics must never change disposal behavior.
+    }
+  };
 
   const exists = await pathExists(worktreePath);
+  emit({
+    phase: "checkout",
+    status: exists ? "completed" : "skipped",
+    detail: exists ? "checkout exists" : "checkout directory missing",
+  });
   let preserved: PreserveNodeModulesResult = { status: "missing" };
 
   if (exists && repo) {
-    preserved = await preserveNodeModules({
-      repo,
-      repoDir: worktreePath,
-      config: nodeModulesConfig,
+    emit({ phase: "node-modules", status: "started" });
+    try {
+      preserved = await preserveNodeModules({
+        repo,
+        repoDir: worktreePath,
+        config: nodeModulesConfig,
+      });
+    } catch (error) {
+      emit({
+        phase: "node-modules",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    emit({
+      phase: "node-modules",
+      status: preserved.status === "warning" ? "failed" : "completed",
+      detail:
+        preserved.status === "warning"
+          ? preserved.warning
+          : `preservation ${preserved.status}`,
+    });
+  } else {
+    emit({
+      phase: "node-modules",
+      status: "skipped",
+      detail: exists ? "repository details unavailable" : "checkout missing",
     });
   }
 
@@ -89,6 +140,7 @@ export async function disposeWorktreeCheckout(
     : "missing";
 
   if (exists) {
+    emit({ phase: "worktree-remove", status: "started" });
     try {
       for await (const _state of removeWorktree({
         gitDir,
@@ -100,7 +152,13 @@ export async function disposeWorktreeCheckout(
         // Physical disposal is a single step for callers; progress is owned by
         // higher-level cleanup generators when they need it.
       }
+      emit({ phase: "worktree-remove", status: "completed" });
     } catch (error) {
+      emit({
+        phase: "worktree-remove",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
       await rollbackPreservedNodeModules(preserved);
       throw error;
     }
@@ -119,21 +177,52 @@ export async function disposeWorktreeCheckout(
         // Drained.
       }
       status = "stale";
-    } catch {
+    } catch (error) {
       status = "missing";
+      emit({
+        phase: "worktree-remove",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   // `git worktree remove` can leave an empty or partial directory when the
   // checkout was already half-deleted; finish the job unconditionally.
   if (await pathExists(worktreePath)) {
-    await fs.rm(worktreePath, { recursive: true, force: true });
+    emit({ phase: "residual-cleanup", status: "started" });
+    try {
+      await fs.rm(worktreePath, { recursive: true, force: true });
+      emit({ phase: "residual-cleanup", status: "completed" });
+    } catch (error) {
+      emit({
+        phase: "residual-cleanup",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  } else {
+    emit({ phase: "residual-cleanup", status: "skipped" });
   }
 
   let branchDeleted = false;
   if (branch) {
-    await deleteBranchIfPossible(gitDir, branch, forceBranchDelete);
-    branchDeleted = true;
+    emit({ phase: "branch", status: "started", detail: branch });
+    try {
+      await deleteBranchIfPossible(gitDir, branch, forceBranchDelete);
+      branchDeleted = true;
+      emit({ phase: "branch", status: "completed", detail: branch });
+    } catch (error) {
+      emit({
+        phase: "branch",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  } else {
+    emit({ phase: "branch", status: "skipped", detail: "no branch" });
   }
 
   return {

@@ -87,6 +87,25 @@ describe("disposeWorktreeCheckout", () => {
     });
   });
 
+  it("reports node_modules and teardown decisions", async () => {
+    const events: string[] = [];
+    await disposeWorktreeCheckout({
+      gitDir: "/cache/api.git",
+      worktreePath: "/repos/api/demo",
+      onEvent: (event) => events.push(`${event.phase}:${event.status}`),
+    });
+
+    expect(events).toEqual([
+      "checkout:completed",
+      "node-modules:skipped",
+      "worktree-remove:started",
+      "worktree-remove:completed",
+      "residual-cleanup:started",
+      "residual-cleanup:completed",
+      "branch:skipped",
+    ]);
+  });
+
   it("rolls preserved node_modules back when removal fails", async () => {
     const preserved = { status: "preserved" as const };
     preserveNodeModulesMock.mockResolvedValue(preserved);
