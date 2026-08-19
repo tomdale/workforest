@@ -672,9 +672,7 @@ export function createPipelineStateConverter(): PipelineStateConverter {
             ...target,
             status: "progress",
             progress: {
-              ...(body.current !== undefined
-                ? { current: body.current }
-                : {}),
+              ...(body.current !== undefined ? { current: body.current } : {}),
               ...(body.total !== undefined ? { total: body.total } : {}),
               ...(body.message !== undefined ? { message: body.message } : {}),
             },
