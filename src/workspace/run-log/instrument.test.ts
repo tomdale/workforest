@@ -234,6 +234,39 @@ describe("createPipelineStateConverter", () => {
     ]);
   });
 
+  it("maps initializer progress with its structured payload", () => {
+    const legacy = convertAll([
+      {
+        kind: "step-start",
+        repo: "api",
+        step: "init:pnpm-install",
+        title: "Install dependencies",
+      },
+      {
+        kind: "step-progress",
+        repo: "api",
+        step: "init:pnpm-install",
+        current: 12,
+        total: 40,
+        message: "pnpm resolved",
+      },
+    ]);
+
+    expect(legacy).toEqual([
+      {
+        phase: "initializer",
+        name: "Install dependencies",
+        status: "running",
+      },
+      {
+        phase: "initializer",
+        name: "Install dependencies",
+        status: "progress",
+        progress: { current: 12, total: 40, message: "pnpm resolved" },
+      },
+    ]);
+  });
+
   it("maps initializer failures with legacy step names", () => {
     const legacy = convertAll([
       {

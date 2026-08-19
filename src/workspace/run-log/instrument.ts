@@ -664,6 +664,23 @@ export function createPipelineStateConverter(): PipelineStateConverter {
         if (!target) return [];
         return [{ ...target, status: "output", output: body.chunk }];
       }
+      case "step-progress": {
+        const target = stepTarget(body.step, titles);
+        if (!target) return [];
+        return [
+          {
+            ...target,
+            status: "progress",
+            progress: {
+              ...(body.current !== undefined
+                ? { current: body.current }
+                : {}),
+              ...(body.total !== undefined ? { total: body.total } : {}),
+              ...(body.message !== undefined ? { message: body.message } : {}),
+            },
+          },
+        ];
+      }
       case "step-retry": {
         const target = stepTarget(body.step, titles);
         if (!target) return [];

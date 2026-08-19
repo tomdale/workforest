@@ -37,6 +37,7 @@ export type RepoPipelineState =
       status: TaskState["status"];
       output?: string;
       message?: string;
+      progress?: { current?: number; total?: number; message?: string };
     }
   | {
       phase: "initializer";
@@ -44,6 +45,7 @@ export type RepoPipelineState =
       status: TaskState["status"];
       output?: string;
       message?: string;
+      progress?: { current?: number; total?: number; message?: string };
     }
   | { phase: "worktree-ready"; hasLockfile: boolean }
   | { phase: "complete"; hasLockfile: boolean }
@@ -403,6 +405,9 @@ export function mapInitializerStateToPipelineState(
         ...(state.state.status === "running" &&
         state.state.message !== undefined
           ? { message: state.state.message }
+          : {}),
+        ...(state.state.status === "progress"
+          ? { progress: state.state.progress }
           : {}),
       };
     case "skipped":

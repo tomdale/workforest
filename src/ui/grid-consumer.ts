@@ -648,6 +648,27 @@ function emitPipelineProgress(
         message: `${id}: ${label} failed`,
       });
       break;
+    case "progress": {
+      const details = [
+        state.progress?.message,
+        state.progress?.current !== undefined &&
+        state.progress?.total !== undefined
+          ? `${state.progress.current}/${state.progress.total}`
+          : state.progress?.current !== undefined
+            ? String(state.progress.current)
+            : state.progress?.total !== undefined
+              ? `of ${state.progress.total}`
+              : undefined,
+      ].filter(Boolean);
+      if (details.length > 0) {
+        emitServiceEvent(onEvent, {
+          type: "message",
+          level: "info",
+          message: `${id}: ${label} (${details.join(" ")})`,
+        });
+      }
+      break;
+    }
     // "output" / "log" / "skipped" / "pending" carry no inline progress line.
   }
 }
