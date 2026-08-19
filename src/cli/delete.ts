@@ -23,6 +23,7 @@ import {
   type DeleteTaskSafety,
   deleteSafetyFor,
 } from "../workspace/delete-safety.ts";
+import { createDeleteSystemLogger } from "../workspace/delete-system-log.ts";
 import type { InventoryEntry } from "../workspace/inventory.ts";
 import { readWorkspaceMetadata } from "../workspace/metadata.ts";
 import {
@@ -145,6 +146,13 @@ export async function runDeleteCommand(
   options: RunCleanupOptions,
 ): Promise<CommandResult> {
   const timing = createDeleteTimingRecorder();
+  const systemLog = createDeleteSystemLogger();
+  const recordDisposeEvent = (
+    event: Parameters<DeleteTimingRecorder["recordDisposalEvent"]>[0],
+  ) => {
+    timing.recordDisposalEvent(event);
+    void systemLog.record(event);
+  };
   const force = invocation.flags["force"] === true;
   const dryRun = invocation.flags["dryRun"] === true;
   const json = invocation.flags["json"] === true;
@@ -164,6 +172,7 @@ export async function runDeleteCommand(
           { dryRun, force, json },
           options,
           timing,
+          recordDisposeEvent,
         );
       }
     }
@@ -197,7 +206,7 @@ export async function runDeleteCommand(
       options,
       "cleanup-dispatch",
       `Deleting ${typeLabel(entry)} ${entry.selector}`,
-      () => cleanupTarget(entry, options, timing),
+      () => cleanupTarget(entry, options, timing, recordDisposeEvent),
     );
     if (json) {
       return jsonSuccess(deleteResult(entry, cleanup));
@@ -206,6 +215,7 @@ export async function runDeleteCommand(
     return success();
   } finally {
     await timing.flush();
+    await systemLog.flush();
   }
 }
 
@@ -243,6 +253,9 @@ async function deleteReviewWorktree(
   deleteOptions: Readonly<{ dryRun: boolean; force: boolean; json: boolean }>,
   options: RunCleanupOptions,
   timing: DeleteTimingRecorder,
+  onDisposeEvent: (
+    event: Parameters<DeleteTimingRecorder["recordDisposalEvent"]>[0],
+  ) => void,
 ): Promise<CommandResult> {
   const initialCwd = options.cwd ?? process.cwd();
   const isInsideTarget = await isComparablePathInsideOrEqual(
@@ -260,6 +273,7 @@ async function deleteReviewWorktree(
         reviewsRoot: reviewWorktree.reviewsRoot,
         force: deleteOptions.force,
         dryRun: deleteOptions.dryRun,
+        onDisposeEvent,
       }),
   );
   const selector = reviewSelector(reviewWorktree.target);
@@ -800,6 +814,9 @@ async function cleanupTarget(
   entry: InventoryEntry,
   options: RunCleanupOptions,
   timing: DeleteTimingRecorder,
+  onDisposeEvent: (
+    event: Parameters<DeleteTimingRecorder["recordDisposalEvent"]>[0],
+  ) => void,
 ): Promise<CleanupResult> {
   const initialCwd = options.cwd ?? process.cwd();
   const cleanupRoot = entry.path;
@@ -821,6 +838,7 @@ async function cleanupTarget(
       targetPath: entry.path,
       ...(repo ? { repo } : {}),
       onState,
+      onDisposeEvent,
     });
   } else {
     result = await (options.cleanupWorkspace ?? cleanupWorkspace)(entry.path, {

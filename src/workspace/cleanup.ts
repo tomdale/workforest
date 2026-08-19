@@ -21,7 +21,10 @@ import type {
 } from "../types.ts";
 import { resolveContainedPath } from "../utils/path-safety.ts";
 import { runParallel, type TaskState } from "../utils/task-generator.ts";
-import { disposeWorktreeCheckout } from "./dispose-worktree.ts";
+import {
+  type DisposeWorktreeEvent,
+  disposeWorktreeCheckout,
+} from "./dispose-worktree.ts";
 import { ensureCacheDir } from "./index.ts";
 import {
   hasWorkspaceMetadata,
@@ -94,6 +97,7 @@ export type WorktreeCleanupOptions = Readonly<{
   repo?: RepositorySource;
   dryRun?: boolean;
   onState?: CleanupStateSink;
+  onDisposeEvent?: (event: DisposeWorktreeEvent) => void;
 }>;
 
 const CLEANUP_MAX_CONCURRENT = 4;
@@ -290,7 +294,7 @@ export async function previewCleanup(
  */
 export async function* streamWorkspaceCleanup(
   workspaceDir: string,
-  options: CleanupOptions = {},
+  options: CleanupExecutionOptions = {},
 ): AsyncGenerator<CleanupState> {
   const {
     dryRun = false,
@@ -779,6 +783,7 @@ export async function cleanupWorktree({
   repo,
   dryRun = false,
   onState,
+  onDisposeEvent,
 }: WorktreeCleanupOptions): Promise<CleanupResult> {
   const safeRepoName = validateRepositoryComponent(repoName, "Repository name");
   const resolvedChangePath = path.resolve(targetPath);
@@ -828,6 +833,7 @@ export async function cleanupWorktree({
             ? { nodeModulesConfig: config.cache.nodeModules }
             : {}),
           force: true,
+          ...(onDisposeEvent ? { onEvent: onDisposeEvent } : {}),
         });
         if (repo) {
           await onState?.(

@@ -18,7 +18,10 @@ import { compactHome } from "./utils/display-path.ts";
 import { ensureDir } from "./utils/fs.ts";
 import { resolveContainedPath } from "./utils/path-safety.ts";
 import { spawnCommand } from "./utils/task-generator.ts";
-import { disposeWorktreeCheckout } from "./workspace/dispose-worktree.ts";
+import {
+  type DisposeWorktreeEvent,
+  disposeWorktreeCheckout,
+} from "./workspace/dispose-worktree.ts";
 import { runScopedRepoSetupPipeline } from "./workspace/index.ts";
 import {
   initializeWorktreeSetup,
@@ -109,6 +112,7 @@ export type RemoveReviewWorktreeOptions = {
   reviewsRoot: string;
   dryRun?: boolean;
   force?: boolean;
+  onDisposeEvent?: (event: DisposeWorktreeEvent) => void;
 };
 
 export type RemoveReviewWorktreeResult = {
@@ -655,6 +659,7 @@ export async function removeReviewWorktree({
   reviewsRoot,
   dryRun = false,
   force = false,
+  onDisposeEvent,
 }: RemoveReviewWorktreeOptions): Promise<RemoveReviewWorktreeResult> {
   validateReviewTarget(target);
   const targetDir = getReviewWorktreePath(reviewsRoot, target);
@@ -700,6 +705,7 @@ export async function removeReviewWorktree({
     force: true,
     ...(branch ? { branch, forceBranchDelete: force } : {}),
     timeoutMs: 30_000,
+    ...(onDisposeEvent ? { onEvent: onDisposeEvent } : {}),
   });
 
   if (await readWorkspaceMetadata(workspaceDir)) {
