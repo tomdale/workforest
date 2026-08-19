@@ -109,7 +109,6 @@ async function* execute(context: InitializerContext) {
 
     if (versionPrefix) {
       command = versionPrefix.command;
-<<<<<<< HEAD
       args = [
         ...versionPrefix.args,
         "pnpm",
@@ -119,7 +118,6 @@ async function* execute(context: InitializerContext) {
       ];
     } else {
       command = "pnpm";
-<<<<<<< HEAD
       args = [
         "install",
         "--config.confirmModulesPurge=false",
