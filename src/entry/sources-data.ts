@@ -72,21 +72,38 @@ export async function listSourceCandidates(): Promise<SourceCandidate[]> {
       };
     });
 
-  const templateCandidates: SourceCandidate[] = templates.map((template) => {
-    const description = template.config.description?.trim();
-    const repoCount = template.config.repos.length;
-    return {
-      kind: "template",
-      id: template.id,
-      label: template.id,
-      hint:
-        description && description.length > 0
-          ? description
-          : `Template · ${repoCount} repo${repoCount === 1 ? "" : "s"}`,
-    };
-  });
+  const templateCandidates: SourceCandidate[] = await Promise.all(
+    templates.map(async (template) => {
+      const description = template.config.description?.trim();
+      const repoNames = await resolveTemplateRepositoryNames(
+        template.config.repos,
+      );
+      const repoCount = repoNames.length;
+      const summary =
+        repoNames.length > 0 ? repoNames.join(", ") : "no repositories";
+      return {
+        kind: "template",
+        id: template.id,
+        label: template.id,
+        hint: description
+          ? `${description} · ${summary}`
+          : `Template · ${repoCount} repo${repoCount === 1 ? "" : "s"} · ${summary}`,
+      };
+    }),
+  );
 
   return [...repoCandidates, ...templateCandidates];
+}
+
+async function resolveTemplateRepositoryNames(
+  specifiers: string[],
+): Promise<string[]> {
+  try {
+    const repositories = await resolveRepositorySpecifiers(specifiers);
+    return repositories.map((repository) => repository.name);
+  } catch {
+    return specifiers;
+  }
 }
 
 /**

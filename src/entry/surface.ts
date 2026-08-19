@@ -98,33 +98,41 @@ export async function runEntry(
   };
 
   try {
-    const phase1 = await runPhase1(
-      screen,
-      stage,
-      mode,
-      deps.scope,
-      deps.initialName,
-    );
-    if (phase1.kind === "cancel") return;
-    if (phase1.kind === "cd") {
-      await cdToEntry(phase1.candidate);
-      return;
+    let changeName: string;
+    if (mode === "create") {
+      changeName = deps.initialName ?? "";
+    } else {
+      const phase1 = await runPhase1(
+        screen,
+        stage,
+        mode,
+        deps.scope,
+        deps.initialName,
+      );
+      if (phase1.kind === "cancel") return;
+      if (phase1.kind === "cd") {
+        await cdToEntry(phase1.candidate);
+        return;
+      }
+      changeName = phase1.changeName;
     }
 
-    const sources = await runPhase2(
+    const phase2 = await runPhase2(
       screen,
       stage,
-      phase1.changeName,
+      changeName,
       deps.scope,
+      mode === "create",
     );
-    if (!sources) return;
+    if (!phase2) return;
+    changeName = phase2.changeName;
 
     const target = await runTargetStep(screen, stage, deps.initialTarget);
     if (!target) return;
 
     // Hand off to the setup grid + confetti, which owns its own screen.
     teardown();
-    await deps.commit({ changeName: phase1.changeName, sources, target });
+    await deps.commit({ changeName, sources: phase2.sources, target });
   } finally {
     teardown();
   }
@@ -295,7 +303,8 @@ async function runPhase2(
   stage: Box,
   changeName: string,
   scope: Scope | undefined,
-): Promise<ChosenSource[] | null> {
+  includeNameInput = false,
+): Promise<{ changeName: string; sources: ChosenSource[] } | null> {
   const candidates = await listSourceCandidates();
   const repoCandidates = candidates.filter(
     (candidate) => candidate.kind === "repo",
@@ -343,6 +352,7 @@ async function runPhase2(
   });
 
   let notice: string | null = null;
+  let selectedName = changeName;
 
   try {
     while (true) {
@@ -389,6 +399,22 @@ async function runPhase2(
       const list = createFuzzyList<SourceCandidate>({
         screen,
         parent: host,
+        ...(includeNameInput
+          ? {
+              nameInput: {
+                initialValue: changeName,
+                label: "Name",
+                placeholder: "type a name",
+                onChange: (value) => {
+                  selectedName = value;
+                  preview.setContent(
+                    renderPreviewSync(theme, selectedName, mode, chosen, null),
+                  );
+                  screen.render();
+                },
+              },
+            }
+          : {}),
         scopeToggle: modeScopeToggle(mode),
         items: itemsForMode(mode),
         placeholder: "add a repo or @template",
@@ -417,13 +443,26 @@ async function runPhase2(
       if (result.kind === "cancel") return null;
 
       if (result.kind === "item") {
+        if (includeNameInput && !selectedName.trim()) {
+          notice = "Enter a name before selecting a source";
+          continue;
+        }
         const source = sourceFromCandidate(result.value);
-        return [source];
+        return { changeName: selectedName.trim(), sources: [source] };
       }
 
       if (result.kind === "items") {
         replaceCandidateSources(chosen, repoCandidates, result.values);
-        if (chosen.length >= 2) return chosen;
+        if (includeNameInput && !selectedName.trim()) {
+          notice = "Enter a name before creating a workspace";
+          continue;
+        }
+        if (chosen.length >= 2) {
+          return {
+            changeName: selectedName.trim(),
+            sources: chosen,
+          };
+        }
         notice = "Select at least two repositories";
         continue;
       }
@@ -435,7 +474,10 @@ async function runPhase2(
           notice = addSource(chosen, source);
           continue;
         }
-        return [source];
+        return {
+          changeName: selectedName.trim(),
+          sources: [source],
+        };
       }
     }
   } finally {

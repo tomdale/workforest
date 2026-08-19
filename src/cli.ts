@@ -2567,6 +2567,7 @@ function templateJson(
     parentId: template.parentId,
     variantId: template.variantId ?? null,
     parentPath: template.parentPath ?? null,
+    repositories: template.config.repos,
     config: template.config,
   };
 }

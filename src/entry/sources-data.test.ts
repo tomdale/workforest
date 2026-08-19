@@ -55,7 +55,7 @@ describe("listSourceCandidates", () => {
       kind: "template",
       id: "vercel-agent",
       label: "vercel-agent",
-      hint: "Agent workspace",
+      hint: "Agent workspace · front, api",
     });
   });
 
@@ -65,7 +65,7 @@ describe("listSourceCandidates", () => {
 
     const candidates = await listSourceCandidates();
     expect(candidates.find((c) => c.id === "solo")?.hint).toBe(
-      "Template · 1 repo",
+      "Template · 1 repo · front",
     );
   });
 });

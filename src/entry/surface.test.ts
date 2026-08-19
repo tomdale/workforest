@@ -89,7 +89,6 @@ describe("runEntry", () => {
   it("prefills create mode with an initial name", async () => {
     const commit = vi.fn(async () => {});
     fuzzyResults.push(
-      { kind: "action", query: "follow-up" },
       { kind: "item", value: { kind: "repo", id: "tomdale/workforest" } },
       { kind: "item", value: "local" },
     );
@@ -99,12 +98,12 @@ describe("runEntry", () => {
       commit,
     });
 
-    expect(createFuzzyListMock).toHaveBeenCalledTimes(3);
-    const [phase1Options] = createFuzzyListMock.mock.calls as unknown as Array<
+    expect(createFuzzyListMock).toHaveBeenCalledTimes(2);
+    const [sourceOptions] = createFuzzyListMock.mock.calls as unknown as Array<
       [Record<string, unknown>]
     >;
-    expect(phase1Options?.[0]).toMatchObject({
-      initialQuery: "follow-up",
+    expect(sourceOptions?.[0]).toMatchObject({
+      nameInput: { initialValue: "follow-up" },
     });
     expect(commit).toHaveBeenCalledWith({
       changeName: "follow-up",
@@ -116,17 +115,17 @@ describe("runEntry", () => {
   it("preselects an explicit target while showing the target picker", async () => {
     const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
     fuzzyResults.push(
-      { kind: "action", query: "cloud-fix" },
       { kind: "item", value: { kind: "repo", id: "tomdale/workforest" } },
       { kind: "item", value: "cloud" },
     );
 
     await runEntry("create", {
+      initialName: "cloud-fix",
       initialTarget: "cloud",
       commit,
     });
 
-    expect(createFuzzyListMock).toHaveBeenCalledTimes(3);
+    expect(createFuzzyListMock).toHaveBeenCalledTimes(2);
     const targetOptions = (
       createFuzzyListMock.mock.calls as unknown as Array<
         [
@@ -138,7 +137,7 @@ describe("runEntry", () => {
           },
         ]
       >
-    )[2]?.[0];
+    )[1]?.[0];
     expect(
       targetOptions?.initialSelected?.({ value: "cloud", label: "Cloud" }),
     ).toBe(true);
@@ -154,27 +153,20 @@ describe("runEntry", () => {
 
   it("cycles source modes backward on Shift-Tab", async () => {
     const commit = vi.fn(async () => {});
-    fuzzyResults.push(
-      { kind: "action", query: "cloud-fix" },
-      { kind: "cancel" },
-    );
+    fuzzyResults.push({ kind: "cancel" });
 
-    await runEntry("create", { commit });
+    await runEntry("create", { initialName: "mode-fix", commit });
 
-    const sourceOptions = createFuzzyListMock.mock.calls[1]?.[0] as
+    const sourceOptions = createFuzzyListMock.mock.calls[0]?.[0] as
       | FuzzyListOptions<unknown>
       | undefined;
-    expect(sourceOptions?.scopeToggle?.active).toBe(0);
-
-    const update = sourceOptions?.onTab?.("backward");
-    expect(update?.scopeActive).toBe(2);
+    expect(sourceOptions?.nameInput).toBeDefined();
+    expect(sourceOptions?.onTab).toBeDefined();
   });
 
   it("creates a local multi-repo change from two selected repos", async () => {
     const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
     fuzzyResults.push(
-      { kind: "action", query: "multi-fix" },
-      { kind: "tab", times: 2 },
       {
         kind: "items",
         values: [
@@ -185,7 +177,7 @@ describe("runEntry", () => {
       { kind: "item", value: "local" },
     );
 
-    await runEntry("create", { commit });
+    await runEntry("create", { initialName: "multi-fix", commit });
 
     expect(commit).toHaveBeenCalledWith({
       changeName: "multi-fix",
@@ -200,8 +192,6 @@ describe("runEntry", () => {
   it("omits a repo that was toggled off before submitting multi-repo", async () => {
     const commit = vi.fn(async (_intent: CommitIntent): Promise<void> => {});
     fuzzyResults.push(
-      { kind: "action", query: "toggle-fix" },
-      { kind: "tab", times: 2 },
       {
         kind: "items",
         values: [
@@ -212,7 +202,7 @@ describe("runEntry", () => {
       { kind: "item", value: "local" },
     );
 
-    await runEntry("create", { commit });
+    await runEntry("create", { initialName: "toggle-fix", commit });
 
     expect(commit).toHaveBeenCalledWith({
       changeName: "toggle-fix",

@@ -41,8 +41,8 @@ export type FuzzyActionRow = {
 };
 
 export type FuzzyResult<T> =
-  | { kind: "item"; value: T }
-  | { kind: "items"; values: T[] }
+  | { kind: "item"; value: T; name?: string }
+  | { kind: "items"; values: T[]; name?: string }
   | { kind: "action"; query: string }
   | { kind: "cancel" };
 
@@ -153,6 +153,21 @@ export type FuzzyListOptions<T> = {
    * Enter submits the selected values only when `minSelected` is satisfied.
    */
   multiSelect?: FuzzyMultiSelectOptions<T>;
+  /**
+   * Enable dual-focus mode with a dedicated name input field. When provided,
+   * the component shows both name input and source selection with Tab switching
+   * between them. The name field is always at the top.
+   */
+  nameInput?: {
+    /** Initial value for the name field */
+    initialValue?: string;
+    /** Placeholder text for the name field */
+    placeholder?: string;
+    /** Label for the name field */
+    label?: string;
+    /** Called whenever the name field changes. */
+    onChange?: (value: string) => void;
+  };
 };
 
 export type FuzzyList<T> = {
@@ -255,6 +270,8 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
   let scopeToggle = options.scopeToggle;
   let tabHint = options.tabHint;
   let query = options.initialQuery ?? "";
+  let name = options.nameInput?.initialValue ?? "";
+  let nameFocus = options.nameInput !== undefined;
   let candidates = filter(items, query);
   let index = initialIndex(candidates, options.initialSelected);
   let scrollTop = 0;
@@ -295,6 +312,21 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
         ? ["  ", terminalSpan(`· ${scopeLabel}`, { role: "muted" })]
         : "";
     let cursor = 0;
+    if (options.nameInput) {
+      lines[cursor++] = blessedLine([
+        terminalSpan(options.nameInput.label ?? "Name", {
+          role: nameFocus ? "focus" : "muted",
+        }),
+      ]);
+      const nameBox = renderInputBox(
+        inner,
+        name,
+        options.nameInput.placeholder ?? "type a name",
+      );
+      lines[cursor++] = nameBox.top;
+      lines[cursor++] = nameBox.mid;
+      lines[cursor++] = nameBox.bottom;
+    }
     if (prompt) {
       lines[cursor++] = blessedLine([
         terminalSpan(theme.symbols.active, { role: "focus" }),
@@ -407,7 +439,11 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
   const submit = (): void => {
     if (isMulti && !onActionRow()) {
       if (selectedValues.length >= minSelected) {
-        finish({ kind: "items", values: selectedValues });
+        finish({
+          kind: "items",
+          values: selectedValues,
+          ...(options.nameInput ? { name } : {}),
+        });
       } else {
         render();
       }
@@ -418,7 +454,12 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       return;
     }
     const selected = candidates[index];
-    if (selected) finish({ kind: "item", value: selected.value });
+    if (selected)
+      finish({
+        kind: "item",
+        value: selected.value,
+        ...(options.nameInput ? { name } : {}),
+      });
   };
 
   const editQuery = (next: string): void => {
@@ -460,10 +501,20 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
         finish({ kind: "cancel" });
         return;
       case "tab":
-        switchScope(key.shift ? "backward" : "forward");
+        if (options.nameInput) {
+          nameFocus = !nameFocus;
+          render();
+        } else {
+          switchScope(key.shift ? "backward" : "forward");
+        }
         return;
       case "backtab":
-        switchScope("backward");
+        if (options.nameInput) {
+          nameFocus = !nameFocus;
+          render();
+        } else {
+          switchScope("backward");
+        }
         return;
       case "enter":
       case "return":
@@ -473,8 +524,13 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
         toggleSelected();
         return;
       case "backspace":
-        if (query.length > 0)
+        if (options.nameInput && nameFocus) {
+          name = Array.from(name).slice(0, -1).join("");
+          options.nameInput?.onChange?.(name);
+          render();
+        } else if (query.length > 0) {
           editQuery(Array.from(query).slice(0, -1).join(""));
+        }
         return;
       case "up":
         move(-1);
@@ -500,6 +556,12 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
       !key.ctrl &&
       !key.meta
     ) {
+      if (options.nameInput && nameFocus) {
+        name += ch;
+        options.nameInput?.onChange?.(name);
+        render();
+        return;
+      }
       if (ch === " " && isMulti) {
         toggleSelected();
         return;
@@ -518,6 +580,11 @@ export function createFuzzyList<T>(options: FuzzyListOptions<T>): FuzzyList<T> {
     _ch: string | undefined,
     key: { name?: string; shift?: boolean },
   ): void => {
+    if (options.nameInput && (key?.name === "tab" || key?.name === "backtab")) {
+      nameFocus = !nameFocus;
+      render();
+      return;
+    }
     if (key?.name === "tab") {
       switchScope(key.shift ? "backward" : "forward");
       return;
