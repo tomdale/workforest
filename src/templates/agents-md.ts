@@ -76,7 +76,6 @@ type PreparedSources = Readonly<{
 
 type PreparedTemplateRootFile = Readonly<{
   workspacePath: string;
-  stagedPath: string;
   size: number;
   sha256: string;
 }>;
@@ -683,10 +682,6 @@ async function stageTemplateRootFiles(
     await fs.copyFile(file.absolutePath, target);
     prepared.push({
       workspacePath: file.workspacePath,
-      stagedPath: path.posix.join(
-        STAGED_TEMPLATE_FILES_DIR,
-        file.workspacePath,
-      ),
       size: file.size,
       sha256: file.sha256,
     });
@@ -872,45 +867,65 @@ function generationPrompt(
     })
     .join("\n");
   const templateRootFiles = formatTemplateRootFiles(sources.templateRootFiles);
+  const isBroadScope =
+    sources.repositories.length > 1 ||
+    Object.values(config.paths ?? {}).some((paths) => paths.length > 1);
 
   return [
     `You are drafting the compact instruction body for the root AGENTS.md for Workforest template \`${template.id}\`. It will later be copied to workspace roots and read by coding agents before edits.`,
     [
       "Operating context:",
       "A Workforest workspace is a local working directory created from a template, with related repository checkouts side-by-side and a root AGENTS.md above them.",
-      "The coding agent reading the generated file may not know Workforest. Assume it starts at the workspace root, then enters repository directories. Orient it to the multi-repository layout and focused workflow before it follows each repository's own AGENTS.md and commands.",
+      "The coding agent reading the generated file may not know Workforest. Assume it starts at the workspace root, then enters repository directories. Set the purpose of this workspace, explain the relationship between its repositories, and route the agent to the right starting point. Treat the configured focus as the authoritative description of what this workspace enables; repository evidence should clarify it, not redefine it.",
     ].join("\n"),
     [
       "Why this file exists:",
-      "Without a root guide, coding agents waste context rediscovering repository boundaries, cross-repository seams, commands, and nested instructions. The useful outcome is a compact router that helps the next agent choose the right repository, files, existing AGENTS.md instructions, and verification command for the configured workflow.",
-      "Repository and nested AGENTS.md files remain authoritative for local conventions. This template-owned file should add only the cross-repository and workflow-specific context those files do not already provide.",
+      "The root guide is a workspace router, not a replacement for repository guidance or a feature-specific architecture document. It should explain the work this template enables, ownership boundaries, common task routes, cross-repository handoffs, and verification strategy.",
+      "Repository-local agent instructions and package scripts remain authoritative within their directories and are loaded by the harness as the agent enters those directories. Do not enumerate nested AGENTS.md files or duplicate their local rules; add only cross-repository and workflow-specific context that cannot be inferred from directory scope.",
     ].join("\n"),
     `Configured focus:\n${config.focus}`,
     `Checked-out clean default-branch repositories are available from the current working directory:\n${repositories}`,
-    [
-      "Template-provided workspace root files:",
-      "The template's `files/` directory is staged read-only at `.workforest/template-files/`. These files will be copied to the workspace root; paths under repository names act as overlays on those checkouts. The configured generated guidance file is excluded because Workforest writes it.",
-      "Inspect only the staged files relevant to the configured focus, and do not repeat secrets or environment values from `.env`, credential, token, key, or certificate files.",
-      templateRootFiles,
-    ].join("\n"),
+    ...(sources.templateRootFiles.length > 0
+      ? [
+          [
+            "Template-provided workspace root files:",
+            "The template provides these files in the workspace; paths under repository names act as overlays on those checkouts. Inspect only files relevant to the configured focus, and do not repeat secrets or environment values from `.env`, credential, token, key, or certificate files.",
+            templateRootFiles,
+          ].join("\n"),
+        ]
+      : []),
     [
       "Success criteria:",
-      "- A coding agent can tell which repository owns each common part of the focused workflow.",
+      "- A coding agent understands what kinds of work this template is designed to enable and can tell which repository owns each common part.",
       "- The first files or directories to inspect are named with repo-prefixed paths.",
       "- Cross-repository control flow, data flow, proxying, generated-client boundaries, or shared contracts are summarized only where they affect the configured focus.",
-      "- Applicable repo-level and nested AGENTS.md files are listed without duplicating their instructions.",
-      "- Template-provided root files that affect setup, environment, routing, or repository overlays are accounted for without dumping their contents.",
+      "- Repository-local instructions are acknowledged as authoritative without enumerating nested AGENTS.md files or duplicating their instructions.",
+      "- Template-provided root files that affect setup, environment, routing, or repository overlays are accounted for without exposing generator internals.",
       "- Verification commands are included only when found in package scripts or local docs, with the directory they run from.",
+      ...(isBroadScope
+        ? [
+            "- Because this is a broad or multi-repository scope, the guide covers multiple durable task categories and does not organize the whole document around one discovered feature or seam.",
+          ]
+        : []),
     ].join("\n"),
     [
       "Exploration budget and stop rules:",
-      "- Treat the configured path hints as entry points, not as the complete source of truth.",
-      "- Treat `.workforest/template-files/` as workspace-root context, not as a repository. Use it to understand template-provided scripts, docs, config, or repo overlays that future agents will see.",
-      "- Search each repository for applicable AGENTS.md files, then read only the repo-level and nested instruction files that govern the hinted paths.",
+      "- Treat configured path hints as optional evidence for the configured focus, not as a requirement to inventory every hinted package or directory. Use them to understand ownership, then stop at the repository or concern level unless a concrete path materially improves routing.",
+      ...(sources.templateRootFiles.length > 0
+        ? [
+            "- Treat template-provided files as workspace-root context, not as a repository. Use them to understand scripts, docs, config, or repo overlays that future agents will see.",
+          ]
+        : []),
+      "- Let the harness and directory scope resolve repository-local AGENTS.md files. Read them only when needed to understand ownership or a command; do not turn their paths into a checklist in the root guide.",
       "- Prefer a small number of high-signal reads, roughly 6-12 shell commands across all repositories for normal templates. If that is not enough, choose the missing evidence needed for the success criteria and omit lower-confidence detail.",
-      "- Inspect the smallest useful set of implementation paths, nearby tests, package scripts, and local docs that directly affect the configured focus. A useful root guide usually needs representative owner files and seams, not every helper in the call graph.",
-      "- Follow cross-repository calls, API routes, generated clients, shared packages, or data contracts only until the handoff is clear enough to route a future task.",
-      "- Stop exploring and draft once you can name the owning repo, first files, governing AGENTS.md files, cross-repository handoff, and verification lane for the focused workflow. Do not inspect another file just to make the guide more complete.",
+      "- Inspect the smallest useful set of repository-level guidance, top-level layout, package scripts, and implementation evidence needed to explain ownership. Preserve breadth for broad scopes; do not spend the exploration budget tracing one feature, project, service, or package deeply.",
+      "- Follow cross-repository calls, API routes, generated clients, shared packages, or data contracts only when needed to explain a durable boundary. A concrete seam is one routing example, not the scope of a broad template; prefer describing the boundary at the repository or concern level.",
+      ...(isBroadScope
+        ? [
+            "- Before drafting a broad guide, establish several task routes spanning the configured repositories, such as user-facing behavior, local/project workflows, contracts, and backend implementation. Do not make one discovered seam the organizing principle.",
+          ]
+        : []),
+      "- Stop exploring and draft once you can name the workspace purpose, owning repo for common tasks, first paths, cross-repository handoff, and verification strategy. Do not inspect another file just to make the guide more complete.",
     ].join("\n"),
     [
       "Final response contract:",
@@ -924,8 +939,14 @@ function generationPrompt(
       "Required content:",
       `- Identify this as guidance for template \`${template.id}\` without using a Markdown heading.`,
       "- Keep it compact enough to be useful at the start of an agent session; optimize for fast routing, not broad education.",
-      "- Cover scope, in-scope paths, template-provided root context, cross-repository flow, task routing hints, reusable exploration recipes, verified commands, and existing AGENTS.md instructions.",
-      "- Use repo-prefixed paths like `front/path/to/file.ts` so agents can jump directly to the right files.",
+      "- Cover purpose, scope, repository ownership, cross-repository flow, broad task-routing guidance, and a concise verification strategy. Include concrete paths, recipes, or commands only when they are durable and materially improve routing.",
+      "- State that repository-local instructions are authoritative, but do not list nested AGENTS.md files by name unless a specific file is itself a necessary cross-repository entry point.",
+      ...(isBroadScope
+        ? [
+            "- For broad or multi-repository templates, organize routing by durable concerns or task types and cover each repository meaningfully; do not present a single representative feature as the template's scope.",
+          ]
+        : []),
+      "- Use repo-prefixed paths when a concrete entry point is durable and useful; do not turn the guide into a package, project, service, or file inventory.",
     ].join("\n"),
     [
       "Output style for an LLM reader:",
@@ -946,11 +967,11 @@ function generationPrompt(
       "Quality bar:",
       "- Answer the startup questions: which repository owns the work, which files should be inspected first, which existing instructions apply, and which command verifies the change.",
       "- Be specific about how the focused workflow is wired together.",
-      "- Prefer concrete modules, route files, scripts, and tests over broad repository summaries.",
-      "- Account for template files that will exist at the workspace root or overlay repositories; mention only the files that materially affect this focused workflow.",
-      "- Do not duplicate instructions already covered by repository or nested AGENTS.md files; list the applicable AGENTS.md paths and add only the template-specific context agents need on top.",
+      "- Prefer accurate repository- and concern-level guidance over a broad repository summary or a narrow inventory of concrete modules, route files, scripts, and tests.",
+      "- Account for template files that will exist at the workspace root or overlay repositories; mention only the files that materially affect this focused workflow, and omit this topic when there are no such files.",
+      "- Do not duplicate instructions already covered by repository-local guidance. State the precedence rule once and add only the template-specific context agents need on top.",
       "- Do not inline exhaustive research notes, architecture walkthroughs, API inventories, or incident histories. If deeper context is useful, point to existing source files, docs, or AGENTS.md files and summarize only the route to them.",
-      "- Memoize repeated exploration patterns as short recipes: the search terms, source paths, and package scripts an agent should try first.",
+      "- Include an exploration recipe only when the workflow has a durable cross-repository handoff; keep it at the concern level and avoid encoding transient search terms or one feature's paths.",
       "- Include only statements supported by files you actually inspected.",
       "- Include only commands you found in package scripts or local docs, and state the repository directory they should run from.",
       "- Omit unrelated components, generic coding advice, and speculative behavior.",
@@ -969,10 +990,7 @@ function formatTemplateRootFiles(
 ): string {
   if (files.length === 0) return "- none";
   return files
-    .map(
-      (file) =>
-        `- workspace \`${file.workspacePath}\`: staged at \`${file.stagedPath}\` (${file.size} bytes)`,
-    )
+    .map((file) => `- workspace \`${file.workspacePath}\` (${file.size} bytes)`)
     .join("\n");
 }
 

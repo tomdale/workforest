@@ -234,15 +234,9 @@ describe("template AGENTS.md artifacts", () => {
     expect(prompt).toEqual(
       expect.stringContaining("Template-provided workspace root files:"),
     );
+    expect(prompt).toEqual(expect.stringContaining("workspace `README.md` ("));
     expect(prompt).toEqual(
-      expect.stringContaining(
-        "workspace `README.md`: staged at `.workforest/template-files/README.md`",
-      ),
-    );
-    expect(prompt).toEqual(
-      expect.stringContaining(
-        "workspace `source/AGENTS.md`: staged at `.workforest/template-files/source/AGENTS.md`",
-      ),
+      expect.stringContaining("workspace `source/AGENTS.md` ("),
     );
     expect(prompt).toMatch(/<agents_md>[\s\S]*<\/agents_md>/);
     expect(prompt).not.toContain("implementation detail");
@@ -281,6 +275,7 @@ describe("template AGENTS.md artifacts", () => {
     const configHome = path.join(root, "config");
     const cache = path.join(root, "cache");
     const bin = path.join(root, "bin");
+    const promptLog = path.join(root, "prompts.log");
     await mkdir(path.join(source, "src"), { recursive: true });
     await mkdir(bin);
     await runGit(["init", "-b", "master"], { cwd: source });
@@ -319,6 +314,7 @@ describe("template AGENTS.md artifacts", () => {
     process.env["WORKFOREST_CACHE_DIR"] = cache;
     process.env["WORKFOREST_AI_PROVIDER"] = "codex-cli";
     delete process.env["WORKFOREST_AI_DISABLED"];
+    process.env["WORKFOREST_PROMPT_LOG"] = promptLog;
     process.env["PATH"] = `${bin}${path.delimiter}${originalPath ?? ""}`;
     delete process.env["SHELL"];
     await createTemplate("master-default", {
@@ -339,6 +335,9 @@ describe("template AGENTS.md artifacts", () => {
     ]);
 
     expect(result.state).toBe("fresh");
+    const prompt = await readFile(promptLog, "utf8");
+    expect(prompt).not.toContain("Template-provided workspace root files:");
+    expect(prompt).not.toContain(".workforest/template-files/");
     if (!result.artifactPath) throw new Error("Expected artifact path");
     expect(await readFile(result.artifactPath, "utf8")).toContain(
       "Scope: Start in source/src/integration.ts.",
