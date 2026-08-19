@@ -34,7 +34,7 @@ describe("delete system log", () => {
     process.env["WORKFOREST_CACHE_DIR"] = root;
     const directory = path.join(root, "system-logs");
     await mkdir(directory, { recursive: true });
-    const oldPath = path.join(directory, "delete-old.ndjson");
+    const oldPath = path.join(directory, "delete-2019-01-01.ndjson");
     await writeFile(oldPath, "old\n", "utf8");
     const oldTime = new Date("2020-01-01T00:00:00.000Z");
     await utimes(oldPath, oldTime, oldTime);

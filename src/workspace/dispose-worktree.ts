@@ -87,8 +87,13 @@ export async function disposeWorktreeCheckout(
     timeoutMs,
     lock = true,
   } = options;
-  const emit = (event: Omit<DisposeWorktreeEvent, "worktreePath">) =>
-    onEvent?.({ ...event, worktreePath });
+  const emit = (event: Omit<DisposeWorktreeEvent, "worktreePath">) => {
+    try {
+      onEvent?.({ ...event, worktreePath });
+    } catch {
+      // Diagnostics must never change disposal behavior.
+    }
+  };
 
   const exists = await pathExists(worktreePath);
   emit({
@@ -100,11 +105,20 @@ export async function disposeWorktreeCheckout(
 
   if (exists && repo) {
     emit({ phase: "node-modules", status: "started" });
-    preserved = await preserveNodeModules({
-      repo,
-      repoDir: worktreePath,
-      config: nodeModulesConfig,
-    });
+    try {
+      preserved = await preserveNodeModules({
+        repo,
+        repoDir: worktreePath,
+        config: nodeModulesConfig,
+      });
+    } catch (error) {
+      emit({
+        phase: "node-modules",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
     emit({
       phase: "node-modules",
       status: preserved.status === "warning" ? "failed" : "completed",
@@ -163,8 +177,13 @@ export async function disposeWorktreeCheckout(
         // Drained.
       }
       status = "stale";
-    } catch {
+    } catch (error) {
       status = "missing";
+      emit({
+        phase: "worktree-remove",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -172,8 +191,17 @@ export async function disposeWorktreeCheckout(
   // checkout was already half-deleted; finish the job unconditionally.
   if (await pathExists(worktreePath)) {
     emit({ phase: "residual-cleanup", status: "started" });
-    await fs.rm(worktreePath, { recursive: true, force: true });
-    emit({ phase: "residual-cleanup", status: "completed" });
+    try {
+      await fs.rm(worktreePath, { recursive: true, force: true });
+      emit({ phase: "residual-cleanup", status: "completed" });
+    } catch (error) {
+      emit({
+        phase: "residual-cleanup",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   } else {
     emit({ phase: "residual-cleanup", status: "skipped" });
   }
@@ -181,9 +209,18 @@ export async function disposeWorktreeCheckout(
   let branchDeleted = false;
   if (branch) {
     emit({ phase: "branch", status: "started", detail: branch });
-    await deleteBranchIfPossible(gitDir, branch, forceBranchDelete);
-    branchDeleted = true;
-    emit({ phase: "branch", status: "completed", detail: branch });
+    try {
+      await deleteBranchIfPossible(gitDir, branch, forceBranchDelete);
+      branchDeleted = true;
+      emit({ phase: "branch", status: "completed", detail: branch });
+    } catch (error) {
+      emit({
+        phase: "branch",
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   } else {
     emit({ phase: "branch", status: "skipped", detail: "no branch" });
   }

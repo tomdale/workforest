@@ -62,10 +62,10 @@ async function removeExpiredLogs(
           entry.name.endsWith(".ndjson"),
       )
       .map(async (entry) => {
-        const target = path.join(directory, entry.name);
-        const stat = await fs.stat(target);
-        if (nowMs - stat.mtimeMs > RETENTION_MS) {
-          await fs.rm(target, { force: true });
+        const dateText = entry.name.slice(LOG_PREFIX.length, -".ndjson".length);
+        const logTime = Date.parse(`${dateText}T00:00:00.000Z`);
+        if (Number.isFinite(logTime) && nowMs - logTime > RETENTION_MS) {
+          await fs.rm(path.join(directory, entry.name), { force: true });
         }
       }),
   );
