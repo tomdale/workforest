@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
-  "ignoreBinaries": ["codex", "sandbox"],
+  "ignoreBinaries": ["codex", "sandbox", "tmux"],
   "rules": {
     "exports": "off",
     "types": "off"

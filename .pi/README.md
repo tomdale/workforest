@@ -14,8 +14,12 @@ using pi's project-local resource conventions.
 - `skills/*/SKILL.md` — the `submit`, `integrate`, and `plan` skills. Pi
   auto-discovers project skills once the repository is trusted, and registers
   them as `/skill:submit`, `/skill:integrate`, and `/skill:plan`.
-- `scripts/integration.mjs` — the shared integration queue and lock helper the
-  skills call by relative path.
+- `scripts/integration.mjs` — the shared integration queue, lock, and singleton
+  integration-session helper the skills call by relative path.
+- `scripts/integration-runner.mjs` — the detached tmux runner that repeatedly
+  invokes pi until a final queue check confirms no work remains.
+- `scripts/integration-reaper.mjs` — closes the runner handoff race by waiting
+  for the old tmux session to exit, then restarting integration if work arrived.
 
 ## Mapping from the plugin
 
