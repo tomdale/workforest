@@ -402,13 +402,28 @@ function startHerdrIntegrationSession(mainWorktree, context) {
     INTEGRATION_SESSION_NAME,
   ]);
   if (existing.status === 0) {
-    promptHerdrIntegrationAgent();
-    return {
-      status: "already-running",
-      session: INTEGRATION_SESSION_NAME,
-      mode: "herdr",
-      worktree: mainWorktree,
-    };
+    const response = JSON.parse(existing.stdout);
+    const agent = response?.result?.agent;
+    if (agent?.cwd === mainWorktree) {
+      promptHerdrIntegrationAgent();
+      return {
+        status: "already-running",
+        session: INTEGRATION_SESSION_NAME,
+        mode: "herdr",
+        worktree: mainWorktree,
+      };
+    }
+    if (agent?.agent_status !== "idle" || typeof agent?.tab_id !== "string") {
+      throw new Error(
+        `Existing Herdr integration agent is running in unexpected directory ${agent?.cwd ?? "unknown"}.`,
+      );
+    }
+    const closed = runCommandCapture("herdr", ["tab", "close", agent.tab_id]);
+    if (closed.status !== 0) {
+      throw new Error(
+        closed.stderr.trim() || "Could not close the stale Herdr integration tab.",
+      );
+    }
   }
 
   const created = runCommandCapture("herdr", [

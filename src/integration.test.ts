@@ -80,14 +80,21 @@ async function createFakeHerdr(root: string) {
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + "\\n");
-if (args[0] === "agent" && args[1] === "get") process.exit(fs.existsSync(${JSON.stringify(statePath)}) ? 0 : 1);
+if (args[0] === "agent" && args[1] === "get") {
+  if (!fs.existsSync(${JSON.stringify(statePath)})) process.exit(1);
+  console.log(JSON.stringify({ result: { agent: JSON.parse(fs.readFileSync(${JSON.stringify(statePath)}, "utf8")) } }));
+  process.exit(0);
+}
 if (args[0] === "tab" && args[1] === "create") {
   console.log(JSON.stringify({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } }));
   process.exit(0);
 }
-if (args[0] === "agent" && args[1] === "start") { fs.writeFileSync(${JSON.stringify(statePath)}, "running\\n"); process.exit(0); }
+if (args[0] === "agent" && args[1] === "start") {
+  fs.writeFileSync(${JSON.stringify(statePath)}, JSON.stringify({ cwd: process.cwd(), agent_status: "idle", tab_id: "w1:t2" }));
+  process.exit(0);
+}
 if (args[0] === "agent" && args[1] === "prompt") process.exit(0);
-if (args[0] === "tab" && args[1] === "close") process.exit(0);
+if (args[0] === "tab" && args[1] === "close") { fs.rmSync(${JSON.stringify(statePath)}, { force: true }); process.exit(0); }
 process.exit(2);
 `,
   );
@@ -100,6 +107,7 @@ process.exit(2);
       PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
     },
     logPath,
+    statePath,
   };
 }
 
@@ -426,6 +434,40 @@ describe("integration session", () => {
     expect(
       calls.filter((args) => args[0] === "agent" && args[1] === "prompt"),
     ).toHaveLength(2);
+  });
+
+  it("replaces an idle Herdr integration agent from the wrong directory", async () => {
+    const { root, repoDir } = await createRepositoryFixture();
+    const fakeHerdr = await createFakeHerdr(root);
+    await writeFile(
+      fakeHerdr.statePath,
+      JSON.stringify({
+        cwd: path.join(root, "stale-fixture"),
+        agent_status: "idle",
+        tab_id: "w1:t9",
+      }),
+    );
+
+    const started = JSON.parse(
+      run(process.execPath, [queueScript, "start-pi"], repoDir, {
+        env: fakeHerdr.env,
+      }),
+    ) as { status: string; mode: string; tab: string; worktree: string };
+
+    expect(started).toMatchObject({
+      status: "started",
+      mode: "herdr",
+      tab: "w1:t2",
+      worktree: await realpath(repoDir),
+    });
+    const calls = (await readFile(fakeHerdr.logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    expect(calls).toContainEqual(["tab", "close", "w1:t9"]);
+    expect(
+      calls.some((args) => args[0] === "tab" && args[1] === "create"),
+    ).toBe(true);
   });
 
   it("starts one pi session in the main worktree and reuses it", async () => {
