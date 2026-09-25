@@ -38,10 +38,24 @@ Use this skill when a feature branch is done and should be queued for the local 
 5. Enqueue the current branch with `.pi/scripts/integration.mjs enqueue`.
    If validation fails, fix the reported errors, commit the fixes, and rerun
    enqueue.
-6. Report:
+6. Immediately run `.pi/scripts/integration.mjs start-pi`.
+   When submitting from a Herdr-managed pane, this creates a new Herdr tab in
+   the current workspace and starts a named interactive Pi integration agent
+   there. Otherwise it starts the singleton `workforest-integration` tmux
+   session. In either mode it reports `already-running` when the integration
+   agent is already draining the queue. Starting and prompting the agent is part
+   of submission; do not ask the user to run the integrate skill.
+7. Once `start-pi` reports `started` or `already-running`, return immediately.
+   Do not focus or attach to the integration tab/session, inspect integration
+   output, poll the agent, wait for queue progress, or run the integrate skill
+   in the submit session.
+8. Report:
    - branch name
    - queued SHA
    - queue ref path
+   - integration session status (`started` or `already-running`)
+   - launch mode (`herdr` or `tmux`)
+   - Herdr tab ID or the printed tmux attach command when a session was started
 
 ## Notes
 

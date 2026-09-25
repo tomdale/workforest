@@ -2,14 +2,16 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 
 const QUEUE_PREFIX = "refs/workforest/integration-ready";
 const BRANCH_PREFIX = "tomdale/";
 const MAIN_BRANCH = "main";
 const MAIN_LOCK_FILENAME = "workforest-main.lock";
+const INTEGRATION_SESSION_NAME = "workforest-integration";
 
 function runGit(args, options = {}) {
   return execFileSync("git", args, {
@@ -37,6 +39,38 @@ function runCommand(command, args, options = {}) {
   });
   if (result.error) throw result.error;
   return result.status ?? 1;
+}
+
+function commandSucceeds(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    stdio: "ignore",
+    ...options,
+  });
+  if (result.error && result.error.code === "ENOENT") return false;
+  if (result.error) throw result.error;
+  return result.status === 0;
+}
+
+function runCommandCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    ...options,
+  });
+  if (result.error) throw result.error;
+  return result;
+}
+
+async function resolveExecutable(command) {
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, command);
+    try {
+      await fs.access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  return null;
 }
 
 function resolveGitCommonDir() {
@@ -306,6 +340,8 @@ function entryForIdentifier(identifier) {
 function printHelp() {
   console.log(`Usage:
   integration.mjs enqueue [branch]
+  integration.mjs start-pi [--if-queued]
+  integration.mjs finish-pi
   integration.mjs list [--json]
   integration.mjs refresh <branch|id>
   integration.mjs sync-worktree <branch|id> [--target <commit>]
@@ -313,6 +349,228 @@ function printHelp() {
   integration.mjs acquire-lock [--force]
   integration.mjs release-lock --token <token>
   integration.mjs with-lock -- <command> [args...]`);
+}
+
+function resolveMainWorktree() {
+  if (process.env.WORKFOREST_REPOS) {
+    return path.resolve(process.env.WORKFOREST_REPOS, "workforest", "main");
+  }
+
+  const main = parseWorktreeList(runGit(["worktree", "list", "--porcelain"])).find(
+    (worktree) => worktree.branch === "refs/heads/main",
+  );
+  if (!main) {
+    throw new Error(
+      "Could not locate the main worktree. Set WORKFOREST_REPOS or check out main.",
+    );
+  }
+  return main.path;
+}
+
+function herdrContext() {
+  if (
+    process.env.HERDR_ENV !== "1" ||
+    !process.env.HERDR_SOCKET_PATH ||
+    !process.env.HERDR_WORKSPACE_ID
+  ) {
+    return null;
+  }
+  return { workspace: process.env.HERDR_WORKSPACE_ID };
+}
+
+function promptHerdrIntegrationAgent() {
+  const prompt = [
+    "Run the integrate skill now and autonomously drain every entry in the integration queue.",
+    "Re-list the queue after each entry and continue until it is empty.",
+    "Check the queue one final time immediately before settling.",
+  ].join(" ");
+  const result = runCommandCapture("herdr", [
+    "agent",
+    "prompt",
+    INTEGRATION_SESSION_NAME,
+    prompt,
+  ]);
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || "Could not prompt the Herdr integration agent.");
+  }
+}
+
+function startHerdrIntegrationSession(mainWorktree, context) {
+  const existing = runCommandCapture("herdr", [
+    "agent",
+    "get",
+    INTEGRATION_SESSION_NAME,
+  ]);
+  if (existing.status === 0) {
+    const response = JSON.parse(existing.stdout);
+    const agent = response?.result?.agent;
+    if (agent?.cwd === mainWorktree) {
+      promptHerdrIntegrationAgent();
+      return {
+        status: "already-running",
+        session: INTEGRATION_SESSION_NAME,
+        mode: "herdr",
+        worktree: mainWorktree,
+      };
+    }
+    if (agent?.agent_status !== "idle" || typeof agent?.tab_id !== "string") {
+      throw new Error(
+        `Existing Herdr integration agent is running in unexpected directory ${agent?.cwd ?? "unknown"}.`,
+      );
+    }
+    const closed = runCommandCapture("herdr", ["tab", "close", agent.tab_id]);
+    if (closed.status !== 0) {
+      throw new Error(
+        closed.stderr.trim() || "Could not close the stale Herdr integration tab.",
+      );
+    }
+  }
+
+  const created = runCommandCapture("herdr", [
+    "tab",
+    "create",
+    "--workspace",
+    context.workspace,
+    "--cwd",
+    mainWorktree,
+    "--label",
+    "Integration",
+    "--no-focus",
+  ]);
+  if (created.status !== 0) {
+    throw new Error(created.stderr.trim() || "Could not create the Herdr integration tab.");
+  }
+  const response = JSON.parse(created.stdout);
+  const paneId = response?.result?.root_pane?.pane_id;
+  const tabId = response?.result?.tab?.tab_id;
+  if (typeof paneId !== "string" || typeof tabId !== "string") {
+    throw new Error("Herdr tab creation did not return tab and pane identifiers.");
+  }
+
+  const started = runCommandCapture("herdr", [
+    "agent",
+    "start",
+    INTEGRATION_SESSION_NAME,
+    "--kind",
+    "pi",
+    "--pane",
+    paneId,
+    "--",
+    "--name",
+    "Workforest integration",
+    "--approve",
+  ]);
+  if (started.status !== 0) {
+    runCommandCapture("herdr", ["tab", "close", tabId]);
+    const winner = runCommandCapture("herdr", [
+      "agent",
+      "get",
+      INTEGRATION_SESSION_NAME,
+    ]);
+    if (winner.status === 0) {
+      promptHerdrIntegrationAgent();
+      return {
+        status: "already-running",
+        session: INTEGRATION_SESSION_NAME,
+        mode: "herdr",
+        worktree: mainWorktree,
+      };
+    }
+    throw new Error(started.stderr.trim() || "Could not start Pi in the Herdr tab.");
+  }
+
+  promptHerdrIntegrationAgent();
+  return {
+    status: "started",
+    session: INTEGRATION_SESSION_NAME,
+    mode: "herdr",
+    worktree: mainWorktree,
+    tab: tabId,
+  };
+}
+
+async function startPiIntegrationSession({ ifQueued = false } = {}) {
+  const mainWorktree = resolveMainWorktree();
+  const stat = await fs.stat(mainWorktree).catch(() => null);
+  if (!stat?.isDirectory()) {
+    throw new Error(`Workforest main worktree does not exist at ${mainWorktree}`);
+  }
+  const herdr = herdrContext();
+  if (herdr) {
+    return startHerdrIntegrationSession(mainWorktree, herdr);
+  }
+
+  if (!commandSucceeds("tmux", ["-V"])) {
+    throw new Error("Starting the integration session requires tmux on PATH.");
+  }
+  if (commandSucceeds("tmux", ["has-session", "-t", `=${INTEGRATION_SESSION_NAME}`])) {
+    return {
+      status: "already-running",
+      session: INTEGRATION_SESSION_NAME,
+      mode: "tmux",
+      worktree: mainWorktree,
+    };
+  }
+
+  if (ifQueued && queueEntries().length === 0) {
+    return {
+      status: "not-needed",
+      session: INTEGRATION_SESSION_NAME,
+      worktree: mainWorktree,
+    };
+  }
+
+  const piExecutable = await resolveExecutable("pi");
+  if (!piExecutable) {
+    throw new Error("Starting the integration session requires pi on PATH.");
+  }
+
+  const runner = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "integration-runner.mjs",
+  );
+  const result = spawnSync(
+    "tmux",
+    [
+      "new-session",
+      "-d",
+      "-s",
+      INTEGRATION_SESSION_NAME,
+      "-c",
+      mainWorktree,
+      process.execPath,
+      runner,
+      piExecutable,
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    if (commandSucceeds("tmux", ["has-session", "-t", `=${INTEGRATION_SESSION_NAME}`])) {
+      return {
+        status: "already-running",
+        session: INTEGRATION_SESSION_NAME,
+        mode: "tmux",
+        worktree: mainWorktree,
+      };
+    }
+    throw new Error(result.stderr.trim() || "Could not start the integration session.");
+  }
+  return {
+    status: "started",
+    session: INTEGRATION_SESSION_NAME,
+    mode: "tmux",
+    worktree: mainWorktree,
+    attach: `tmux attach -t ${INTEGRATION_SESSION_NAME}`,
+  };
+}
+
+function finishPiIntegrationSession() {
+  const queued = queueEntries();
+  if (queued.length > 0) {
+    return { status: "continue", queued: queued.length };
+  }
+  return { status: "finished", queued: 0 };
 }
 
 function enqueue(branchArg) {
@@ -569,6 +827,24 @@ async function main(argv) {
   if (command === "enqueue") {
     const branch = rest[0];
     const result = enqueue(branch);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "start-pi") {
+    const unknownOptions = rest.filter((arg) => arg !== "--if-queued");
+    if (unknownOptions.length > 0) {
+      throw new Error(`Unknown start-pi option: ${unknownOptions[0]}`);
+    }
+    const result = await startPiIntegrationSession({
+      ifQueued: rest.includes("--if-queued"),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "finish-pi") {
+    const result = await finishPiIntegrationSession();
     console.log(JSON.stringify(result, null, 2));
     return;
   }
