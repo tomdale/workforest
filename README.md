@@ -531,6 +531,68 @@ Hooks run after repository initializers. Each hook supports `name`, `run`,
 optional `in`, optional `if`, optional `continueOnError`, and optional
 `timeoutMs` (fail the hook if it runs longer than this).
 
+## Activity Digests
+
+Feature slugs rarely say what a checkout is for. Workforest keeps a short,
+cached digest per worktree and workspace: its purpose, the latest observed
+work, and the likely next step.
+
+```sh
+wf activity list                 # cached digests, instant; never runs Git or a model
+wf activity list --json          # the same read model for UI clients
+wf activity show [selector]
+wf activity refresh [selector]   # regenerate now if outdated (--force: always)
+wf activity watch                # foreground periodic service; Ctrl-C to stop
+wf activity sweep                # one reconciliation pass, e.g. from a scheduler
+wf activity status               # service heartbeat, inference state, digest counts
+```
+
+How it stays cheap and trustworthy:
+
+- **Detection is separate from generation.** Each pass fingerprints Git state
+  (`HEAD`, branch, upstream, and the paths plus size/mtime of dirty files, so
+  repeated edits to an already dirty file count), task lifecycle, and explicit
+  inputs. Ignored files never count, nothing is watched recursively, and
+  generated digests never count as activity.
+- **Only active checkouts are summarized.** Active means a change was observed
+  within the last 12 hours or the checkout is pinned. Inactive checkouts are
+  re-checked every 6 hours to discover new work; unchanged checkouts are never
+  summarized again. Changes settle for 3 minutes before a digest (at most 30
+  minutes under continuous change), digests are spaced at least 10 minutes
+  apart, each sweep generates at most 3, and failures back off exponentially.
+- **Freshness is relative to the last observation.** `current` means the
+  digest matches what the last detection pass saw; `outdated` means inputs have
+  changed since; `missing` means no digest yet. Generation state
+  (`idle`, `queued`, `running`, `failed`) is reported separately, and a failed
+  run keeps the previous digest. A run summarizes the fingerprint it captured,
+  so edits made during generation leave the digest `outdated`, never falsely
+  current. A deleted and recreated checkout starts without a digest.
+- **The model sees a bounded evidence packet**: commit subjects, changed file
+  names with line counts, task names, and explicit notes. File contents, tool
+  logs, and secret-looking paths are never sent. The provider runs with tools
+  disabled in an empty directory, on the inexpensive `activity-digest` tier
+  (`gpt-5.4-mini` for Codex CLI, `claude-haiku-4-5` for Claude Code), which
+  ignores the general `ai.model` override. `ai.provider` still selects the
+  provider; `ai.disabled` or `WORKFOREST_AI_DISABLED=1` keeps detection running
+  without inference.
+
+Explicit inputs outrank inference:
+
+```sh
+wf activity purpose --set "Migrate billing to the v2 API"
+wf activity pin                  # keep summarizing without recent activity (--off to unpin)
+wf activity note --source bb:thr_123 --summary "Added retry tests" --next "Wire retries into the CLI"
+```
+
+`wf activity note` is the ingestion seam for agent hosts such as BB: a note is
+explicit evidence, marks the checkout active, and its `next` step is shown
+(labelled `handoff`) until a later digest covers it. Workforest does not read
+private Claude, Codex, or Pi session histories.
+
+Background generation happens only while `wf activity watch` (or a scheduled
+`wf activity sweep`) runs, or on an explicit refresh; stop the service to
+disable it. Records live under `$WORKFOREST_CACHE_DIR/_activity/`.
+
 ## Configuration
 
 Global settings live in `~/.workforest/config.json` by default:
@@ -595,6 +657,10 @@ wf delete              Delete a worktree or workspace (verified; --force to aban
 wf init logs           Render or tail recorded setup run logs
 wf init retry          Retry failed repository setup
 wf init cancel         Cancel in-flight background setup
+
+wf activity list       Show cached activity digests (purpose, latest, next)
+wf activity watch      Run the periodic activity digest service
+wf activity refresh    Regenerate one activity digest now
 
 wf task new            Create nested task worktrees
 wf task list           List task worktrees

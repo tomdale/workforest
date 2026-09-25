@@ -36,5 +36,8 @@ syntax.
 
 ## Finish The Tasks
 
+- Record each finished handoff with `wf activity note <parent-selector>
+  --source <agent> --summary <done> --next <next>` so the parent's activity
+  digest reflects it.
 - Use `wf task delete` after the task branch is merged or cherry-picked.
 - Use `wf task delete --force` only for intentional abandonment.

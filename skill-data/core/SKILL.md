@@ -29,6 +29,16 @@ wf add <repo...|@template>
 Use `wf list` for inventory, `wf status` for progress, and `wf add` when a
 worktree needs to grow. Use `wf add --help` for the exact cases.
 
+```sh
+wf activity list --json
+wf activity note --source <agent> --summary <done> --next <next>
+```
+
+`wf activity list` reads cached digests of what each checkout is for, what
+happened last, and what is likely next, without running a model. Record a
+handoff note when you stop so the next agent sees your explicit next step. Use
+`wf activity --help` for refresh, purpose, pin, and the periodic service.
+
 ## Finish Cleanly
 
 ```sh
