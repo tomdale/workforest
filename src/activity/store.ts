@@ -59,6 +59,7 @@ export function emptyRecord(target: ActivityTargetIdentity): ActivityRecord {
       fingerprint: null,
       runId: null,
       pid: null,
+      host: null,
       startedAt: null,
       attempts: 0,
       lastError: null,

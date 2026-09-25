@@ -83,6 +83,8 @@ export type ActivityGeneration = {
   fingerprint: string | null;
   runId: string | null;
   pid: number | null;
+  /** Host of the claimant; a claim from another host is never superseded. */
+  host: string | null;
   startedAt: string | null;
   attempts: number;
   lastError: string | null;

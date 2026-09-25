@@ -566,8 +566,19 @@ describe("activity generation", () => {
       if (record.generation.state === "running") break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    // The slow claim now looks abandoned; a newer run takes over.
-    clock.advance(DEFAULT_ACTIVITY_POLICY.staleRunMs);
+    // Age alone never supersedes a live claim.
+    clock.advance(24 * 60 * MINUTE);
+    const blocked = await generateForTarget(
+      target,
+      engine(fixture, fakeGenerator(undefined, "blocked run"), clock),
+      "force",
+    );
+    expect(blocked).toMatchObject({ result: "skipped", reason: "running" });
+    // Simulate the claimant's process dying; a newer run takes over.
+    await mutateRecord(fixture.paths, target.identity, (current) => ({
+      ...current,
+      generation: { ...current.generation, pid: 2_147_483_647 },
+    }));
     const fast = await generateForTarget(
       target,
       engine(fixture, fakeGenerator(undefined, "newer run"), clock),
@@ -866,7 +877,8 @@ describe("activity policy", () => {
           state: "running",
           pid: 1,
           runId: "r",
-          startedAt: new Date(nowMs - MINUTE).toISOString(),
+          host: null,
+          startedAt: new Date(nowMs - 24 * 60 * MINUTE).toISOString(),
         },
       },
     };

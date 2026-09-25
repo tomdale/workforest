@@ -14,12 +14,15 @@ import { setTimeout as delay } from "node:timers/promises";
  * - Liveness: a lock is reclaimable only when its owner is on this host and
  *   its pid is dead. Age never evicts a live owner; a lock from another host
  *   or with unreadable content is never reclaimed automatically.
- * - Reclamation: reclaimers first win an exclusive per-owner-token marker
- *   (`<lock>.reclaim-<token>`, also published with `link`). Only the winner
- *   may remove a lock carrying that token, and a dead owner never rewrites
- *   its lock, so the lock cannot change under the winner. Markers are left
- *   behind so a slow reclaimer holding the same stale token can never win
- *   later and delete a newer owner's lock.
+ * - Reclamation: a reclaimer must hold the per-owner-token marker lock
+ *   `<lock>.reclaim-<token>`, acquired with this same protocol. Holding it,
+ *   the reclaimer re-reads the lock and deletes it only if it still carries
+ *   the dead token. At most one live process holds a marker, a dead owner
+ *   never rewrites its lock, and tokens are never reused, so the lock cannot
+ *   change between that check and the delete, and a delayed reclaimer that
+ *   acquires the marker later finds a different token and deletes nothing.
+ *   A reclaimer that dies while holding a marker leaves a dead-owned marker,
+ *   which is reclaimed recursively the same way, so crashes never wedge.
  * - Release: only the holder of the matching token deletes the lock; no
  *   other process removes a live owner's lock, so check-then-delete is safe.
  */
@@ -47,9 +50,13 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+/** Each level of nesting requires another crashed reclaimer. */
+const MAX_RECLAIM_DEPTH = 4;
+
 export async function tryAcquireLock(
   lockPath: string,
   hooks: LockHooks = {},
+  depth = 0,
 ): Promise<HeldLock | null> {
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
   const owner: LockOwner = {
@@ -70,11 +77,20 @@ export async function tryAcquireLock(
     const alive = hooks.isProcessAlive ?? isProcessAlive;
     if (current.host !== HOST || alive(current.pid)) return null;
     await hooks.beforeReclaim?.();
-    const marker = `${lockPath}.reclaim-${current.token}`;
-    if (!(await publish(marker, owner))) return null;
-    const confirmed = await readOwner(lockPath);
-    if (typeof confirmed === "object" && confirmed.token === current.token) {
-      await fs.rm(lockPath, { force: true });
+    if (depth >= MAX_RECLAIM_DEPTH) return null;
+    const marker = await tryAcquireLock(
+      `${lockPath}.reclaim-${current.token}`,
+      hooks.isProcessAlive ? { isProcessAlive: hooks.isProcessAlive } : {},
+      depth + 1,
+    );
+    if (!marker) return null;
+    try {
+      const confirmed = await readOwner(lockPath);
+      if (typeof confirmed === "object" && confirmed.token === current.token) {
+        await fs.rm(lockPath, { force: true });
+      }
+    } finally {
+      await marker.release();
     }
   }
   return null;

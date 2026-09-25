@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -65,7 +66,8 @@ export type SweepSummary = Readonly<{
 }>;
 
 export function isRunAlive(record: ActivityRecord): boolean {
-  const pid = record.generation.pid;
+  const { pid, host } = record.generation;
+  if (host !== null && host !== os.hostname()) return true;
   return pid !== null && isProcessAlive(pid);
 }
 
@@ -334,6 +336,7 @@ async function generateWithSignal(
           fingerprint: observation.fingerprint,
           runId,
           pid: process.pid,
+          host: os.hostname(),
           startedAt: new Date(now()).toISOString(),
         },
       };
@@ -373,6 +376,17 @@ async function generateWithSignal(
       };
     }
     if (signal.aborted) throw new Error("cancelled");
+    const owner = await readRecord(options.paths, target.identity);
+    if (owner.generation.runId !== runId) {
+      // The claim was superseded (its process looked dead); never spend a
+      // model call for a run that can no longer record its result.
+      return {
+        selector,
+        result: "skipped",
+        reason: "superseded",
+        record: owner,
+      };
+    }
     const generated = await options.generator(packet, signal);
     const afterInputs = await readInputs(options.paths, target.identity);
     const after = await observeTarget(target, afterInputs, now());
@@ -405,6 +419,7 @@ async function generateWithSignal(
                   fingerprint: null,
                   runId: null,
                   pid: null,
+                  host: null,
                   startedAt: null,
                   attempts: 0,
                   lastError: null,
@@ -437,6 +452,7 @@ async function generateWithSignal(
             state: "failed",
             runId: null,
             pid: null,
+            host: null,
             startedAt: null,
             attempts,
             lastError: message,
@@ -480,6 +496,7 @@ async function releaseClaim(
             fingerprint: null,
             runId: null,
             pid: null,
+            host: null,
             startedAt: null,
           },
         }

@@ -80,6 +80,35 @@ describe("activity locks", () => {
     expect(content.token).toBe(winner?.token);
   });
 
+  it("recovers when a reclaimer crashed while holding the marker", async () => {
+    const file = await lockPath();
+    await writeFile(file, owner("dead-original", DEAD_PID));
+    await writeFile(
+      `${file}.reclaim-dead-original`,
+      owner("dead-reclaimer", 2_147_483_647),
+    );
+
+    const lock = await tryAcquireLock(file);
+
+    expect(lock).not.toBeNull();
+    const content = JSON.parse(await readFile(file, "utf8")) as {
+      token: string;
+    };
+    expect(content.token).toBe(lock?.token);
+  });
+
+  it("waits for a live reclaimer holding the marker", async () => {
+    const file = await lockPath();
+    await writeFile(file, owner("dead-original", DEAD_PID));
+    await writeFile(
+      `${file}.reclaim-dead-original`,
+      owner("live-reclaimer", process.pid),
+    );
+
+    expect(await tryAcquireLock(file)).toBeNull();
+    expect(await readFile(file, "utf8")).toContain("dead-original");
+  });
+
   it("never evicts a live owner regardless of age", async () => {
     const file = await lockPath();
     await writeFile(file, owner("live", process.pid));

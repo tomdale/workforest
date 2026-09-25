@@ -24,8 +24,6 @@ export type ActivityPolicy = Readonly<{
   discoveryIntervalMs: number;
   retryBaseMs: number;
   retryMaxMs: number;
-  /** A running claim older than this is treated as abandoned. */
-  staleRunMs: number;
 }>;
 
 export const DEFAULT_ACTIVITY_POLICY: ActivityPolicy = {
@@ -36,7 +34,6 @@ export const DEFAULT_ACTIVITY_POLICY: ActivityPolicy = {
   discoveryIntervalMs: 6 * 60 * 60_000,
   retryBaseMs: 5 * 60_000,
   retryMaxMs: 6 * 60 * 60_000,
-  staleRunMs: 10 * 60_000,
 };
 
 export type ObservedInputs = Readonly<{
@@ -194,7 +191,7 @@ export function decideGeneration(
   }
   const fingerprint = observation.fingerprint;
 
-  if (isRunning(record, nowMs, policy, options.isRunAlive)) {
+  if (isRunning(record, options.isRunAlive)) {
     return { kind: "skip", reason: "running" };
   }
   if (mode === "force") return { kind: "generate", fingerprint };
@@ -251,17 +248,18 @@ export function decideGeneration(
   return { kind: "generate", fingerprint };
 }
 
+/**
+ * A running claim stands exactly as long as its claimant process is alive.
+ * Age never supersedes a live claim: the provider call has its own timeout,
+ * and superseding a live run would spend a second model call on the same
+ * checkout. A claim whose process died (crash, kill) is retryable at once.
+ */
 export function isRunning(
   record: ActivityRecord,
-  nowMs: number,
-  policy: ActivityPolicy = DEFAULT_ACTIVITY_POLICY,
   isRunAlive: (record: ActivityRecord) => boolean = () => true,
 ): boolean {
   const generation = record.generation;
   if (generation.state !== "running" || !generation.startedAt) return false;
-  if (nowMs - Date.parse(generation.startedAt) >= policy.staleRunMs) {
-    return false;
-  }
   return isRunAlive(record);
 }
 
@@ -281,7 +279,7 @@ export function toActivityView(
   const policy = options.policy ?? DEFAULT_ACTIVITY_POLICY;
   const { record, inputs } = state;
   const digest = record.digest;
-  const running = isRunning(record, nowMs, policy, options.isRunAlive);
+  const running = isRunning(record, options.isRunAlive);
   const storedState = record.generation.state;
   const generationState =
     storedState === "running" && !running ? "failed" : storedState;
