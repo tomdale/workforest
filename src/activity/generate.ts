@@ -3,7 +3,7 @@ import path from "node:path";
 import { runGit } from "../services/git.ts";
 import type { CheckoutObservation, TargetObservation } from "./observe.ts";
 import type { ActivityTarget } from "./targets.ts";
-import type { ActivityDigest, ActivityRecord } from "./types.ts";
+import type { ActivityDigest, ActivityInputs } from "./types.ts";
 
 /** Bump when the prompt or output contract changes meaningfully. */
 export const ACTIVITY_PROMPT_VERSION = 1;
@@ -18,7 +18,9 @@ const GENERATION_TIMEOUT_MS = 90_000;
  * The only material a model sees. It is assembled from Git metadata and
  * explicit inputs: commit subjects, file *names* with status codes and line
  * counts, task names, and handoff notes. File contents, tool logs, and
- * secret-looking paths are never included.
+ * secret-looking paths are never included. Commits are limited to the
+ * checkout's own history (`baseline..HEAD` at the captured HEAD); shared
+ * upstream history is never presented as this checkout's work.
  */
 export type EvidencePacket = Readonly<{
   selector: string;
@@ -35,7 +37,14 @@ export type EvidencePacket = Readonly<{
       upstream: string | null;
       ahead: number | null;
       behind: number | null;
-      recentCommits: readonly string[];
+      /** Default branch this checkout diverged from, or null if unknown. */
+      baseline: string | null;
+      /**
+       * Commits beyond the baseline, newest first. Empty with a known
+       * baseline means the checkout has no commits of its own.
+       */
+      ownCommits: readonly string[];
+      ownCommitsTotal: number | null;
       changedFiles: readonly string[];
       changedFilesTotal: number;
     }>
@@ -76,8 +85,7 @@ export type DigestGenerator = (
 export async function collectEvidence(
   target: ActivityTarget,
   observation: TargetObservation,
-  record: ActivityRecord,
-  capturedAtMs: number,
+  inputs: ActivityInputs,
 ): Promise<EvidencePacket> {
   const checkouts = await Promise.all(
     observation.checkouts.map((checkout, index) =>
@@ -85,15 +93,18 @@ export async function collectEvidence(
     ),
   );
   const packet: EvidencePacket = {
-    selector: target.identity.selector,
-    changeName: target.changeName,
+    selector: clip(target.identity.selector) ?? "",
+    changeName: clip(target.changeName) ?? "",
     type: target.identity.type,
     description: clip(target.description),
-    userPurpose: clip(record.user.purpose),
-    capturedAt: new Date(capturedAtMs).toISOString(),
+    userPurpose: clip(inputs.purpose),
+    capturedAt: new Date(observation.captureStartedAtMs).toISOString(),
     checkouts,
-    tasks: target.tasks.map((task) => ({ repo: task.repo, slug: task.slug })),
-    handoffs: record.events.slice(-MAX_EVENTS).map((event) => ({
+    tasks: target.tasks.map((task) => ({
+      repo: clip(task.repo) ?? "",
+      slug: clip(task.slug) ?? "",
+    })),
+    handoffs: inputs.events.slice(-MAX_EVENTS).map((event) => ({
       at: event.at,
       source: clip(event.source) ?? "unknown",
       summary: clip(event.summary),
@@ -108,32 +119,38 @@ async function checkoutEvidence(
   checkoutPath: string | null,
 ): Promise<EvidencePacket["checkouts"][number]> {
   const base = {
-    label: checkout.label,
-    branch: checkout.branch,
-    upstream: checkout.upstream,
+    label: clip(checkout.label) ?? "",
+    branch: clip(checkout.branch),
+    upstream: clip(checkout.upstream),
     ahead: checkout.ahead,
     behind: checkout.behind,
+    baseline: clip(
+      checkout.baseline?.replace(/^refs\/(remotes|heads)\//, "") ?? null,
+    ),
+    ownCommitsTotal: checkout.ownCommits,
     changedFilesTotal: checkout.dirtyTotal,
   };
   if (!checkout.exists || !checkoutPath) {
-    return { ...base, state: "missing", recentCommits: [], changedFiles: [] };
+    return { ...base, state: "missing", ownCommits: [], changedFiles: [] };
   }
   if (checkout.error) {
-    return {
-      ...base,
-      state: "unreadable",
-      recentCommits: [],
-      changedFiles: [],
-    };
+    return { ...base, state: "unreadable", ownCommits: [], changedFiles: [] };
   }
 
+  // Commits come from the captured HEAD, not the live one, so they match
+  // the fingerprint being summarized.
   const [log, numstat] = await Promise.all([
-    gitText(checkoutPath, [
-      "log",
-      `-${MAX_COMMITS_PER_CHECKOUT}`,
-      "--format=%h %cs %s",
-    ]),
-    gitText(checkoutPath, ["diff", "--numstat", "HEAD"]),
+    checkout.baseline && checkout.head && (checkout.ownCommits ?? 0) > 0
+      ? gitText(checkoutPath, [
+          "log",
+          `-${MAX_COMMITS_PER_CHECKOUT}`,
+          "--format=%h %cs %s",
+          `${checkout.baseline}..${checkout.head}`,
+        ])
+      : Promise.resolve(""),
+    checkout.dirtyTotal > 0
+      ? gitText(checkoutPath, ["diff", "--numstat", "HEAD"])
+      : Promise.resolve(""),
   ]);
   const lineCounts = new Map<string, string>();
   for (const line of numstat.split("\n")) {
@@ -151,7 +168,7 @@ async function checkoutEvidence(
   return {
     ...base,
     state: "present",
-    recentCommits: log
+    ownCommits: log
       .split("\n")
       .filter(Boolean)
       .map((line) => clip(line) ?? ""),
@@ -185,8 +202,16 @@ function clip(value: string | null | undefined, max = MAX_TEXT): string | null {
   return collapsed.length > max ? `${collapsed.slice(0, max - 1)}…` : collapsed;
 }
 
-/** Drop the least important detail until the serialized packet fits. */
-function boundPacket(packet: EvidencePacket): EvidencePacket {
+function packetSize(packet: EvidencePacket): number {
+  return JSON.stringify(packet).length;
+}
+
+/**
+ * Enforce MAX_PACKET_CHARS as a hard limit: trim detail first, then drop
+ * trailing checkouts, tasks, and handoffs until the packet fits. Every
+ * string is already clipped, so the empty-list packet always fits.
+ */
+export function boundPacket(packet: EvidencePacket): EvidencePacket {
   let current = packet;
   const shrinkers: Array<(value: EvidencePacket) => EvidencePacket> = [
     (value) => ({
@@ -194,22 +219,34 @@ function boundPacket(packet: EvidencePacket): EvidencePacket {
       checkouts: value.checkouts.map((checkout) => ({
         ...checkout,
         changedFiles: checkout.changedFiles.slice(0, 10),
-        recentCommits: checkout.recentCommits.slice(0, 4),
+        ownCommits: checkout.ownCommits.slice(0, 4),
       })),
     }),
     (value) => ({ ...value, tasks: value.tasks.slice(0, 10) }),
     (value) => ({
       ...value,
-      checkouts: value.checkouts.slice(0, 12).map((checkout) => ({
+      checkouts: value.checkouts.map((checkout) => ({
         ...checkout,
         changedFiles: checkout.changedFiles.slice(0, 3),
-        recentCommits: checkout.recentCommits.slice(0, 2),
+        ownCommits: checkout.ownCommits.slice(0, 2),
       })),
     }),
   ];
   for (const shrink of shrinkers) {
-    if (JSON.stringify(current).length <= MAX_PACKET_CHARS) break;
+    if (packetSize(current) <= MAX_PACKET_CHARS) return current;
     current = shrink(current);
+  }
+  while (packetSize(current) > MAX_PACKET_CHARS) {
+    if (current.checkouts.length > 1) {
+      current = { ...current, checkouts: current.checkouts.slice(0, -1) };
+    } else if (current.tasks.length > 0) {
+      current = { ...current, tasks: current.tasks.slice(0, -1) };
+    } else if (current.handoffs.length > 1) {
+      current = { ...current, handoffs: current.handoffs.slice(1) };
+    } else {
+      current = { ...current, checkouts: [], handoffs: [] };
+      break;
+    }
   }
   return current;
 }
@@ -251,7 +288,7 @@ export function buildDigestPrompt(packet: EvidencePacket): string {
     "",
     "Return JSON matching the schema:",
     "- purpose: what the checkout is for, in at most 12 words. If userPurpose is set, restate it. If only the change name hints at a purpose, return null rather than guessing.",
-    "- latest: the most recent observed work, grounded in commits, changed files, or handoffs. Do not claim tests passed, work was reviewed, merged, or deployed unless the evidence says so explicitly.",
+    "- latest: the most recent observed work, grounded in ownCommits, changedFiles, or handoffs. ownCommits are the checkout's own commits beyond its baseline; when a checkout has a known baseline and no ownCommits or changedFiles, it has done no work of its own yet, so say so. Never describe upstream or shared history as this checkout's work. Do not claim tests passed, work was reviewed, merged, or deployed unless the evidence says so explicitly.",
     '- likelyNext: the most likely next step. Prefer the newest handoff `next` (basis "handoff"). Otherwise infer only when evidence supports it (basis "inferred"); else null with basis "unknown".',
     "- confidence: how well the evidence supports the card.",
     '- insufficientContext: true when the evidence is too thin for a trustworthy card; keep latest factual (for example "No commits or changes observed since creation").',
@@ -325,19 +362,19 @@ function optionalString(value: unknown, field: string): string | null {
 
 export function digestFromOutput({
   generated,
-  record,
+  inputs,
   fingerprint,
   capturedAtMs,
   nowMs,
 }: {
   generated: GeneratedDigestOutput;
-  record: ActivityRecord;
+  inputs: ActivityInputs;
   fingerprint: string;
   capturedAtMs: number;
   nowMs: number;
 }): ActivityDigest {
   const { output } = generated;
-  const userPurpose = record.user.purpose;
+  const userPurpose = inputs.purpose;
   const basis =
     output.likelyNextBasis === "unknown" ? null : output.likelyNextBasis;
   return {
@@ -352,6 +389,7 @@ export function digestFromOutput({
     observedThrough: new Date(capturedAtMs).toISOString(),
     generatedAt: new Date(nowMs).toISOString(),
     fingerprint,
+    inputsRevision: inputs.revision,
     provider: generated.provider,
     model: generated.model,
     promptVersion: ACTIVITY_PROMPT_VERSION,
@@ -360,8 +398,9 @@ export function digestFromOutput({
 
 /**
  * Default generator: the shared AI provider layer with the inexpensive
- * `activity-digest` model tier, tools disabled, and an empty working
- * directory so the provider cannot explore the repository on its own.
+ * `activity-digest` model tier and `toolAccess: "none"`, which only
+ * providers with a verified tool-free mode accept (others fail closed). The
+ * empty working directory is an additional precaution, not the confinement.
  */
 export function createProviderDigestGenerator(
   sandboxDir: string,

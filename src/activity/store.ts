@@ -1,30 +1,39 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
-import { getCacheDir } from "../config.ts";
+import { getCacheDir, getConfigPaths } from "../config.ts";
+import { withLock } from "./lock.ts";
 import {
   ACTIVITY_RECORD_VERSION,
+  type ActivityInputs,
   type ActivityRecord,
   type ActivityTargetIdentity,
 } from "./types.ts";
 
-const ACTIVITY_DIRNAME = "_activity";
-const RECORDS_DIRNAME = "records";
-const LOCK_RETRY_MS = 15;
-const LOCK_TIMEOUT_MS = 5_000;
-const STALE_LOCK_MS = 30_000;
+/** Where cache records and authored inputs live. */
+export type ActivityPaths = Readonly<{
+  /** Regenerable: records, sweep/service state, provider sandbox. */
+  cacheRoot: string;
+  /** Durable: explicit purpose, pins, and handoff notes. */
+  inputsRoot: string;
+}>;
 
-export function activityRoot(cacheDir = getCacheDir()): string {
-  return path.join(cacheDir, ACTIVITY_DIRNAME);
+export function activityPaths(): ActivityPaths {
+  return {
+    cacheRoot: path.join(getCacheDir(), "_activity"),
+    inputsRoot: path.join(
+      path.dirname(getConfigPaths().preferredPath),
+      "activity",
+    ),
+  };
 }
 
-function recordsDir(root: string): string {
-  return path.join(root, RECORDS_DIRNAME);
+function recordsDir(paths: ActivityPaths): string {
+  return path.join(paths.cacheRoot, "records");
 }
 
-function recordPath(root: string, key: string): string {
-  return path.join(recordsDir(root), `${key}.json`);
+function inputsDir(paths: ActivityPaths): string {
+  return path.join(paths.inputsRoot, "inputs");
 }
 
 /**
@@ -56,50 +65,91 @@ export function emptyRecord(target: ActivityTargetIdentity): ActivityRecord {
       lastFailedAt: null,
       nextAttemptAt: null,
     },
-    user: { purpose: null, pinned: false, updatedAt: null },
+  };
+}
+
+export function emptyInputs(target: ActivityTargetIdentity): ActivityInputs {
+  return {
+    version: ACTIVITY_RECORD_VERSION,
+    target,
+    purpose: null,
+    pinned: false,
     events: [],
+    revision: 0,
+    activityAt: null,
   };
 }
 
 export async function readRecord(
-  root: string,
-  key: string,
-): Promise<ActivityRecord | null> {
+  paths: ActivityPaths,
+  target: ActivityTargetIdentity,
+): Promise<ActivityRecord> {
+  const value = await readVersioned<ActivityRecord>(
+    path.join(recordsDir(paths), `${target.key}.json`),
+  );
+  return { ...(value ?? emptyRecord(target)), target };
+}
+
+export async function readInputs(
+  paths: ActivityPaths,
+  target: ActivityTargetIdentity,
+): Promise<ActivityInputs> {
+  const value = await readVersioned<ActivityInputs>(
+    path.join(inputsDir(paths), `${target.key}.json`),
+  );
+  return { ...(value ?? emptyInputs(target)), target };
+}
+
+async function readVersioned<T extends { version: number }>(
+  filePath: string,
+): Promise<T | null> {
   let text: string;
   try {
-    text = await fs.readFile(recordPath(root, key), "utf8");
+    text = await fs.readFile(filePath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
   try {
-    const value = JSON.parse(text) as ActivityRecord;
+    const value = JSON.parse(text) as T;
     return value.version === ACTIVITY_RECORD_VERSION ? value : null;
   } catch {
-    // A torn or foreign file is treated as absent; the next write replaces it.
+    // Writes are atomic renames, so this is a foreign file; treat as absent.
     return null;
   }
 }
 
 /**
- * Read-modify-write one record under its lock with an atomic rename, so
- * concurrent sweeps, refreshes, and explicit inputs never lose each other's
- * fields. `update` receives the current record (or a fresh one) and returns
- * the record to persist, or `null` to leave the file untouched.
+ * Read-modify-write one cache record under its lock with an atomic rename.
+ * `update` returns the record to persist, or `null` to leave it untouched.
  */
 export async function mutateRecord(
-  root: string,
+  paths: ActivityPaths,
   target: ActivityTargetIdentity,
   update: (record: ActivityRecord) => ActivityRecord | null,
 ): Promise<ActivityRecord> {
-  await fs.mkdir(recordsDir(root), { recursive: true });
-  return withFileLock(`${recordPath(root, target.key)}.lock`, async () => {
-    const current = (await readRecord(root, target.key)) ?? emptyRecord(target);
-    // Selector and path can change (e.g. group renames) without a new identity.
-    const base = { ...current, target };
-    const next = update(base);
+  const filePath = path.join(recordsDir(paths), `${target.key}.json`);
+  await fs.mkdir(recordsDir(paths), { recursive: true });
+  return withLock(`${filePath}.lock`, async () => {
+    const current = await readRecord(paths, target);
+    const next = update(current);
     if (!next) return current;
-    await writeJsonAtomic(recordPath(root, target.key), next);
+    await writeJsonAtomic(filePath, next);
+    return next;
+  });
+}
+
+/** Read-modify-write authored inputs; see {@link mutateRecord}. */
+export async function mutateInputs(
+  paths: ActivityPaths,
+  target: ActivityTargetIdentity,
+  update: (inputs: ActivityInputs) => ActivityInputs,
+): Promise<ActivityInputs> {
+  const filePath = path.join(inputsDir(paths), `${target.key}.json`);
+  await fs.mkdir(inputsDir(paths), { recursive: true });
+  return withLock(`${filePath}.lock`, async () => {
+    const next = update(await readInputs(paths, target));
+    await writeJsonAtomic(filePath, next);
     return next;
   });
 }
@@ -122,104 +172,30 @@ export async function readJson<T>(filePath: string): Promise<T | null> {
   }
 }
 
-async function withFileLock<T>(
-  lockPath: string,
-  action: () => Promise<T>,
-): Promise<T> {
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  for (;;) {
-    try {
-      const handle = await fs.open(lockPath, "wx");
-      await handle.writeFile(
-        JSON.stringify({ pid: process.pid, at: Date.now() }),
-      );
-      await handle.close();
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (await isStaleLock(lockPath)) {
-        await fs.rm(lockPath, { force: true });
-        continue;
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`Timed out waiting for activity lock ${lockPath}.`);
-      }
-      await delay(LOCK_RETRY_MS);
-    }
-  }
-  try {
-    return await action();
-  } finally {
-    await fs.rm(lockPath, { force: true });
-  }
-}
-
-async function isStaleLock(lockPath: string): Promise<boolean> {
-  const owner = await readJson<{ pid?: number; at?: number }>(lockPath);
-  if (!owner) {
-    // Unreadable: either mid-write or torn. Age decides.
-    try {
-      const stat = await fs.stat(lockPath);
-      return Date.now() - stat.mtimeMs > STALE_LOCK_MS;
-    } catch {
-      return true;
-    }
-  }
-  if (typeof owner.pid === "number" && !isProcessAlive(owner.pid)) return true;
-  return typeof owner.at === "number" && Date.now() - owner.at > STALE_LOCK_MS;
-}
-
-export function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
 /**
- * Exclusive long-lived ownership (one sweeper at a time across processes).
- * Returns a release function, or `null` when a live process already holds it.
+ * Delete cache records whose checkout identity is gone. Each deletion takes
+ * the record lock so it cannot interleave with a writer. Authored inputs are
+ * never pruned.
  */
-export async function tryAcquireOwnership(
-  lockPath: string,
-): Promise<(() => Promise<void>) | null> {
-  await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = await fs.open(lockPath, "wx");
-      await handle.writeFile(
-        JSON.stringify({ pid: process.pid, at: Date.now() }),
-      );
-      await handle.close();
-      return async () => {
-        const owner = await readJson<{ pid?: number }>(lockPath);
-        if (owner?.pid === process.pid) await fs.rm(lockPath, { force: true });
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const owner = await readJson<{ pid?: number }>(lockPath);
-      if (typeof owner?.pid === "number" && isProcessAlive(owner.pid)) {
-        return null;
-      }
-      await fs.rm(lockPath, { force: true });
-    }
-  }
-  return null;
-}
-
-export async function listRecordKeys(root: string): Promise<string[]> {
+export async function pruneRecords(
+  paths: ActivityPaths,
+  liveKeys: ReadonlySet<string>,
+): Promise<number> {
+  let names: string[];
   try {
-    return (await fs.readdir(recordsDir(root)))
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => name.slice(0, -".json".length));
+    names = await fs.readdir(recordsDir(paths));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
     throw error;
   }
-}
-
-export async function removeRecord(root: string, key: string): Promise<void> {
-  await fs.rm(recordPath(root, key), { force: true });
+  let pruned = 0;
+  for (const name of names) {
+    if (!/^[0-9a-f]{32}\.json$/.test(name)) continue;
+    const key = name.slice(0, -".json".length);
+    if (liveKeys.has(key)) continue;
+    const filePath = path.join(recordsDir(paths), name);
+    await withLock(`${filePath}.lock`, () => fs.rm(filePath, { force: true }));
+    pruned += 1;
+  }
+  return pruned;
 }

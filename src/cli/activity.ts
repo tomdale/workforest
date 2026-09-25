@@ -66,10 +66,11 @@ export async function runActivityCommand(
         : success(reportOutput(renderActivityView(view, note)));
     }
     case "activity.sweep": {
-      const targets = await activity.collectActivityTargets(config);
+      const { targets, complete } =
+        await activity.collectActivityTargets(config);
       const summary = await activity.runSweep(targets, {
         ...activity.defaultEngineOptions(config),
-        prune: true,
+        prune: complete,
       });
       return json
         ? jsonSuccess(summary)
@@ -191,7 +192,7 @@ async function runWatch(
       `Activity service running (every ${seconds}s, inference ${engine.inferenceEnabled ? "enabled" : "disabled"}). Press Ctrl-C to stop.\n`,
     );
     const result = await activity.runService({
-      root: engine.root,
+      paths: engine.paths,
       intervalMs: seconds * 1000,
       collectTargets: () => activity.collectActivityTargets(config),
       engine,
@@ -357,7 +358,8 @@ function renderStatus(status: ActivityStatus): string {
             value: service.lastSweep?.finishedAt ?? "(none)",
           },
           { label: "Inference", value: status.inference },
-          { label: "Store", value: status.root },
+          { label: "Cache", value: status.cacheRoot },
+          { label: "Inputs", value: status.inputsRoot },
         ],
       },
       {

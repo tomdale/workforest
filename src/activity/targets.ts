@@ -36,17 +36,31 @@ export type ActivityTarget = Readonly<{
   tasks: readonly ActivityTask[];
 }>;
 
+export type CollectedTargets = Readonly<{
+  targets: ActivityTarget[];
+  /**
+   * False when a filter was applied or any entry's metadata was unreadable;
+   * pruning cached records is only safe with a complete list.
+   */
+  complete: boolean;
+}>;
+
 export async function collectActivityTargets(
   config: WorkspaceConfig,
   filters: InventoryFilters = {},
-): Promise<ActivityTarget[]> {
+): Promise<CollectedTargets> {
   const inventory = await collectInventory(config, filters);
   const entries: InventoryEntry[] = [
     ...inventory.workspaces,
     ...inventory.repositories,
   ];
-  const targets = await Promise.all(entries.map(activityTargetForEntry));
-  return targets.filter((target) => target !== null);
+  const resolved = await Promise.all(entries.map(activityTargetForEntry));
+  const targets = resolved.filter((target) => target !== null);
+  return {
+    targets,
+    complete:
+      targets.length === entries.length && !filters.repo && !filters.group,
+  };
 }
 
 export async function activityTargetForEntry(

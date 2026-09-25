@@ -1,15 +1,15 @@
 /**
- * Persisted activity state for one Workforest checkout (a workspace or a
- * repository worktree). One JSON record per checkout identity lives under
- * `<cache>/_activity/records/<key>.json`.
+ * Activity state for one Workforest checkout (a workspace or a repository
+ * worktree) is split by durability:
  *
- * The record keeps four independent concerns apart:
- * - `observation`: what the last cheap detection pass saw (never inferred).
- * - `digest`: the last *successful* generated summary, tied to the input
- *   fingerprint it summarized. Failures never erase it.
- * - `generation`: queue/run/failure bookkeeping for the next summary.
- * - `user` and `events`: explicit human or agent inputs (purpose, pin,
- *   handoffs) that outrank inference.
+ * - `ActivityRecord` is regenerable cache under
+ *   `<cache>/_activity/records/<key>.json`: what the last cheap detection
+ *   pass saw (`observation`), the last *successful* digest tied to the input
+ *   fingerprint it summarized (`digest`, never erased by failures), and
+ *   queue/run/failure bookkeeping (`generation`).
+ * - `ActivityInputs` is authored data under
+ *   `<config dir>/activity/inputs/<key>.json`: explicit purpose, pin, and
+ *   handoff notes. It survives cache wipes and outranks inference.
  */
 export const ACTIVITY_RECORD_VERSION = 1;
 
@@ -30,6 +30,19 @@ export type ActivityTargetIdentity = Readonly<{
 export type ActivityObservation = {
   /** Hash of every meaningful input: Git state, lifecycle, explicit inputs. */
   fingerprint: string;
+  /**
+   * When this observation's capture began. A capture that began earlier
+   * never replaces a later one, whatever order they finish in.
+   */
+  captureStartedAt: string;
+  /** The inputs revision folded into `fingerprint`. */
+  inputsRevision: number;
+  /**
+   * Whether anything checkout-specific exists to summarize: commits beyond
+   * the shared baseline, uncommitted changes, a purpose, or handoff notes.
+   * A slug or shared upstream history alone never triggers a digest.
+   */
+  hasEvidence: boolean;
   /** When detection last ran for this checkout (the freshness horizon). */
   checkedAt: string;
   /** When a meaningful input change was last observed (or estimated on first sight). */
@@ -56,6 +69,7 @@ export type ActivityDigest = {
   observedThrough: string;
   generatedAt: string;
   fingerprint: string;
+  inputsRevision: number;
   provider: string;
   model: string | null;
   promptVersion: number;
@@ -84,10 +98,20 @@ export type ActivityEvent = {
   next: string | null;
 };
 
-export type ActivityUserInputs = {
+export type ActivityInputs = {
+  version: typeof ACTIVITY_RECORD_VERSION;
+  target: ActivityTargetIdentity;
   purpose: string | null;
   pinned: boolean;
-  updatedAt: string | null;
+  events: ActivityEvent[];
+  /**
+   * Increments whenever purpose or events change. Observations and digests
+   * record the revision they saw, so an input change makes cached state
+   * outdated immediately without running Git.
+   */
+  revision: number;
+  /** Last purpose or note change; counts as activity. Pins do not. */
+  activityAt: string | null;
 };
 
 export type ActivityRecord = {
@@ -96,11 +120,18 @@ export type ActivityRecord = {
   observation: ActivityObservation | null;
   digest: ActivityDigest | null;
   generation: ActivityGeneration;
-  user: ActivityUserInputs;
-  events: ActivityEvent[];
 };
 
-/** `current` means the digest matches the last observation, not the live disk. */
+/** The pair every policy decision reads. */
+export type ActivityState = Readonly<{
+  record: ActivityRecord;
+  inputs: ActivityInputs;
+}>;
+
+/**
+ * `current` means the digest matches the last observation and the current
+ * explicit inputs, not the live disk.
+ */
 export type ActivityFreshness = "current" | "outdated" | "missing";
 
 /**

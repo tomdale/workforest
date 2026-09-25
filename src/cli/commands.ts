@@ -808,7 +808,7 @@ const activityRefreshCommand = leaf({
   path: ["activity", "refresh"],
   summary: "Regenerate one activity digest now",
   description:
-    "Detects current activity for one worktree or workspace and, unless its digest already matches, generates a new one with the inexpensive activity-digest model tier. Waits for the model. --force regenerates even when the digest is current.",
+    "Detects current activity for one worktree or workspace and, unless its digest already matches, generates a new one with the inexpensive activity-digest model tier through a tool-free provider. Waits for the model. --force regenerates even when the digest is current.",
   handler: "activity.refresh",
   help: nestedHelp("activity", "refresh"),
   operands: activitySelectorOperands,
@@ -888,7 +888,7 @@ const activityPurposeCommand = leaf({
   path: ["activity", "purpose"],
   summary: "Set or clear an explicit purpose",
   description:
-    "Records what a worktree or workspace is for. An explicit purpose always replaces the inferred one and becomes evidence for the next digest.",
+    "Records what a worktree or workspace is for, stored durably next to config.json. An explicit purpose always replaces the inferred one, marks the cached digest outdated, and becomes evidence for the next digest.",
   handler: "activity.purpose",
   help: nestedHelp("activity", "purpose"),
   operands: activitySelectorOperands,

@@ -11,9 +11,10 @@ import {
 import { createProviderDigestGenerator } from "./generate.ts";
 import { toActivityView } from "./policy.ts";
 import {
-  activityRoot,
-  emptyRecord,
-  mutateRecord,
+  type ActivityPaths,
+  activityPaths,
+  mutateInputs,
+  readInputs,
   readRecord,
 } from "./store.ts";
 import { type ActivityTarget, collectActivityTargets } from "./targets.ts";
@@ -35,10 +36,12 @@ export function defaultEngineOptions(
   config: WorkspaceConfig,
   signal?: AbortSignal,
 ): ActivityEngineOptions {
-  const root = activityRoot();
+  const paths = activityPaths();
   return {
-    root,
-    generator: createProviderDigestGenerator(path.join(root, "sandbox")),
+    paths,
+    generator: createProviderDigestGenerator(
+      path.join(paths.cacheRoot, "sandbox"),
+    ),
     inferenceEnabled: !aiDisabled(config),
     ...(signal ? { signal } : {}),
   };
@@ -54,32 +57,32 @@ function aiDisabled(config: WorkspaceConfig): boolean {
 }
 
 /**
- * Cached bulk read for UI clients: inventory metadata plus one small JSON
- * record per checkout. Never runs Git or a model.
+ * Cached bulk read for UI clients: inventory metadata plus two small JSON
+ * files per checkout (cache record and authored inputs). Never runs Git or a
+ * model.
  */
 export async function readActivityViews(
   config: WorkspaceConfig,
   filters: InventoryFilters = {},
-  root = activityRoot(),
+  paths: ActivityPaths = activityPaths(),
   nowMs = Date.now(),
 ): Promise<ActivityView[]> {
-  const targets = await collectActivityTargets(config, filters);
+  const { targets } = await collectActivityTargets(config, filters);
   return Promise.all(
-    targets.map((target) => readActivityView(target, root, nowMs)),
+    targets.map((target) => readActivityView(target, paths, nowMs)),
   );
 }
 
 export async function readActivityView(
   target: ActivityTarget,
-  root = activityRoot(),
+  paths: ActivityPaths = activityPaths(),
   nowMs = Date.now(),
 ): Promise<ActivityView> {
-  const record =
-    (await readRecord(root, target.identity.key)) ??
-    emptyRecord(target.identity);
-  return toActivityView({ ...record, target: target.identity }, nowMs, {
-    isRunAlive,
-  });
+  const [record, inputs] = await Promise.all([
+    readRecord(paths, target.identity),
+    readInputs(paths, target.identity),
+  ]);
+  return toActivityView({ record, inputs }, nowMs, { isRunAlive });
 }
 
 export type ActivityInput =
@@ -93,34 +96,33 @@ export type ActivityInput =
     }>;
 
 /**
- * Explicit inputs from people or agents. A purpose outranks inference, a pin
- * keeps the checkout active, and a note is the bounded ingestion seam for
- * externally supplied activity (for example a BB thread handoff). Notes and
- * purposes change the fingerprint; pins affect scheduling only.
+ * Explicit inputs from people or agents, stored durably. A purpose outranks
+ * inference, a pin keeps the checkout active, and a note is the bounded
+ * ingestion seam for externally supplied activity (for example a BB thread
+ * handoff). Purpose and note changes bump the inputs revision, which makes
+ * the cached digest `outdated` and the next detection due immediately.
  */
 export async function recordActivityInput(
   target: ActivityTarget,
   input: ActivityInput,
-  root = activityRoot(),
+  paths: ActivityPaths = activityPaths(),
   nowMs = Date.now(),
 ): Promise<ActivityView> {
   const now = new Date(nowMs).toISOString();
-  const record = await mutateRecord(root, target.identity, (current) => {
+  await mutateInputs(paths, target.identity, (current) => {
     switch (input.kind) {
-      case "purpose":
+      case "purpose": {
+        const purpose = clipInput(input.purpose);
+        if (purpose === current.purpose) return current;
         return {
           ...current,
-          user: {
-            ...current.user,
-            purpose: clipInput(input.purpose),
-            updatedAt: now,
-          },
+          purpose,
+          revision: current.revision + 1,
+          activityAt: now,
         };
+      }
       case "pin":
-        return {
-          ...current,
-          user: { ...current.user, pinned: input.pinned, updatedAt: now },
-        };
+        return { ...current, pinned: input.pinned };
       case "note": {
         const event: ActivityEvent = {
           at: now,
@@ -131,15 +133,13 @@ export async function recordActivityInput(
         return {
           ...current,
           events: [...current.events, event].slice(-MAX_EVENTS),
-          // Explicit agent activity is activity: keep the checkout active.
-          observation: current.observation
-            ? { ...current.observation, lastActivityAt: now }
-            : current.observation,
+          revision: current.revision + 1,
+          activityAt: now,
         };
       }
     }
   });
-  return toActivityView(record, nowMs, { isRunAlive });
+  return readActivityView(target, paths, nowMs);
 }
 
 function clipInput(value: string | null): string | null {
@@ -150,7 +150,8 @@ function clipInput(value: string | null): string | null {
 }
 
 export type ActivityStatus = Readonly<{
-  root: string;
+  cacheRoot: string;
+  inputsRoot: string;
   inference: "enabled" | "disabled";
   service: ServiceStatus;
   counts: Readonly<{
@@ -167,17 +168,18 @@ export type ActivityStatus = Readonly<{
 
 export async function readActivityStatus(
   config: WorkspaceConfig,
-  root = activityRoot(),
+  paths: ActivityPaths = activityPaths(),
   nowMs = Date.now(),
 ): Promise<ActivityStatus> {
   const [views, service] = await Promise.all([
-    readActivityViews(config, {}, root, nowMs),
-    readServiceStatus(root),
+    readActivityViews(config, {}, paths, nowMs),
+    readServiceStatus(paths),
   ]);
   const count = (predicate: (view: ActivityView) => boolean) =>
     views.filter(predicate).length;
   return {
-    root,
+    cacheRoot: paths.cacheRoot,
+    inputsRoot: paths.inputsRoot,
     inference: aiDisabled(config) ? "disabled" : "enabled",
     service,
     counts: {

@@ -6,28 +6,27 @@ import {
   type DigestGenerator,
   digestFromOutput,
 } from "./generate.ts";
-import { observeTarget } from "./observe.ts";
+import { isProcessAlive, lockOwnerPid, tryAcquireLock } from "./lock.ts";
+import { observeTarget, type TargetObservation } from "./observe.ts";
 import {
   type ActivityPolicy,
   applyObservation,
   DEFAULT_ACTIVITY_POLICY,
   decideGeneration,
-  freshnessOf,
   isCheckDue,
   retryDelayMs,
 } from "./policy.ts";
 import {
-  isProcessAlive,
-  listRecordKeys,
+  type ActivityPaths,
   mutateRecord,
+  pruneRecords,
+  readInputs,
   readJson,
   readRecord,
-  removeRecord,
-  tryAcquireOwnership,
   writeJsonAtomic,
 } from "./store.ts";
 import type { ActivityTarget } from "./targets.ts";
-import type { ActivityRecord } from "./types.ts";
+import type { ActivityRecord, ActivityState } from "./types.ts";
 
 const DETECTION_CONCURRENCY = 8;
 const GENERATION_CONCURRENCY = 2;
@@ -35,7 +34,7 @@ const MAX_GENERATIONS_PER_SWEEP = 3;
 const MAX_ERROR_CHARS = 500;
 
 export type ActivityEngineOptions = Readonly<{
-  root: string;
+  paths: ActivityPaths;
   generator: DigestGenerator;
   now?: () => number;
   policy?: ActivityPolicy;
@@ -70,12 +69,58 @@ export function isRunAlive(record: ActivityRecord): boolean {
   return pid !== null && isProcessAlive(pid);
 }
 
+async function readState(
+  paths: ActivityPaths,
+  target: ActivityTarget,
+): Promise<ActivityState> {
+  const [record, inputs] = await Promise.all([
+    readRecord(paths, target.identity),
+    readInputs(paths, target.identity),
+  ]);
+  return { record, inputs };
+}
+
+/**
+ * Capture and store an observation. Inputs are read before Git so the
+ * captured revision never claims inputs the fingerprint did not see; the
+ * store step refuses to replace an observation whose capture began later.
+ */
+async function observeAndStore(
+  options: ActivityEngineOptions,
+  target: ActivityTarget,
+): Promise<{
+  observed: TargetObservation;
+  record: ActivityRecord;
+  stored: boolean;
+  changed: boolean;
+}> {
+  const now = options.now ?? Date.now;
+  const inputs = await readInputs(options.paths, target.identity);
+  const observed = await observeTarget(target, inputs, now());
+  let stored = false;
+  let changed = false;
+  const record = await mutateRecord(
+    options.paths,
+    target.identity,
+    (current) => {
+      const observation = applyObservation(current, observed, now());
+      if (!observation) return null;
+      stored = true;
+      changed =
+        current.observation !== null &&
+        current.observation.fingerprint !== observation.fingerprint;
+      return { ...current, observation };
+    },
+  );
+  return { observed, record, stored, changed };
+}
+
 /**
  * One reconciliation pass: cheap detection for due checkouts, then a
  * bounded number of generations for active checkouts whose inputs changed
- * and have settled (debounce) or waited too long (max delay). Only one
- * sweep runs at a time across processes; a concurrent caller returns
- * immediately with `skippedReason`.
+ * and have settled (debounce) or waited too long (max delay). Only one sweep
+ * runs at a time across processes; a concurrent caller returns immediately
+ * with `skippedReason`. Pass `prune` only with a complete target list.
  */
 export async function runSweep(
   targets: readonly ActivityTarget[],
@@ -83,10 +128,10 @@ export async function runSweep(
 ): Promise<SweepSummary> {
   const now = options.now ?? Date.now;
   const startedAt = new Date(now()).toISOString();
-  const release = await tryAcquireOwnership(
-    path.join(options.root, "sweep.lock"),
+  const lock = await tryAcquireLock(
+    path.join(options.paths.cacheRoot, "sweep.lock"),
   );
-  if (!release) {
+  if (!lock) {
     return {
       startedAt,
       finishedAt: startedAt,
@@ -104,45 +149,27 @@ export async function runSweep(
   try {
     let checked = 0;
     let changed = 0;
-    const candidates: Array<{
-      target: ActivityTarget;
-      record: ActivityRecord;
-    }> = [];
+    const candidates: Array<{ target: ActivityTarget; state: ActivityState }> =
+      [];
 
     await forEachLimited(targets, DETECTION_CONCURRENCY, async (target) => {
       if (options.signal?.aborted) return;
-      const existing = await readRecord(options.root, target.identity.key);
-      if (existing && !isCheckDue(existing, now(), options.policy)) {
-        if (wantsGeneration(existing, now(), options)) {
-          candidates.push({ target, record: existing });
-        }
-        return;
+      let state = await readState(options.paths, target);
+      if (isCheckDue(state, now(), options.policy)) {
+        const result = await observeAndStore(options, target);
+        checked += 1;
+        if (result.changed) changed += 1;
+        state = await readState(options.paths, target);
       }
-      const observed = await observeTarget(target, existing);
-      checked += 1;
-      const record = await mutateRecord(
-        options.root,
-        target.identity,
-        (current) => {
-          const observation = applyObservation(current, observed, now());
-          if (
-            current.observation &&
-            current.observation.fingerprint !== observation.fingerprint
-          ) {
-            changed += 1;
-          }
-          return { ...current, observation };
-        },
-      );
-      if (wantsGeneration(record, now(), options)) {
-        candidates.push({ target, record });
+      if (wantsGeneration(state, now(), options)) {
+        candidates.push({ target, state });
       }
     });
 
     candidates.sort(
       (left, right) =>
-        Date.parse(right.record.observation?.lastActivityAt ?? "0") -
-        Date.parse(left.record.observation?.lastActivityAt ?? "0"),
+        Date.parse(right.state.record.observation?.lastActivityAt ?? "0") -
+        Date.parse(left.state.record.observation?.lastActivityAt ?? "0"),
     );
     const limit =
       options.inferenceEnabled === false
@@ -152,7 +179,7 @@ export async function runSweep(
     const deferred = candidates.slice(limit);
 
     for (const { target } of deferred) {
-      await mutateRecord(options.root, target.identity, (current) =>
+      await mutateRecord(options.paths, target.identity, (current) =>
         current.generation.state === "running"
           ? null
           : {
@@ -176,7 +203,10 @@ export async function runSweep(
     );
 
     const pruned = options.prune
-      ? await pruneRecords(options.root, targets)
+      ? await pruneRecords(
+          options.paths,
+          new Set(targets.map((target) => target.identity.key)),
+        )
       : 0;
     const summary: SweepSummary = {
       startedAt,
@@ -189,20 +219,23 @@ export async function runSweep(
       failed,
       pruned,
     };
-    await writeJsonAtomic(path.join(options.root, "last-sweep.json"), summary);
+    await writeJsonAtomic(
+      path.join(options.paths.cacheRoot, "last-sweep.json"),
+      summary,
+    );
     return summary;
   } finally {
-    await release();
+    await lock.release();
   }
 }
 
 function wantsGeneration(
-  record: ActivityRecord,
+  state: ActivityState,
   nowMs: number,
   options: ActivityEngineOptions,
 ): boolean {
   return (
-    decideGeneration(record, nowMs, {
+    decideGeneration(state, nowMs, {
       ...(options.policy ? { policy: options.policy } : {}),
       isRunAlive,
     }).kind === "generate"
@@ -210,17 +243,20 @@ function wantsGeneration(
 }
 
 /**
- * Detect, claim, gather evidence, and generate for one checkout.
+ * Detect, claim, gather evidence, generate, and reconcile for one checkout.
  *
- * Race safety: the fingerprint is captured *before* evidence, and the digest
- * is stored with that fingerprint. A change made while the model runs gives
- * the next observation a different fingerprint, so the digest reads as
- * `outdated` rather than being mistaken for current. A slower, older run
- * never replaces a digest observed later, and only the claimant's run id may
- * clear or fail the generation state.
- *
- * `refresh` ignores scheduling gates but skips an already-current digest;
- * `force` regenerates regardless.
+ * Race safety:
+ * - The fingerprint X is captured before evidence; commit evidence is read
+ *   at the captured HEAD. A second capture after evidence must still equal
+ *   X, otherwise the checkout is changing and the run is abandoned (queued)
+ *   instead of summarizing a mixed snapshot.
+ * - After the model returns, the checkout is observed again and stored with
+ *   the digest, so work done during inference leaves the digest `outdated`
+ *   immediately; only a digest whose fingerprint and inputs revision match
+ *   the latest observation reads as `current`.
+ * - An older, slower run never replaces a digest observed later, and only
+ *   the claimant's run id may clear or fail the generation state.
+ * - An aborted signal never launches the model and releases the claim.
  */
 export async function generateForTarget(
   target: ActivityTarget,
@@ -230,29 +266,64 @@ export async function generateForTarget(
   const now = options.now ?? Date.now;
   const policy = options.policy ?? DEFAULT_ACTIVITY_POLICY;
   const selector = target.identity.selector;
-  const existing = await readRecord(options.root, target.identity.key);
-  const observed = await observeTarget(target, existing);
-  const capturedAtMs = now();
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await generateWithSignal(
+      target,
+      options,
+      mode,
+      controller.signal,
+      now,
+      policy,
+      selector,
+    );
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function generateWithSignal(
+  target: ActivityTarget,
+  options: ActivityEngineOptions,
+  mode: "scheduled" | "refresh" | "force",
+  signal: AbortSignal,
+  now: () => number,
+  policy: ActivityPolicy,
+  selector: string,
+): Promise<GenerationOutcome> {
+  if (signal.aborted) {
+    const { record } = await readState(options.paths, target);
+    return { selector, result: "cancelled", record };
+  }
+  const inputs = await readInputs(options.paths, target.identity);
+  const observed = await observeTarget(target, inputs, now());
   const runId = randomUUID();
   let skipReason: string | undefined;
 
   const claimed = await mutateRecord(
-    options.root,
+    options.paths,
     target.identity,
     (current) => {
-      const observation = applyObservation(current, observed, capturedAtMs);
+      const observation = applyObservation(current, observed, now());
+      if (!observation) {
+        skipReason = "superseded";
+        return null;
+      }
       const next = { ...current, observation };
-      const decision = decideGeneration(next, capturedAtMs, {
+      const decision = decideGeneration({ record: next, inputs }, now(), {
         policy,
         isRunAlive,
-        force: mode !== "scheduled",
+        mode,
       });
       if (decision.kind === "skip") {
         skipReason = decision.reason;
         return next;
       }
-      if (mode === "refresh" && freshnessOf(next) === "current") {
-        skipReason = "current";
+      if (signal.aborted) {
+        skipReason = "cancelled";
         return next;
       }
       return {
@@ -263,7 +334,7 @@ export async function generateForTarget(
           fingerprint: observation.fingerprint,
           runId,
           pid: process.pid,
-          startedAt: new Date(capturedAtMs).toISOString(),
+          startedAt: new Date(now()).toISOString(),
         },
       };
     },
@@ -271,7 +342,7 @@ export async function generateForTarget(
   if (skipReason !== undefined || claimed.generation.runId !== runId) {
     return {
       selector,
-      result: "skipped",
+      result: skipReason === "cancelled" ? "cancelled" : "skipped",
       reason: skipReason ?? "running",
       record: claimed,
     };
@@ -287,63 +358,65 @@ export async function generateForTarget(
   }
 
   const fingerprint = observed.fingerprint;
-  const controller = new AbortController();
-  const onAbort = () => controller.abort();
-  options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    const packet = await collectEvidence(
-      target,
-      observed,
-      claimed,
-      capturedAtMs,
-    );
-    const generated = await options.generator(packet, controller.signal);
+    const packet = await collectEvidence(target, observed, inputs);
+    const confirmInputs = await readInputs(options.paths, target.identity);
+    const confirm = await observeTarget(target, confirmInputs, now());
+    if (confirm.fingerprint !== fingerprint) {
+      await storeObservation(options, target, confirm);
+      const record = await releaseClaim(options, target, runId, "queued");
+      return {
+        selector,
+        result: "skipped",
+        reason: "changed-during-capture",
+        record,
+      };
+    }
+    if (signal.aborted) throw new Error("cancelled");
+    const generated = await options.generator(packet, signal);
+    const afterInputs = await readInputs(options.paths, target.identity);
+    const after = await observeTarget(target, afterInputs, now());
     const record = await mutateRecord(
-      options.root,
+      options.paths,
       target.identity,
       (current) => {
         const digest = digestFromOutput({
           generated,
-          record: current,
+          inputs,
           fingerprint,
-          capturedAtMs,
+          capturedAtMs: observed.captureStartedAtMs,
           nowMs: now(),
         });
         const newer =
           current.digest &&
-          Date.parse(current.digest.observedThrough) > capturedAtMs;
-        const ownsClaim = current.generation.runId === runId;
+          Date.parse(current.digest.observedThrough) >
+            observed.captureStartedAtMs;
+        const withDigest = newer ? current : { ...current, digest };
+        const observation =
+          applyObservation(withDigest, after, now()) ?? current.observation;
         return {
-          ...current,
-          digest: newer ? current.digest : digest,
-          observation: current.observation
-            ? {
-                ...current.observation,
-                pendingSince:
-                  current.observation.fingerprint === fingerprint
-                    ? null
-                    : current.observation.pendingSince,
-              }
-            : current.observation,
-          generation: ownsClaim
-            ? {
-                ...current.generation,
-                state: "idle",
-                fingerprint: null,
-                runId: null,
-                pid: null,
-                startedAt: null,
-                attempts: 0,
-                lastError: null,
-                nextAttemptAt: null,
-              }
-            : current.generation,
+          ...withDigest,
+          observation,
+          generation:
+            current.generation.runId === runId
+              ? {
+                  ...current.generation,
+                  state: "idle",
+                  fingerprint: null,
+                  runId: null,
+                  pid: null,
+                  startedAt: null,
+                  attempts: 0,
+                  lastError: null,
+                  nextAttemptAt: null,
+                }
+              : current.generation,
         };
       },
     );
     return { selector, result: "generated", record };
   } catch (error) {
-    if (controller.signal.aborted) {
+    if (signal.aborted) {
       const record = await releaseClaim(options, target, runId, "idle");
       return { selector, result: "cancelled", record };
     }
@@ -351,7 +424,7 @@ export async function generateForTarget(
       error instanceof Error ? error.message : String(error)
     ).slice(0, MAX_ERROR_CHARS);
     const record = await mutateRecord(
-      options.root,
+      options.paths,
       target.identity,
       (current) => {
         if (current.generation.runId !== runId) return null;
@@ -376,18 +449,28 @@ export async function generateForTarget(
       },
     );
     return { selector, result: "failed", reason: message, record };
-  } finally {
-    options.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+async function storeObservation(
+  options: ActivityEngineOptions,
+  target: ActivityTarget,
+  observed: TargetObservation,
+): Promise<void> {
+  const now = options.now ?? Date.now;
+  await mutateRecord(options.paths, target.identity, (current) => {
+    const observation = applyObservation(current, observed, now());
+    return observation ? { ...current, observation } : null;
+  });
 }
 
 async function releaseClaim(
   options: ActivityEngineOptions,
   target: ActivityTarget,
   runId: string,
-  state: "idle",
+  state: "idle" | "queued",
 ): Promise<ActivityRecord> {
-  return mutateRecord(options.root, target.identity, (current) =>
+  return mutateRecord(options.paths, target.identity, (current) =>
     current.generation.runId === runId
       ? {
           ...current,
@@ -402,21 +485,6 @@ async function releaseClaim(
         }
       : null,
   );
-}
-
-/** Records whose checkout identity no longer exists are deleted. */
-async function pruneRecords(
-  root: string,
-  targets: readonly ActivityTarget[],
-): Promise<number> {
-  const live = new Set(targets.map((target) => target.identity.key));
-  let pruned = 0;
-  for (const key of await listRecordKeys(root)) {
-    if (live.has(key)) continue;
-    await removeRecord(root, key);
-    pruned += 1;
-  }
-  return pruned;
 }
 
 export type ServiceState = Readonly<{
@@ -434,13 +502,15 @@ export type ServiceStatus = Readonly<{
   lastSweep: SweepSummary | null;
 }>;
 
-export async function readServiceStatus(root: string): Promise<ServiceStatus> {
-  const [state, lastSweep] = await Promise.all([
-    readJson<ServiceState>(path.join(root, "service.json")),
-    readJson<SweepSummary>(path.join(root, "last-sweep.json")),
+export async function readServiceStatus(
+  paths: ActivityPaths,
+): Promise<ServiceStatus> {
+  const [state, lastSweep, ownerPid] = await Promise.all([
+    readJson<ServiceState>(path.join(paths.cacheRoot, "service.json")),
+    readJson<SweepSummary>(path.join(paths.cacheRoot, "last-sweep.json")),
+    lockOwnerPid(path.join(paths.cacheRoot, "service.lock")),
   ]);
-  const running = state !== null && isProcessAlive(state.pid);
-  return { running, state, lastSweep };
+  return { running: ownerPid !== null, state, lastSweep };
 }
 
 /**
@@ -450,29 +520,32 @@ export async function readServiceStatus(root: string): Promise<ServiceStatus> {
  * nothing is left detached.
  */
 export async function runService({
-  root,
+  paths,
   intervalMs,
   collectTargets,
   engine,
   onSweep,
   maxSweeps,
 }: {
-  root: string;
+  paths: ActivityPaths;
   intervalMs: number;
-  collectTargets: () => Promise<ActivityTarget[]>;
-  engine: Omit<ActivityEngineOptions, "root">;
+  collectTargets: () => Promise<{
+    targets: ActivityTarget[];
+    complete: boolean;
+  }>;
+  engine: Omit<ActivityEngineOptions, "paths">;
   onSweep?: (summary: SweepSummary) => void;
   /** Stop after this many sweeps (tests and one-shot smoke runs). */
   maxSweeps?: number;
 }): Promise<"stopped" | "already-running"> {
-  const release = await tryAcquireOwnership(path.join(root, "service.lock"));
-  if (!release) return "already-running";
+  const lock = await tryAcquireLock(path.join(paths.cacheRoot, "service.lock"));
+  if (!lock) return "already-running";
   const now = engine.now ?? Date.now;
   const startedAt = new Date(now()).toISOString();
   let lastSweep: SweepSummary | null = null;
   let lastError: string | null = null;
   const writeState = () =>
-    writeJsonAtomic(path.join(root, "service.json"), {
+    writeJsonAtomic(path.join(paths.cacheRoot, "service.json"), {
       pid: process.pid,
       startedAt,
       heartbeatAt: new Date(now()).toISOString(),
@@ -485,8 +558,12 @@ export async function runService({
     let sweeps = 0;
     while (!engine.signal?.aborted) {
       try {
-        const targets = await collectTargets();
-        lastSweep = await runSweep(targets, { ...engine, root, prune: true });
+        const { targets, complete } = await collectTargets();
+        lastSweep = await runSweep(targets, {
+          ...engine,
+          paths,
+          prune: complete,
+        });
         lastError = null;
         onSweep?.(lastSweep);
       } catch (error) {
@@ -505,7 +582,7 @@ export async function runService({
     }
     return "stopped";
   } finally {
-    await release();
+    await lock.release();
   }
 }
 
