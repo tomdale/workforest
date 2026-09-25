@@ -742,6 +742,220 @@ const aiStatus = leaf({
   outputModes: ["report", "json"],
 });
 
+const activitySelectorOperands = operands(
+  0,
+  1,
+  "selector",
+  undefined,
+  "Selector as <group>/<name>, or a bare name when unique. Defaults to the current worktree or workspace.",
+);
+
+const activityJsonFlag = booleanFlag(
+  "json",
+  "--json",
+  undefined,
+  "Emit the result as a JSON envelope instead of the report.",
+);
+
+const activityListCommand = leaf({
+  name: "list",
+  path: ["activity", "list"],
+  summary: "Show cached activity digests",
+  description:
+    "Reads the persisted activity digest for every worktree and workspace: purpose, latest observed work, likely next step, freshness, and generation state. Reads cached records only and never runs Git or a model, so it is safe for UI polling. With --json it emits one entry per checkout.",
+  handler: "activity.list",
+  help: nestedHelp("activity", "list"),
+  flags: [
+    stringFlag("repo", "--repo", "repo", {
+      description: "Show only entries containing this repository.",
+    }),
+    stringFlag("group", "--group", "group", {
+      description: "Show only entries in this group.",
+    }),
+    activityJsonFlag,
+  ],
+  examples: [
+    { command: "wf activity list", description: "Show every cached digest." },
+    {
+      command: "wf activity list --json",
+      description: "Emit cached digests for a UI client.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
+const activityShowCommand = leaf({
+  name: "show",
+  path: ["activity", "show"],
+  summary: "Show one cached activity digest",
+  description:
+    "Reads the persisted activity digest for one worktree or workspace without running Git or a model.",
+  handler: "activity.show",
+  help: nestedHelp("activity", "show"),
+  operands: activitySelectorOperands,
+  flags: [activityJsonFlag],
+  examples: [
+    {
+      command: "wf activity show",
+      description: "Show the digest for the current checkout.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
+const activityRefreshCommand = leaf({
+  name: "refresh",
+  path: ["activity", "refresh"],
+  summary: "Regenerate one activity digest now",
+  description:
+    "Detects current activity for one worktree or workspace and, unless its digest already matches, generates a new one with the inexpensive activity-digest model tier. Waits for the model. --force regenerates even when the digest is current.",
+  handler: "activity.refresh",
+  help: nestedHelp("activity", "refresh"),
+  operands: activitySelectorOperands,
+  flags: [
+    booleanFlag(
+      "force",
+      "--force",
+      undefined,
+      "Regenerate even when the digest matches the current inputs.",
+    ),
+    activityJsonFlag,
+  ],
+  examples: [
+    {
+      command: "wf activity refresh workforest/cli-redesign",
+      description: "Refresh an outdated digest.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
+const activitySweepCommand = leaf({
+  name: "sweep",
+  path: ["activity", "sweep"],
+  summary: "Run one activity reconciliation pass",
+  description:
+    "Runs one background pass: cheap Git detection for due checkouts, then a small bounded number of digest generations for active checkouts whose changes have settled or waited past the maximum delay. Unchanged checkouts are never summarized again. Only one sweep runs at a time.",
+  handler: "activity.sweep",
+  help: nestedHelp("activity", "sweep"),
+  flags: [activityJsonFlag],
+  examples: [
+    {
+      command: "wf activity sweep --json",
+      description: "Run one pass, e.g. from a scheduler.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
+const activityWatchCommand = leaf({
+  name: "watch",
+  path: ["activity", "watch"],
+  summary: "Run the periodic activity service",
+  description:
+    "Runs sweeps in the foreground on an interval until interrupted, recording a heartbeat that `wf activity status` reports. Only one service runs at a time; Ctrl-C cancels any in-flight generation and exits. Run it under a supervisor (launchd, a terminal tab) to keep digests current; stop it to disable background generation.",
+  handler: "activity.watch",
+  help: nestedHelp("activity", "watch"),
+  flags: [
+    stringFlag("interval", "--interval", "seconds", {
+      description: "Seconds between sweeps. Defaults to 60.",
+    }),
+  ],
+  examples: [
+    {
+      command: "wf activity watch",
+      description: "Keep digests current while this runs.",
+    },
+  ],
+  outputModes: ["human"],
+  supportsJson: false,
+});
+
+const activityStatusCommand = leaf({
+  name: "status",
+  path: ["activity", "status"],
+  summary: "Show activity service status",
+  description:
+    "Reports whether the periodic service is running, its last sweep, whether inference is enabled, and digest counts by freshness and generation state.",
+  handler: "activity.status",
+  help: nestedHelp("activity", "status"),
+  flags: [activityJsonFlag],
+  outputModes: ["report", "json"],
+});
+
+const activityPurposeCommand = leaf({
+  name: "purpose",
+  path: ["activity", "purpose"],
+  summary: "Set or clear an explicit purpose",
+  description:
+    "Records what a worktree or workspace is for. An explicit purpose always replaces the inferred one and becomes evidence for the next digest.",
+  handler: "activity.purpose",
+  help: nestedHelp("activity", "purpose"),
+  operands: activitySelectorOperands,
+  flags: [
+    stringFlag("set", "--set", "text", {
+      description: "Purpose text to record.",
+    }),
+    booleanFlag("clear", "--clear", undefined, "Remove the explicit purpose."),
+    activityJsonFlag,
+  ],
+  examples: [
+    {
+      command: 'wf activity purpose --set "Migrate billing to v2 API"',
+      description: "Set the purpose of the current checkout.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
+const activityPinCommand = leaf({
+  name: "pin",
+  path: ["activity", "pin"],
+  summary: "Keep a checkout active",
+  description:
+    "Marks a worktree or workspace active so sweeps keep summarizing its changes even without recent observed activity. `--off` removes the pin.",
+  handler: "activity.pin",
+  help: nestedHelp("activity", "pin"),
+  operands: activitySelectorOperands,
+  flags: [
+    booleanFlag("off", "--off", undefined, "Remove the pin."),
+    activityJsonFlag,
+  ],
+  outputModes: ["report", "json"],
+});
+
+const activityNoteCommand = leaf({
+  name: "note",
+  path: ["activity", "note"],
+  summary: "Record an agent or human handoff",
+  description:
+    "Appends a bounded handoff note (for example from an agent thread) as explicit evidence. A note's next step is shown as the likely next step until a later digest covers it, and the note marks the checkout active.",
+  handler: "activity.note",
+  help: nestedHelp("activity", "note"),
+  operands: activitySelectorOperands,
+  flags: [
+    stringFlag("source", "--source", "source", {
+      description:
+        "Origin of the note, such as bb:thr_123. Defaults to manual.",
+    }),
+    stringFlag("summary", "--summary", "text", {
+      description: "What just happened.",
+    }),
+    stringFlag("next", "--next", "text", {
+      description: "The explicit next step.",
+    }),
+    activityJsonFlag,
+  ],
+  examples: [
+    {
+      command:
+        'wf activity note --source bb:thr_123 --summary "Added retry tests" --next "Wire retries into the CLI"',
+      description: "Record an agent handoff for the current checkout.",
+    },
+  ],
+  outputModes: ["report", "json"],
+});
+
 const shellCompleteCommand = leaf({
   name: "_complete",
   path: ["_complete"],
@@ -802,6 +1016,25 @@ export const commandRegistry: CommandRegistry = {
           "Reports the built-in provider adapters available to AI-backed Workforest features.",
         help: { kind: "command", command: "ai" },
         children: [aiStatus],
+      }),
+      group({
+        name: "activity",
+        path: ["activity"],
+        summary: "Cached activity digests",
+        description:
+          "Short, cached summaries of what each worktree and workspace is for, what happened most recently, and what is likely next. Reads are instant from persisted records; generation happens only in sweeps, the periodic service, or explicit refreshes, and only when a checkout's inputs changed.",
+        help: { kind: "command", command: "activity" },
+        children: [
+          activityListCommand,
+          activityShowCommand,
+          activityRefreshCommand,
+          activitySweepCommand,
+          activityWatchCommand,
+          activityStatusCommand,
+          activityPurposeCommand,
+          activityPinCommand,
+          activityNoteCommand,
+        ],
       }),
       group({
         name: "migrate",

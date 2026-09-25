@@ -371,6 +371,19 @@ async function runInvocation(
       });
     case "ai.status":
       return runTypedCommand(() => runAiStatusCommand(invocation));
+    case "activity.list":
+    case "activity.show":
+    case "activity.refresh":
+    case "activity.sweep":
+    case "activity.watch":
+    case "activity.status":
+    case "activity.purpose":
+    case "activity.pin":
+    case "activity.note":
+      return runTypedCommand(async () => {
+        const { runActivityCommand } = await import("./cli/activity.ts");
+        return runActivityCommand(invocation);
+      });
     case "migrate.workspaces":
       return runTypedCommand(async () => {
         const { runMigrateWorkspacesCommand } = await import(
