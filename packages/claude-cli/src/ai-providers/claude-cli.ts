@@ -33,6 +33,9 @@ class ClaudeCliClient {
     if (model) {
       args.push("--model", model);
     }
+    if (request.toolAccess === "none") {
+      args.push("--tools", "", "--strict-mcp-config");
+    }
     if (request.onEvent) {
       args.push("--verbose");
     }
@@ -60,6 +63,7 @@ class ClaudeCliClient {
         env: this.#context.env,
         input: request.prompt,
         timeoutMs: request.timeoutMs ?? this.#context.timeoutMs,
+        ...(request.signal ? { signal: request.signal } : {}),
         ...(eventStream ? { onOutput: eventStream.write } : {}),
         ...(onDebug ? { onDebug } : {}),
       });
@@ -92,7 +96,10 @@ const claudeCliProvider: AiProviderDefinition = {
   label: "Claude CLI",
   priority: 50,
   capabilities: ["text"],
-  modelCategories: { "generate-context": "claude-opus-4-5" },
+  modelCategories: {
+    "generate-context": "claude-opus-4-5",
+    "activity-digest": "claude-haiku-4-5",
+  },
   async detect(context) {
     if (await commandAvailable("claude", ["--version"], context)) {
       return { available: true };

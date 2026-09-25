@@ -72,6 +72,7 @@ class CodexCliClient {
         env: this.#context.env,
         input: request.prompt,
         timeoutMs: request.timeoutMs ?? this.#context.timeoutMs,
+        ...(request.signal ? { signal: request.signal } : {}),
         ...(eventStream ? { onOutput: eventStream.write } : {}),
         ...(onDebug ? { onDebug } : {}),
       });
@@ -107,7 +108,10 @@ const codexCliProvider: AiProviderDefinition = {
   label: "Codex CLI",
   priority: 100,
   capabilities: ["text"],
-  modelCategories: { "generate-context": "gpt-5.4" },
+  modelCategories: {
+    "generate-context": "gpt-5.4",
+    "activity-digest": "gpt-5.4-mini",
+  },
   async detect(context) {
     if (await commandAvailable("codex", ["--version"], context)) {
       return { available: true };

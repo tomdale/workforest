@@ -2,7 +2,12 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AiUnavailableError, generateText, getAiStatus } from "./index.ts";
+import {
+  AiUnavailableError,
+  generateText,
+  generateTextWithMetadata,
+  getAiStatus,
+} from "./index.ts";
 
 const tempDirs: string[] = [];
 
@@ -153,6 +158,50 @@ describe("AI provider resolver", () => {
         category: "generate-context",
       }),
     ).resolves.toBe("claude-model:claude-opus-4-5");
+  });
+
+  it("pins the inexpensive activity-digest tier over configured models", async () => {
+    const codex = await createFixture(["codex"]);
+    const claude = await createFixture(["claude"]);
+
+    await expect(
+      generateTextWithMetadata({
+        prompt: "report model",
+        cwd: codex.cwd,
+        env: { ...codex.env, WORKFOREST_AI_MODEL: "premium-env" },
+        config: { ai: { model: "premium-configured" } },
+        category: "activity-digest",
+        modelPolicy: "category",
+      }),
+    ).resolves.toEqual({
+      text: "codex-model:gpt-5.4-mini",
+      provider: "codex-cli",
+      model: "gpt-5.4-mini",
+    });
+    await expect(
+      generateText({
+        prompt: "report model",
+        cwd: claude.cwd,
+        env: claude.env,
+        config: { ai: { model: "premium-configured" } },
+        category: "activity-digest",
+        modelPolicy: "category",
+      }),
+    ).resolves.toBe("claude-model:claude-haiku-4-5");
+  });
+
+  it("disables provider tools when tool access is none", async () => {
+    const claude = await createFixture(["claude"]);
+
+    const text = await generateText({
+      prompt: "report args",
+      cwd: claude.cwd,
+      env: claude.env,
+      config: {},
+      toolAccess: "none",
+    });
+
+    expect(text).toContain("--tools  --strict-mcp-config");
   });
 
   it("lets an explicit model override a normalized model category", async () => {
@@ -328,7 +377,9 @@ for arg in "$@"; do
   previous="$arg"
 done
 input="$(cat)"
-if [ "$input" = "report model" ]; then
+if [ "$input" = "report args" ]; then
+  printf 'claude-args:%s' "$*"
+elif [ "$input" = "report model" ]; then
   printf 'claude-model:%s' "$model"
 elif [ "$input" = "report schema" ]; then
   printf 'claude-schema:%s' "$schema"

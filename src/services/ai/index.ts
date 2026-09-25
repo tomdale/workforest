@@ -28,7 +28,21 @@ export type GenerateTextOptions = {
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   config?: WorkspaceConfig;
+  /**
+   * `category` pins the provider's task-category model and ignores the
+   * general `ai.model` / WORKFOREST_AI_MODEL override, so a premium default
+   * configured for other features never leaks into a cheap background task.
+   */
+  modelPolicy?: "configured" | "category";
+  toolAccess?: "default" | "none";
+  signal?: AbortSignal;
   onEvent?: (event: AiProgressEvent) => void;
+};
+
+export type GeneratedText = {
+  text: string;
+  provider: string;
+  model: string | null;
 };
 
 export type GenerateJsonOptions<T> = GenerateTextOptions & {
@@ -65,6 +79,7 @@ type AiRuntimeOptions = {
   env?: NodeJS.ProcessEnv;
   config?: WorkspaceConfig;
   disabled?: boolean;
+  ignoreConfiguredModel?: boolean;
 };
 
 type ResolvedAiOptions = {
@@ -100,7 +115,18 @@ export async function getAiStatus(
 export async function generateText(
   options: GenerateTextOptions,
 ): Promise<string> {
-  const inspection = await inspectAiProviders(options);
+  return (await generateTextWithMetadata(options)).text;
+}
+
+export async function generateTextWithMetadata(
+  options: GenerateTextOptions,
+): Promise<GeneratedText> {
+  const { model: explicitModel, ...rest } = options;
+  const inspection = await inspectAiProviders(
+    options.modelPolicy === "category"
+      ? { ...rest, ignoreConfiguredModel: true }
+      : { ...rest, ...(explicitModel ? { model: explicitModel } : {}) },
+  );
   if (inspection.options.disabled) {
     throw new AiUnavailableError(
       "AI features are disabled. Unset WORKFOREST_AI_DISABLED or set ai.disabled to false.",
@@ -118,15 +144,26 @@ export async function generateText(
   const context = providerContext(inspection.options);
   const client = await selected.loaded.provider.create(context);
   const model = selectedModel(inspection);
+  if (options.modelPolicy === "category" && !model) {
+    throw new AiUnavailableError(
+      `${selected.loaded.provider.label} has no model for the "${options.category ?? "(none)"}" task category.`,
+    );
+  }
   try {
     const result = await client.generateText({
       prompt: options.prompt,
       ...(model ? { model } : {}),
       ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
       timeoutMs: inspection.options.timeoutMs,
+      ...(options.toolAccess ? { toolAccess: options.toolAccess } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     });
-    return result.text;
+    return {
+      text: result.text,
+      provider: selected.loaded.provider.id,
+      model: model ?? null,
+    };
   } catch (error) {
     throw new AiUnavailableError(
       formatProviderFailure(selected.loaded.provider, error),
@@ -303,7 +340,9 @@ async function resolveAiOptions(
   );
 
   const provider = options.provider ?? envProvider ?? config.ai?.provider;
-  const model = options.model ?? envModel ?? config.ai?.model;
+  const model = options.ignoreConfiguredModel
+    ? undefined
+    : (options.model ?? envModel ?? config.ai?.model);
   const timeoutMs =
     options.timeoutMs ??
     envTimeoutMs ??

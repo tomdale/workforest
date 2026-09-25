@@ -118,13 +118,24 @@ export type AiProgressEvent =
   | { type: "diagnostic"; source: string; message: string }
   | { type: "error"; source: string; message: string };
 
-export type AiModelCategory = "generate-context";
+/**
+ * Task-specific model tiers. `generate-context` is a premium analysis tier;
+ * `activity-digest` must stay an inexpensive tier because it runs from
+ * periodic background sweeps.
+ */
+export type AiModelCategory = "generate-context" | "activity-digest";
 
 export type AiTextGenerationRequest = {
   prompt: string;
   model?: string;
   outputSchema?: Record<string, unknown>;
   timeoutMs?: number;
+  /**
+   * `none` asks the provider to answer from the prompt alone, with every
+   * built-in and MCP tool disabled where the provider supports it.
+   */
+  toolAccess?: "default" | "none";
+  signal?: AbortSignal;
   onEvent?: (event: AiProgressEvent) => void;
 };
 
@@ -704,6 +715,8 @@ export type CliRunOptions = {
   input?: string;
   timeoutMs: number;
   timeoutKillGraceMs?: number;
+  /** Terminates the child (SIGTERM, then SIGKILL) and rejects when aborted. */
+  signal?: AbortSignal;
   onOutput?: (stream: "stdout" | "stderr", data: string) => void;
   onDebug?: (message: string) => void;
 };
@@ -747,14 +760,11 @@ export function runCli(
     const stdout: string[] = [];
     const stderr = new TailBuffer(CLI_STDERR_TAIL_CHARS);
     let timedOut = false;
+    let aborted = false;
     let killTimer: NodeJS.Timeout | undefined;
     const startedAt = Date.now();
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      options.onDebug?.(
-        `${command} timed out after ${options.timeoutMs}ms; sending SIGTERM to pid ${child.pid ?? "(unknown)"}.`,
-      );
+    const terminate = () => {
       child.kill("SIGTERM");
       killTimer = setTimeout(() => {
         options.onDebug?.(
@@ -762,7 +772,22 @@ export function runCli(
         );
         child.kill("SIGKILL");
       }, options.timeoutKillGraceMs ?? CLI_TIMEOUT_KILL_GRACE_MS);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      options.onDebug?.(
+        `${command} timed out after ${options.timeoutMs}ms; sending SIGTERM to pid ${child.pid ?? "(unknown)"}.`,
+      );
+      terminate();
     }, options.timeoutMs);
+    const onAbort = () => {
+      if (aborted || timedOut) return;
+      aborted = true;
+      clearTimeout(timer);
+      terminate();
+    };
+    if (options.signal?.aborted) onAbort();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     options.onDebug?.(
       `${command} spawned pid ${child.pid ?? "(unknown)"} in ${options.cwd} with timeout ${options.timeoutMs}ms.`,
     );
@@ -782,11 +807,17 @@ export function runCli(
     child.on("error", (error) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      options.signal?.removeEventListener("abort", onAbort);
       reject(error);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      options.signal?.removeEventListener("abort", onAbort);
+      if (aborted) {
+        reject(new Error(`${command} was cancelled.`));
+        return;
+      }
       options.onDebug?.(
         `${command} exited with code ${code ?? "(signal)"} after ${Date.now() - startedAt}ms.`,
       );

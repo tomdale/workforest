@@ -147,6 +147,7 @@ function isAiProviderDefinition(value: unknown): value is AiProviderDefinition {
     candidate.modelCategories !== null &&
     typeof candidate.modelCategories === "object" &&
     typeof candidate.modelCategories["generate-context"] === "string" &&
+    typeof candidate.modelCategories["activity-digest"] === "string" &&
     typeof candidate.detect === "function" &&
     typeof candidate.create === "function"
   );
