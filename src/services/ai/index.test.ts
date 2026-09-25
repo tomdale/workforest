@@ -1,4 +1,11 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -190,18 +197,78 @@ describe("AI provider resolver", () => {
     ).resolves.toBe("claude-model:claude-haiku-4-5");
   });
 
-  it("disables provider tools when tool access is none", async () => {
-    const claude = await createFixture(["claude"]);
+  it("runs tool-free requests only through a verified tool-free provider", async () => {
+    const fixture = await createFixture(["codex", "claude"]);
 
     const text = await generateText({
       prompt: "report args",
-      cwd: claude.cwd,
-      env: claude.env,
+      cwd: fixture.cwd,
+      env: fixture.env,
       config: {},
       toolAccess: "none",
     });
+    const calls = await readInvocations(fixture.invocations);
+    const generation = calls.filter((call) => !call.args.includes("--version"));
 
-    expect(text).toContain("--tools  --strict-mcp-config");
+    expect(text).toContain(
+      "--tools  --strict-mcp-config --disable-slash-commands",
+    );
+    expect(generation).toEqual([
+      expect.objectContaining({
+        executable: path.join(fixture.binDir, "claude"),
+      }),
+    ]);
+  });
+
+  it("fails closed when the configured provider cannot run tool-free", async () => {
+    const fixture = await createFixture(["codex", "claude"]);
+
+    await expect(
+      generateText({
+        prompt: "report args",
+        cwd: fixture.cwd,
+        env: fixture.env,
+        config: { ai: { provider: "codex-cli" } },
+        toolAccess: "none",
+      }),
+    ).rejects.toThrow(/tool-free/);
+    const calls = await readInvocations(fixture.invocations);
+    expect(calls.every((call) => call.args.includes("--version"))).toBe(true);
+  });
+
+  it("rejects tool-free requests in the Codex adapter without spawning", async () => {
+    const fixture = await createFixture(["codex"]);
+    const { default: codex } = await import(
+      "@wf-plugin/codex-cli/ai-providers/codex-cli"
+    );
+    const client = await codex.create({
+      cwd: fixture.cwd,
+      env: fixture.env,
+      timeoutMs: 5000,
+    });
+
+    await expect(
+      client.generateText({ prompt: "x", toolAccess: "none" }),
+    ).rejects.toThrow(/tool-free/);
+    expect(await readInvocations(fixture.invocations)).toEqual([]);
+  });
+
+  it("never launches a provider for an already-aborted request", async () => {
+    const fixture = await createFixture(["claude"]);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      generateText({
+        prompt: "x",
+        cwd: fixture.cwd,
+        env: fixture.env,
+        config: {},
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/cancelled/);
+    const calls = await readInvocations(fixture.invocations);
+    expect(calls.every((call) => call.args.includes("--version"))).toBe(true);
   });
 
   it("lets an explicit model override a normalized model category", async () => {
@@ -288,7 +355,12 @@ describe("AI provider resolver", () => {
 async function createFixture(
   binaries: Array<"codex" | "claude">,
   env: NodeJS.ProcessEnv = {},
-): Promise<{ cwd: string; env: NodeJS.ProcessEnv }> {
+): Promise<{
+  cwd: string;
+  binDir: string;
+  invocations: string;
+  env: NodeJS.ProcessEnv;
+}> {
   const root = await mkdtemp(path.join(os.tmpdir(), "workforest-ai-"));
   tempDirs.push(root);
   const binDir = path.join(root, "bin");
@@ -305,7 +377,10 @@ async function createFixture(
 
   return {
     cwd: root,
+    binDir,
+    invocations: path.join(root, "invocations.log"),
     env: {
+      WORKFOREST_TEST_INVOCATIONS: path.join(root, "invocations.log"),
       HOME: root,
       PATH: [binDir, "/usr/bin", "/bin"].join(path.delimiter),
       PWD: root,
@@ -324,6 +399,7 @@ async function writeExecutable(
 
 function codexScript(): string {
   return `#!/bin/sh
+if [ -n "$WORKFOREST_TEST_INVOCATIONS" ]; then printf '%s|%s\\n' "$0" "$*" >> "$WORKFOREST_TEST_INVOCATIONS"; fi
 if [ "$1" = "--version" ]; then
   printf 'codex 1.0.0\\n'
   exit 0
@@ -362,6 +438,7 @@ fi
 
 function claudeScript(): string {
   return `#!/bin/sh
+if [ -n "$WORKFOREST_TEST_INVOCATIONS" ]; then printf '%s|%s\\n' "$0" "$*" >> "$WORKFOREST_TEST_INVOCATIONS"; fi
 if [ "$1" = "--version" ]; then
   printf 'claude 1.0.0\\n'
   exit 0
@@ -391,4 +468,22 @@ else
   printf 'claude:%s' "$input"
 fi
 `;
+}
+
+async function readInvocations(
+  file: string,
+): Promise<Array<{ executable: string; args: string }>> {
+  let text = "";
+  try {
+    text = await readFile(file, "utf8");
+  } catch {
+    return [];
+  }
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [executable = "", ...rest] = line.split("|");
+      return { executable, args: rest.join("|") };
+    });
 }

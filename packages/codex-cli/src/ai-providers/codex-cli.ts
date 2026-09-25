@@ -22,6 +22,13 @@ class CodexCliClient {
   async generateText(
     request: AiTextGenerationRequest,
   ): Promise<AiTextGenerationResult> {
+    if (request.toolAccess === "none") {
+      // Codex CLI has no documented switch that removes shell, file, and MCP
+      // tools; a read-only sandbox still permits reads. Fail closed.
+      throw new Error(
+        "Codex CLI cannot run tool-free requests. Select a provider with the tool-free capability.",
+      );
+    }
     const outputFile = path.join(
       os.tmpdir(),
       `workforest-codex-${process.pid}-${Date.now()}.txt`,
@@ -110,6 +117,8 @@ const codexCliProvider: AiProviderDefinition = {
   capabilities: ["text"],
   modelCategories: {
     "generate-context": "gpt-5.4",
+    // Activity digests require tool-free requests, which this adapter
+    // rejects; the entry keeps the category map complete.
     "activity-digest": "gpt-5.4-mini",
   },
   async detect(context) {

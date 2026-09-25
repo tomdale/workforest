@@ -13,6 +13,8 @@ import type { WorkspaceConfig } from "../../types.ts";
 import { type LoadedAiProvider, loadAiProviders } from "./providers.ts";
 
 export const DEFAULT_AI_TIMEOUT_MS = 120_000;
+/** Providers declaring this capability honor `toolAccess: "none"`. */
+const TOOL_FREE_CAPABILITY = "tool-free";
 
 export class AiUnavailableError extends Error {
   override name = "AiUnavailableError";
@@ -80,6 +82,8 @@ type AiRuntimeOptions = {
   config?: WorkspaceConfig;
   disabled?: boolean;
   ignoreConfiguredModel?: boolean;
+  /** Restricts selection to providers declaring this capability. */
+  requiredCapability?: string;
 };
 
 type ResolvedAiOptions = {
@@ -121,12 +125,18 @@ export async function generateText(
 export async function generateTextWithMetadata(
   options: GenerateTextOptions,
 ): Promise<GeneratedText> {
+  if (options.signal?.aborted) {
+    throw new AiUnavailableError("AI request was cancelled before it started.");
+  }
   const { model: explicitModel, ...rest } = options;
-  const inspection = await inspectAiProviders(
-    options.modelPolicy === "category"
+  const inspection = await inspectAiProviders({
+    ...(options.modelPolicy === "category"
       ? { ...rest, ignoreConfiguredModel: true }
-      : { ...rest, ...(explicitModel ? { model: explicitModel } : {}) },
-  );
+      : { ...rest, ...(explicitModel ? { model: explicitModel } : {}) }),
+    ...(options.toolAccess === "none"
+      ? { requiredCapability: TOOL_FREE_CAPABILITY }
+      : {}),
+  });
   if (inspection.options.disabled) {
     throw new AiUnavailableError(
       "AI features are disabled. Unset WORKFOREST_AI_DISABLED or set ai.disabled to false.",
@@ -143,6 +153,9 @@ export async function generateTextWithMetadata(
 
   const context = providerContext(inspection.options);
   const client = await selected.loaded.provider.create(context);
+  if (options.signal?.aborted) {
+    throw new AiUnavailableError("AI request was cancelled before it started.");
+  }
   const model = selectedModel(inspection);
   if (options.modelPolicy === "category" && !model) {
     throw new AiUnavailableError(
@@ -240,6 +253,9 @@ async function inspectAiProviders(
   const resolvedOptions = await resolveAiOptions(options);
   const loadedProviders = await loadAiProviders();
   const context = providerContext(resolvedOptions);
+  const required = options.requiredCapability;
+  const capable = (provider: ProviderInspection) =>
+    !required || provider.loaded.provider.capabilities.includes(required);
   const providers = await Promise.all(
     loadedProviders.map((loaded) => inspectProvider(loaded, context)),
   );
@@ -254,6 +270,8 @@ async function inspectAiProviders(
       );
       if (!explicitProvider) {
         setupHint = `Unknown AI provider "${resolvedOptions.provider}".`;
+      } else if (!capable(explicitProvider)) {
+        setupHint = `${explicitProvider.loaded.provider.label} does not support ${required} requests.`;
       } else if (explicitProvider.availability.available) {
         selected = explicitProvider;
       } else {
@@ -261,11 +279,16 @@ async function inspectAiProviders(
       }
     } else {
       selected =
-        providers.find((provider) => provider.availability.available) ?? null;
+        providers.find(
+          (provider) => capable(provider) && provider.availability.available,
+        ) ?? null;
+      const candidates = providers.filter(capable);
       setupHint = selected
         ? undefined
-        : (providers[0]?.availability.setupHint ??
-          "No AI providers are registered.");
+        : required && candidates.length === 0
+          ? `No AI provider supports ${required} requests.`
+          : (candidates[0]?.availability.setupHint ??
+            "No AI providers are registered.");
     }
   }
 

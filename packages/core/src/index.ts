@@ -131,8 +131,10 @@ export type AiTextGenerationRequest = {
   outputSchema?: Record<string, unknown>;
   timeoutMs?: number;
   /**
-   * `none` asks the provider to answer from the prompt alone, with every
-   * built-in and MCP tool disabled where the provider supports it.
+   * `none` requires the provider to answer from the prompt alone with every
+   * built-in tool, MCP server, and skill disabled. Only providers that
+   * declare the `tool-free` capability accept it; others must reject the
+   * request without launching anything.
    */
   toolAccess?: "default" | "none";
   signal?: AbortSignal;
@@ -752,6 +754,10 @@ export function runCli(
   options: CliRunOptions,
 ): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new Error(`${command} was cancelled before it started.`));
+      return;
+    }
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
@@ -786,7 +792,6 @@ export function runCli(
       clearTimeout(timer);
       terminate();
     };
-    if (options.signal?.aborted) onAbort();
     options.signal?.addEventListener("abort", onAbort, { once: true });
     options.onDebug?.(
       `${command} spawned pid ${child.pid ?? "(unknown)"} in ${options.cwd} with timeout ${options.timeoutMs}ms.`,

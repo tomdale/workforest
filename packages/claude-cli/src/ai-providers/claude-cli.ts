@@ -34,7 +34,14 @@ class ClaudeCliClient {
       args.push("--model", model);
     }
     if (request.toolAccess === "none") {
-      args.push("--tools", "", "--strict-mcp-config");
+      // `--tools ""` disables every built-in tool, `--strict-mcp-config`
+      // without `--mcp-config` loads no MCP servers, and skills are off.
+      args.push(
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+      );
     }
     if (request.onEvent) {
       args.push("--verbose");
@@ -95,7 +102,7 @@ const claudeCliProvider: AiProviderDefinition = {
   id: "claude-cli",
   label: "Claude CLI",
   priority: 50,
-  capabilities: ["text"],
+  capabilities: ["text", "tool-free"],
   modelCategories: {
     "generate-context": "claude-opus-4-5",
     "activity-digest": "claude-haiku-4-5",
