@@ -552,31 +552,45 @@ How it stays cheap and trustworthy:
 - **Detection is separate from generation.** Each pass fingerprints Git state
   (`HEAD`, branch, upstream, and the paths plus size/mtime of dirty files, so
   repeated edits to an already dirty file count), task lifecycle, and explicit
-  inputs. Ignored files never count, nothing is watched recursively, and
-  generated digests never count as activity.
-- **Only active checkouts are summarized.** Active means a change was observed
-  within the last 12 hours or the checkout is pinned. Inactive checkouts are
-  re-checked every 6 hours to discover new work; unchanged checkouts are never
-  summarized again. Changes settle for 3 minutes before a digest (at most 30
-  minutes under continuous change), digests are spaced at least 10 minutes
-  apart, each sweep generates at most 3, and failures back off exponentially.
+  inputs. Ignored files never count, nothing is watched recursively, fetching
+  upstream does not count, and generated digests never count as activity.
+- **Only checkout-specific work is summarized.** Commits are split at the
+  shared baseline (`origin/HEAD`, `origin/main`, `origin/master`, `main`, or
+  `master`): only commits beyond it are this checkout's work. A checkout with
+  no own commits, no uncommitted changes, and no explicit inputs is never
+  summarized on a schedule, so a fresh checkout of a busy `main` is not
+  described as doing upstream work, and a slug alone never produces a summary.
+- **Only active checkouts are summarized.** Active means a change or explicit
+  input was observed within the last 12 hours, or the checkout is pinned. On
+  first sight, activity time comes from the newest own commit, uncommitted
+  change, or explicit input, falling back to the checkout's creation time, so
+  old checkouts are not backfilled. Inactive checkouts are re-checked every 6
+  hours; unchanged checkouts are never summarized again. Changes settle for 3
+  minutes before a digest (at most 30 minutes under continuous change),
+  digests are spaced at least 10 minutes apart, each sweep generates at most
+  3, and failures back off exponentially.
 - **Freshness is relative to the last observation.** `current` means the
-  digest matches what the last detection pass saw; `outdated` means inputs have
-  changed since; `missing` means no digest yet. Generation state
-  (`idle`, `queued`, `running`, `failed`) is reported separately, and a failed
-  run keeps the previous digest. A run summarizes the fingerprint it captured,
-  so edits made during generation leave the digest `outdated`, never falsely
-  current. A deleted and recreated checkout starts without a digest.
-- **The model sees a bounded evidence packet**: commit subjects, changed file
-  names with line counts, task names, and explicit notes. File contents, tool
-  logs, and secret-looking paths are never sent. The provider runs with tools
-  disabled in an empty directory, on the inexpensive `activity-digest` tier
-  (`gpt-5.4-mini` for Codex CLI, `claude-haiku-4-5` for Claude Code), which
-  ignores the general `ai.model` override. `ai.provider` still selects the
-  provider; `ai.disabled` or `WORKFOREST_AI_DISABLED=1` keeps detection running
-  without inference.
+  digest matches what the last detection pass saw and the current explicit
+  inputs; `outdated` means either has changed since; `missing` means no digest
+  yet. Generation state (`idle`, `queued`, `running`, `failed`) is reported
+  separately, and a failed run keeps the previous digest. A run summarizes the
+  fingerprint it captured and re-observes the checkout when the model returns,
+  so edits made during generation leave the digest `outdated` immediately. A
+  deleted and recreated checkout starts without a digest.
+- **The model sees a bounded evidence packet** (at most 12,000 characters):
+  own commit subjects at the captured `HEAD`, changed file names with line
+  counts, task names, and explicit notes. File contents, tool logs, and
+  secret-looking paths are never sent. Requests are tool-free: only a provider
+  with a verified tool-free mode is used (currently Claude Code, run with
+  `--tools "" --strict-mcp-config --disable-slash-commands`). Codex CLI has no
+  such mode, so it is skipped for digests, and a configured
+  `ai.provider: "codex-cli"` makes generation fail closed. Digests use the
+  inexpensive `activity-digest` tier (`claude-haiku-4-5`), which ignores the
+  general `ai.model` override. `ai.disabled` or `WORKFOREST_AI_DISABLED=1`
+  keeps detection running without inference.
 
-Explicit inputs outrank inference:
+Explicit inputs outrank inference and are stored durably, separate from the
+regenerable cache:
 
 ```sh
 wf activity purpose --set "Migrate billing to the v2 API"
@@ -584,6 +598,8 @@ wf activity pin                  # keep summarizing without recent activity (--o
 wf activity note --source bb:thr_123 --summary "Added retry tests" --next "Wire retries into the CLI"
 ```
 
+Setting or clearing a purpose, or adding a note, marks the digest `outdated`
+at once and makes the checkout due for detection on the next sweep.
 `wf activity note` is the ingestion seam for agent hosts such as BB: a note is
 explicit evidence, marks the checkout active, and its `next` step is shown
 (labelled `handoff`) until a later digest covers it. Workforest does not read
@@ -591,7 +607,9 @@ private Claude, Codex, or Pi session histories.
 
 Background generation happens only while `wf activity watch` (or a scheduled
 `wf activity sweep`) runs, or on an explicit refresh; stop the service to
-disable it. Records live under `$WORKFOREST_CACHE_DIR/_activity/`.
+disable it. Cached digests live under `$WORKFOREST_CACHE_DIR/_activity/` and
+can be deleted freely; explicit inputs live under `activity/` next to
+`config.json`.
 
 ## Configuration
 
